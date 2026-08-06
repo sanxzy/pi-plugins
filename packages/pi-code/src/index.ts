@@ -3,7 +3,9 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { isDefaultAgentName } from "./domain/agents/default-agent.ts";
 import { getChildPool } from "./infrastructure/pool/child-pool.ts";
+import { spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 import { recordNewJob } from "./infrastructure/registry/registry.ts";
 import type { Job } from "./domain/jobs/job.ts";
 import { MAX_PARALLEL_TASKS } from "./shared/constants.ts";
@@ -105,11 +107,68 @@ function registerTaskTool(pi: ExtensionAPI): void {
         subagentType: params.subagent_type,
       });
 
-      return textResult(
-        params.background
-          ? `Accepted background task ${job.jobId}. Execution will be connected in a later phase.`
-          : `Accepted task ${job.jobId}. Foreground execution will be connected in a later phase.`,
-        { jobId: job.jobId, status: job.status },
+      if (params.background) {
+        return textResult(
+          `Accepted background task ${job.jobId}. Execution will be connected in a later phase.`,
+          { jobId: job.jobId, status: job.status },
+        );
+      }
+
+      // Foreground: run the child synchronously and return its final output.
+      // The child inherits the parent's model; without one there is nothing to run.
+      if (!ctx.model) {
+        pool.registry.updateJob(job.jobId, { status: "failed" });
+        return errorResult("no model available to run the child session", {
+          jobId: job.jobId,
+          reason: "no model available",
+        });
+      }
+
+      // Unknown subagent types are rejected before any child is created.
+      if (!isDefaultAgentName(params.subagent_type)) {
+        pool.registry.updateJob(job.jobId, { status: "failed" });
+        return errorResult(
+          `unknown subagent_type: ${params.subagent_type}`,
+          { jobId: job.jobId, reason: "unknown subagent_type" },
+        );
+      }
+
+      pool.registry.updateJob(job.jobId, { status: "running" });
+      const result = await spawnChildSession({
+        jobId: job.jobId,
+        cwd: ctx.cwd,
+        subagentType: params.subagent_type,
+        prompt: params.prompt,
+        parentSessionId: ctx.sessionManager.getSessionId(),
+        model: ctx.model,
+        signal: ctx.signal,
+      });
+
+      if (!result) {
+        pool.registry.updateJob(job.jobId, { status: "failed" });
+        return errorResult(`could not spawn child for ${params.subagent_type}`, {
+          jobId: job.jobId,
+          reason: "spawn failed",
+        });
+      }
+
+      pool.registry.updateJob(job.jobId, {
+        status: result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed",
+        sessionFile: result.sessionFile,
+      });
+
+      if (result.status === "completed") {
+        return textResult(`Task ${job.jobId} completed:\n${result.output}`, {
+          jobId: job.jobId,
+          status: "completed",
+          result: result.output,
+        });
+      }
+      return errorResult(
+        result.status === "aborted"
+          ? `task ${job.jobId} was aborted`
+          : `task ${job.jobId} failed: ${result.output}`,
+        { jobId: job.jobId, reason: result.status === "aborted" ? "aborted" : "failed" },
       );
     },
   });
