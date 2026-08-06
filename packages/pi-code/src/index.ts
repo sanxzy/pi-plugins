@@ -2,6 +2,7 @@ import type {
   AgentToolResult,
   ExtensionAPI,
   ExtensionContext,
+  TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { isDefaultAgentName } from "./domain/agents/default-agent.ts";
 import { getChildPool } from "./infrastructure/pool/child-pool.ts";
@@ -85,8 +86,20 @@ function registerTaskTool(pi: ExtensionAPI): void {
 
       const pool = getChildPool(ctx.cwd);
 
+      // A single model response may issue at most MAX_PARALLEL_TASKS task calls.
+      // The counter is shared through the pool and reset on each turn_start, so
+      // separate responses get independent budgets.
+      if (!pool.concurrency.countTaskCall(MAX_PARALLEL_TASKS)) {
+        return errorResult(
+          `too many parallel tasks in one response: at most ${MAX_PARALLEL_TASKS} task calls are allowed`,
+          { jobId: undefined, reason: "parallel task limit exceeded" },
+        );
+      }
+
       // A model-supplied id is never used to create or address a job. It must
-      // resolve to an exact existing job, otherwise it is rejected.
+      // resolve to an exact existing job, otherwise it is rejected. The counter
+      // above is not consumed by a resume/steer: it only addresses an existing
+      // job and does not spawn a new child.
       if (params.task_id) {
         if (!pool.registry.get(params.task_id)) {
           return errorResult(`unknown task id: ${params.task_id}`, {
@@ -100,40 +113,49 @@ function registerTaskTool(pi: ExtensionAPI): void {
         });
       }
 
-      const job = recordNewJob(pool.registry, {
-        jobId: makeJobId(),
-        status: params.background ? "queued" : "created",
-        description: params.description,
-        subagentType: params.subagent_type,
-      });
-
+      // Background execution is connected in Phase 5, so it is recorded and
+      // acknowledged without requiring a model or agent definition yet.
       if (params.background) {
+        const job = recordNewJob(pool.registry, {
+          jobId: makeJobId(),
+          status: "queued",
+          description: params.description,
+          subagentType: params.subagent_type,
+        });
         return textResult(
           `Accepted background task ${job.jobId}. Execution will be connected in a later phase.`,
           { jobId: job.jobId, status: job.status },
         );
       }
 
-      // Foreground: run the child synchronously and return its final output.
-      // The child inherits the parent's model; without one there is nothing to run.
+      // Foreground: validate before creating a queued record. The lifecycle
+      // deliberately has no queued → failed transition; setup failures after
+      // gate admission are recorded as running → failed instead.
       if (!ctx.model) {
-        pool.registry.updateJob(job.jobId, { status: "failed" });
         return errorResult("no model available to run the child session", {
-          jobId: job.jobId,
+          jobId: undefined,
           reason: "no model available",
         });
       }
-
-      // Unknown subagent types are rejected before any child is created.
       if (!isDefaultAgentName(params.subagent_type)) {
-        pool.registry.updateJob(job.jobId, { status: "failed" });
         return errorResult(
           `unknown subagent_type: ${params.subagent_type}`,
-          { jobId: job.jobId, reason: "unknown subagent_type" },
+          { jobId: undefined, reason: "unknown subagent_type" },
         );
       }
 
-      pool.registry.updateJob(job.jobId, { status: "running" });
+      // Every foreground task starts queued and waits for a concurrency slot.
+      // The `queued → running` transition happens at the moment the slot is acquired.
+      const job = recordNewJob(pool.registry, {
+        jobId: makeJobId(),
+        status: "queued",
+        description: params.description,
+        subagentType: params.subagent_type,
+      });
+
+      // The child run is admitted through the shared concurrency gate. The
+      // `queued → running` transition is recorded at the exact moment the slot is
+      // acquired, so a job waiting for a slot stays observable as `queued`.
       const result = await spawnChildSession({
         jobId: job.jobId,
         cwd: ctx.cwd,
@@ -142,6 +164,11 @@ function registerTaskTool(pi: ExtensionAPI): void {
         parentSessionId: ctx.sessionManager.getSessionId(),
         model: ctx.model,
         signal: ctx.signal,
+        run: (operation) =>
+          pool.concurrency.run(() => {
+            pool.registry.updateJob(job.jobId, { status: "running" });
+            return operation();
+          }),
       });
 
       if (!result) {
@@ -263,6 +290,13 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerCancelTool(pi);
   registerStatusTool(pi);
   registerJobsTool(pi);
+
+  pi.on("turn_start", (_event: TurnStartEvent, ctx: ExtensionContext) => {
+    // A turn is one model response and its tool batch. Resetting here means
+    // separate responses get independent MAX_PARALLEL_TASKS budgets while the
+    // pool still shares the counter across all task calls in this response.
+    getChildPool(ctx.cwd).resetParallelTasks();
+  });
 
   pi.on("session_start", () => {
     // The pool is initialized lazily by the first tool call. This event keeps

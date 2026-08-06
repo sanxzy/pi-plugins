@@ -9,6 +9,7 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { isDefaultAgentName } from "../../domain/agents/default-agent.ts";
+import type { JobStatus } from "../../domain/jobs/status.ts";
 import { sessionsDir } from "../../shared/paths.ts";
 import type { SpawnChildSession } from "../../domain/ports/child-session.ts";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
@@ -157,6 +158,13 @@ function findLastAssistantMessage(session: AgentSession): {
  * Run a foreground child session to completion.
  *
  * Returns `undefined` for an unknown subagent type without spawning a child.
+ *
+ * The whole child lifecycle (create + prompt) runs under the shared concurrency
+ * gate. Admission is recorded as `queued → running` by the composition root at
+ * the exact moment the slot is acquired, so every failure after admission is a
+ * legal `running → failed` transition. A parent run that is already aborted
+ * before admission never enters the gate and the job stays `queued` (the
+ * composition root marks it `cancelled` from the aborted result).
  */
 export const spawnChildSession: SpawnChildSession = async (options) => {
   if (!isDefaultAgentName(options.subagentType)) {
@@ -168,62 +176,81 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
     return { sessionFile: "", output: "(aborted before start)", status: "aborted" };
   }
 
-  let child: ChildSessionServices;
-  try {
-    child = await createIsolatedChild({
-      jobId: options.jobId,
-      cwd: options.cwd,
-      model: options.model,
-      parentSessionId: options.parentSessionId,
-    });
-  } catch (error) {
-    return { sessionFile: "", output: toErrorMessage(error), status: "failed" };
-  }
-
-  try {
-    // The abort may have fired while the child was being created; if so the
-    // child is already cancelled and there is nothing left to run.
-    if (options.signal?.aborted) {
-      await child.session.abort();
-      return { sessionFile: child.session.sessionFile ?? "", output: "(aborted)", status: "aborted" };
+  return options.run(async () => {
+    let child: ChildSessionServices;
+    try {
+      child = await createIsolatedChild({
+        jobId: options.jobId,
+        cwd: options.cwd,
+        model: options.model,
+        parentSessionId: options.parentSessionId,
+      });
+    } catch (error) {
+      return { sessionFile: "", output: toErrorMessage(error), status: "failed" };
     }
-
-    let abortPromise: Promise<void> | undefined;
-    const abort = () => {
-      abortPromise ??= child.session.abort();
-    };
-    options.signal?.addEventListener("abort", abort, { once: true });
 
     try {
-      // prompt() resolves only after the agent run and awaited listeners settle.
-      // Older PI versions do not emit the newer agent_settled session event.
-      await child.session.prompt(options.prompt, {
-        streamingBehavior: "steer",
-        source: "extension",
-      });
+      // The abort may have fired while the child was being created; if so the
+      // child is already cancelled and there is nothing left to run.
+      if (options.signal?.aborted) {
+        await child.session.abort();
+        return { sessionFile: child.session.sessionFile ?? "", output: "(aborted)", status: "aborted" };
+      }
+
+      let abortPromise: Promise<void> | undefined;
+      const abort = () => {
+        abortPromise ??= child.session.abort();
+      };
+      options.signal?.addEventListener("abort", abort, { once: true });
+
+      try {
+        // prompt() resolves only after the agent run and awaited listeners settle.
+        // Older PI versions do not emit the newer agent_settled session event.
+        await child.session.prompt(options.prompt, {
+          streamingBehavior: "steer",
+          source: "extension",
+        });
+      } finally {
+        options.signal?.removeEventListener("abort", abort);
+        if (abortPromise) await abortPromise;
+      }
+
+      const sessionFile = child.session.sessionFile;
+      if (!sessionFile) {
+        return { sessionFile: "", output: "(no transcript)", status: "failed" };
+      }
+
+      return {
+        sessionFile,
+        output: getFinalOutput(child.session) || "(no output)",
+        status: deriveChildStatus(child.session),
+      };
+    } catch (error) {
+      // A run interrupted by the abort signal is reported as aborted, not failed.
+      return {
+        sessionFile: child.session.sessionFile ?? "",
+        output: toErrorMessage(error),
+        status: options.signal?.aborted ? "aborted" : "failed",
+      };
     } finally {
-      options.signal?.removeEventListener("abort", abort);
-      if (abortPromise) await abortPromise;
+      child.dispose();
     }
-
-    const sessionFile = child.session.sessionFile;
-    if (!sessionFile) {
-      return { sessionFile: "", output: "(no transcript)", status: "failed" };
-    }
-
-    return {
-      sessionFile,
-      output: getFinalOutput(child.session) || "(no output)",
-      status: deriveChildStatus(child.session),
-    };
-  } catch (error) {
-    // A run interrupted by the abort signal is reported as aborted, not failed.
-    return {
-      sessionFile: child.session.sessionFile ?? "",
-      output: toErrorMessage(error),
-      status: options.signal?.aborted ? "aborted" : "failed",
-    };
-  } finally {
-    child.dispose();
-  }
+  });
 };
+
+/**
+ * Run a child operation under the shared per-project concurrency gate.
+ *
+ * The gate is owned by the pool; this adapter is the domain seam that lets the
+ * `task` tool wrap the child run in `pool.concurrency.run(...)` while keeping
+ * the pool PI-SDK independent.
+ */
+export type ChildRunFunction = <T>(operation: () => Promise<T>) => Promise<T>;
+
+/** Terminal statuses a child run can end in, mirrored to the registry. */
+export type ChildTerminalStatus = "completed" | "aborted" | "failed";
+
+/** Map a child result status to its registry terminal status. */
+export function mapChildStatus(status: ChildTerminalStatus): JobStatus {
+  return status === "completed" ? "completed" : status === "aborted" ? "cancelled" : "failed";
+}

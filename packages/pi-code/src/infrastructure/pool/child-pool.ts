@@ -1,5 +1,7 @@
+import { MAX_CONCURRENCY } from "../../shared/constants.ts";
 import { registryFile } from "../../shared/paths.ts";
 import { createRegistry, type Registry } from "../registry/registry.ts";
+import { createConcurrencyGate, type ConcurrencyGate } from "./concurrency-gate.ts";
 
 /**
  * Shared per-project runtime state.
@@ -13,6 +15,10 @@ import { createRegistry, type Registry } from "../registry/registry.ts";
 export interface ChildPool {
   readonly projectRoot: string;
   readonly registry: Registry;
+  /** Global child-run gate: at most MAX_CONCURRENCY children run at once. */
+  readonly concurrency: ConcurrencyGate;
+  /** Reset the per-response task-call counter; called from `turn_start`. */
+  resetParallelTasks(): void;
 }
 
 declare global {
@@ -36,6 +42,10 @@ export function getChildPool(projectRoot: string): ChildPool {
   const pool: ChildPool = {
     projectRoot,
     registry: createRegistry(registryFile(projectRoot)),
+    concurrency: createConcurrencyGate(MAX_CONCURRENCY),
+    resetParallelTasks(): void {
+      pool.concurrency.resetParallelCount();
+    },
   };
 
   if (!globalThis.piCodePool) {

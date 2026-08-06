@@ -45,4 +45,12 @@ export type SpawnChildSession = (options: {
    * calling the port.
    */
   model: unknown;
+  /**
+   * Run the child under the shared per-project concurrency gate.
+   *
+   * The gate is owned by the pool, so the domain only needs a function that
+   * runs the given operation while holding a slot. The registry records
+   * `running` at the moment the slot is acquired.
+   */
+  run: <T>(operation: () => Promise<T>) => Promise<T>;
 }) => Promise<ChildRunResult | undefined>;
