@@ -10,12 +10,14 @@ export interface DeliveryCoordinator {
   readonly pendingCount: number;
   register(sessionFile: string, deliver: (content: string) => void): void;
   unregister(sessionFile: string): void;
+  /** Move pending results from a replaced parent session to its descendant. */
+  rebind(previousSessionFile: string, nextSessionFile: string): void;
   deliverResult(jobId: string, parentSessionFile: string, content: string): boolean;
 }
 
 interface PendingResult {
   readonly jobId: string;
-  readonly parentSessionFile: string;
+  parentSessionFile: string;
   readonly content: string;
 }
 
@@ -58,6 +60,18 @@ export function createDeliveryCoordinator(): DeliveryCoordinator {
     },
     unregister(sessionFile): void {
       sinks.delete(sessionFile);
+    },
+    rebind(previousSessionFile, nextSessionFile): void {
+      if (previousSessionFile === nextSessionFile) return;
+      // A result addressed to the replaced parent belongs to the descendant
+      // session that continues the same conversation, so it must follow the
+      // fork. Live sinks are not moved: those sessions are shared jobs, not a
+      // parent waiting for a result.
+      for (const result of pending) {
+        if (result.parentSessionFile === previousSessionFile) {
+          result.parentSessionFile = nextSessionFile;
+        }
+      }
     },
     deliverResult(jobId, parentSessionFile, content): boolean {
       const sink = sinks.get(parentSessionFile);

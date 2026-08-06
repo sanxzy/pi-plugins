@@ -2,6 +2,7 @@ import type {
   AgentToolResult,
   ExtensionAPI,
   ExtensionContext,
+  SessionBeforeSwitchEvent,
   SessionShutdownEvent,
   SessionStartEvent,
   TurnStartEvent,
@@ -489,6 +490,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerCancelTool(pi);
   registerStatusTool(pi);
   registerJobsTool(pi);
+  registerLifecycleGates(pi);
 
   pi.on("turn_start", (_event: TurnStartEvent, ctx: ExtensionContext) => {
     // A turn is one model response and its tool batch. Resetting here means
@@ -497,11 +499,16 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
     getChildPool(ctx.cwd).resetParallelTasks();
   });
 
-  pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
+  pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile) return;
 
     const pool = getChildPool(ctx.cwd);
+    if (event.reason === "fork" && event.previousSessionFile) {
+      // Fork creates the descendant before this event. Pending results that
+      // were addressed to the replaced parent must follow that descendant.
+      pool.delivery.rebind(event.previousSessionFile, sessionFile);
+    }
     pool.delivery.register(sessionFile, (content) => {
       // `followUp` queues behind the active run instead of interrupting a
       // streaming response. The SDK host owns the actual parent session.
@@ -509,12 +516,58 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
     });
   });
 
-  pi.on("session_shutdown", (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
+  pi.on("session_shutdown", async (event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    const pool = getChildPool(ctx.cwd);
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (sessionFile) {
-      getChildPool(ctx.cwd).delivery.unregister(sessionFile);
+      pool.delivery.unregister(sessionFile);
     }
-    // Process-quit interruption is implemented in Phase 7.
+    // Child sessions also emit `quit` when they are disposed after settling.
+    // Only the root orchestrator may sweep the project's shared jobs; a child
+    // must never abort its siblings or its parent while it is being cleaned up.
+    const isChildSession = pool.registry.get(ctx.sessionManager.getSessionId()) !== undefined;
+    if (isChildSession) return;
+
+    // Process quit and a confirmed `/new` both terminate the current host
+    // session's background work. Reload/resume/fork preserve live children.
+    if (event.reason === "quit" || event.reason === "new") {
+      await pool.interruptRunningJobs();
+    }
+  });
+}
+
+/**
+ * Ask the user to confirm `/new` when orchestrator background jobs are running.
+ *
+ * Called before the session switch. Returns `{ cancel: true }` to abort the
+ * switch when the user declines, so running children are not orphaned without
+ * consent. `/fork` is not gated: it keeps delivering results into the
+ * descendant session and never kills children.
+ */
+async function confirmNewWithRunningJobs(
+  _event: SessionBeforeSwitchEvent,
+  ctx: ExtensionContext,
+): Promise<{ cancel?: boolean }> {
+  const pool = getChildPool(ctx.cwd);
+  const running = Array.from(pool.registry.all().values()).filter((job) => job.status === "running");
+  if (running.length === 0) return {};
+
+  if (!ctx.hasUI) {
+    return { cancel: true };
+  }
+  const confirmed = await ctx.ui.confirm(
+    "Running background tasks",
+    `${running.length} background task(s) are still running. Starting a new session will stop them. Continue?`,
+  );
+  return { cancel: !confirmed };
+}
+
+function registerLifecycleGates(pi: ExtensionAPI): void {
+  pi.on("session_before_switch", async (event: SessionBeforeSwitchEvent, ctx: ExtensionContext) => {
+    if (event.reason !== "new") return undefined;
+    // The handler is awaited by the host before the switch and may cancel it by
+    // returning `{ cancel: true }`.
+    return confirmNewWithRunningJobs(event, ctx);
   });
 }
 
