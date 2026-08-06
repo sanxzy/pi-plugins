@@ -11,8 +11,12 @@ import {
 import { isDefaultAgentName } from "../../domain/agents/default-agent.ts";
 import type { JobStatus } from "../../domain/jobs/status.ts";
 import { sessionsDir } from "../../shared/paths.ts";
-import type { SpawnChildSession } from "../../domain/ports/child-session.ts";
+import type {
+  ChildSessionControl,
+  SpawnChildSession,
+} from "../../domain/ports/child-session.ts";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
+import { prepareResumeSessionFile } from "../sessions/resume-file.ts";
 
 /**
  * In-process child-session adapter.
@@ -77,12 +81,19 @@ async function createChildModelRuntime(options: {
   return {};
 }
 
-/** Isolate the child's runtime stack so it never touches the parent's. */
+/**
+ * Isolate the child's runtime stack so it never touches the parent's.
+ *
+ * A fresh call creates a new session under the project session directory with
+ * the job id. A resume reopens the stored transcript through `SessionManager.open`,
+ * which restores the header, entries, and leaf pointer from the JSONL file.
+ */
 async function createIsolatedChild(options: {
   jobId: string;
   cwd: string;
   model: unknown;
   parentSessionId?: string;
+  sessionFile?: string;
 }): Promise<ChildSessionServices> {
   const agentDir = getAgentDir();
   const settingsManager = SettingsManager.create(options.cwd, agentDir);
@@ -94,10 +105,12 @@ async function createIsolatedChild(options: {
   await resourceLoader.reload();
 
   const runtime = await createChildModelRuntime({ agentDir });
-  const sessionManager = SessionManager.create(options.cwd, sessionsDir(options.cwd), {
-    id: options.jobId,
-    parentSession: options.parentSessionId,
-  });
+  const sessionManager = options.sessionFile
+    ? SessionManager.open(options.sessionFile, sessionsDir(options.cwd))
+    : SessionManager.create(options.cwd, sessionsDir(options.cwd), {
+        id: options.jobId,
+        parentSession: options.parentSessionId,
+      });
 
   const { session } = await (createAgentSession as unknown as (options: Record<string, unknown>) => Promise<{ session: AgentSession }>)({
     cwd: options.cwd,
@@ -115,6 +128,25 @@ async function createIsolatedChild(options: {
       session.dispose();
     },
   };
+}
+
+/**
+ * Reopen an existing transcript under the project session directory.
+ *
+ * A resumed job is a NEW descendant job record whose child session reopens the
+ * original job's stored session file. Because the reopened session keeps the
+ * original session id, on-disk transcript and in-memory child session it is
+ * played through a fresh copy so the original transcript stays stable and the
+ * resumed run never mutates it. The copy lives under the project session
+ * directory so it is discoverable and removable alongside the other children.
+ */
+export function copySessionFile(source: string, jobId: string, cwd: string): string | undefined {
+  if (!source) return undefined;
+  try {
+    return prepareResumeSessionFile(source, jobId, cwd);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Extract the final assistant text, mirroring the reference `getFinalOutput`. */
@@ -184,6 +216,12 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
         cwd: options.cwd,
         model: options.model,
         parentSessionId: options.parentSessionId,
+        sessionFile: options.sessionFile,
+      });
+      options.onControl?.({
+        sessionFile: child.session.sessionFile,
+        steer: (prompt) => child.session.steer(prompt),
+        abort: () => child.session.abort(),
       });
     } catch (error) {
       return { sessionFile: "", output: toErrorMessage(error), status: "failed" };

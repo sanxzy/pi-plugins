@@ -45,6 +45,7 @@ export interface TaskErrorDetails {
 export interface StatusDetails {
   status: JobStatus;
   job?: JobSummary;
+  controllable?: boolean;
   reason?: string;
 }
 

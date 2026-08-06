@@ -7,11 +7,18 @@ import type {
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { isDefaultAgentName } from "./domain/agents/default-agent.ts";
+import {
+  canCancel,
+  resumeDisposition,
+  statusFor,
+  visibleJobs,
+  type ControlCaller,
+} from "./application/control/control.ts";
+import type { Job } from "./domain/jobs/job.ts";
 import { backgroundModeError, runBackgroundJob } from "./infrastructure/pool/background.ts";
 import { getChildPool } from "./infrastructure/pool/child-pool.ts";
-import { spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
+import { copySessionFile, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 import { recordNewJob } from "./infrastructure/registry/registry.ts";
-import type { Job } from "./domain/jobs/job.ts";
 import { MAX_PARALLEL_TASKS } from "./shared/constants.ts";
 import {
   cancelParams,
@@ -62,6 +69,55 @@ function toJobSummary(job: Job): import("./shared/types.ts").JobSummary {
   };
 }
 
+/**
+ * Spawn a child for a new or resumed job under the shared gate.
+ *
+ * The live-child handle is registered before the child exists so a steer or
+ * cancel issued while the child is still creating finds the job; it is removed
+ * once the child settles. The `queued → running` transition is recorded at the
+ * exact moment the gate slot is acquired.
+ */
+async function spawnWithControl(
+  pool: ReturnType<typeof getChildPool>,
+  params: TaskParams,
+  ctx: ExtensionContext,
+  job: Job,
+  options: { parentSessionId: string; sessionFile?: string; signal?: AbortSignal },
+): Promise<import("./domain/ports/child-session.ts").ChildRunResult | undefined> {
+  try {
+    return await spawnChildSession({
+      jobId: job.jobId,
+      cwd: ctx.cwd,
+      subagentType: params.subagent_type,
+      prompt: params.prompt,
+      parentSessionId: options.parentSessionId,
+      sessionFile: options.sessionFile,
+      model: ctx.model,
+      signal: options.signal,
+      onControl: (control) => {
+        pool.liveChildren.set(job.jobId, control);
+      },
+      run: (operation) =>
+        pool.concurrency.run(() => {
+          pool.registry.updateJob(job.jobId, { status: "running" });
+          return operation();
+        }),
+    });
+  } finally {
+    // The child has settled; a later steer or cancel must not find it.
+    pool.liveChildren.delete(job.jobId);
+  }
+}
+
+function callerFor(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>): ControlCaller {
+  const sessionId = ctx.sessionManager.getSessionId();
+  return { jobId: pool.registry.get(sessionId) ? sessionId : undefined };
+}
+
+function settleStatus(status: "completed" | "aborted" | "failed"): "completed" | "cancelled" | "failed" {
+  return status === "completed" ? "completed" : status === "aborted" ? "cancelled" : "failed";
+}
+
 function registerTaskTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "task",
@@ -100,20 +156,71 @@ function registerTaskTool(pi: ExtensionAPI): void {
         );
       }
 
-      // A model-supplied id is never used to create or address a job. It must
-      // resolve to an exact existing job, otherwise it is rejected. The counter
-      // above is not consumed by a resume/steer: it only addresses an existing
-      // job and does not spawn a new child.
+      // The caller's own job id is its child session id when that session is
+      // itself a registered job; the root orchestrator session is not a job, so
+      // it controls and views every job in the project.
+      const caller = callerFor(ctx, pool);
+
+      // Address an existing job: a running job is steered, a finished job is
+      // resumed from its stored transcript, and a job with no transcript yet is
+      // re-spawned fresh. The parallel-call counter above is deliberately not
+      // consumed by a resume/steer that only addresses an existing job.
       if (params.task_id) {
-        if (!pool.registry.get(params.task_id)) {
+        const job = pool.registry.get(params.task_id);
+        if (!job) {
           return errorResult(`unknown task id: ${params.task_id}`, {
             jobId: params.task_id,
             reason: "unknown task id",
           });
         }
-        return textResult(`Task ${params.task_id} already exists; execution will be connected in a later phase.`, {
-          jobId: params.task_id,
-          status: pool.registry.get(params.task_id)!.status,
+        const disposition = resumeDisposition(caller, job, (jobId) => pool.registry.get(jobId));
+        if (disposition.kind === "reject") {
+          return errorResult(`cannot resume task ${params.task_id}: ${disposition.reason}`, {
+            jobId: params.task_id,
+            reason: disposition.reason,
+          });
+        }
+        if (disposition.kind === "steer") {
+          const control = pool.liveChildren.get(job.jobId);
+          if (!control) {
+            return errorResult(`task ${params.task_id} is running but has no live child to steer`, {
+              jobId: job.jobId,
+              reason: "no live child",
+            });
+          }
+          await control.steer(params.prompt);
+          return textResult(`Steered running task ${job.jobId}.`, {
+            jobId: job.jobId,
+            status: "running",
+          });
+        }
+        if (disposition.kind === "fresh-spawn") {
+          return taskExecute(params, ctx, caller, { parentJobId: job.jobId });
+        }
+        // Resume from the stored transcript.
+        if (!job.sessionFile) {
+          return errorResult(`task ${params.task_id} has no stored transcript to resume`, {
+            jobId: job.jobId,
+            reason: "no stored transcript",
+          });
+        }
+        const resumeJobId = makeJobId();
+        let copyPath: string | undefined;
+        try {
+          copyPath = copySessionFile(job.sessionFile, resumeJobId, ctx.cwd);
+        } catch {
+          copyPath = undefined;
+        }
+        if (!copyPath) {
+          return errorResult(`could not copy the transcript for task ${params.task_id}`, {
+            jobId: job.jobId,
+            reason: "transcript copy failed",
+          });
+        }
+        return taskExecute(params, ctx, caller, {
+          jobId: resumeJobId,
+          parentJobId: job.jobId,
+          sessionFile: copyPath,
         });
       }
 
@@ -161,19 +268,9 @@ function registerTaskTool(pi: ExtensionAPI): void {
           {
             parentSessionFile,
             runChild: () =>
-              spawnChildSession({
-                jobId: job.jobId,
-                cwd: ctx.cwd,
-                subagentType: params.subagent_type,
-                prompt: params.prompt,
+              spawnWithControl(pool, params, ctx, job, {
                 parentSessionId,
-                model: ctx.model,
                 signal: undefined,
-                run: (operation) =>
-                  pool.concurrency.run(() => {
-                    pool.registry.updateJob(job.jobId, { status: "running" });
-                    return operation();
-                  }),
               }),
           },
         );
@@ -184,77 +281,90 @@ function registerTaskTool(pi: ExtensionAPI): void {
         );
       }
 
-      // Foreground: validate before creating a queued record. The lifecycle
-      // deliberately has no queued → failed transition; setup failures after
-      // gate admission are recorded as running → failed instead.
-      if (!ctx.model) {
-        return errorResult("no model available to run the child session", {
-          jobId: undefined,
-          reason: "no model available",
-        });
-      }
-      if (!isDefaultAgentName(params.subagent_type)) {
-        return errorResult(
-          `unknown subagent_type: ${params.subagent_type}`,
-          { jobId: undefined, reason: "unknown subagent_type" },
-        );
-      }
-
-      // Every foreground task starts queued and waits for a concurrency slot.
-      // The `queued → running` transition happens at the moment the slot is acquired.
-      const job = recordNewJob(pool.registry, {
-        jobId: makeJobId(),
-        status: "queued",
-        description: params.description,
-        subagentType: params.subagent_type,
-      });
-
-      // The child run is admitted through the shared concurrency gate. The
-      // `queued → running` transition is recorded at the exact moment the slot is
-      // acquired, so a job waiting for a slot stays observable as `queued`.
-      const result = await spawnChildSession({
-        jobId: job.jobId,
-        cwd: ctx.cwd,
-        subagentType: params.subagent_type,
-        prompt: params.prompt,
-        parentSessionId: ctx.sessionManager.getSessionId(),
-        model: ctx.model,
-        signal: ctx.signal,
-        run: (operation) =>
-          pool.concurrency.run(() => {
-            pool.registry.updateJob(job.jobId, { status: "running" });
-            return operation();
-          }),
-      });
-
-      if (!result) {
-        pool.registry.updateJob(job.jobId, { status: "failed" });
-        return errorResult(`could not spawn child for ${params.subagent_type}`, {
-          jobId: job.jobId,
-          reason: "spawn failed",
-        });
-      }
-
-      pool.registry.updateJob(job.jobId, {
-        status: result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed",
-        sessionFile: result.sessionFile,
-      });
-
-      if (result.status === "completed") {
-        return textResult(`Task ${job.jobId} completed:\n${result.output}`, {
-          jobId: job.jobId,
-          status: "completed",
-          result: result.output,
-        });
-      }
-      return errorResult(
-        result.status === "aborted"
-          ? `task ${job.jobId} was aborted`
-          : `task ${job.jobId} failed: ${result.output}`,
-        { jobId: job.jobId, reason: result.status === "aborted" ? "aborted" : "failed" },
-      );
+      return taskExecute(params, ctx, caller);
     },
   });
+}
+
+/**
+ * Run a new or resumed job in the foreground and settle its registry record.
+ *
+ * Shared by fresh `task` calls and by the resume/fresh-spawn branches of
+ * `task(task_id, prompt)`. `parentJobId`/`sessionFile` carry the resumed
+ * lineage and transcript; a fresh call leaves both unset.
+ */
+async function taskExecute(
+  params: TaskParams,
+  ctx: ExtensionContext,
+  caller: ControlCaller,
+  options: { jobId?: string; parentJobId?: string; sessionFile?: string } = {},
+): Promise<AgentToolResult<TaskDetails | TaskErrorDetails>> {
+  const pool = getChildPool(ctx.cwd);
+
+  // Foreground: validate before creating a queued record. The lifecycle
+  // deliberately has no queued → failed transition; setup failures after
+  // gate admission are recorded as running → failed instead.
+  if (!ctx.model) {
+    return errorResult("no model available to run the child session", {
+      jobId: options.parentJobId,
+      reason: "no model available",
+    });
+  }
+  if (!isDefaultAgentName(params.subagent_type)) {
+    return errorResult(
+      `unknown subagent_type: ${params.subagent_type}`,
+      { jobId: options.parentJobId, reason: "unknown subagent_type" },
+    );
+  }
+
+  const parent = options.parentJobId ? pool.registry.get(options.parentJobId) : undefined;
+  const job = recordNewJob(pool.registry, {
+    jobId: options.jobId ?? makeJobId(),
+    status: "queued",
+    description: params.description,
+    subagentType: params.subagent_type,
+    parentJobId: parent?.jobId,
+    rootJobId: parent?.rootJobId,
+    depth: parent ? parent.depth + 1 : undefined,
+    sessionFile: options.sessionFile,
+  });
+
+  // The child run is admitted through the shared concurrency gate. The
+  // `queued → running` transition is recorded at the exact moment the slot is
+  // acquired, so a job waiting for a slot stays observable as `queued`.
+  const result = await spawnWithControl(pool, params, ctx, job, {
+    parentSessionId: ctx.sessionManager.getSessionId(),
+    sessionFile: options.sessionFile,
+    signal: ctx.signal,
+  });
+
+  if (!result) {
+    pool.registry.updateJob(job.jobId, { status: "failed" });
+    return errorResult(`could not spawn child for ${params.subagent_type}`, {
+      jobId: job.jobId,
+      reason: "spawn failed",
+    });
+  }
+
+  // Mark the job terminal and persist the child's transcript. If the job was
+  // already cancelled by `task_cancel` mid-run, the status update is a legal
+  // no-op, so persist the session file in a separate update.
+  pool.registry.updateJob(job.jobId, { status: settleStatus(result.status) });
+  pool.registry.updateJob(job.jobId, { sessionFile: result.sessionFile });
+
+  if (result.status === "completed") {
+    return textResult(`Task ${job.jobId} completed:\n${result.output}`, {
+      jobId: job.jobId,
+      status: "completed",
+      result: result.output,
+    });
+  }
+  return errorResult(
+    result.status === "aborted"
+      ? `task ${job.jobId} was aborted`
+      : `task ${job.jobId} failed: ${result.output}`,
+    { jobId: job.jobId, reason: result.status === "aborted" ? "aborted" : "failed" },
+  );
 }
 
 function registerCancelTool(pi: ExtensionAPI): void {
@@ -270,7 +380,9 @@ function registerCancelTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<CancelDetails>> {
-      const job = getChildPool(ctx.cwd).registry.get(params.job_id);
+      const pool = getChildPool(ctx.cwd);
+      const caller = callerFor(ctx, pool);
+      const job = pool.registry.get(params.job_id);
       if (!job) {
         return errorResult(`unknown job id: ${params.job_id}`, {
           jobId: params.job_id,
@@ -278,12 +390,37 @@ function registerCancelTool(pi: ExtensionAPI): void {
           reason: "unknown job id",
         });
       }
-      return textResult(`Task ${params.job_id} is not cancellable until execution is connected.`, {
+      const decision = canCancel(caller, job, (jobId) => pool.registry.get(jobId));
+      if (!decision.allowed) {
+        return textResult(`Task ${params.job_id} is not cancellable: ${decision.reason}.`, {
+          jobId: params.job_id,
+          success: false,
+          status: job.status,
+          allowed: false,
+          reason: decision.reason,
+        });
+      }
+
+      const control = pool.liveChildren.get(job.jobId);
+      if (!control) {
+        return textResult(`Task ${params.job_id} is running but has no live child to abort.`, {
+          jobId: params.job_id,
+          success: false,
+          status: job.status,
+          allowed: false,
+          reason: "no live child",
+        });
+      }
+
+      // Abort the child run; the abort resolves the child's own prompt() and its
+      // result handler maps the aborted status to cancelled. Marking the job
+      // cancelled here stays idempotent when the handler follows up.
+      await control.abort();
+      pool.registry.updateJob(job.jobId, { status: "cancelled" });
+      return textResult(`Task ${params.job_id} was cancelled.`, {
         jobId: params.job_id,
-        success: false,
-        status: job.status,
-        allowed: false,
-        reason: "execution is not connected in the scaffold phase",
+        success: true,
+        status: "cancelled",
       });
     },
   });
@@ -302,16 +439,20 @@ function registerStatusTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<StatusDetails>> {
-      const job = getChildPool(ctx.cwd).registry.get(params.job_id);
+      const pool = getChildPool(ctx.cwd);
+      const caller = callerFor(ctx, pool);
+      const job = pool.registry.get(params.job_id);
       if (!job) {
         return errorResult(`unknown job id: ${params.job_id}`, {
           status: "failed",
           reason: "unknown job id",
         });
       }
+      const result = statusFor(caller, job, (jobId) => pool.registry.get(jobId));
       return textResult(`Task ${params.job_id} is ${job.status}.`, {
         status: job.status,
         job: toJobSummary(job),
+        controllable: result.controllable,
       });
     },
   });
@@ -330,7 +471,9 @@ function registerJobsTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<JobsDetails>> {
-      const jobs = Array.from(getChildPool(ctx.cwd).registry.all().values()).map(toJobSummary);
+      const pool = getChildPool(ctx.cwd);
+      const caller = callerFor(ctx, pool);
+      const jobs = visibleJobs(caller, pool.registry.all().values(), (jobId) => pool.registry.get(jobId)).map(toJobSummary);
       if (jobs.length === 0) {
         return textResult("No subagent jobs are currently visible.", { jobs: [] });
       }

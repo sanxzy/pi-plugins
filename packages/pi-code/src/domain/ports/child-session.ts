@@ -1,10 +1,19 @@
 /**
  * Child-session port.
  *
- * The application layer depends only on this function type. Infrastructure
- * implements it over the PI SDK; the composition root wires it into the
- * `task` tool. No session handle or PI SDK type reaches the port.
+ * The application layer depends only on these functions. Infrastructure
+ * implements them over the PI SDK; no SDK session handle reaches the port.
  */
+
+/** Control surface for a live child session. */
+export interface ChildSessionControl {
+  /** Exact session file path, when persistence is enabled. */
+  readonly sessionFile?: string;
+  /** Queue steering context for the current child run. */
+  steer(prompt: string): Promise<void>;
+  /** Abort the current child run and wait for it to become idle. */
+  abort(): Promise<void>;
+}
 
 /** Outcome of running a foreground child session to completion. */
 export interface ChildRunResult {
@@ -25,7 +34,7 @@ export interface ChildRunResult {
  * spawning a child.
  */
 export type SpawnChildSession = (options: {
-  /** Stable orchestrator job id, used as the child session id. */
+  /** Stable orchestrator job id, used as the child session id for new sessions. */
   jobId: string;
   /** Working directory inherited from the parent session. */
   cwd: string;
@@ -35,8 +44,12 @@ export type SpawnChildSession = (options: {
   prompt: string;
   /** Parent session id, preserved in the child session header. */
   parentSessionId?: string;
-  /** Abort signal forwarded to the child's run. */
+  /** Stored transcript to reopen for a resume, if any. */
+  sessionFile?: string;
+  /** Abort signal forwarded to the child's run and concurrency wait. */
   signal?: AbortSignal;
+  /** Called once the isolated child exists and can be controlled. */
+  onControl?: (control: ChildSessionControl) => void;
   /**
    * Model inherited from the parent session.
    *
@@ -50,7 +63,11 @@ export type SpawnChildSession = (options: {
    *
    * The gate is owned by the pool, so the domain only needs a function that
    * runs the given operation while holding a slot. The registry records
-   * `running` at the moment the slot is acquired.
+   * `running` at the moment the slot is acquired. The optional signal lets the
+   * gate observe cancellations that arrive while the job is queued.
    */
-  run: <T>(operation: () => Promise<T>) => Promise<T>;
+  run: (
+    operation: () => Promise<ChildRunResult | undefined>,
+    signal?: AbortSignal,
+  ) => Promise<ChildRunResult | undefined>;
 }) => Promise<ChildRunResult | undefined>;

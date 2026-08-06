@@ -107,3 +107,21 @@ export function updateJob(job: Job, update: JobUpdate): Job {
 export function isDescendantOf(job: Job, rootJobId: string): boolean {
   return job.rootJobId === rootJobId;
 }
+
+/**
+ * Whether `ancestorJob` is a strict ancestor of `job` in the job lineage.
+ *
+ * The check walks the parent chain from `job` upward, so a sibling (same root,
+ * different parent) is never treated as an ancestor. A job is not its own
+ * ancestor.
+ */
+export function isJobAncestorOf(ancestorJob: Job, job: Job, getJob: (jobId: string) => Job | undefined): boolean {
+  let parentJobId = job.parentJobId;
+  while (parentJobId !== undefined) {
+    if (parentJobId === ancestorJob.jobId) return true;
+    const parent = getJob(parentJobId);
+    if (!parent) return false;
+    parentJobId = parent.parentJobId;
+  }
+  return false;
+}

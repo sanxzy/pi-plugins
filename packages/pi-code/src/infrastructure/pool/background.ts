@@ -78,10 +78,13 @@ export async function runBackgroundJob(
     return;
   }
 
+  // Mark the job terminal and persist the child's transcript. If the job was
+  // already cancelled by `task_cancel` mid-run, the status update is a legal
+  // no-op, so persist the session file in a separate update.
   deps.registry.updateJob(job.jobId, {
     status: result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed",
-    sessionFile: result.sessionFile,
   });
+  deps.registry.updateJob(job.jobId, { sessionFile: result.sessionFile });
   deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.jobId, result));
   deps.registry.updateJob(job.jobId, { delivered: true });
 }

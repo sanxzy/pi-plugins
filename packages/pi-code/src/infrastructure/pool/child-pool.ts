@@ -1,5 +1,6 @@
 import { MAX_CONCURRENCY } from "../../shared/constants.ts";
 import { registryFile } from "../../shared/paths.ts";
+import type { ChildSessionControl } from "../../domain/ports/child-session.ts";
 import { createRegistry, type Registry } from "../registry/registry.ts";
 import { createDeliveryCoordinator, type DeliveryCoordinator } from "./delivery.ts";
 import { createConcurrencyGate, type ConcurrencyGate } from "./concurrency-gate.ts";
@@ -20,8 +21,8 @@ export interface ChildPool {
   readonly concurrency: ConcurrencyGate;
   /** Delivers finished background results to each result's direct parent session. */
   readonly delivery: DeliveryCoordinator;
-  /** Live child handles keyed by job id; populated by later phases. */
-  readonly liveChildren: Map<string, unknown>;
+  /** Live child handles keyed by job id; populated while a child runs. */
+  readonly liveChildren: Map<string, ChildSessionControl>;
   /** Reset the per-response task-call counter; called from `turn_start`. */
   resetParallelTasks(): void;
 }

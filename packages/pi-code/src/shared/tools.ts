@@ -13,7 +13,7 @@ export const taskParams = Type.Object({
   prompt: Type.String({ description: "Instruction to run in the subagent." }),
   subagent_type: Type.String({ description: "Name of the agent definition to run." }),
   background: Type.Optional(Type.Boolean({ description: "Run in background and inject the result later (TUI only)." })),
-  task_id: Type.Optional(Type.String({ description: "Existing job id to resume or steer." })),
+  task_id: Type.Optional(Type.String({ description: "Existing job id to resume or steer. A running job is steered; a finished job is resumed from its stored transcript." })),
 });
 
 export const cancelParams = Type.Object({
