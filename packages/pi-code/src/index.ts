@@ -2,9 +2,12 @@ import type {
   AgentToolResult,
   ExtensionAPI,
   ExtensionContext,
+  SessionShutdownEvent,
+  SessionStartEvent,
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { isDefaultAgentName } from "./domain/agents/default-agent.ts";
+import { backgroundModeError, runBackgroundJob } from "./infrastructure/pool/background.ts";
 import { getChildPool } from "./infrastructure/pool/child-pool.ts";
 import { spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 import { recordNewJob } from "./infrastructure/registry/registry.ts";
@@ -77,11 +80,12 @@ function registerTaskTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<TaskDetails | TaskErrorDetails>> {
-      if (params.background && ctx.mode !== "tui") {
-        return errorResult(
-          "background tasks are available only in TUI mode",
-          { jobId: undefined, reason: `background mode is invalid in ${ctx.mode} mode` },
-        );
+      const backgroundError = params.background ? backgroundModeError(ctx.mode) : undefined;
+      if (backgroundError) {
+        return errorResult("background tasks are available only in TUI mode", {
+          jobId: undefined,
+          reason: backgroundError,
+        });
       }
 
       const pool = getChildPool(ctx.cwd);
@@ -113,17 +117,69 @@ function registerTaskTool(pi: ExtensionAPI): void {
         });
       }
 
-      // Background execution is connected in Phase 5, so it is recorded and
-      // acknowledged without requiring a model or agent definition yet.
+      // Background: validate before recording so an invalid request never
+      // consumes a job id. The child runs off the main turn and its result is
+      // delivered to the direct parent when it finishes.
       if (params.background) {
+        if (!ctx.model) {
+          return errorResult("no model available to run the child session", {
+            jobId: undefined,
+            reason: "no model available",
+          });
+        }
+        if (!isDefaultAgentName(params.subagent_type)) {
+          return errorResult(
+            `unknown subagent_type: ${params.subagent_type}`,
+            { jobId: undefined, reason: "unknown subagent_type" },
+          );
+        }
+
         const job = recordNewJob(pool.registry, {
           jobId: makeJobId(),
           status: "queued",
           description: params.description,
           subagentType: params.subagent_type,
         });
+
+        // The direct-parent session file keys result delivery. The realisation
+        // below is async, so the job is acknowledged as `running` to match the
+        // contract (return immediately with the job id and a running
+        // acknowledgement); a gate slot is acquired before the child runs.
+        pool.registry.updateJob(job.jobId, { status: "running" });
+
+        const parentSessionFile = ctx.sessionManager.getSessionFile() ?? "";
+        const parentSessionId = ctx.sessionManager.getSessionId();
+
+        // The child lifecycle runs under the shared concurrency gate, exactly
+        // like the foreground path, so a call beyond the cap stays `queued` and
+        // starts when a slot frees. `signal: undefined` deliberately keeps the
+        // child alive when the main turn is cancelled; only quitting the PI
+        // process interrupts it (Phase 7).
+        void runBackgroundJob(
+          pool,
+          job,
+          {
+            parentSessionFile,
+            runChild: () =>
+              spawnChildSession({
+                jobId: job.jobId,
+                cwd: ctx.cwd,
+                subagentType: params.subagent_type,
+                prompt: params.prompt,
+                parentSessionId,
+                model: ctx.model,
+                signal: undefined,
+                run: (operation) =>
+                  pool.concurrency.run(() => {
+                    pool.registry.updateJob(job.jobId, { status: "running" });
+                    return operation();
+                  }),
+              }),
+          },
+        );
+
         return textResult(
-          `Accepted background task ${job.jobId}. Execution will be connected in a later phase.`,
+          `Accepted background task ${job.jobId}. Its result will be delivered when it finishes.`,
           { jobId: job.jobId, status: job.status },
         );
       }
@@ -298,13 +354,24 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
     getChildPool(ctx.cwd).resetParallelTasks();
   });
 
-  pi.on("session_start", () => {
-    // The pool is initialized lazily by the first tool call. This event keeps
-    // extension startup side-effect free while reserving the lifecycle seam.
+  pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    if (!sessionFile) return;
+
+    const pool = getChildPool(ctx.cwd);
+    pool.delivery.register(sessionFile, (content) => {
+      // `followUp` queues behind the active run instead of interrupting a
+      // streaming response. The SDK host owns the actual parent session.
+      pi.sendUserMessage(content, { deliverAs: "followUp" });
+    });
   });
 
-  pi.on("session_shutdown", () => {
-    // Shutdown interruption is implemented in Phase 7.
+  pi.on("session_shutdown", (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    if (sessionFile) {
+      getChildPool(ctx.cwd).delivery.unregister(sessionFile);
+    }
+    // Process-quit interruption is implemented in Phase 7.
   });
 }
 
