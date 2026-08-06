@@ -10,7 +10,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/scaffold.smoke.test.ts"
+    "test": "node --test --import tsx tests/scaffold.smoke.test.ts tests/registry.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.2",

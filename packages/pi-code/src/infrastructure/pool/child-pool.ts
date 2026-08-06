@@ -1,15 +1,18 @@
-import type { JobSummary } from "../../shared/types.ts";
+import { registryFile } from "../../shared/paths.ts";
+import { createRegistry, type Registry } from "../registry/registry.ts";
 
 /**
- * Minimal shared runtime state for Phase 1.
+ * Shared per-project runtime state.
  *
- * The pool is deliberately independent of the PI SDK. Later phases add live
- * child handles, the registry writer, the concurrency gate, and pending result
- * delivery to this per-project state object.
+ * The pool is deliberately independent of the PI SDK. It owns the mutable
+ * runtime state that must survive extension factory reloads and session
+ * replacement: the append-only job registry writer, the live child handles,
+ * the concurrency gate, and the pending-result queue. Later phases attach the
+ * remaining fields to this object.
  */
 export interface ChildPool {
   readonly projectRoot: string;
-  readonly jobs: Map<string, JobSummary>;
+  readonly registry: Registry;
 }
 
 declare global {
@@ -32,7 +35,7 @@ export function getChildPool(projectRoot: string): ChildPool {
 
   const pool: ChildPool = {
     projectRoot,
-    jobs: new Map(),
+    registry: createRegistry(registryFile(projectRoot)),
   };
 
   if (!globalThis.piCodePool) {

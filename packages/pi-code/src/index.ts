@@ -4,6 +4,8 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { getChildPool } from "./infrastructure/pool/child-pool.ts";
+import { recordNewJob } from "./infrastructure/registry/registry.ts";
+import type { Job } from "./domain/jobs/job.ts";
 import { MAX_PARALLEL_TASKS } from "./shared/constants.ts";
 import {
   cancelParams,
@@ -39,6 +41,21 @@ function makeJobId(): string {
   return `job-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Public summary of a job, with no session handle or filesystem path. */
+function toJobSummary(job: Job): import("./shared/types.ts").JobSummary {
+  return {
+    jobId: job.jobId,
+    status: job.status,
+    description: job.description,
+    subagentType: job.subagentType,
+    parentJobId: job.parentJobId,
+    rootJobId: job.rootJobId,
+    depth: job.depth,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
+}
+
 function registerTaskTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "task",
@@ -65,25 +82,34 @@ function registerTaskTool(pi: ExtensionAPI): void {
       }
 
       const pool = getChildPool(ctx.cwd);
-      const jobId = params.task_id ?? makeJobId();
-      const status = params.background ? "queued" : "created";
-      const now = new Date().toISOString();
-      pool.jobs.set(jobId, {
-        jobId,
-        status,
+
+      // A model-supplied id is never used to create or address a job. It must
+      // resolve to an exact existing job, otherwise it is rejected.
+      if (params.task_id) {
+        if (!pool.registry.get(params.task_id)) {
+          return errorResult(`unknown task id: ${params.task_id}`, {
+            jobId: params.task_id,
+            reason: "unknown task id",
+          });
+        }
+        return textResult(`Task ${params.task_id} already exists; execution will be connected in a later phase.`, {
+          jobId: params.task_id,
+          status: pool.registry.get(params.task_id)!.status,
+        });
+      }
+
+      const job = recordNewJob(pool.registry, {
+        jobId: makeJobId(),
+        status: params.background ? "queued" : "created",
         description: params.description,
         subagentType: params.subagent_type,
-        rootJobId: jobId,
-        depth: 0,
-        createdAt: now,
-        updatedAt: now,
       });
 
       return textResult(
         params.background
-          ? `Accepted background task ${jobId}. Execution will be connected in a later phase.`
-          : `Accepted task ${jobId}. Foreground execution will be connected in a later phase.`,
-        { jobId, status },
+          ? `Accepted background task ${job.jobId}. Execution will be connected in a later phase.`
+          : `Accepted task ${job.jobId}. Foreground execution will be connected in a later phase.`,
+        { jobId: job.jobId, status: job.status },
       );
     },
   });
@@ -102,7 +128,7 @@ function registerCancelTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<CancelDetails>> {
-      const job = getChildPool(ctx.cwd).jobs.get(params.job_id);
+      const job = getChildPool(ctx.cwd).registry.get(params.job_id);
       if (!job) {
         return errorResult(`unknown job id: ${params.job_id}`, {
           jobId: params.job_id,
@@ -134,7 +160,7 @@ function registerStatusTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<StatusDetails>> {
-      const job = getChildPool(ctx.cwd).jobs.get(params.job_id);
+      const job = getChildPool(ctx.cwd).registry.get(params.job_id);
       if (!job) {
         return errorResult(`unknown job id: ${params.job_id}`, {
           status: "failed",
@@ -143,7 +169,7 @@ function registerStatusTool(pi: ExtensionAPI): void {
       }
       return textResult(`Task ${params.job_id} is ${job.status}.`, {
         status: job.status,
-        job,
+        job: toJobSummary(job),
       });
     },
   });
@@ -155,8 +181,19 @@ function registerJobsTool(pi: ExtensionAPI): void {
     label: "List tasks",
     description: "List subagent jobs visible to the current orchestrator.",
     parameters: jobsParams,
-    async execute(): Promise<AgentToolResult<JobsDetails>> {
-      return textResult("No subagent jobs are currently visible.", { jobs: [] });
+    async execute(
+      _toolCallId: string,
+      _params: unknown,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      ctx: ExtensionContext,
+    ): Promise<AgentToolResult<JobsDetails>> {
+      const jobs = Array.from(getChildPool(ctx.cwd).registry.all().values()).map(toJobSummary);
+      if (jobs.length === 0) {
+        return textResult("No subagent jobs are currently visible.", { jobs: [] });
+      }
+      const lines = jobs.map((j) => `- ${j.jobId}: ${j.status} (${j.description})`).join("\n");
+      return textResult(`Subagent jobs:\n${lines}`, { jobs });
     },
   });
 }

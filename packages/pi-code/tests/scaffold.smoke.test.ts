@@ -25,12 +25,12 @@ test("child pool is a stable singleton keyed by project root", () => {
   assert.equal(a, b);
   assert.notEqual(a, c);
   assert.equal(a.projectRoot, "/tmp/projects/a");
-  assert.ok(a.jobs instanceof Map);
+  assert.ok(a.registry.all() instanceof Map);
 });
 
 test("child pool slot is namespaced by project root", () => {
   const a = getChildPool("/tmp/projects/ns-a");
   const c = getChildPool("/tmp/projects/ns-b");
-  a.jobs.set("j1", undefined as never);
-  assert.ok(!c.jobs.has("j1"));
+  a.registry.all().set("j1", undefined as never);
+  assert.ok(!c.registry.all().has("j1"));
 });
