@@ -1,0 +1,23 @@
+{
+  "name": "@xzy-ai/pi-code",
+  "version": "0.1.0",
+  "description": "PI extension: delegate work to isolated in-process subagents through model-callable tools",
+  "type": "module",
+  "main": "./src/index.ts",
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "private": true,
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "node --test --import tsx tests/scaffold.smoke.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "typebox": "^1.1.38"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.22.2"
+  }
+}
