@@ -4,11 +4,13 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  resolveCliModel,
   SessionManager,
   SettingsManager,
   type AgentSession,
+  type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import { isDefaultAgentName } from "../../domain/agents/default-agent.ts";
+import type { ResolvedAgent } from "../../domain/agents/agent.ts";
 import type { JobStatus } from "../../domain/jobs/status.ts";
 import { sessionsDir } from "../../shared/paths.ts";
 import type {
@@ -27,8 +29,8 @@ import { prepareResumeSessionFile } from "../sessions/resume-file.ts";
  *   `DefaultResourceLoader` — the parent's instances are never shared, because
  *   sharing couples otherwise independent children and can overwrite extension
  *   actions,
- * - a minimal agent seam that recognizes only the inherited default agent
- *   (Phase 8 replaces it with full agent discovery).
+ * - a resolved agent definition that can provide a stable system-prompt
+ *   override, a tool allowlist, and a model override.
  *
  * The supplied `AbortSignal` is forwarded to the child: an abort cancels the
  * child run through `session.abort()` and the run resolves as `aborted`.
@@ -59,11 +61,14 @@ function toErrorMessage(error: unknown): string {
  */
 async function createChildModelRuntime(options: {
   agentDir: string;
-}): Promise<Record<string, unknown>> {
+}): Promise<{ runtime: Record<string, unknown>; modelRuntime?: ModelRuntime }> {
   const sdk = PiSdk as unknown as Record<string, unknown>;
-  const modelRuntime = sdk.ModelRuntime as { create?: () => Promise<unknown> } | undefined;
+  const modelRuntime = sdk.ModelRuntime as {
+    create?: () => Promise<unknown>;
+  } | undefined;
   if (typeof modelRuntime?.create === "function") {
-    return { modelRuntime: await modelRuntime.create() };
+    const instance = (await modelRuntime.create()) as ModelRuntime;
+    return { runtime: { modelRuntime: instance }, modelRuntime: instance };
   }
 
   const modelRegistry = sdk.ModelRegistry as { create?: (auth: unknown, modelsPath: string) => unknown } | undefined;
@@ -71,14 +76,16 @@ async function createChildModelRuntime(options: {
   if (typeof modelRegistry?.create === "function" && typeof authStorage?.create === "function") {
     const auth = authStorage.create(join(options.agentDir, "auth.json"));
     return {
-      modelRegistry: modelRegistry.create(auth, join(options.agentDir, "models.json")),
-      authStorage: auth,
+      runtime: {
+        modelRegistry: modelRegistry.create(auth, join(options.agentDir, "models.json")),
+        authStorage: auth,
+      },
     };
   }
 
   // Neither service is available; still let createAgentSession fall back to its
   // own defaults by returning no runtime services.
-  return {};
+  return { runtime: {} };
 }
 
 /**
@@ -92,19 +99,29 @@ async function createIsolatedChild(options: {
   jobId: string;
   cwd: string;
   model: unknown;
+  agent: ResolvedAgent;
   parentSessionId?: string;
   sessionFile?: string;
 }): Promise<ChildSessionServices> {
   const agentDir = getAgentDir();
   const settingsManager = SettingsManager.create(options.cwd, agentDir);
+  // The discovered agent carries the frontmatter fields and Markdown body; the
+  // inherited default agent carries none of them.
+  const discovered = options.agent.isDefault === false ? options.agent : undefined;
+  // The agent Markdown body is applied through a stable system-prompt override
+  // on the child's own loader. `reload()` re-applies the override on every
+  // rebuild, so the prompt survives a runtime resource reload (a one-time
+  // mutation would be reset).
+  const systemPromptOverride = discovered ? () => discovered.systemPrompt : undefined;
   const resourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir,
     settingsManager,
+    systemPromptOverride,
   });
   await resourceLoader.reload();
 
-  const runtime = await createChildModelRuntime({ agentDir });
+  const { runtime, modelRuntime } = await createChildModelRuntime({ agentDir });
   const sessionManager = options.sessionFile
     ? SessionManager.open(options.sessionFile, sessionsDir(options.cwd))
     : SessionManager.create(options.cwd, sessionsDir(options.cwd), {
@@ -112,15 +129,28 @@ async function createIsolatedChild(options: {
         parentSession: options.parentSessionId,
       });
 
-  const { session } = await (createAgentSession as unknown as (options: Record<string, unknown>) => Promise<{ session: AgentSession }>)({
+  // Model mapping: an explicit frontmatter model is resolved against the child
+  // runtime and falls back to the inherited parent model when resolution fails
+  // or no runtime/models are available; an absent model inherits the parent.
+  const model =
+    discovered && discovered.model ? resolveChildModel(discovered.model, modelRuntime) ?? options.model : options.model;
+
+  const sessionOptions: Record<string, unknown> = {
     cwd: options.cwd,
     agentDir,
-    model: options.model,
+    model,
     ...runtime,
     settingsManager,
     sessionManager,
     resourceLoader,
-  });
+  };
+  // Tool mapping: an explicit `tools` list becomes the child allowlist; an
+  // absent list leaves the child on the SDK's default tools.
+  if (discovered && discovered.tools) {
+    sessionOptions.tools = discovered.tools;
+  }
+
+  const { session } = await (createAgentSession as unknown as (options: Record<string, unknown>) => Promise<{ session: AgentSession }>)(sessionOptions);
 
   return {
     session,
@@ -128,6 +158,19 @@ async function createIsolatedChild(options: {
       session.dispose();
     },
   };
+}
+
+/**
+ * Resolve a frontmatter model reference against the child model runtime.
+ *
+ * Returns the resolved model, or `undefined` when there is no runtime, no
+ * configured models, or the reference does not match. The caller falls back to
+ * the inherited parent model in every failure case.
+ */
+function resolveChildModel(model: string, modelRuntime: ModelRuntime | undefined): unknown {
+  if (!modelRuntime) return undefined;
+  const result = resolveCliModel({ cliModel: model, modelRuntime });
+  return result.model;
 }
 
 /**
@@ -189,8 +232,6 @@ function findLastAssistantMessage(session: AgentSession): {
 /**
  * Run a foreground child session to completion.
  *
- * Returns `undefined` for an unknown subagent type without spawning a child.
- *
  * The whole child lifecycle (create + prompt) runs under the shared concurrency
  * gate. Admission is recorded as `queued → running` by the composition root at
  * the exact moment the slot is acquired, so every failure after admission is a
@@ -199,10 +240,6 @@ function findLastAssistantMessage(session: AgentSession): {
  * composition root marks it `cancelled` from the aborted result).
  */
 export const spawnChildSession: SpawnChildSession = async (options) => {
-  if (!isDefaultAgentName(options.subagentType)) {
-    return undefined;
-  }
-
   // A cancelled parent run must not start a child at all.
   if (options.signal?.aborted) {
     return { sessionFile: "", output: "(aborted before start)", status: "aborted" };
@@ -215,6 +252,7 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
         jobId: options.jobId,
         cwd: options.cwd,
         model: options.model,
+        agent: options.agent,
         parentSessionId: options.parentSessionId,
         sessionFile: options.sessionFile,
       });

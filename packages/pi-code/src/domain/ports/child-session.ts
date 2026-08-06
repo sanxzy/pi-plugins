@@ -1,3 +1,5 @@
+import type { ResolvedAgent } from "../agents/agent.ts";
+
 /**
  * Child-session port.
  *
@@ -29,17 +31,16 @@ export interface ChildRunResult {
  * Spawn and run a foreground child session.
  *
  * The child uses the inherited `cwd` and `model` with a fresh isolated
- * `SessionManager`/`ModelRuntime`/`DefaultResourceLoader`. The subagent name
- * is resolved by the adapter seam; an unknown name returns `undefined` without
- * spawning a child.
+ * `SessionManager`/`ModelRuntime`/`DefaultResourceLoader`. The subagent type is
+ * resolved by the application layer; an unknown name never reaches this port.
  */
 export type SpawnChildSession = (options: {
   /** Stable orchestrator job id, used as the child session id for new sessions. */
   jobId: string;
   /** Working directory inherited from the parent session. */
   cwd: string;
-  /** Subagent type to run; "default" is the only one recognized in Phase 3. */
-  subagentType: string;
+  /** Resolved agent definition; the default agent or a discovered agent. */
+  agent: ResolvedAgent;
   /** Instruction to run in the child session. */
   prompt: string;
   /** Parent session id, preserved in the child session header. */

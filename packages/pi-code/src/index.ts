@@ -7,7 +7,8 @@ import type {
   SessionStartEvent,
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { isDefaultAgentName } from "./domain/agents/default-agent.ts";
+import { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
+import type { ResolvedAgent } from "./domain/agents/agent.ts";
 import {
   canCancel,
   resumeDisposition,
@@ -83,13 +84,14 @@ async function spawnWithControl(
   params: TaskParams,
   ctx: ExtensionContext,
   job: Job,
+  agent: ResolvedAgent,
   options: { parentSessionId: string; sessionFile?: string; signal?: AbortSignal },
 ): Promise<import("./domain/ports/child-session.ts").ChildRunResult | undefined> {
   try {
     return await spawnChildSession({
       jobId: job.jobId,
       cwd: ctx.cwd,
-      subagentType: params.subagent_type,
+      agent,
       prompt: params.prompt,
       parentSessionId: options.parentSessionId,
       sessionFile: options.sessionFile,
@@ -235,7 +237,8 @@ function registerTaskTool(pi: ExtensionAPI): void {
             reason: "no model available",
           });
         }
-        if (!isDefaultAgentName(params.subagent_type)) {
+        const agent = createAgentDiscovery(ctx.cwd).resolve(params.subagent_type);
+        if (!agent) {
           return errorResult(
             `unknown subagent_type: ${params.subagent_type}`,
             { jobId: undefined, reason: "unknown subagent_type" },
@@ -269,7 +272,7 @@ function registerTaskTool(pi: ExtensionAPI): void {
           {
             parentSessionFile,
             runChild: () =>
-              spawnWithControl(pool, params, ctx, job, {
+              spawnWithControl(pool, params, ctx, job, agent, {
                 parentSessionId,
                 signal: undefined,
               }),
@@ -311,7 +314,8 @@ async function taskExecute(
       reason: "no model available",
     });
   }
-  if (!isDefaultAgentName(params.subagent_type)) {
+  const agent = createAgentDiscovery(ctx.cwd).resolve(params.subagent_type);
+  if (!agent) {
     return errorResult(
       `unknown subagent_type: ${params.subagent_type}`,
       { jobId: options.parentJobId, reason: "unknown subagent_type" },
@@ -333,7 +337,7 @@ async function taskExecute(
   // The child run is admitted through the shared concurrency gate. The
   // `queued → running` transition is recorded at the exact moment the slot is
   // acquired, so a job waiting for a slot stays observable as `queued`.
-  const result = await spawnWithControl(pool, params, ctx, job, {
+  const result = await spawnWithControl(pool, params, ctx, job, agent, {
     parentSessionId: ctx.sessionManager.getSessionId(),
     sessionFile: options.sessionFile,
     signal: ctx.signal,
