@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import piCodeExtension, { extensionName } from "../index.ts";
-import type { QuestionDetails } from "@xzy-ai/tools";
+import piCodeExtension, { extensionName, type QuestionDetails } from "../index.ts";
 
 /**
  * Phase 4 extension-wiring tests.
