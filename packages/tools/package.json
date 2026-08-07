@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/question.test.ts tests/question-render.test.ts"
+    "test": "node --test --import tsx tests/question.test.ts tests/question-render.test.ts tests/manager.test.ts tests/background-gate.test.ts"
   },
   "dependencies": {
     "@xzy-ai/core": "workspace:*",

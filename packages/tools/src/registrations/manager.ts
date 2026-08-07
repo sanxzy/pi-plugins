@@ -1,6 +1,7 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
+  SessionShutdownEvent,
   SessionStartEvent,
   Theme,
 } from "@earendil-works/pi-coding-agent";
@@ -32,6 +33,20 @@ export function registerManagerShortcut(pi: ExtensionAPI): void {
       description: "Open the agent manager",
       handler: (handlerCtx: ExtensionContext) => openManager(handlerCtx),
     });
+  });
+
+  // A host UI reset (reload or session replacement) pops the overlay without
+  // calling the mounted component's `dispose()`, so the manager registration
+  // releases modal subscriptions itself. Disposal is strictly UI teardown: it
+  // never aborts a child and never invokes the shutdown interruption sweep.
+  pi.on("session_shutdown", (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    const pool = getChildPool(ctx.cwd);
+    // Child AgentSessions emit their own `quit` shutdown after settling. Only
+    // the root host session owns this modal; a child teardown must not close a
+    // manager that is viewing another live child.
+    if (pool.registry.get(ctx.sessionManager.getSessionId()) !== undefined) return;
+    activeManager.get(pool)?.dispose();
+    activeManager.delete(pool);
   });
 }
 

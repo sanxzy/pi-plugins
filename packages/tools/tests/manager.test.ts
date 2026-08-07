@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ChildSessionControl } from "@xzy-ai/core";
+import { createJob, type ChildSessionControl } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
 import { registerManagerShortcut } from "../src/registrations/manager.ts";
 
@@ -20,7 +20,7 @@ import { registerManagerShortcut } from "../src/registrations/manager.ts";
  */
 
 /** ExtensionContext double exposing the surfaces the manager uses. */
-function ctx(cwd: string): ExtensionContext {
+function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
   return {
     mode: "tui",
     hasUI: true,
@@ -31,8 +31,8 @@ function ctx(cwd: string): ExtensionContext {
       setEditorText: (_text: string) => {},
     },
     sessionManager: {
-      getSessionId: () => "root-session",
-      getSessionFile: () => join(cwd, "sessions", "root-session.jsonl"),
+      getSessionId: () => sessionId,
+      getSessionFile: () => join(cwd, "sessions", `${sessionId}.jsonl`),
     } as unknown as ExtensionContext["sessionManager"],
   } as unknown as ExtensionContext;
 }
@@ -95,19 +95,22 @@ test("host reset on session_shutdown disposes the mounted manager without aborti
   const liveControl: ChildSessionControl = {
     sessionFile: join(cwd, "sessions", "job-a.jsonl"),
     steer: async () => {},
-    abort: () => {
+    abort: async () => {
       abortCalls++;
     },
     live: {
       snapshot: { status: "running" as const, settled: false, transcript: [] },
       subscribe: () => () => {},
       steer: async () => {},
-      abort: () => {
+      abort: async () => {
         abortCalls++;
       },
     },
   };
   pool.liveChildren.set("job-a", liveControl);
+  // job-a owns a scoped registry job, so it is a CHILD session: its own
+  // shutdown must not close the root manager.
+  pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", status: "running", description: "job-a", subagentType: "default" }));
 
   const d = piDouble();
   registerManagerShortcut(d.pi);
@@ -131,6 +134,12 @@ test("host reset on session_shutdown disposes the mounted manager without aborti
 
   // Closed-copy: the component returns nothing observable; host reset survival
   // is the behavior under test.
+
+  // A background child settling emits its own session_shutdown(quit) from the
+  // child's session id; the root-owned manager must ignore it so the settled
+  // view stays open.
+  d.handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "quit" }, ctx(cwd, "job-a"));
+  assert.equal(disposed, 0, "a child shutdown does not close the manager");
 
   // A host reset on session replacement fires session_shutdown(reload) BEFORE
   // resetExtensionUI pops the overlay. The registration must dispose the

@@ -167,16 +167,14 @@ export function registerAgentTool(pi: ExtensionAPI): void {
         });
 
         // The direct-parent session file keys result delivery. The realisation
-        // below is async, so the job is acknowledged as `running` to match the
-        // contract (return immediately with the job id and a running
-        // acknowledgement); a gate slot is acquired before the child runs.
-        pool.registry.updateJob(job.jobId, { status: "running" });
-
+        // below is async, so the job is acknowledged immediately with its id.
         // The child lifecycle runs under the shared concurrency gate, exactly
         // like the foreground path, so a call beyond the cap stays `queued` and
-        // starts when a slot frees. `signal: undefined` deliberately keeps the
-        // child alive when the main turn is cancelled; only quitting the PI
-        // process interrupts it (Phase 7).
+        // only becomes `running` when it actually acquires a slot (in
+        // `spawnWithControl`); the manager therefore renders background work
+        // waiting for a gate slot as `queued` and not enterable. `signal:
+        // undefined` deliberately keeps the child alive when the main turn is
+        // cancelled; only quitting the PI process interrupts it (Phase 7).
         void runBackgroundJob(
           pool,
           job,
