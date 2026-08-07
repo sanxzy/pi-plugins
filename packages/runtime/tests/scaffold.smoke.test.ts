@@ -14,8 +14,8 @@ import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
  */
 
 test("constants match the reference values", () => {
-  assert.equal(MAX_CONCURRENCY, 4);
-  assert.equal(MAX_PARALLEL_AGENTS, 8);
+  assert.equal(MAX_CONCURRENCY, 2);
+  assert.equal(MAX_PARALLEL_AGENTS, 3);
 });
 
 test("child pool is a stable singleton keyed by project root", () => {
