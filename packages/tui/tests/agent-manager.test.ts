@@ -51,7 +51,7 @@ function render(manager: AgentManager, width = 100): string[] {
   return manager.render(width).map(stripVTControlCharacters);
 }
 
-test("renders the scoped tree with status legend, connectors, description, and duration", () => {
+test("renders the elegant bordered tree with status bar, connectors, icons, and legend", () => {
   const manager = new AgentManager({
     tui: fakeTUI(),
     theme: textTheme,
@@ -61,16 +61,48 @@ test("renders the scoped tree with status legend, connectors, description, and d
 
   const lines = render(manager);
   const output = lines.join("\n");
-  assert.match(output, /Current session/);
+  // Bordered chrome.
+  assert.match(output, /╭/, "top-left border corner");
+  assert.match(output, /╮/, "top-right border corner");
+  assert.match(output, /╰/, "bottom-left border corner");
+  assert.match(output, /╯/, "bottom-right border corner");
+  assert.match(output, /Agent Manager/, "title label");
+  assert.match(output, /Session root/, "title context");
+  // Status bar totals.
+  assert.match(output, /7 sessions/, "status bar session total");
+  assert.match(output, /1 running/, "status bar running count");
+  assert.match(output, /1 done/, "status bar done count");
+  // Tree body.
   assert.match(output, /├─|└─/, "tree branch connectors are rendered");
+  assert.match(output, /▸/, "selection cursor is rendered");
   assert.match(output, /Implement feature/);
   assert.match(output, /Finished work.*2m 5s/);
   assert.match(output, /◯/, "open-circle status is rendered");
   assert.match(output, /●/, "filled status indicators are rendered");
-  assert.match(output, /Enter.*view|Escape.*close/, "manager help is rendered");
+  // Legend footer.
+  assert.match(output, /↑\/↓ move/, "up/down hint is rendered");
+  assert.match(output, /Enter view/, "enter hint is rendered");
+  assert.match(output, /← back/, "back hint is rendered");
+  assert.match(output, /Esc close/, "close hint is rendered");
   for (const line of lines) {
     assert.ok(line.length <= 100, `line fits width: ${line}`);
   }
+});
+
+test("an empty scope renders a polished bordered empty state with a legend", () => {
+  const manager = new AgentManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    view: { scopeSessionId: "root", rows: [] },
+    done: () => {},
+  });
+
+  const output = render(manager).join("\n");
+  assert.match(output, /╭/, "top border");
+  assert.match(output, /Agent Manager/, "title label");
+  assert.match(output, /No child sessions/i, "empty-state message");
+  assert.match(output, /╯/, "bottom-right border corner");
+  assert.match(output, /Esc close/, "legend is still rendered on an empty scope");
 });
 
 test("plain Up and Down move across the complete flattened tree", () => {
