@@ -1,0 +1,109 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { stripVTControlCharacters } from "node:util";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { registerQuestionTool, type QuestionParams } from "../src/index.ts";
+import type { QuestionDetails } from "../src/types.ts";
+
+/**
+ * Renderer tests for the `question` tool.
+ *
+ * The tool provides custom `renderCall`/`renderResult` components built from
+ * pi-tui `Text`; these tests drive those components directly with a stub theme
+ * and assert the emitted text covers the question, numbered options (including
+ * the always-appended "Type something."), and the answer or cancellation state.
+ */
+
+interface Renderers {
+  renderCall: (args: QuestionParams, theme: Theme) => { render(width: number): string[] };
+  renderResult: (
+    result: { content: Array<{ type: string; text?: string }>; details?: QuestionDetails },
+    options: unknown,
+    theme: Theme,
+  ) => { render(width: number): string[] };
+}
+
+interface RegisteredTool {
+  renderCall?: Renderers["renderCall"];
+  renderResult?: Renderers["renderResult"];
+}
+
+function captureRenderers(): Renderers {
+  let tool: RegisteredTool | undefined;
+  const pi = {
+    registerTool(registered: RegisteredTool) {
+      tool = registered;
+    },
+  } as unknown as Parameters<typeof registerQuestionTool>[0];
+  registerQuestionTool(pi);
+  assert.ok(tool?.renderCall && tool.renderResult, "question tool renderers present");
+  return { renderCall: tool.renderCall, renderResult: tool.renderResult };
+}
+
+/** Stub theme: identity functions so rendered text stays plain. */
+const identity = (text: string): string => text;
+const theme = {
+  fg: (_color: string, text: string) => text,
+  bg: (_color: string, text: string) => text,
+  bold: identity,
+  italic: identity,
+  underline: identity,
+  inverse: identity,
+  strikethrough: identity,
+} as unknown as Theme;
+
+const params: QuestionParams = {
+  question: "Proceed?",
+  options: [
+    { label: "Yes", description: "Continue" },
+    { label: "No" },
+  ],
+};
+
+test("renderCall shows the question and numbered options including Type something", () => {
+  const { renderCall } = captureRenderers();
+  const lines = stripVTControlCharacters(renderCall(params, theme).render(80).join("\n"));
+  assert.match(lines, /Proceed\?/);
+  assert.match(lines, /1\. Yes/);
+  assert.match(lines, /2\. No/);
+  assert.match(lines, /3\. Type something\./);
+});
+
+test("renderResult shows a selected answer with its display position", () => {
+  const { renderResult } = captureRenderers();
+  const details: QuestionDetails = {
+    question: "Proceed?",
+    options: ["Yes", "No"],
+    answer: "No",
+    wasCustom: false,
+    index: 2,
+  };
+  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme).render(80).join(""));
+  assert.match(lines, /No/);
+  assert.match(lines, /2\. No/);
+  assert.doesNotMatch(lines, /✓ \(wrote\)/);
+});
+
+test("renderResult shows a custom answer as written", () => {
+  const { renderResult } = captureRenderers();
+  const details: QuestionDetails = {
+    question: "Proceed?",
+    options: ["Yes", "No"],
+    answer: "Maybe later",
+    wasCustom: true,
+  };
+  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme).render(80).join(""));
+  assert.match(lines, /Maybe later/);
+  assert.match(lines, /wrote/);
+});
+
+test("renderResult shows Cancelled for a null answer", () => {
+  const { renderResult } = captureRenderers();
+  const details: QuestionDetails = {
+    question: "Proceed?",
+    options: ["Yes", "No"],
+    answer: null,
+  };
+  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme).render(80).join(""));
+  assert.match(lines, /Cancelled/);
+});

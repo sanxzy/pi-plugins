@@ -9,7 +9,8 @@
   },
   "private": true,
   "scripts": {
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "node --test --import tsx tests/extension.test.ts"
   },
   "dependencies": {
     "@xzy-ai/commands": "workspace:*",
