@@ -8,7 +8,7 @@
 
 /** A named agent recognized by the orchestrator. */
 export interface AgentDefinition {
-  /** Stable name used by the `task` tool's `subagent_type` parameter. */
+  /** Stable name used by the `agent` tool's `subagent_type` parameter. */
   readonly name: string;
   /** Literal `true` for the inherited default agent. */
   readonly isDefault: true;

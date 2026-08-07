@@ -3,14 +3,14 @@ import type { ChildRunResult } from "../../domain/ports/child-session.ts";
 import type { DeliveryCoordinator } from "./delivery.ts";
 
 /**
- * Background task execution.
+ * Background agent execution.
  *
- * A background task acknowledges immediately with the job id and runs the child
- * off the main turn. When the child settles, its result is delivered to the
- * direct parent session through the delivery coordinator, which either sends it
- * right away or defers it until the parent session re-registers. Delivery uses
- * `followUp` semantics at the host boundary (after the current run finishes, so
- * it never interrupts streaming).
+ * A background agent call acknowledges immediately with the job id and runs the
+ * child off the main turn. When the child settles, its result is delivered to
+ * the direct parent session through the delivery coordinator, which either
+ * sends it right away or defers it until the parent session re-registers.
+ * Delivery uses `followUp` semantics at the host boundary (after the current
+ * run finishes, so it never interrupts streaming).
  */
 
 /** Reason a background request is invalid in the given extension mode. */
@@ -22,12 +22,12 @@ export function backgroundModeError(mode: string): string | undefined {
 /** Format a child result for the direct parent. */
 export function formatBackgroundResult(jobId: string, result: ChildRunResult): string {
   if (result.status === "completed") {
-    return `Background task ${jobId} completed:\n${result.output}`;
+    return `Background agent ${jobId} completed:\n${result.output}`;
   }
   if (result.status === "aborted") {
-    return `Background task ${jobId} was aborted.`;
+    return `Background agent ${jobId} was aborted.`;
   }
-  return `Background task ${jobId} failed: ${result.output}`;
+  return `Background agent ${jobId} failed: ${result.output}`;
 }
 
 interface BackgroundJobDeps {
@@ -79,7 +79,7 @@ export async function runBackgroundJob(
   }
 
   // Mark the job terminal and persist the child's transcript. If the job was
-  // already cancelled by `task_cancel` mid-run, the status update is a legal
+  // already cancelled by `agent_cancel` mid-run, the status update is a legal
   // no-op, so persist the session file in a separate update.
   deps.registry.updateJob(job.jobId, {
     status: result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed",

@@ -318,7 +318,7 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
  * Run a child operation under the shared per-project concurrency gate.
  *
  * The gate is owned by the pool; this adapter is the domain seam that lets the
- * `task` tool wrap the child run in `pool.concurrency.run(...)` while keeping
+ * `agent` tool wrap the child run in `pool.concurrency.run(...)` while keeping
  * the pool PI-SDK independent.
  */
 export type ChildRunFunction = <T>(operation: () => Promise<T>) => Promise<T>;

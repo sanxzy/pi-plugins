@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createConcurrencyGate } from "../src/infrastructure/pool/concurrency-gate.ts";
-import { MAX_CONCURRENCY, MAX_PARALLEL_TASKS } from "../src/shared/constants.ts";
+import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "../src/shared/constants.ts";
 
 /**
  * Phase 4 concurrency-gate tests.
@@ -10,7 +10,7 @@ import { MAX_CONCURRENCY, MAX_PARALLEL_TASKS } from "../src/shared/constants.ts"
  * 4-child cap must be a shared gate rather than a per-loop limit. These tests
  * drive the pure FIFO gate: no more than `MAX_CONCURRENCY` operations overlap,
  * waiting operations are admitted in FIFO order, and the per-response
- * `MAX_PARALLEL_TASKS` counter rejects responses that exceed the limit. The
+ * `MAX_PARALLEL_AGENTS` counter rejects responses that exceed the limit. The
  * registry `queued`/`running` transitions are covered by the registry tests and
  * the live `pi -e` verification.
  */
@@ -114,23 +114,23 @@ test("gate releases the slot when an operation throws", async () => {
   assert.equal(gate.queuedCount, 0);
 });
 
-test("per-response counter rejects more than MAX_PARALLEL_TASKS task calls", () => {
+test("per-response counter rejects more than MAX_PARALLEL_AGENTS agent calls", () => {
   const gate = createConcurrencyGate(MAX_CONCURRENCY);
 
-  // The first MAX_PARALLEL_TASKS calls are accepted.
-  for (let i = 0; i < MAX_PARALLEL_TASKS; i += 1) {
-    assert.equal(gate.countTaskCall(MAX_PARALLEL_TASKS), true);
+  // The first MAX_PARALLEL_AGENTS calls are accepted.
+  for (let i = 0; i < MAX_PARALLEL_AGENTS; i += 1) {
+    assert.equal(gate.countAgentCall(MAX_PARALLEL_AGENTS), true);
   }
-  assert.equal(gate.parallelTasksInResponse, MAX_PARALLEL_TASKS);
+  assert.equal(gate.parallelAgentsInResponse, MAX_PARALLEL_AGENTS);
 
   // The next call in the same response overflows the limit.
-  assert.equal(gate.countTaskCall(MAX_PARALLEL_TASKS), false);
-  assert.equal(gate.parallelTasksInResponse, MAX_PARALLEL_TASKS + 1);
+  assert.equal(gate.countAgentCall(MAX_PARALLEL_AGENTS), false);
+  assert.equal(gate.parallelAgentsInResponse, MAX_PARALLEL_AGENTS + 1);
 
   // A fresh response (turn_start reset) gets a clean budget.
   gate.resetParallelCount();
-  assert.equal(gate.parallelTasksInResponse, 0);
-  assert.equal(gate.countTaskCall(MAX_PARALLEL_TASKS), true);
+  assert.equal(gate.parallelAgentsInResponse, 0);
+  assert.equal(gate.countAgentCall(MAX_PARALLEL_AGENTS), true);
 });
 
 test("gate clamps a pathological max concurrency to at least one slot", async () => {

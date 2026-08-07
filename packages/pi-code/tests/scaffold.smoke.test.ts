@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getChildPool } from "../src/infrastructure/pool/child-pool.ts";
-import { MAX_CONCURRENCY, MAX_PARALLEL_TASKS } from "../src/shared/constants.ts";
+import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "../src/shared/constants.ts";
 
 /**
  * Phase 1 smoke tests.
@@ -15,7 +15,7 @@ import { MAX_CONCURRENCY, MAX_PARALLEL_TASKS } from "../src/shared/constants.ts"
 
 test("constants match the reference values", () => {
   assert.equal(MAX_CONCURRENCY, 4);
-  assert.equal(MAX_PARALLEL_TASKS, 8);
+  assert.equal(MAX_PARALLEL_AGENTS, 8);
 });
 
 test("child pool is a stable singleton keyed by project root", () => {

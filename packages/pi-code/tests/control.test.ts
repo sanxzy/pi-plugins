@@ -186,7 +186,7 @@ test("prepareResumeSessionFile rewrites the header id and trims a trailing tool 
       role: "assistant",
       content: [
         { type: "text", text: "thinking" },
-        { type: "toolCall", id: "call-1", name: "task", arguments: "{}" },
+        { type: "toolCall", id: "call-1", name: "agent", arguments: "{}" },
       ],
     },
   };
@@ -218,7 +218,7 @@ test("prepareResumeSessionFile drops a trailing assistant message whose content 
     timestamp: "t",
     message: {
       role: "assistant",
-      content: [{ type: "toolCall", id: "call-1", name: "task", arguments: "{}" }],
+      content: [{ type: "toolCall", id: "call-1", name: "agent", arguments: "{}" }],
     },
   };
   writeFileSync(source, `${JSON.stringify(header)}\n${JSON.stringify(assistant)}\n`);

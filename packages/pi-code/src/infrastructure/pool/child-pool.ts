@@ -31,8 +31,8 @@ export interface ChildPool {
    * process quits, and per-session when a root session is replaced by `/new`.
    */
   readonly interruptRunningJobs: () => Promise<void>;
-  /** Reset the per-response task-call counter; called from `turn_start`. */
-  resetParallelTasks(): void;
+  /** Reset the per-response agent-call counter; called from `turn_start`. */
+  resetParallelAgents(): void;
 }
 
 declare global {
@@ -63,7 +63,7 @@ export function getChildPool(projectRoot: string): ChildPool {
     delivery: createDeliveryCoordinator(),
     liveChildren,
     interruptRunningJobs: createInterruptionSweep({ registry, liveChildren }),
-    resetParallelTasks(): void {
+    resetParallelAgents(): void {
       pool.concurrency.resetParallelCount();
     },
   };

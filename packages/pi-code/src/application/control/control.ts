@@ -91,7 +91,7 @@ export interface StatusResult {
   readonly controllable: boolean;
 }
 
-/** Look up a job for `task_status`, tolerating unknown ids. */
+/** Look up a job for `agent_status`, tolerating unknown ids. */
 export function statusFor(caller: ControlCaller, job: Job, getJob: (jobId: string) => Job | undefined): StatusResult {
   return { job, controllable: isVisibleToCaller(caller, job, getJob) };
 }
@@ -109,7 +109,7 @@ export type ResumeDisposition =
   | { kind: "reject"; reason: RejectReason; job: Job };
 
 /**
- * Decide what `task(task_id, prompt)` should do with an existing job.
+ * Decide what `agent(agent_id, prompt)` should do with an existing job.
  *
  * - A running job is steered: the live child gets the new prompt and the call
  *   returns immediately without creating a duplicate job.

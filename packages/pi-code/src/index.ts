@@ -21,22 +21,22 @@ import { backgroundModeError, runBackgroundJob } from "./infrastructure/pool/bac
 import { getChildPool } from "./infrastructure/pool/child-pool.ts";
 import { copySessionFile, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 import { recordNewJob } from "./infrastructure/registry/registry.ts";
-import { MAX_PARALLEL_TASKS } from "./shared/constants.ts";
+import { MAX_PARALLEL_AGENTS } from "./shared/constants.ts";
 import {
+  agentParams,
   cancelParams,
   jobsParams,
   statusParams,
-  taskParams,
+  type AgentParams,
   type CancelParams,
   type StatusParams,
-  type TaskParams,
 } from "./shared/tools.ts";
 import type {
+  AgentDetails,
+  AgentErrorDetails,
   CancelDetails,
   JobsDetails,
   StatusDetails,
-  TaskDetails,
-  TaskErrorDetails,
 } from "./shared/types.ts";
 
 const extensionName = "pi-code";
@@ -81,7 +81,7 @@ function toJobSummary(job: Job): import("./shared/types.ts").JobSummary {
  */
 async function spawnWithControl(
   pool: ReturnType<typeof getChildPool>,
-  params: TaskParams,
+  params: AgentParams,
   ctx: ExtensionContext,
   job: Job,
   agent: ResolvedAgent,
@@ -121,27 +121,27 @@ function settleStatus(status: "completed" | "aborted" | "failed"): "completed" |
   return status === "completed" ? "completed" : status === "aborted" ? "cancelled" : "failed";
 }
 
-function registerTaskTool(pi: ExtensionAPI): void {
+function registerAgentTool(pi: ExtensionAPI): void {
   pi.registerTool({
-    name: "task",
-    label: "Task",
+    name: "agent",
+    label: "Agent",
     description: [
       "Delegate work to a specialized in-process subagent.",
-      "Use background=true only in the TUI; task_id resumes or steers an existing job.",
-      `A single response may issue at most ${MAX_PARALLEL_TASKS} task calls.`,
+      "Use background=true only in the TUI; agent_id resumes or steers an existing job.",
+      `A single response may issue at most ${MAX_PARALLEL_AGENTS} agent calls.`,
     ].join(" "),
     promptSnippet: "Delegate a focused task to a specialized subagent.",
-    parameters: taskParams,
+    parameters: agentParams,
     async execute(
       _toolCallId: string,
-      params: TaskParams,
+      params: AgentParams,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
       ctx: ExtensionContext,
-    ): Promise<AgentToolResult<TaskDetails | TaskErrorDetails>> {
+    ): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
       const backgroundError = params.background ? backgroundModeError(ctx.mode) : undefined;
       if (backgroundError) {
-        return errorResult("background tasks are available only in TUI mode", {
+        return errorResult("background agents are available only in TUI mode", {
           jobId: undefined,
           reason: backgroundError,
         });
@@ -149,13 +149,13 @@ function registerTaskTool(pi: ExtensionAPI): void {
 
       const pool = getChildPool(ctx.cwd);
 
-      // A single model response may issue at most MAX_PARALLEL_TASKS task calls.
+      // A single model response may issue at most MAX_PARALLEL_AGENTS agent calls.
       // The counter is shared through the pool and reset on each turn_start, so
       // separate responses get independent budgets.
-      if (!pool.concurrency.countTaskCall(MAX_PARALLEL_TASKS)) {
+      if (!pool.concurrency.countAgentCall(MAX_PARALLEL_AGENTS)) {
         return errorResult(
-          `too many parallel tasks in one response: at most ${MAX_PARALLEL_TASKS} task calls are allowed`,
-          { jobId: undefined, reason: "parallel task limit exceeded" },
+          `too many parallel agents in one response: at most ${MAX_PARALLEL_AGENTS} agent calls are allowed`,
+          { jobId: undefined, reason: "parallel agent limit exceeded" },
         );
       }
 
@@ -168,41 +168,41 @@ function registerTaskTool(pi: ExtensionAPI): void {
       // resumed from its stored transcript, and a job with no transcript yet is
       // re-spawned fresh. The parallel-call counter above is deliberately not
       // consumed by a resume/steer that only addresses an existing job.
-      if (params.task_id) {
-        const job = pool.registry.get(params.task_id);
+      if (params.agent_id) {
+        const job = pool.registry.get(params.agent_id);
         if (!job) {
-          return errorResult(`unknown task id: ${params.task_id}`, {
-            jobId: params.task_id,
-            reason: "unknown task id",
+          return errorResult(`unknown agent id: ${params.agent_id}`, {
+            jobId: params.agent_id,
+            reason: "unknown agent id",
           });
         }
         const disposition = resumeDisposition(caller, job, (jobId) => pool.registry.get(jobId));
         if (disposition.kind === "reject") {
-          return errorResult(`cannot resume task ${params.task_id}: ${disposition.reason}`, {
-            jobId: params.task_id,
+          return errorResult(`cannot resume agent ${params.agent_id}: ${disposition.reason}`, {
+            jobId: params.agent_id,
             reason: disposition.reason,
           });
         }
         if (disposition.kind === "steer") {
           const control = pool.liveChildren.get(job.jobId);
           if (!control) {
-            return errorResult(`task ${params.task_id} is running but has no live child to steer`, {
+            return errorResult(`agent ${params.agent_id} is running but has no live child to steer`, {
               jobId: job.jobId,
               reason: "no live child",
             });
           }
           await control.steer(params.prompt);
-          return textResult(`Steered running task ${job.jobId}.`, {
+          return textResult(`Steered running agent ${job.jobId}.`, {
             jobId: job.jobId,
             status: "running",
           });
         }
         if (disposition.kind === "fresh-spawn") {
-          return taskExecute(params, ctx, caller, { parentJobId: job.jobId });
+          return agentExecute(params, ctx, caller, { parentJobId: job.jobId });
         }
         // Resume from the stored transcript.
         if (!job.sessionFile) {
-          return errorResult(`task ${params.task_id} has no stored transcript to resume`, {
+          return errorResult(`agent ${params.agent_id} has no stored transcript to resume`, {
             jobId: job.jobId,
             reason: "no stored transcript",
           });
@@ -215,12 +215,12 @@ function registerTaskTool(pi: ExtensionAPI): void {
           copyPath = undefined;
         }
         if (!copyPath) {
-          return errorResult(`could not copy the transcript for task ${params.task_id}`, {
+          return errorResult(`could not copy the transcript for agent ${params.agent_id}`, {
             jobId: job.jobId,
             reason: "transcript copy failed",
           });
         }
-        return taskExecute(params, ctx, caller, {
+        return agentExecute(params, ctx, caller, {
           jobId: resumeJobId,
           parentJobId: job.jobId,
           sessionFile: copyPath,
@@ -280,12 +280,12 @@ function registerTaskTool(pi: ExtensionAPI): void {
         );
 
         return textResult(
-          `Accepted background task ${job.jobId}. Its result will be delivered when it finishes.`,
+          `Accepted background agent ${job.jobId}. Its result will be delivered when it finishes.`,
           { jobId: job.jobId, status: job.status },
         );
       }
 
-      return taskExecute(params, ctx, caller);
+      return agentExecute(params, ctx, caller);
     },
   });
 }
@@ -293,16 +293,16 @@ function registerTaskTool(pi: ExtensionAPI): void {
 /**
  * Run a new or resumed job in the foreground and settle its registry record.
  *
- * Shared by fresh `task` calls and by the resume/fresh-spawn branches of
- * `task(task_id, prompt)`. `parentJobId`/`sessionFile` carry the resumed
+ * Shared by fresh `agent` calls and by the resume/fresh-spawn branches of
+ * `agent(agent_id, prompt)`. `parentJobId`/`sessionFile` carry the resumed
  * lineage and transcript; a fresh call leaves both unset.
  */
-async function taskExecute(
-  params: TaskParams,
+async function agentExecute(
+  params: AgentParams,
   ctx: ExtensionContext,
   caller: ControlCaller,
   options: { jobId?: string; parentJobId?: string; sessionFile?: string } = {},
-): Promise<AgentToolResult<TaskDetails | TaskErrorDetails>> {
+): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
   const pool = getChildPool(ctx.cwd);
 
   // Foreground: validate before creating a queued record. The lifecycle
@@ -352,13 +352,13 @@ async function taskExecute(
   }
 
   // Mark the job terminal and persist the child's transcript. If the job was
-  // already cancelled by `task_cancel` mid-run, the status update is a legal
+  // already cancelled by `agent_cancel` mid-run, the status update is a legal
   // no-op, so persist the session file in a separate update.
   pool.registry.updateJob(job.jobId, { status: settleStatus(result.status) });
   pool.registry.updateJob(job.jobId, { sessionFile: result.sessionFile });
 
   if (result.status === "completed") {
-    return textResult(`Task ${job.jobId} completed:\n${result.output}`, {
+    return textResult(`Agent ${job.jobId} completed:\n${result.output}`, {
       jobId: job.jobId,
       status: "completed",
       result: result.output,
@@ -366,16 +366,16 @@ async function taskExecute(
   }
   return errorResult(
     result.status === "aborted"
-      ? `task ${job.jobId} was aborted`
-      : `task ${job.jobId} failed: ${result.output}`,
+      ? `agent ${job.jobId} was aborted`
+      : `agent ${job.jobId} failed: ${result.output}`,
     { jobId: job.jobId, reason: result.status === "aborted" ? "aborted" : "failed" },
   );
 }
 
 function registerCancelTool(pi: ExtensionAPI): void {
   pi.registerTool({
-    name: "task_cancel",
-    label: "Cancel task",
+    name: "agent_cancel",
+    label: "Cancel agent",
     description: "Cancel a descendant subagent job by id.",
     parameters: cancelParams,
     async execute(
@@ -397,7 +397,7 @@ function registerCancelTool(pi: ExtensionAPI): void {
       }
       const decision = canCancel(caller, job, (jobId) => pool.registry.get(jobId));
       if (!decision.allowed) {
-        return textResult(`Task ${params.job_id} is not cancellable: ${decision.reason}.`, {
+        return textResult(`Agent ${params.job_id} is not cancellable: ${decision.reason}.`, {
           jobId: params.job_id,
           success: false,
           status: job.status,
@@ -408,7 +408,7 @@ function registerCancelTool(pi: ExtensionAPI): void {
 
       const control = pool.liveChildren.get(job.jobId);
       if (!control) {
-        return textResult(`Task ${params.job_id} is running but has no live child to abort.`, {
+        return textResult(`Agent ${params.job_id} is running but has no live child to abort.`, {
           jobId: params.job_id,
           success: false,
           status: job.status,
@@ -422,7 +422,7 @@ function registerCancelTool(pi: ExtensionAPI): void {
       // cancelled here stays idempotent when the handler follows up.
       await control.abort();
       pool.registry.updateJob(job.jobId, { status: "cancelled" });
-      return textResult(`Task ${params.job_id} was cancelled.`, {
+      return textResult(`Agent ${params.job_id} was cancelled.`, {
         jobId: params.job_id,
         success: true,
         status: "cancelled",
@@ -433,8 +433,8 @@ function registerCancelTool(pi: ExtensionAPI): void {
 
 function registerStatusTool(pi: ExtensionAPI): void {
   pi.registerTool({
-    name: "task_status",
-    label: "Task status",
+    name: "agent_status",
+    label: "Agent status",
     description: "Inspect the status of a descendant subagent job by id.",
     parameters: statusParams,
     async execute(
@@ -454,7 +454,7 @@ function registerStatusTool(pi: ExtensionAPI): void {
         });
       }
       const result = statusFor(caller, job, (jobId) => pool.registry.get(jobId));
-      return textResult(`Task ${params.job_id} is ${job.status}.`, {
+      return textResult(`Agent ${params.job_id} is ${job.status}.`, {
         status: job.status,
         job: toJobSummary(job),
         controllable: result.controllable,
@@ -465,8 +465,8 @@ function registerStatusTool(pi: ExtensionAPI): void {
 
 function registerJobsTool(pi: ExtensionAPI): void {
   pi.registerTool({
-    name: "task_jobs",
-    label: "List tasks",
+    name: "agent_jobs",
+    label: "List agents",
     description: "List subagent jobs visible to the current orchestrator.",
     parameters: jobsParams,
     async execute(
@@ -490,7 +490,7 @@ function registerJobsTool(pi: ExtensionAPI): void {
 
 /** PI extension entry point. */
 export default function piCodeExtension(pi: ExtensionAPI): void {
-  registerTaskTool(pi);
+  registerAgentTool(pi);
   registerCancelTool(pi);
   registerStatusTool(pi);
   registerJobsTool(pi);
@@ -498,9 +498,9 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
 
   pi.on("turn_start", (_event: TurnStartEvent, ctx: ExtensionContext) => {
     // A turn is one model response and its tool batch. Resetting here means
-    // separate responses get independent MAX_PARALLEL_TASKS budgets while the
-    // pool still shares the counter across all task calls in this response.
-    getChildPool(ctx.cwd).resetParallelTasks();
+    // separate responses get independent MAX_PARALLEL_AGENTS budgets while the
+    // pool still shares the counter across all agent calls in this response.
+    getChildPool(ctx.cwd).resetParallelAgents();
   });
 
   pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
@@ -560,8 +560,8 @@ async function confirmNewWithRunningJobs(
     return { cancel: true };
   }
   const confirmed = await ctx.ui.confirm(
-    "Running background tasks",
-    `${running.length} background task(s) are still running. Starting a new session will stop them. Continue?`,
+    "Running background agents",
+    `${running.length} background agent(s) are still running. Starting a new session will stop them. Continue?`,
   );
   return { cancel: !confirmed };
 }

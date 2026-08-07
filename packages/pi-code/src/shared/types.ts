@@ -28,20 +28,20 @@ export interface JobSummary {
   updatedAt: string;
 }
 
-/** Details payload for the `task` tool. */
-export interface TaskDetails {
+/** Details payload for the `agent` tool. */
+export interface AgentDetails {
   jobId: string;
   status: JobStatus;
   result?: string;
 }
 
-/** Edge-case outcome from the `task` tool. */
-export interface TaskErrorDetails {
+/** Edge-case outcome from the `agent` tool. */
+export interface AgentErrorDetails {
   jobId?: string;
   reason: string;
 }
 
-/** Details payload for the `task_status` tool. */
+/** Details payload for the `agent_status` tool. */
 export interface StatusDetails {
   status: JobStatus;
   job?: JobSummary;
@@ -49,12 +49,12 @@ export interface StatusDetails {
   reason?: string;
 }
 
-/** Details payload for the `task_jobs` tool. */
+/** Details payload for the `agent_jobs` tool. */
 export interface JobsDetails {
   jobs: JobSummary[];
 }
 
-/** Details payload for the `task_cancel` tool. */
+/** Details payload for the `agent_cancel` tool. */
 export interface CancelDetails {
   jobId: string;
   success: boolean;

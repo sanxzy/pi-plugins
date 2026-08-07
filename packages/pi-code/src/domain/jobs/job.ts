@@ -13,7 +13,7 @@ export interface Job {
   readonly jobId: string;
   /** Current status. */
   readonly status: JobStatus;
-  /** Short description of the delegate task. */
+  /** Short description of the delegated work. */
   readonly description: string;
   /** Name of the agent definition that runs this job. */
   readonly subagentType: string;

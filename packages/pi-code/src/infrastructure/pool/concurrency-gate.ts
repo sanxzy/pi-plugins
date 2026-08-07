@@ -2,7 +2,7 @@
  * FIFO concurrency gate for child sessions.
  *
  * PI executes tool calls in one model response concurrently by default. The
- * gate is shared by the project pool so every task call observes one global
+ * gate is shared by the project pool so every agent call observes one global
  * child limit rather than creating a limit per extension instance.
  */
 
@@ -15,22 +15,22 @@ export interface ConcurrencyGate {
   readonly queuedCount: number;
   run<T>(operation: () => Promise<T>): Promise<T>;
   /**
-   * Count task calls issued in the current model response.
+   * Count agent calls issued in the current model response.
    *
    * The counter is shared through the pool so every extension instance observes
    * one per-response limit. It is reset from `turn_start` and defends AC4: a
-   * response issuing more than `MAX_PARALLEL_TASKS` task calls is rejected.
+   * response issuing more than `MAX_PARALLEL_AGENTS` agent calls is rejected.
    */
-  readonly parallelTasksInResponse: number;
+  readonly parallelAgentsInResponse: number;
   resetParallelCount(): void;
-  /** Register one task call; true when the response-wide limit is still open. */
-  countTaskCall(maxParallelTasks: number): boolean;
+  /** Register one agent call; true when the response-wide limit is still open. */
+  countAgentCall(maxParallelAgents: number): boolean;
 }
 
 export function createConcurrencyGate(maxConcurrency: number): ConcurrencyGate {
   const limit = Math.max(1, Math.floor(maxConcurrency));
   let activeCount = 0;
-  let parallelTasksInResponse = 0;
+  let parallelAgentsInResponse = 0;
   const queue: Waiter[] = [];
 
   const admitNext = (): void => {
@@ -63,15 +63,15 @@ export function createConcurrencyGate(maxConcurrency: number): ConcurrencyGate {
     get queuedCount() {
       return queue.length;
     },
-    get parallelTasksInResponse() {
-      return parallelTasksInResponse;
+    get parallelAgentsInResponse() {
+      return parallelAgentsInResponse;
     },
     resetParallelCount(): void {
-      parallelTasksInResponse = 0;
+      parallelAgentsInResponse = 0;
     },
-    countTaskCall(maxParallelTasks: number): boolean {
-      parallelTasksInResponse += 1;
-      return parallelTasksInResponse <= maxParallelTasks;
+    countAgentCall(maxParallelAgents: number): boolean {
+      parallelAgentsInResponse += 1;
+      return parallelAgentsInResponse <= maxParallelAgents;
     },
     async run<T>(operation: () => Promise<T>): Promise<T> {
       await acquire();
