@@ -13,7 +13,7 @@ function fakeTUI(rows = 24): TUI {
 }
 
 function raw(key: "up" | "down" | "left"): string {
-  return key === "up" ? "[1;5A" : key === "down" ? "[1;5B" : "[1;5D";
+  return key === "up" ? "[A" : key === "down" ? "[B" : "[D";
 }
 
 const TOGGLE_SHORTCUT = "[97;6u";
@@ -87,7 +87,7 @@ test("Entering a running child mounts the live transcript view and subscriptions
   });
 
   // Enter the running child, then close: the live subscription is released.
-  manager.handleInput("[1;5B");
+  manager.handleInput(raw("down"));
   manager.handleInput("\r");
   manager.handleInput("");
   assert.ok(unsubscribed >= 1, "closing the manager unsubscribes from the live child feed");
@@ -195,7 +195,7 @@ test("steering input reaches only the live child and settlement disables further
   assert.deepEqual(steers, ["steer"], "settled views accept no further steering");
 });
 
-test("Ctrl+Left returns to the exact prior tree selection after live view", () => {
+test("plain Left returns to the exact prior tree selection after live view", () => {
   const live = {
     snapshot: { status: "running" as const, settled: false, transcript: [] },
     steer: async () => {},

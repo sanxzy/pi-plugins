@@ -14,7 +14,7 @@ function fakeTUI(rows = 24): TUI {
 
 function raw(key: "up" | "down" | "left"): string {
   const suffix = key === "up" ? "A" : key === "down" ? "B" : "D";
-  return `[1;5${suffix}`;
+  return `[${suffix}`;
 }
 
 const TOGGLE_SHORTCUT = "[97;6u"; // Ctrl+Shift+A (kitty keyboard protocol)
@@ -73,7 +73,7 @@ test("renders the scoped tree with status legend, connectors, description, and d
   }
 });
 
-test("Ctrl+Up and Ctrl+Down move across the complete flattened tree", () => {
+test("plain Up and Down move across the complete flattened tree", () => {
   const manager = new AgentManager({
     tui: fakeTUI(),
     theme: textTheme,
@@ -152,7 +152,7 @@ test("child entry pushes a view onto the return stack", () => {
   assert.equal(manager.returnDepth(), 1);
 });
 
-test("Ctrl+Left unwinds nested views as a return stack, then closes at the top", () => {
+test("plain Left unwinds nested views as a return stack, then closes at the top", () => {
   let closed = 0;
   const parent: ManagerView = { scopeSessionId: "root", rows: ROWS };
   const child: ManagerView = {
@@ -182,7 +182,7 @@ test("Ctrl+Left unwinds nested views as a return stack, then closes at the top",
   assert.equal(manager.currentView().scopeSessionId, "root");
   assert.equal(manager.returnDepth(), 0);
   manager.handleInput(raw("left"));
-  assert.equal(closed, 1, "top-level Ctrl+Left closes the manager");
+  assert.equal(closed, 1, "top-level plain Left closes the manager");
 });
 
 test("Escape and the manager shortcut close exactly once", () => {
