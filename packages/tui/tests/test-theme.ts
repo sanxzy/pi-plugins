@@ -1,12 +1,13 @@
-import type { EditorTheme } from "@earendil-works/pi-tui";
+import type { QuestionDialogTheme } from "../src/question-dialog.ts";
 
 /**
  * Stub theme for dialog tests: every theme function is the identity function
  * so rendered lines stay plain text that assertions can match on.
  */
 
-export const textTheme: EditorTheme = {
+export const textTheme: QuestionDialogTheme = {
   borderColor: (text: string) => text,
+  fg: (_color: string, text: string) => text,
   selectList: {
     selectedPrefix: (text: string) => text,
     selectedText: (text: string) => text,

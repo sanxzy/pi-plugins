@@ -78,8 +78,7 @@ test("Enter on an option resolves with the label and its display position", asyn
   const { dialog } = makeDialog({ done: resolve });
   dialog.handleInput("\x1b[B"); // select option 2
   dialog.handleInput("\r"); // enter
-  const value = (await result) as QuestionDialogResult;
-  assert.ok(value !== DISMISSED, "selection is not a dismissal");
+  const value = (await result) as Exclude<QuestionDialogResult, typeof DISMISSED>;
   assert.equal(value.answer, "Cancel", "selected label returned");
   assert.equal(value.wasCustom, false, "selection is not custom");
   assert.equal(value.index, 2, "display position is 1-based");
@@ -103,8 +102,8 @@ test("editor Enter resolves with the trimmed custom answer", async () => {
   dialog.handleInput("\r"); // enter -> editor
   dialog.handleInput("  hello  ");
   dialog.handleInput("\r"); // submit
-  const value = (await result) as QuestionDialogResult;
-  assert.ok(value && value.wasCustom, "custom answer returned");
+  const value = (await result) as Exclude<QuestionDialogResult, typeof DISMISSED>;
+  assert.equal(value.wasCustom, true, "custom answer returned");
   assert.equal(value.answer, "hello", "custom answer is trimmed");
 });
 
