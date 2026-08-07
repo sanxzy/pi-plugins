@@ -1,0 +1,21 @@
+{
+  "name": "@xzy-ai/tools",
+  "version": "0.1.0",
+  "description": "pi-code tools: model-callable agent tool registrations, schemas, and host-aware orchestration",
+  "type": "module",
+  "main": "./src/index.ts",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@xzy-ai/core": "workspace:*",
+    "@xzy-ai/runtime": "workspace:*",
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "typebox": "^1.1.38"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.22.2"
+  }
+}

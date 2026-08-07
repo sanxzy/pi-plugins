@@ -1,0 +1,14 @@
+{
+  "name": "@xzy-ai/plugins",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "test": "pnpm -r --if-present run test"
+  },
+  "engines": {
+    "node": ">=22.19.0",
+    "pnpm": ">=11.5.0"
+  },
+  "packageManager": "pnpm@11.5.0"
+}

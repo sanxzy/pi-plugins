@@ -1,0 +1,43 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  registerAgentTool,
+  registerCancelTool,
+  registerStatusTool,
+  registerJobsTool,
+} from "@xzy-ai/tools";
+import {
+  registerSessionEvents,
+  registerLifecycleGates,
+} from "@xzy-ai/commands";
+import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
+import type {
+  AgentDetails,
+  AgentErrorDetails,
+  CancelDetails,
+  JobSummary,
+  JobsDetails,
+  StatusDetails,
+} from "@xzy-ai/tools";
+
+const extensionName = "pi-code";
+
+/** PI extension entry point. */
+export default function piCodeExtension(pi: ExtensionAPI): void {
+  registerAgentTool(pi);
+  registerCancelTool(pi);
+  registerStatusTool(pi);
+  registerJobsTool(pi);
+  registerSessionEvents(pi);
+  registerLifecycleGates(pi);
+}
+
+export { extensionName };
+export { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS };
+export type {
+  AgentDetails,
+  AgentErrorDetails,
+  CancelDetails,
+  JobSummary,
+  JobsDetails,
+  StatusDetails,
+};

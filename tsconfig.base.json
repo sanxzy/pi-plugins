@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
+    "paths": {
+      "@xzy-ai/core": ["./packages/core/src/index.ts"],
+      "@xzy-ai/core/*": ["./packages/core/src/*", "./packages/core/src/*.ts"],
+      "@xzy-ai/runtime": ["./packages/runtime/src/index.ts"],
+      "@xzy-ai/runtime/*": ["./packages/runtime/src/*", "./packages/runtime/src/*.ts"],
+      "@xzy-ai/tools": ["./packages/tools/src/index.ts"],
+      "@xzy-ai/tools/*": ["./packages/tools/src/*", "./packages/tools/src/*.ts"],
+      "@xzy-ai/commands": ["./packages/commands/src/index.ts"],
+      "@xzy-ai/commands/*": ["./packages/commands/src/*", "./packages/commands/src/*.ts"],
+      "@xzy-ai/pi-code": ["./packages/extensions/pi-code/index.ts"]
+    }
+  }
+}

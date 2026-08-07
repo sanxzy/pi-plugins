@@ -1,0 +1,25 @@
+{
+  "name": "@xzy-ai/pi-code",
+  "version": "0.1.0",
+  "description": "PI extension: delegate work to isolated in-process subagents through model-callable tools",
+  "type": "module",
+  "main": "./index.ts",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "private": true,
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@xzy-ai/commands": "workspace:*",
+    "@xzy-ai/core": "workspace:*",
+    "@xzy-ai/runtime": "workspace:*",
+    "@xzy-ai/tools": "workspace:*",
+    "@earendil-works/pi-coding-agent": "^0.80.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.22.2"
+  }
+}

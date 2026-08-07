@@ -1,0 +1,11 @@
+export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
+export { resolveChildTools, spawnChildSession, copySessionFile } from "./infrastructure/pi-sdk/child-session.ts";
+export { observeChildStatus, type ChildStatus, type ChildStatusInput } from "./infrastructure/pi-sdk/child-status.ts";
+export { backgroundModeError, formatBackgroundResult, runBackgroundJob } from "./infrastructure/pool/background.ts";
+export { getChildPool, type ChildPool } from "./infrastructure/pool/child-pool.ts";
+export { createConcurrencyGate, type ConcurrencyGate } from "./infrastructure/pool/concurrency-gate.ts";
+export { createDeliveryCoordinator, type DeliveryCoordinator } from "./infrastructure/pool/delivery.ts";
+export { createInterruptionSweep, interruptRunningJobs } from "./infrastructure/pool/interruption.ts";
+export { createRegistry, foldLog, recordNewJob, type Registry } from "./infrastructure/registry/registry.ts";
+export { prepareResumeSessionFile } from "./infrastructure/sessions/resume-file.ts";
+export { runtimeDir, registryFile, sessionsDir } from "./shared/paths.ts";
