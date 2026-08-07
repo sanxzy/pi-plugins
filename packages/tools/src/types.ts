@@ -54,6 +54,15 @@ export interface JobsDetails {
   jobs: JobSummary[];
 }
 
+/** Details payload for the `question` tool. */
+export interface QuestionDetails {
+  question: string;
+  options: string[];
+  answer: string | null;
+  wasCustom?: boolean;
+  index?: number;
+}
+
 /** Details payload for the `agent_cancel` tool. */
 export interface CancelDetails {
   jobId: string;

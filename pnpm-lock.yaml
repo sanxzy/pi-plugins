@@ -85,6 +85,9 @@ importers:
       '@xzy-ai/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@xzy-ai/tui':
+        specifier: workspace:*
+        version: link:../tui
       typebox:
         specifier: ^1.1.38
         version: 1.3.10

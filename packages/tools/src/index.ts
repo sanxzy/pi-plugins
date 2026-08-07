@@ -1,3 +1,4 @@
+export { registerQuestionTool } from "./registrations/question.ts";
 export { registerAgentTool } from "./registrations/agent.ts";
 export { registerCancelTool } from "./registrations/cancel.ts";
 export { registerStatusTool } from "./registrations/status.ts";

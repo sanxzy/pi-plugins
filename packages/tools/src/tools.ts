@@ -17,6 +17,16 @@ export const agentParams = Type.Object({
   agent_id: Type.Optional(Type.String({ description: "Existing job id to resume or steer. A running job is steered; a finished job is resumed from its stored transcript." })),
 });
 
+export const questionOptionSchema = Type.Object({
+  label: Type.String({ description: "Display label for the option" }),
+  description: Type.Optional(Type.String({ description: "Optional description shown below label" })),
+});
+
+export const questionParams = Type.Object({
+  question: Type.String({ description: "The question to ask the user" }),
+  options: Type.Array(questionOptionSchema, { description: "Options for the user to choose from" }),
+});
+
 export const cancelParams = Type.Object({
   job_id: Type.String({ description: "Id of the job to cancel." }),
 });
@@ -27,6 +37,7 @@ export const statusParams = Type.Object({
 
 export const jobsParams = Type.Object({});
 
+export type QuestionParams = Static<typeof questionParams>;
 export type AgentParams = Static<typeof agentParams>;
 export type CancelParams = Static<typeof cancelParams>;
 export type StatusParams = Static<typeof statusParams>;
