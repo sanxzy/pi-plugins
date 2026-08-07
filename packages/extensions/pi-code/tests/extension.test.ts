@@ -17,6 +17,7 @@ test("pi-code extension registers the question tool", () => {
     registerTool(tool: { name: string }) {
       names.push(tool.name);
     },
+    registerShortcut() {},
     on() {},
     setActiveTools() {},
     getAllTools() {
@@ -36,6 +37,7 @@ test("question registration is main-agent-only (no child tool registrations)", (
     registerTool(tool: { name: string }) {
       names.push(tool.name);
     },
+    registerShortcut() {},
     on() {},
     setActiveTools() {},
     getAllTools() {

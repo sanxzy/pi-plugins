@@ -17,6 +17,8 @@ function raw(key: "up" | "down" | "left"): string {
   return `[1;5${suffix}`;
 }
 
+const TOGGLE_SHORTCUT = "[97;6u"; // Ctrl+Shift+A (kitty keyboard protocol)
+
 function row(
   rowId: string,
   status: ManagerRow["status"],
@@ -89,7 +91,6 @@ test("Ctrl+Up and Ctrl+Down move across the complete flattened tree", () => {
 
 test("Enter requests entry only for enterable running children", () => {
   const entered: string[] = [];
-  const hints: string[] = [];
   const manager = new AgentManager({
     tui: fakeTUI(),
     theme: textTheme,
@@ -97,11 +98,10 @@ test("Enter requests entry only for enterable running children", () => {
     done: () => {},
     onEnter: (selected) => entered.push(selected.rowId),
   });
-  manager.onHint = (hint) => hints.push(hint);
 
   manager.handleInput("\r");
   assert.deepEqual(entered, [], "active session cannot be entered");
-  assert.match(hints.at(-1) ?? "", /not enterable/i);
+  assert.match(render(manager).join("\n"), /not enterable/i);
 
   manager.handleInput(raw("down"));
   manager.handleInput("\r");
@@ -110,7 +110,46 @@ test("Enter requests entry only for enterable running children", () => {
   manager.handleInput(raw("down"));
   manager.handleInput("\r");
   assert.deepEqual(entered, ["running"], "queued child is rejected");
-  assert.match(hints.at(-1) ?? "", /not enterable/i);
+  assert.match(render(manager).join("\n"), /not enterable/i);
+});
+
+test("Ctrl+Shift+A closes the manager overlay", () => {
+  const reasons: string[] = [];
+  const manager = new AgentManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    view: { scopeSessionId: "root", rows: ROWS },
+    done: (reason) => reasons.push(reason),
+  });
+
+  manager.handleInput(TOGGLE_SHORTCUT);
+  manager.handleInput(TOGGLE_SHORTCUT);
+  assert.deepEqual(reasons, ["shortcut"]);
+});
+
+
+test("child entry pushes a view onto the return stack", () => {
+  const child: ManagerView = {
+    scopeSessionId: "running",
+    rows: [row("nested", "running", 0, { enterable: true })],
+  };
+  let entered: ManagerRow | undefined;
+  const manager = new AgentManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    view: { scopeSessionId: "root", rows: ROWS },
+    done: () => {},
+    onEnter: (selected) => {
+      entered = selected;
+      manager.pushView(child);
+    },
+  });
+
+  manager.handleInput(raw("down"));
+  manager.handleInput("\r");
+  assert.equal(entered?.rowId, "running");
+  assert.equal(manager.currentView().scopeSessionId, "running");
+  assert.equal(manager.returnDepth(), 1);
 });
 
 test("Ctrl+Left unwinds nested views as a return stack, then closes at the top", () => {
