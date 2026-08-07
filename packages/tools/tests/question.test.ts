@@ -33,7 +33,12 @@ function captureTool(): RegisteredTool {
   return registered;
 }
 
-function context(mode: ExtensionContext["mode"], custom: ExtensionContext["ui"]["custom"]): ExtensionContext {
+// The host `custom` is generic over its result type; a test stub returns a
+// fixed shape, so type it loosely and let the cast to ExtensionContext absorb
+// the difference.
+type CustomUI = (factory: unknown, options?: unknown) => Promise<unknown>;
+
+function context(mode: ExtensionContext["mode"], custom: CustomUI): ExtensionContext {
   return { mode, ui: { custom } } as unknown as ExtensionContext;
 }
 

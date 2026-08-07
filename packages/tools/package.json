@@ -14,6 +14,7 @@
     "@xzy-ai/runtime": "workspace:*",
     "@xzy-ai/tui": "workspace:*",
     "@earendil-works/pi-coding-agent": "^0.80.2",
+    "@earendil-works/pi-tui": "^0.80.2",
     "typebox": "^1.1.38"
   },
   "devDependencies": {
