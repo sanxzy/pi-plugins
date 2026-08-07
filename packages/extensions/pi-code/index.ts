@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   registerAgentTool,
   registerCancelTool,
+  registerQuestionTool,
   registerStatusTool,
   registerJobsTool,
 } from "@xzy-ai/tools";
@@ -16,6 +17,7 @@ import type {
   CancelDetails,
   JobSummary,
   JobsDetails,
+  QuestionDetails,
   StatusDetails,
 } from "@xzy-ai/tools";
 
@@ -23,6 +25,7 @@ const extensionName = "pi-code";
 
 /** PI extension entry point. */
 export default function piCodeExtension(pi: ExtensionAPI): void {
+  registerQuestionTool(pi);
   registerAgentTool(pi);
   registerCancelTool(pi);
   registerStatusTool(pi);
@@ -39,5 +42,6 @@ export type {
   CancelDetails,
   JobSummary,
   JobsDetails,
+  QuestionDetails,
   StatusDetails,
 };
