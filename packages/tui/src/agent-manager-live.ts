@@ -96,8 +96,8 @@ export class AgentLiveManager implements Component {
       lines.push(this.theme.fg("warning", this.hint));
     }
     const help = snapshot.settled
-      ? "Ctrl+← back • Esc close"
-      : "Type to steer this child • Ctrl+← back • Esc close";
+      ? "← back • Esc close"
+      : "Type to steer this child • ← back • Esc close";
     lines.push(this.theme.fg("dim", help));
     this.cachedLines = lines;
     return lines;
@@ -110,7 +110,7 @@ export class AgentLiveManager implements Component {
 
   handleInput(data: string): void {
     if (this.settled) return;
-    if (matchesEscape(data) || matchesCtrlLeft(data)) {
+    if (matchesEscape(data) || matchesLeft(data)) {
       this.finish(data);
       return;
     }
@@ -150,6 +150,6 @@ function matchesEscape(data: string): boolean {
   return data === "";
 }
 
-function matchesCtrlLeft(data: string): boolean {
-  return data === "[1;5D";
+function matchesLeft(data: string): boolean {
+  return data === "[D";
 }

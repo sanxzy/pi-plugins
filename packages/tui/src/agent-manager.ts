@@ -150,7 +150,7 @@ export class AgentManager implements Component {
     lines.push(
       this.theme.fg(
         "dim",
-        truncateToWidth("Ctrl+↑/↓ move • Enter view • Ctrl+← back • Esc close", renderWidth),
+        truncateToWidth("↑/↓ move • Enter view • ← back • Esc close", renderWidth),
       ),
     );
     this.cachedLines = lines;
@@ -169,8 +169,8 @@ export class AgentManager implements Component {
     lines.push(this.theme.fg("accent", truncateToWidth(title, renderWidth)));
     lines.push(this.theme.fg("muted", truncateToWidth(description, renderWidth)));
     const footerHelp = live.snapshot.settled
-      ? "Ctrl+← back • Esc close"
-      : "Type to steer this child • Enter to send • Ctrl+← back • Esc close";
+      ? "← back • Esc close"
+      : "Type to steer this child • Enter to send • ← back • Esc close";
     const footer = this.theme.fg("dim", truncateToWidth(footerHelp, renderWidth));
     const steerLine = !live.snapshot.settled && this.draftInput
       ? `  steer> ${this.draftInput}`
@@ -227,12 +227,12 @@ export class AgentManager implements Component {
       this.finish("shortcut");
       return;
     }
-    if (matchesKey(data, Key.ctrl("up"))) {
+    if (matchesKey(data, Key.up)) {
       this.selectedIndex = Math.max(0, this.selectedIndex - 1);
       this.refresh();
       return;
     }
-    if (matchesKey(data, Key.ctrl("down"))) {
+    if (matchesKey(data, Key.down)) {
       this.selectedIndex = Math.min(this.view.rows.length - 1, this.selectedIndex + 1);
       this.refresh();
       return;
@@ -249,7 +249,7 @@ export class AgentManager implements Component {
       this.onEnter?.(selected);
       return;
     }
-    if (matchesKey(data, Key.ctrl("left"))) {
+    if (matchesKey(data, Key.left)) {
       const previous = this.returnStack.pop();
       if (previous) {
         this.view = previous.view;
@@ -309,7 +309,7 @@ export class AgentManager implements Component {
       this.finish("shortcut");
       return;
     }
-    if (matchesKey(data, Key.ctrl("left"))) {
+    if (matchesKey(data, Key.left)) {
       const leavingLive = this.liveView;
       this.unsubscribeLive();
       this.liveView = undefined;
