@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { sessionsDir } from "../../shared/paths.ts";
+import { sessionDir } from "../../shared/paths.ts";
 
 type SessionEntry = {
   type?: unknown;
@@ -58,8 +58,17 @@ function trimTrailingToolCalls(entries: SessionEntry[]): void {
  * The source is never modified. The copied session receives the new job id in
  * its header, and a trailing unresolved assistant tool call is removed before
  * the child session manager reopens it.
+ *
+ * The copy lives under the new job's parent live-session folder
+ * (`sessions/<parent-session-id>/`), keyed by the resume job id so the
+ * reopened child's session id (== resume job id) matches its storage folder.
  */
-export function prepareResumeSessionFile(source: string, newJobId: string, cwd: string): string {
+export function prepareResumeSessionFile(
+  source: string,
+  newJobId: string,
+  cwd: string,
+  parentSessionId?: string,
+): string {
   if (!existsSync(source)) {
     throw new Error(`session file does not exist: ${source}`);
   }
@@ -76,10 +85,14 @@ export function prepareResumeSessionFile(source: string, newJobId: string, cwd: 
   header.id = newJobId;
   trimTrailingToolCalls(entries);
 
-  const directory = sessionsDir(cwd);
+  if (!parentSessionId) {
+    throw new Error("A resume transcript requires its parent session id");
+  }
+  // Every transcript belongs to the folder owned by the live session that
+  // spawned it. There is no flat fallback: storage is session-scoped only.
+  const directory = sessionDir(cwd, parentSessionId);
   mkdirSync(directory, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const destination = join(directory, `${timestamp}_${newJobId}.jsonl`);
+  const destination = join(directory, `${newJobId}.jsonl`);
   writeFileSync(destination, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
   return destination;
 }

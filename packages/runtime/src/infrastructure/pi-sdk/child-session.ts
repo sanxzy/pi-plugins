@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
-import { sessionsDir } from "../../shared/paths.ts";
+import { sessionDir } from "../../shared/paths.ts";
 import type {
   ChildSessionControl,
   SpawnChildSession,
@@ -106,8 +106,8 @@ async function createChildModelRuntime(options: {
 /**
  * Isolate the child's runtime stack so it never touches the parent's.
  *
- * A fresh call creates a new session under the project session directory with
- * the job id. A resume reopens the stored transcript through `SessionManager.open`,
+ * A fresh call creates a new session under its parent's session folder with the
+ * job id. A resume reopens the stored transcript through `SessionManager.open`,
  * which restores the header, entries, and leaf pointer from the JSONL file.
  */
 async function createIsolatedChild(options: {
@@ -115,7 +115,7 @@ async function createIsolatedChild(options: {
   cwd: string;
   model: unknown;
   agent: ResolvedAgent;
-  parentSessionId?: string;
+  parentSessionId: string;
   sessionFile?: string;
 }): Promise<ChildSessionServices> {
   const agentDir = getAgentDir();
@@ -137,9 +137,13 @@ async function createIsolatedChild(options: {
   await resourceLoader.reload();
 
   const { runtime, modelRuntime } = await createChildModelRuntime({ agentDir });
+  // A fresh child's transcript is created directly under the live session folder
+  // of its parent, so the folder for `<parent-session-id>` contains exactly its
+  // children's transcripts. A resumed child already lives in that folder.
+  const childDir = sessionDir(options.cwd, options.parentSessionId);
   const sessionManager = options.sessionFile
-    ? SessionManager.open(options.sessionFile, sessionsDir(options.cwd))
-    : SessionManager.create(options.cwd, sessionsDir(options.cwd), {
+    ? SessionManager.open(options.sessionFile, childDir)
+    : SessionManager.create(options.cwd, childDir, {
         id: options.jobId,
         parentSession: options.parentSessionId,
       });
@@ -189,19 +193,19 @@ function resolveChildModel(model: string, modelRuntime: ModelRuntime | undefined
 }
 
 /**
- * Reopen an existing transcript under the project session directory.
+ * Reopen an existing transcript under the parent live-session folder.
  *
  * A resumed job is a NEW descendant job record whose child session reopens the
- * original job's stored session file. Because the reopened session keeps the
- * original session id, on-disk transcript and in-memory child session it is
- * played through a fresh copy so the original transcript stays stable and the
- * resumed run never mutates it. The copy lives under the project session
- * directory so it is discoverable and removable alongside the other children.
+ * original job's stored session file. The copy's header id is rewritten to the
+ * new job id, so the reopened session's live id matches its storage folder and
+ * the original transcript stays stable and untouched. The copy lives under the
+ * new job's parent live-session folder (`sessions/<parent-session-id>/`), so it
+ * is discoverable and removable alongside the other children of that parent.
  */
-export function copySessionFile(source: string, jobId: string, cwd: string): string | undefined {
+export function copySessionFile(source: string, jobId: string, cwd: string, parentSessionId?: string): string | undefined {
   if (!source) return undefined;
   try {
-    return prepareResumeSessionFile(source, jobId, cwd);
+    return prepareResumeSessionFile(source, jobId, cwd, parentSessionId);
   } catch {
     return undefined;
   }
@@ -259,6 +263,10 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
   if (options.signal?.aborted) {
     return { sessionFile: "", output: "(aborted before start)", status: "aborted" };
   }
+  if (!options.parentSessionId) {
+    return { sessionFile: "", output: "(no parent session id)", status: "failed" };
+  }
+  const parentSessionId: string = options.parentSessionId;
 
   return options.run(async () => {
     let child: ChildSessionServices;
@@ -268,7 +276,7 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
         cwd: options.cwd,
         model: options.model,
         agent: options.agent,
-        parentSessionId: options.parentSessionId,
+        parentSessionId,
         sessionFile: options.sessionFile,
       });
       options.onControl?.({

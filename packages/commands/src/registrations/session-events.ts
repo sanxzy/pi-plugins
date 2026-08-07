@@ -20,7 +20,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // A turn is one model response and its tool batch. Resetting here means
     // separate responses get independent MAX_PARALLEL_AGENTS budgets while the
     // pool still shares the counter across all agent calls in this response.
-    getChildPool(ctx.cwd).resetParallelAgents();
+    getChildPool(ctx.cwd, ctx.sessionManager.getSessionId()).resetParallelAgents();
   });
 
   pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
@@ -37,7 +37,11 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile) return;
 
-    const pool = getChildPool(ctx.cwd);
+    // The root orchestrator session is not a job, but its live session id still
+    // owns a session-scoped folder; the pool registers it as the scoped root so
+    // the manager tree is seeded from it. Forked sessions get their own id.
+    const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
+    pool.registry.ensureSession(ctx.sessionManager.getSessionId());
     if (event.reason === "fork" && event.previousSessionFile) {
       // Fork creates the descendant before this event. Pending results that
       // were addressed to the replaced parent must follow that descendant.

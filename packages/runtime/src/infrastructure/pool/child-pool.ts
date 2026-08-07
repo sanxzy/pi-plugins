@@ -1,7 +1,6 @@
 import { MAX_CONCURRENCY } from "@xzy-ai/core";
-import { registryFile } from "../../shared/paths.ts";
 import type { ChildSessionControl } from "@xzy-ai/core";
-import { createRegistry, type Registry } from "../registry/registry.ts";
+import { createScopedRegistry, type ScopedRegistry } from "../registry/scoped-registry.ts";
 import { createDeliveryCoordinator, type DeliveryCoordinator } from "./delivery.ts";
 import { createConcurrencyGate, type ConcurrencyGate } from "./concurrency-gate.ts";
 import { createInterruptionSweep } from "./interruption.ts";
@@ -17,7 +16,12 @@ import { createInterruptionSweep } from "./interruption.ts";
  */
 export interface ChildPool {
   readonly projectRoot: string;
-  readonly registry: Registry;
+  /** Session-scoped registry for all job lifecycle and manager operations. */
+  readonly registry: ScopedRegistry;
+  /** Alias retained for manager callers that name the scoped view explicitly. */
+  readonly scopedRegistry: ScopedRegistry;
+  /** Live root session id registered by the current host session, if known. */
+  readonly rootSessionId?: string;
   /** Global child-run gate: at most MAX_CONCURRENCY children run at once. */
   readonly concurrency: ConcurrencyGate;
   /** Delivers finished background results to each result's direct parent session. */
@@ -48,17 +52,23 @@ function poolSlot(projectRoot: string): string {
   return `${POOL_SLOT_PREFIX}${projectRoot}`;
 }
 
-export function getChildPool(projectRoot: string): ChildPool {
+export function getChildPool(projectRoot: string, rootSessionId?: string): ChildPool {
   const slot = poolSlot(projectRoot);
   const shared = globalThis.piCodePool?.[slot];
   if (shared) return shared;
 
-  const registry = createRegistry(registryFile(projectRoot));
+  // The scoped registry is the single authoritative job store. It is created
+  // with the root live session id so the root session's folder (which is not a
+  // job) is scoped correctly; child job records carry their own parent session
+  // id and route to their parent's folder on append.
+  const registry = createScopedRegistry(projectRoot, rootSessionId);
   const liveChildren = new Map<string, ChildSessionControl>();
 
   const pool: ChildPool = {
     projectRoot,
     registry,
+    scopedRegistry: registry,
+    rootSessionId,
     concurrency: createConcurrencyGate(MAX_CONCURRENCY),
     delivery: createDeliveryCoordinator(),
     liveChildren,

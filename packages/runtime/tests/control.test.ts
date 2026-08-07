@@ -192,8 +192,9 @@ test("prepareResumeSessionFile rewrites the header id and trims a trailing tool 
   };
   writeFileSync(source, `${JSON.stringify(header)}\n${JSON.stringify(assistant)}\n`);
 
-  const destination = prepareResumeSessionFile(source, "new-job", dir);
+  const destination = prepareResumeSessionFile(source, "new-job", dir, "parent-session");
 
+  assert.equal(destination, join(dir, ".pi", "pi-code", "sessions", "parent-session", "new-job.jsonl"));
   // The new session file exists and keeps the original entry count (trim only
   // drops content, not the whole message here).
   const lines = readFileSync(destination, "utf-8").trim().split("\n");
@@ -223,7 +224,7 @@ test("prepareResumeSessionFile drops a trailing assistant message whose content 
   };
   writeFileSync(source, `${JSON.stringify(header)}\n${JSON.stringify(assistant)}\n`);
 
-  const destination = prepareResumeSessionFile(source, "new-job", dir);
+  const destination = prepareResumeSessionFile(source, "new-job", dir, "parent-session");
   const lines = readFileSync(destination, "utf-8").trim().split("\n");
   // Only the rewritten header remains.
   assert.equal(lines.length, 1);
@@ -253,7 +254,7 @@ test("prepareResumeSessionFile preserves a normal completed transcript", () => {
   };
   writeFileSync(source, `${JSON.stringify(header)}\n${JSON.stringify(assistant)}\n${JSON.stringify(user)}\n`);
 
-  const destination = prepareResumeSessionFile(source, "new-job", dir);
+  const destination = prepareResumeSessionFile(source, "new-job", dir, "parent-session");
   const lines = readFileSync(destination, "utf-8").trim().split("\n");
   assert.equal(lines.length, 3);
   const last = JSON.parse(lines[2]) as { message: { role?: string } };

@@ -107,6 +107,8 @@ export function recordNewJob(registry: Registry, input: {
   parentJobId?: string;
   rootJobId?: string;
   depth?: number;
+  sessionId?: string;
+  parentSessionId?: string;
   sessionFile?: string;
 }): Job {
   const job = createJob(input);

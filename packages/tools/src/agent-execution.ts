@@ -28,7 +28,8 @@ export async function agentExecute(
   caller: ControlCaller,
   options: { jobId?: string; parentJobId?: string; sessionFile?: string } = {},
 ): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
-  const pool = getChildPool(ctx.cwd);
+  const parentSessionId = ctx.sessionManager.getSessionId();
+  const pool = getChildPool(ctx.cwd, parentSessionId);
 
   // Foreground: validate before creating a queued record. The lifecycle
   // deliberately has no queued → failed transition; setup failures after
@@ -48,8 +49,9 @@ export async function agentExecute(
   }
 
   const parent = options.parentJobId ? pool.registry.get(options.parentJobId) : undefined;
+  const jobId = options.jobId ?? makeJobId();
   const job = recordNewJob(pool.registry, {
-    jobId: options.jobId ?? makeJobId(),
+    jobId,
     status: "queued",
     description: params.description,
     subagentType: params.subagent_type,
@@ -57,13 +59,15 @@ export async function agentExecute(
     rootJobId: parent?.rootJobId,
     depth: parent ? parent.depth + 1 : undefined,
     sessionFile: options.sessionFile,
+    sessionId: jobId,
+    parentSessionId,
   });
 
   // The child run is admitted through the shared concurrency gate. The
   // `queued → running` transition is recorded at the exact moment the slot is
   // acquired, so a job waiting for a slot stays observable as `queued`.
   const result = await spawnWithControl(pool, params, ctx, job, agent, {
-    parentSessionId: ctx.sessionManager.getSessionId(),
+    parentSessionId,
     sessionFile: options.sessionFile,
     signal: ctx.signal,
   });

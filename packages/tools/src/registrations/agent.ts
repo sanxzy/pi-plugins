@@ -114,9 +114,10 @@ export function registerAgentTool(pi: ExtensionAPI): void {
           });
         }
         const resumeJobId = makeJobId();
+        const parentSessionId = ctx.sessionManager.getSessionId();
         let copyPath: string | undefined;
         try {
-          copyPath = copySessionFile(job.sessionFile, resumeJobId, ctx.cwd);
+          copyPath = copySessionFile(job.sessionFile, resumeJobId, ctx.cwd, parentSessionId);
         } catch {
           copyPath = undefined;
         }
@@ -151,11 +152,18 @@ export function registerAgentTool(pi: ExtensionAPI): void {
           );
         }
 
+        // The direct-parent session file keys result delivery and the parent
+        // session id scopes the job's storage folder.
+        const parentSessionFile = ctx.sessionManager.getSessionFile() ?? "";
+        const parentSessionId = ctx.sessionManager.getSessionId();
+        const jobId = makeJobId();
         const job = recordNewJob(pool.registry, {
-          jobId: makeJobId(),
+          jobId,
           status: "queued",
           description: params.description,
           subagentType: params.subagent_type,
+          sessionId: jobId,
+          parentSessionId,
         });
 
         // The direct-parent session file keys result delivery. The realisation
@@ -163,9 +171,6 @@ export function registerAgentTool(pi: ExtensionAPI): void {
         // contract (return immediately with the job id and a running
         // acknowledgement); a gate slot is acquired before the child runs.
         pool.registry.updateJob(job.jobId, { status: "running" });
-
-        const parentSessionFile = ctx.sessionManager.getSessionFile() ?? "";
-        const parentSessionId = ctx.sessionManager.getSessionId();
 
         // The child lifecycle runs under the shared concurrency gate, exactly
         // like the foreground path, so a call beyond the cap stays `queued` and

@@ -10,6 +10,7 @@ import {
   rootSessionDir,
   scopedRegistryFile,
   scopeDescendants,
+  scopeRegistry,
   sessionRegistryFile,
 } from "@xzy-ai/runtime";
 
@@ -34,7 +35,7 @@ function newJob(input: {
   createdAt?: string;
   updatedAt?: string;
 }) {
-  return createJob({
+  const job = createJob({
     jobId: input.jobId,
     sessionId: input.sessionId ?? input.jobId,
     parentSessionId: input.parentSessionId,
@@ -44,6 +45,7 @@ function newJob(input: {
     subagentType: "default",
     createdAt: input.createdAt,
   });
+  return input.updatedAt === undefined ? job : { ...job, updatedAt: input.updatedAt };
 }
 
 test("session path helpers create parent-scoped registry and child transcript directories", () => {
@@ -116,7 +118,13 @@ test("scope API recursively returns descendants, status, duration, and live ente
   }));
 
   const liveChildren = new Map<string, ChildSessionControl>([["job-a", liveControl()]]);
-  const rootScope = scopeDescendants(registry, "root-session", liveChildren, new Date(now));
+  const rootScope = scopeDescendants(
+    (jobId) => registry.get(jobId),
+    registry.all(),
+    "root-session",
+    liveChildren,
+    new Date(now),
+  );
   assert.deepEqual(rootScope.map((entry) => entry.jobId), ["job-a", "job-c", "job-b"]);
   assert.equal(rootScope[0]?.status, "running");
   assert.equal(rootScope[0]?.enterable, true);
@@ -127,7 +135,13 @@ test("scope API recursively returns descendants, status, duration, and live ente
   assert.equal(rootScope[2]?.status, "queued");
   assert.equal(rootScope[2]?.enterable, false);
 
-  const childScope = scopeDescendants(registry, "job-a", liveChildren, new Date(now));
+  const childScope = scopeDescendants(
+    (jobId) => registry.get(jobId),
+    registry.all(),
+    "job-a",
+    liveChildren,
+    new Date(now),
+  );
   assert.deepEqual(childScope.map((entry) => entry.jobId), ["job-c"]);
 });
 
@@ -140,6 +154,6 @@ test("scope API never reads legacy flat jobs or sessions", () => {
   writeFileSync(join(root, ".pi", "pi-code", "sessions", "legacy.jsonl"), "legacy transcript\n");
 
   const registry = createScopedRegistry(root);
-  assert.deepEqual(scopeDescendants(registry, "root-session", new Map()), []);
+  assert.deepEqual(scopeRegistry(registry, "root-session", new Map()), []);
   assert.deepEqual(registry.all(), new Map());
 });

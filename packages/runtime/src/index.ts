@@ -7,5 +7,18 @@ export { createConcurrencyGate, type ConcurrencyGate } from "./infrastructure/po
 export { createDeliveryCoordinator, type DeliveryCoordinator } from "./infrastructure/pool/delivery.ts";
 export { createInterruptionSweep, interruptRunningJobs } from "./infrastructure/pool/interruption.ts";
 export { createRegistry, foldLog, recordNewJob, type Registry } from "./infrastructure/registry/registry.ts";
+export { createScopedRegistry, scopedRegistryForSession, type ScopedRegistry } from "./infrastructure/registry/scoped-registry.ts";
 export { prepareResumeSessionFile } from "./infrastructure/sessions/resume-file.ts";
-export { runtimeDir, registryFile, sessionsDir } from "./shared/paths.ts";
+export { scopeDescendants, scopeRegistry, type ScopedSessionRow, type ScopeRegistry } from "./infrastructure/sessions/scope.ts";
+export {
+  assertSessionId,
+  childSessionDir,
+  childTranscriptDir,
+  childTranscriptFile,
+  rootSessionDir,
+  runtimeDir,
+  scopedRegistryFile,
+  scopedSessionsDir,
+  sessionDir,
+  sessionRegistryFile,
+} from "./shared/paths.ts";

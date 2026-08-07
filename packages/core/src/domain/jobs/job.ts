@@ -11,6 +11,10 @@ import type { JobStatus } from "./status.ts";
 export interface Job {
   /** Stable identity, assigned by the orchestrator. */
   readonly jobId: string;
+  /** Live session id of the child session this job runs (== jobId for fresh children). */
+  readonly sessionId?: string;
+  /** Live session id of the session that spawned this job, keying its per-parent folder. */
+  readonly parentSessionId?: string;
   /** Current status. */
   readonly status: JobStatus;
   /** Short description of the delegated work. */
@@ -46,6 +50,8 @@ export interface Job {
 /** Fields required to create a new job. */
 export interface NewJobInput {
   jobId: string;
+  sessionId?: string;
+  parentSessionId?: string;
   status: JobStatus;
   description: string;
   subagentType: string;
@@ -70,6 +76,8 @@ export function createJob(input: NewJobInput): Job {
   const depth = input.depth ?? (parentJobId === undefined ? 0 : 1);
   return {
     jobId: input.jobId,
+    sessionId: input.sessionId ?? input.jobId,
+    parentSessionId: input.parentSessionId ?? input.parentJobId,
     status: input.status,
     description: input.description,
     subagentType: input.subagentType,

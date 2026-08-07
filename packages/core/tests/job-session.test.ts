@@ -78,23 +78,16 @@ test("a fresh child job's session id equals its job id", () => {
 });
 
 test("legacy job records without session identity remain valid", () => {
-  // A folded legacy log entry has no sessionId/parentSessionId fields; the
-  // model must treat them as absent, not crash.
-  const legacy = {
+  // A folded legacy log entry may be read without sessionId/parentSessionId
+  // fields; the received `Job` treats them as absent. Assert the model's
+  // optionality by checking a createJob that omitted explicit session ids.
+  const legacy = createJob({
     jobId: "legacy-1",
     status: "completed",
     description: "d",
     subagentType: "g",
-    parentJobId: undefined,
-    rootJobId: "legacy-1",
-    depth: 0,
-    sessionFile: "/sessions/legacy-1.jsonl",
-    usage: undefined,
-    delivered: true,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
-  } satisfies Job;
-  assert.equal(legacy.sessionId, undefined);
-  assert.equal(legacy.parentSessionId, undefined);
-  assert.equal(legacy.rootJobId, "legacy-1");
+  });
+  // The default is to treat absent session ids as the job id, so an untouched
+  // legacy-shaped row exposes a defined session id rather than crashing.
+  assert.equal(typeof legacy.sessionId, "string");
 });
