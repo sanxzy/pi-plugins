@@ -6,5 +6,5 @@
  * at most `MAX_CONCURRENCY` child sessions run at once, and a single model
  * response may issue at most `MAX_PARALLEL_AGENTS` agent calls.
  */
-export const MAX_CONCURRENCY = 4;
-export const MAX_PARALLEL_AGENTS = 8;
+export const MAX_CONCURRENCY = 2;
+export const MAX_PARALLEL_AGENTS = 3;
