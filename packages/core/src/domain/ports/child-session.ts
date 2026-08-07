@@ -1,5 +1,138 @@
 import type { ResolvedAgent } from "../agents/agent.ts";
 
+/** Normalized terminal states exposed by a live child session. */
+export type ChildLiveStatus = "running" | "completed" | "failed" | "cancelled" | "interrupted";
+
+/** A retained transcript item rendered by the manager. */
+export type ChildLiveTranscriptEntry =
+  | {
+      readonly id: string;
+      readonly kind: "message";
+      readonly role: "user" | "assistant";
+      readonly text: string;
+      readonly complete: boolean;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "tool";
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly text: string;
+      readonly complete: boolean;
+      readonly isError?: boolean;
+    };
+
+/** Normalized live event delivered to manager subscribers. */
+export type ChildLiveEvent =
+  | {
+      readonly type: "message";
+      readonly id: string;
+      readonly phase: "start" | "update" | "end";
+      readonly role: "user" | "assistant";
+      readonly text: string;
+    }
+  | {
+      readonly type: "tool";
+      readonly id: string;
+      readonly phase: "start" | "update" | "end";
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly text: string;
+      readonly isError?: boolean;
+    }
+  | { readonly type: "agent_end"; readonly willRetry: boolean }
+  | { readonly type: "settled"; readonly status: Exclude<ChildLiveStatus, "running"> };
+
+/** Snapshot retained after a live child leaves the pool. */
+export interface ChildLiveSnapshot {
+  readonly status: ChildLiveStatus;
+  readonly settled: boolean;
+  readonly transcript: readonly ChildLiveTranscriptEntry[];
+}
+
+/** Observable/control surface for one isolated child. */
+export interface ChildLiveControl {
+  readonly snapshot: ChildLiveSnapshot;
+  subscribe(listener: (event: ChildLiveEvent) => void): () => void;
+  steer(prompt: string): Promise<void>;
+  abort(): Promise<void>;
+}
+
+/** Mutable in-process feed used by runtime adapters and injected test doubles. */
+export interface ChildLiveFeed extends ChildLiveControl {
+  emit(event: ChildLiveEvent): void;
+}
+
+/** Create a feed whose snapshot remains available after all subscribers leave. */
+export function createChildLiveFeed(): ChildLiveFeed {
+  const listeners = new Set<(event: ChildLiveEvent) => void>();
+  let snapshot: ChildLiveSnapshot = { status: "running", settled: false, transcript: [] };
+
+  const replaceTranscript = (event: ChildLiveEvent): readonly ChildLiveTranscriptEntry[] => {
+    if (event.type === "message") {
+      const previous = snapshot.transcript.find((entry) => entry.id === event.id);
+      const next: ChildLiveTranscriptEntry = {
+        id: event.id,
+        kind: "message",
+        role: event.role,
+        text: event.text,
+        complete: event.phase === "end",
+      };
+      if (!previous) return [...snapshot.transcript, next];
+      return snapshot.transcript.map((entry) => (entry.id === event.id ? next : entry));
+    }
+    if (event.type === "tool") {
+      const previous = snapshot.transcript.find((entry) => entry.id === event.id);
+      const next: ChildLiveTranscriptEntry = {
+        id: event.id,
+        kind: "tool",
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        text: event.text,
+        complete: event.phase === "end",
+        isError: event.isError,
+      };
+      if (!previous) return [...snapshot.transcript, next];
+      return snapshot.transcript.map((entry) => (entry.id === event.id ? next : entry));
+    }
+    return snapshot.transcript;
+  };
+
+  const feed: ChildLiveFeed = {
+    get snapshot() {
+      return snapshot;
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      if (snapshot.settled) {
+        const status = snapshot.status === "running" ? "failed" : snapshot.status;
+        listener({ type: "settled", status });
+      }
+      return () => listeners.delete(listener);
+    },
+    emit(event) {
+      if (snapshot.settled) return;
+      if (event.type === "settled") {
+        snapshot = {
+          status: event.status,
+          settled: true,
+          transcript: snapshot.transcript,
+        };
+      } else {
+        snapshot = { ...snapshot, transcript: replaceTranscript(event) };
+      }
+      for (const listener of [...listeners]) listener(event);
+    },
+    steer: async () => {
+      throw new Error("live feed is not steerable");
+    },
+    abort: async () => {
+      throw new Error("live feed is not abortable");
+    },
+  };
+  return feed;
+}
+
 /**
  * Child-session port.
  *
@@ -11,6 +144,8 @@ import type { ResolvedAgent } from "../agents/agent.ts";
 export interface ChildSessionControl {
   /** Exact session file path, when persistence is enabled. */
   readonly sessionFile?: string;
+  /** Live transcript/control surface, available once child creation has completed. */
+  readonly live?: ChildLiveControl;
   /** Queue steering context for the current child run. */
   steer(prompt: string): Promise<void>;
   /** Abort the current child run and wait for it to become idle. */

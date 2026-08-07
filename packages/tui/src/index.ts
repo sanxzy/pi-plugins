@@ -8,3 +8,9 @@ export type {
   ManagerStatus,
   ManagerView,
 } from "./agent-manager.ts";
+export type {
+  AgentLiveManagerOptions,
+  AgentLiveManagerTheme,
+  AgentLiveSession,
+  LiveViewReason,
+} from "./agent-manager-live.ts";

@@ -18,6 +18,7 @@ import type {
   SpawnChildSession,
 } from "@xzy-ai/core";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
+import { attachAgentSessionLiveFeed } from "./child-live.ts";
 import { prepareResumeSessionFile } from "../sessions/resume-file.ts";
 
 /**
@@ -41,6 +42,7 @@ import { prepareResumeSessionFile } from "../sessions/resume-file.ts";
 
 interface ChildSessionServices {
   session: AgentSession;
+  liveUnsubscribe?: () => void;
   dispose(): void;
 }
 
@@ -258,7 +260,12 @@ function findLastAssistantMessage(session: AgentSession): {
  * before admission never enters the gate and the job stays `queued` (the
  * composition root marks it `cancelled` from the aborted result).
  */
-export const spawnChildSession: SpawnChildSession = async (options) => {
+export const spawnChildSession: SpawnChildSession & {
+  /** Test seam: override isolated child construction without AI credentials. */
+  __createChild?: (
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; sessionFile?: string },
+  ) => Promise<ChildSessionServices>;
+} = (async (options) => {
   // A cancelled parent run must not start a child at all.
   if (options.signal?.aborted) {
     return { sessionFile: "", output: "(aborted before start)", status: "aborted" };
@@ -267,11 +274,12 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
     return { sessionFile: "", output: "(no parent session id)", status: "failed" };
   }
   const parentSessionId: string = options.parentSessionId;
+  const createChild = spawnChildSession.__createChild ?? ((opts) => createIsolatedChild(opts));
 
   return options.run(async () => {
     let child: ChildSessionServices;
     try {
-      child = await createIsolatedChild({
+      child = await createChild({
         jobId: options.jobId,
         cwd: options.cwd,
         model: options.model,
@@ -279,11 +287,23 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
         parentSessionId,
         sessionFile: options.sessionFile,
       });
+      const live = attachAgentSessionLiveFeed(child.session);
       options.onControl?.({
         sessionFile: child.session.sessionFile,
+        live: {
+          get snapshot() {
+            return live.feed.snapshot;
+          },
+          subscribe(listener) {
+            return live.feed.subscribe(listener);
+          },
+          steer: (prompt) => child.session.steer(prompt),
+          abort: () => child.session.abort(),
+        },
         steer: (prompt) => child.session.steer(prompt),
         abort: () => child.session.abort(),
       });
+      (child as ChildSessionServices).liveUnsubscribe = live.unsubscribe;
     } catch (error) {
       return { sessionFile: "", output: toErrorMessage(error), status: "failed" };
     }
@@ -332,9 +352,14 @@ export const spawnChildSession: SpawnChildSession = async (options) => {
         status: options.signal?.aborted ? "aborted" : "failed",
       };
     } finally {
+      child.liveUnsubscribe?.();
       child.dispose();
     }
   });
+}) as SpawnChildSession & {
+  __createChild?: (
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; sessionFile?: string },
+  ) => Promise<ChildSessionServices>;
 };
 
 /**

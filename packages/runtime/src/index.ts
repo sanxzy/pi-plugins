@@ -1,5 +1,10 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
 export { resolveChildTools, spawnChildSession, copySessionFile } from "./infrastructure/pi-sdk/child-session.ts";
+export {
+  attachAgentSessionLiveFeed,
+  liveStatusForSession,
+  mapAgentSessionEvent,
+} from "./infrastructure/pi-sdk/child-live.ts";
 export { observeChildStatus, type ChildStatus, type ChildStatusInput } from "./infrastructure/pi-sdk/child-status.ts";
 export { backgroundModeError, formatBackgroundResult, runBackgroundJob } from "./infrastructure/pool/background.ts";
 export { getChildPool, type ChildPool } from "./infrastructure/pool/child-pool.ts";

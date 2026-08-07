@@ -6,6 +6,7 @@ import {
   type TUI,
   visibleWidth,
 } from "@earendil-works/pi-tui";
+import type { AgentLiveSession } from "./agent-manager-live.ts";
 
 /** Status values rendered by the manager, including the active host session. */
 export type ManagerStatus =
@@ -47,6 +48,14 @@ export interface AgentManagerOptions {
   view: ManagerView;
   done: (reason: "escape" | "shortcut" | "back") => void;
   onEnter?: (row: ManagerRow) => void;
+  /**
+   * Re-project a live scope into a fresh display view.
+   *
+   * Supplied by the host so re-entering a settled child's tree reflects its
+   * now-terminal status without leaking pool or registry state into the TUI.
+   * Falls back to the captured view when absent.
+   */
+  refreshView?: (sessionId: string) => ManagerView;
 }
 
 const INDENT_WIDTH = 3;
@@ -76,24 +85,34 @@ export class AgentManager implements Component {
   private readonly theme: AgentManagerTheme;
   private readonly done: AgentManagerOptions["done"];
   private readonly onEnter?: AgentManagerOptions["onEnter"];
-  private readonly returnStack: ManagerView[] = [];
+  private readonly refreshView?: AgentManagerOptions["refreshView"];
+  private readonly returnStack: Array<{ view: ManagerView; selectedIndex: number }> = [];
   private view: ManagerView;
   private selectedIndex = 0;
   private cachedLines: string[] | undefined;
   private cachedWidth = -1;
   private hint: string | undefined;
   private settled = false;
+  private liveView: { sessionId: string; rowId?: string; description: string; live: AgentLiveSession } | undefined;
+  private liveUnsubscribe: (() => void) | undefined;
+  private draftInput = "";
 
   constructor(options: AgentManagerOptions) {
     this.tui = options.tui;
     this.theme = options.theme;
     this.done = options.done;
     this.onEnter = options.onEnter;
+    this.refreshView = options.refreshView;
     this.view = options.view;
   }
 
   render(width: number): string[] {
     const renderWidth = Math.max(1, Math.floor(width));
+    if (!this.liveView) return this.renderTree(renderWidth);
+    return this.renderLive(renderWidth);
+  }
+
+  private renderTree(renderWidth: number): string[] {
     // The cache is width-keyed so a terminal resize always re-wraps rows.
     if (this.cachedLines && this.cachedWidth === renderWidth) return this.cachedLines;
     this.cachedWidth = renderWidth;
@@ -138,6 +157,60 @@ export class AgentManager implements Component {
     return lines;
   }
 
+  private renderLive(renderWidth: number): string[] {
+    // The tree cache is stale as soon as a live view is active.
+    this.cachedLines = undefined;
+    this.cachedWidth = -1;
+    const live = this.liveView!.live;
+    const viewportRows = Math.max(1, this.tui.terminal?.rows ?? 24);
+    const lines: string[] = [];
+    const title = `Child Session ${live.snapshot.status}`;
+    const description = `  ${this.liveView!.description}`;
+    lines.push(this.theme.fg("accent", truncateToWidth(title, renderWidth)));
+    lines.push(this.theme.fg("muted", truncateToWidth(description, renderWidth)));
+    const footerHelp = live.snapshot.settled
+      ? "Ctrl+← back • Esc close"
+      : "Type to steer this child • Enter to send • Ctrl+← back • Esc close";
+    const footer = this.theme.fg("dim", truncateToWidth(footerHelp, renderWidth));
+    const steerLine = !live.snapshot.settled && this.draftInput
+      ? `  steer> ${this.draftInput}`
+      : undefined;
+
+    const reserved = 3 + (this.hint ? 1 : 0) + (steerLine ? 1 : 0);
+    const transcriptBudget = Math.max(0, viewportRows - reserved);
+    const entries = [...live.snapshot.transcript].slice(-transcriptBudget);
+
+    if (entries.length === 0 && transcriptBudget === 0) {
+      lines.push(this.theme.fg("muted", truncateToWidth("…", renderWidth)));
+    } else {
+      for (const entry of entries) {
+        const text = entry.kind === "tool"
+          ? `  ⌘ ${entry.toolName ?? "tool"}${entry.complete ? "" : " (running)"}`
+          : `  ${entry.role === "user" ? "you: " : ""}${entry.text}`;
+        lines.push(this.theme.fg(entry.kind === "tool" ? "muted" : "text", truncateToWidth(text, renderWidth)));
+      }
+      if (entries.length === 0) {
+        lines.push(this.theme.fg("muted", truncateToWidth("No activity yet.", renderWidth)));
+      }
+    }
+
+    if (this.hint) {
+      lines.push(this.theme.fg("warning", truncateToWidth(this.hint, renderWidth)));
+    }
+    if (steerLine) {
+      lines.push(this.theme.fg("text", truncateToWidth(steerLine, renderWidth)));
+    }
+    lines.push(footer);
+
+    // Drop older transcript lines that overflowed the viewport; the retained
+    // snapshot is never truncated, only the in-view window prunes the tail.
+    if (lines.length > viewportRows) {
+      lines.length = viewportRows;
+      lines[viewportRows - 1] = footer;
+    }
+    return lines;
+  }
+
   invalidate(): void {
     this.cachedLines = undefined;
     this.cachedWidth = -1;
@@ -145,6 +218,10 @@ export class AgentManager implements Component {
 
   handleInput(data: string): void {
     if (this.settled) return;
+    if (this.liveView) {
+      this.handleLiveInput(data);
+      return;
+    }
 
     if (matchesKey(data, Key.ctrlShift("a"))) {
       this.finish("shortcut");
@@ -173,12 +250,13 @@ export class AgentManager implements Component {
       return;
     }
     if (matchesKey(data, Key.ctrl("left"))) {
-      if (this.returnStack.length === 0) {
-        this.finish("back");
-      } else {
-        this.view = this.returnStack.pop()!;
-        this.selectedIndex = 0;
+      const previous = this.returnStack.pop();
+      if (previous) {
+        this.view = previous.view;
+        this.selectedIndex = previous.selectedIndex;
         this.refresh();
+      } else {
+        this.finish("back");
       }
       return;
     }
@@ -204,17 +282,113 @@ export class AgentManager implements Component {
     this.finish(reason);
   }
 
-  /** Move to a child view while preserving the exact view to return to. */
+  /** Move to a child tree view while preserving the exact view to return to. */
   pushView(next: ManagerView): void {
-    this.returnStack.push(this.view);
+    this.returnStack.push({ view: this.view, selectedIndex: this.selectedIndex });
     this.view = next;
     this.selectedIndex = 0;
     this.refresh();
   }
 
+  /** Enter a live child view while preserving the exact prior tree view. */
+  pushLiveView(next: { sessionId: string; rowId?: string; description: string; live: AgentLiveSession }): void {
+    this.returnStack.push({ view: this.view, selectedIndex: this.selectedIndex });
+    this.liveView = next;
+    this.liveUnsubscribe = next.live.subscribe(() => this.refresh());
+    this.invalidate();
+    this.tui.requestRender();
+  }
+
+  /** Whether the manager is currently showing a live child. */
+  inLiveView(): boolean {
+    return this.liveView !== undefined;
+  }
+
+  private handleLiveInput(data: string): void {
+    if (matchesKey(data, Key.ctrlShift("a"))) {
+      this.finish("shortcut");
+      return;
+    }
+    if (matchesKey(data, Key.ctrl("left"))) {
+      const leavingLive = this.liveView;
+      this.unsubscribeLive();
+      this.liveView = undefined;
+      const previous = this.returnStack.pop();
+      if (previous) {
+        let refreshed = this.refreshView?.(previous.view.scopeSessionId) ?? previous.view;
+        // Settlement can race the registry's final write and pool cleanup. Use
+        // the retained live snapshot as the immediate source of truth so a
+        // just-settled child is never briefly re-enterable on return.
+        if (leavingLive?.live.snapshot.settled && leavingLive.rowId) {
+          const settledStatus = managerStatusForLiveStatus(leavingLive.live.snapshot.status);
+          refreshed = {
+            ...refreshed,
+            rows: refreshed.rows.map((row) =>
+              row.rowId === leavingLive.rowId
+                ? { ...row, status: settledStatus, enterable: false }
+                : row,
+            ),
+          };
+        }
+        this.view = refreshed;
+        const previousRowId = previous.view.rows[previous.selectedIndex]?.rowId;
+        const refreshedIndex = previousRowId
+          ? refreshed.rows.findIndex((row) => row.rowId === previousRowId)
+          : -1;
+        this.selectedIndex = refreshedIndex >= 0
+          ? refreshedIndex
+          : Math.min(previous.selectedIndex, Math.max(0, refreshed.rows.length - 1));
+      }
+      this.invalidate();
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.escape)) {
+      this.finish("escape");
+      return;
+    }
+    const live = this.liveView!.live;
+    if (live.snapshot.settled) return;
+    if (matchesKey(data, Key.enter)) {
+      const prompt = this.draftInput.trim();
+      this.draftInput = "";
+      if (!prompt) return;
+      void live.steer(prompt).catch(() => {
+        this.hint = "Steer failed. The child may have settled.";
+        this.refresh();
+      });
+      return;
+    }
+    if (matchesKey(data, Key.backspace)) {
+      this.draftInput = this.draftInput.slice(0, -1);
+      this.refresh();
+      return;
+    }
+    if (data.length === 1 && data >= " ") {
+      this.draftInput += data;
+      this.refresh();
+    }
+  }
+
+  /**
+   * Release feed listeners when the host disposes the custom component.
+   *
+   * Disposal is intentionally independent from child control: closing or
+   * resetting the modal must never abort or otherwise re-host the child.
+   */
+  dispose(): void {
+    this.unsubscribeLive();
+  }
+
+  private unsubscribeLive(): void {
+    this.liveUnsubscribe?.();
+    this.liveUnsubscribe = undefined;
+  }
+
   private finish(reason: "escape" | "shortcut" | "back"): void {
     if (this.settled) return;
     this.settled = true;
+    this.unsubscribeLive();
     this.done(reason);
   }
 
@@ -270,6 +444,12 @@ export class AgentManager implements Component {
     chars.push(isLast[index] ? "└─ " : "├─ ");
     return chars.join("");
   }
+}
+
+function managerStatusForLiveStatus(
+  status: AgentLiveSession["snapshot"]["status"],
+): ManagerStatus {
+  return status === "running" ? "running" : status;
 }
 
 function formatDuration(durationMs: number): string {

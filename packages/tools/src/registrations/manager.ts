@@ -56,8 +56,19 @@ function openManager(ctx: ExtensionContext): void {
         tui,
         theme: managerTheme(theme),
         view: buildView(ctx, pool),
+        refreshView: (sessionId) => buildViewForSession(ctx, pool, sessionId),
         onEnter: (row) => {
-          manager.pushView(buildViewForSession(ctx, pool, row.sessionId));
+          const control = pool.liveChildren.get(row.rowId);
+          if (!control?.live) {
+            manager.setHint("This session is no longer available.");
+            return;
+          }
+          manager.pushLiveView({
+            sessionId: row.sessionId,
+            rowId: row.rowId,
+            description: row.description,
+            live: control.live,
+          });
         },
         done: (reason) => {
           // Every close path, including the opening shortcut pressed again,
