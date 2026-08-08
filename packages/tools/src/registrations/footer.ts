@@ -51,6 +51,18 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           subscribeTree();
         },
       });
+      // Route raw terminal input to the footer's management mode. Navigation
+      // keys are consumed here (never reaching the composer); all other input
+      // passes through unchanged.
+      const stopInput = ctx.ui.onTerminalInput((data) => {
+        if (footer.handleInput(data)) return { consume: true };
+        return { consume: false, data };
+      });
+      const superDispose = footer.dispose.bind(footer);
+      footer.dispose = () => {
+        stopInput();
+        superDispose();
+      };
       return footer;
     });
   });
@@ -88,7 +100,10 @@ function subscribeFooterTree(
 
   // The registry has no event emitter; poll the scoped descendant projection on
   // the same debounce cadence so newly created/settled jobs appear in the tree.
+  // The poll never blocks process exit; the host keeps the process alive while
+  // the footer is installed, and dispose() clears the interval explicitly.
   const poll = setInterval(attachLiveChildren, REPAINT_DEBOUNCE_MS);
+  poll.unref();
   attachLiveChildren();
   return () => {
     clearInterval(poll);

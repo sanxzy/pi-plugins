@@ -1,6 +1,5 @@
 import { relative, resolve, sep, isAbsolute } from "node:path";
-import type { Component, TUI } from "@earendil-works/pi-tui";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Key, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 
 /** Theme surface required by the host-owned footer component. */
 export interface AgentFooterTheme {
@@ -63,6 +62,10 @@ export interface AgentFooterOptions {
   readonly dispose?: () => void;
 }
 
+export type FooterInputResult = { consumed: boolean; data?: string };
+
+const MAX_VISIBLE_MANAGEMENT_ROWS = 4;
+
 const SETTLED_RETENTION_MS = 2 * 60 * 1000;
 
 /**
@@ -70,13 +73,18 @@ const SETTLED_RETENTION_MS = 2 * 60 * 1000;
  * repaint scheduling; callers provide fresh immutable projections on render.
  */
 export class AgentFooter implements Component {
+  private readonly tui: TUI;
   private readonly theme: AgentFooterTheme;
   private readonly getInfo: () => AgentFooterInfo;
   private readonly getRows?: () => readonly FooterTreeRow[];
   private readonly release?: () => void;
   private disposed = false;
+  private management = false;
+  private selectedIndex = 0;
+  private scrollTop = 0;
 
   constructor(options: AgentFooterOptions) {
+    this.tui = options.tui;
     this.theme = options.theme;
     this.getInfo = options.getInfo;
     this.getRows = options.getRows;
@@ -91,13 +99,60 @@ export class AgentFooter implements Component {
     const rows = filterFooterRows(this.getRows?.() ?? [], new Date());
     if (rows.length === 0) return [pathLine, statsLine];
 
+    if (this.selectedIndex >= rows.length) this.selectedIndex = Math.max(0, rows.length - 1);
+
     const lastByDepth = computeLastByDepth(rows);
     const lines = [pathLine, statsLine, this.theme.fg("dim", "-- current active subagents --")];
-    for (let index = 0; index < rows.length; index++) {
-      lines.push(renderTreeRow(rows[index]!, index, rows, lastByDepth, renderWidth, this.theme));
+
+    const visible = this.management
+      ? rows.slice(this.scrollTop, this.scrollTop + MAX_VISIBLE_MANAGEMENT_ROWS)
+      : rows;
+    for (let index = 0; index < visible.length; index++) {
+      if (!this.management) {
+        lines.push(renderTreeRow(visible[index]!, index, rows, lastByDepth, renderWidth, this.theme));
+        continue;
+      }
+      const rowIndex = this.scrollTop + index;
+      const selected = rowIndex === this.selectedIndex;
+      const cursor = selected ? this.theme.fg("accent", "❯ ") : "  ";
+      const bodyText = renderTreeRow(visible[index]!, rowIndex, rows, lastByDepth, renderWidth, this.theme);
+      const available = Math.max(1, renderWidth - 2);
+      lines.push(cursor + truncateToWidth(bodyText, available));
     }
     return lines;
   }
+
+  /** Handle raw terminal input; returns true when the input was consumed. */
+  handleInput(data: string): boolean {
+    if (data === Key.down) {
+      if (!this.management) {
+        this.enterManagement();
+        return true;
+      }
+      this.moveSelection(1);
+      return true;
+    }
+    if (this.management) {
+      if (data === Key.up) {
+        this.moveSelection(-1);
+        return true;
+      }
+      if (data === Key.left) {
+        this.exitManagement();
+        return true;
+      }
+      if (data === Key.enter) {
+        const row = this.selectedRow();
+        this.exitManagement();
+        this.onEnter?.(row);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Closure invoked when the user activates a selected non-root row. */
+  onEnter?: (row: FooterTreeRow | undefined) => void;
 
   invalidate(): void {
     // The host owns repaint scheduling; live data subscriptions request renders.
@@ -107,6 +162,38 @@ export class AgentFooter implements Component {
     if (this.disposed) return;
     this.disposed = true;
     this.release?.();
+  }
+
+  private enterManagement(): void {
+    this.management = true;
+    this.selectedIndex = 0;
+    this.scrollTop = 0;
+    this.refresh();
+  }
+
+  private exitManagement(): void {
+    this.management = false;
+    this.refresh();
+  }
+
+  private moveSelection(step: number): void {
+    const rows = filterFooterRows(this.getRows?.() ?? [], new Date());
+    if (rows.length === 0) return;
+    const next = Math.max(0, Math.min(rows.length - 1, this.selectedIndex + step));
+    this.selectedIndex = next;
+    if (next < this.scrollTop) this.scrollTop = next;
+    if (next >= this.scrollTop + MAX_VISIBLE_MANAGEMENT_ROWS) {
+      this.scrollTop = next - MAX_VISIBLE_MANAGEMENT_ROWS + 1;
+    }
+    this.refresh();
+  }
+
+  private selectedRow(): FooterTreeRow | undefined {
+    return filterFooterRows(this.getRows?.() ?? [], new Date())[this.selectedIndex];
+  }
+
+  private refresh(): void {
+    this.tui?.requestRender();
   }
 }
 

@@ -55,7 +55,7 @@ function rows(count: number): FooterTreeRow[] {
 function makeFooter(getRows: () => readonly FooterTreeRow[]) {
   let renders = 0;
   const footer = new AgentFooter({
-    tui: { ...fakeTUI(), requestRender: () => renders++ } as TUI,
+    tui: { ...fakeTUI(), requestRender: () => { renders++; } } as unknown as TUI,
     theme,
     getInfo: info,
     getRows,
@@ -105,9 +105,9 @@ test("management mode shows at most four rows and scrolls with selection", () =>
   assert.match(treeLines(footer)[0]!, /main/);
   assert.match(treeLines(footer)[3]!, /child-3/);
 
-  for (let index = 0; index < 4; index++) footer.handleInput(Key.down);
+  for (let index = 0; index < 5; index++) footer.handleInput(Key.down);
   const visible = treeLines(footer);
   assert.equal(visible.length, 4);
-  assert.match(visible[3]!, /^❯ .*child-4/);
+  assert.match(visible[3]!, /^❯ .*child-5/);
   assert.doesNotMatch(visible.join("\n"), /child-1/);
 });
