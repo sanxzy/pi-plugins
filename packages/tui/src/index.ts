@@ -1,5 +1,7 @@
 export { QuestionDialog, DISMISSED } from "./question-dialog.ts";
 export type { QuestionDialogResult, QuestionDialogTheme, QuestionOption } from "./question-dialog.ts";
+export { AgentFooter } from "./agent-footer.ts";
+export type { AgentFooterInfo, AgentFooterOptions, AgentFooterTheme } from "./agent-footer.ts";
 export { AgentManager, MANAGER_SHORTCUT, MANAGER_OVERLAY_OPTIONS } from "./agent-manager.ts";
 export type {
   AgentManagerOptions,

@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createJob } from "@xzy-ai/core";
+import { getChildPool } from "@xzy-ai/runtime";
 import { registerAgentFooter } from "../src/registrations/footer.ts";
 
 /** ExtensionContext double exposing the UI surfaces the footer registration uses. */
@@ -65,8 +67,10 @@ test("the custom footer is installed for TUI sessions and restored on root shutd
     assert.equal(typeof capturedFooterFactory, "function", "TUI session installs the custom footer");
     assert.equal(restoredToNative, false);
 
-    // A background child settling emits session_shutdown(quit) from the child's
-    // session id; the root-owned footer must ignore it.
+    // Publish a scoped child job so the pool recognizes the child session id;
+    // the root-owned footer must ignore the child's own shutdown.
+    const pool = getChildPool(cwd, "root-session");
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "job-a", subagentType: "default" }));
     d.handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "quit" }, ctx(cwd, "job-a"));
     assert.equal(restoredToNative, false, "a child shutdown does not restore the native footer");
 

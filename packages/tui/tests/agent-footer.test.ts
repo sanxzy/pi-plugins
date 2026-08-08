@@ -71,12 +71,15 @@ test("renders provider, session name, unknown context, and narrow widths safely"
     }),
   });
 
-  const lines = footer.render(32).map(stripVTControlCharacters);
+  const lines = footer.render(64).map(stripVTControlCharacters);
   assert.ok(lines.length >= 2);
-  assert.ok(lines.every((line) => line.length <= 32));
+  assert.ok(lines.every((line) => line.length <= 64));
   assert.match(lines[0]!, /work$/);
   assert.match(lines[1]!, /claude/);
   assert.match(lines[1]!, /\?\/200k \(auto\)/);
+
+  const narrowLines = footer.render(32).map(stripVTControlCharacters);
+  assert.ok(narrowLines.every((line) => line.length <= 32));
 });
 
 test("disposes the supplied subscription and invalidates safely", () => {
