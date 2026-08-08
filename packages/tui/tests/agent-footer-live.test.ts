@@ -377,6 +377,73 @@ test("very short heights keep chrome and height changes re-clamp the panel", () 
   assert.match(expanded.join("\n"), /message line 29/, "tail content re-lays out at the larger height");
 });
 
+test("the panel is bounded to ~80% of the terminal height with the newest activity always visible", () => {
+  const tui = fakeTUI(24);
+  const view = new AgentLiveManager({
+    tui,
+    theme: textTheme,
+    live: longLive(60),
+    done: () => {},
+  });
+  const lines = render(view, 100);
+  assert.equal(lines.length, 19, "24-row terminal renders a fixed ~80% panel");
+  assert.match(lines.join("\n"), /message line 59/, "the newest message is always visible at the tail");
+  assert.match(lines.join("\n"), /╰/, "the bottom border is never truncated");
+  assert.match(lines.join("\n"), /╭/, "the top border is never truncated");
+
+  (tui.terminal as unknown as { rows: number }).rows = 30;
+  const taller = render(view, 100);
+  assert.equal(taller.length, 24, "30-row terminal renders a fixed ~80% panel");
+  assert.match(taller.join("\n"), /message line 59/, "newest message stays visible on resize");
+  assert.match(taller.join("\n"), /╰/, "bottom border stays visible on resize");
+});
+
+test("scrolling reaches the oldest message while keeping chrome and the panel height", () => {
+  const tui = fakeTUI(24);
+  const view = new AgentLiveManager({
+    tui,
+    theme: textTheme,
+    live: longLive(60),
+    done: () => {},
+  });
+  render(view, 100);
+  view.handleInput(END);
+  const lines = render(view, 100);
+  assert.equal(lines.length, 19, "panel height is stable while scrolled");
+  assert.match(lines.join("\n"), /message line 0/, "End still reveals the oldest message");
+  assert.doesNotMatch(lines.join("\n"), /message line 59/, "the tail is off-screen at the oldest position");
+  assert.match(lines.join("\n"), /╭/, "top border survives scrolling");
+  assert.match(lines.join("\n"), /╰/, "bottom border survives scrolling");
+});
+
+test("a settled view with a long transcript never truncates its newest line or border", () => {
+  const tui = fakeTUI(24);
+  const view = new AgentLiveManager({
+    tui,
+    theme: textTheme,
+    live: {
+      snapshot: {
+        status: "completed",
+        settled: true,
+        transcript: Array.from({ length: 60 }, (_, index) => ({
+          id: `m${index}`,
+          kind: "message" as const,
+          role: "assistant" as const,
+          text: `message line ${index}`,
+          complete: true,
+        })),
+      },
+      subscribe: () => () => {},
+      steer: async () => {},
+    },
+    done: () => {},
+  });
+  const lines = render(view, 100);
+  assert.equal(lines.length, 19, "settled panel stays at the fixed ~80% height");
+  assert.match(lines.join("\n"), /message line 59/, "the settled newest line is visible at the tail");
+  assert.match(lines.join("\n"), /╰/, "the settled bottom border is visible");
+});
+
 test("a settled live view remains scrollable while ignoring steering and cancellation", async () => {
   const steers: string[] = [];
   const view = new AgentLiveManager({
