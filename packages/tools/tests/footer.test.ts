@@ -261,7 +261,8 @@ test("live transcript events repaint the mounted live view without steering", as
     assert.ok(capturedCustomFactory, "live view mounts through the host custom surface");
 
     let repaints = 0;
-    const mounted = capturedCustomFactory!({ requestRender: () => { repaints++; }, terminal: { rows: 24 } }, { fg: (_c: string, t: string) => t }, {}, () => {}) as {
+    let doneCalls = 0;
+    const mounted = capturedCustomFactory!({ requestRender: () => { repaints++; }, terminal: { rows: 24 } }, { fg: (_c: string, t: string) => t }, {}, () => { doneCalls++; }) as {
       handleInput(data: string): void;
       dispose(): void;
     };
@@ -270,6 +271,10 @@ test("live transcript events repaint the mounted live view without steering", as
     // A live transcript event repaints the mounted view.
     feed.emit({ type: "message", id: "m1", phase: "start", role: "assistant", text: "thinking" });
     assert.ok(repaints > 0, "a live transcript event repaints the mounted view");
+
+    // Closing the live view resolves the host `done`, which closes the overlay.
+    mounted.handleInput(ESC);
+    assert.equal(doneCalls, 1, "closing the live view resolves the host done callback");
 
     mounted.dispose();
     footer.dispose();
