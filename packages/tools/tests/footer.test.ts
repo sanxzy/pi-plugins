@@ -230,6 +230,54 @@ test("Enter on a running child mounts the live view; cancel aborts, close does n
   }
 });
 
+test("live transcript events repaint the mounted live view without steering", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  try {
+    const d = piDouble();
+    registerAgentFooter(d.pi);
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd));
+
+    const pool = getChildPool(cwd, "root-session");
+    const feed = createChildLiveFeed();
+    pool.liveChildren.set("job-a", {
+      sessionFile: join(cwd, "sessions", "job-a.jsonl"),
+      live: feed,
+      steer: async () => {},
+      abort: async () => {},
+    });
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "default" }));
+
+    const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
+    const footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+    }) as { handleInput(data: string): boolean; dispose(): void };
+
+    // Enter mounts the live view through the host custom surface.
+    footer.handleInput(DOWN);
+    footer.handleInput(DOWN);
+    footer.handleInput(ENTER);
+    assert.ok(capturedCustomFactory, "live view mounts through the host custom surface");
+
+    let repaints = 0;
+    const mounted = capturedCustomFactory!({ requestRender: () => { repaints++; }, terminal: { rows: 24 } }, { fg: (_c: string, t: string) => t }, {}, () => {}) as {
+      handleInput(data: string): void;
+      dispose(): void;
+    };
+    assert.ok(mounted, "live view component mounts");
+
+    // A live transcript event repaints the mounted view.
+    feed.emit({ type: "message", id: "m1", phase: "start", role: "assistant", text: "thinking" });
+    assert.ok(repaints > 0, "a live transcript event repaints the mounted view");
+
+    mounted.dispose();
+    footer.dispose();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("the footer factory is re-installed after a host UI reset", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
   try {
