@@ -501,6 +501,144 @@ test("the legend changes for tail, scrolled, settled, and transient states", asy
   assert.match(render(settled).join("\n"), /read-only.*back.*close/i, "settled legend is contextual and non-mutating");
 });
 
+test("draft input shows a cursor and backspace edits without steering", () => {
+  const view = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: runningLive(),
+    done: () => {},
+  });
+  view.handleInput("h");
+  view.handleInput("i");
+  assert.match(render(view).join("\n"), /steer> hi█/, "draft renders a visible cursor");
+  view.handleInput("\x7f");
+  assert.match(render(view).join("\n"), /steer> h█/, "backspace removes the last draft character");
+});
+
+test("Enter clears the draft synchronously, sends once, and blank Enter never steers", async () => {
+  const steers: string[] = [];
+  let resolveSteer: (() => void) | undefined;
+  const view = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: {
+      ...runningLive(steers),
+      steer: async (prompt: string) => {
+        steers.push(prompt);
+        await new Promise<void>((resolve) => {
+          resolveSteer = resolve;
+        });
+      },
+    },
+    done: () => {},
+  });
+  view.handleInput(" ");
+  view.handleInput(ENTER);
+  assert.doesNotMatch(render(view).join("\n"), /steer> /, "draft clears before steer resolves");
+  view.handleInput(ENTER);
+  assert.deepEqual(steers, [""], "the first test prompt is not blank");
+  resolveSteer?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  const blanks: string[] = [];
+  const blankView = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: runningLive(blanks),
+    done: () => {},
+  });
+  blankView.handleInput(ENTER);
+  blankView.handleInput(" ");
+  blankView.handleInput(ENTER);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(blanks, [], "blank Enter never steers");
+});
+
+test("steer failure shows a warning while successful steering clears a prior hint", async () => {
+  let shouldFail = true;
+  const view = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: {
+      ...runningLive(),
+      steer: async () => {
+        if (shouldFail) {
+          shouldFail = false;
+          throw new Error("failed");
+        }
+      },
+    },
+    done: () => {},
+  });
+  view.handleInput("x");
+  view.handleInput(ENTER);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(render(view).join("\n"), /Steer failed/);
+  view.handleInput("y");
+  view.handleInput(ENTER);
+  assert.doesNotMatch(render(view).join("\n"), /Steer failed/, "new steering clears the old failure hint immediately");
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("repeated Alt+x while confirmation is pending asks only once", async () => {
+  let resolveConfirm: ((accepted: boolean) => void) | undefined;
+  let confirmations = 0;
+  let aborted = 0;
+  const view = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: runningLive(),
+    abort: async () => {
+      aborted++;
+    },
+    confirm: async () => {
+      confirmations++;
+      return await new Promise<boolean>((resolve) => {
+        resolveConfirm = resolve;
+      });
+    },
+    done: () => {},
+  });
+  view.handleInput(ALT_X);
+  view.handleInput(ALT_X);
+  assert.equal(confirmations, 1, "pending confirmation suppresses duplicates");
+  resolveConfirm?.(false);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(aborted, 0);
+});
+
+test("disposed view ignores late steer and cancel completions", async () => {
+  let rejectSteer: ((error: Error) => void) | undefined;
+  let rejectAbort: ((error: Error) => void) | undefined;
+  const view = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: {
+      ...runningLive(),
+      steer: async () => {
+        await new Promise<void>((_, reject) => {
+          rejectSteer = () => reject(new Error("late steer"));
+        });
+      },
+    },
+    abort: async () => {
+      await new Promise<void>((_, reject) => {
+        rejectAbort = () => reject(new Error("late abort"));
+      });
+    },
+    confirm: async () => true,
+    done: () => {},
+  });
+  view.handleInput("x");
+  view.handleInput(ENTER);
+  view.handleInput(ALT_X);
+  await new Promise((resolve) => setImmediate(resolve));
+  view.dispose();
+  rejectSteer?.(new Error("late steer"));
+  rejectAbort?.(new Error("late abort"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.doesNotMatch(render(view).join("\n"), /Steer failed|Cancel failed/, "late callbacks do not mutate disposed view");
+});
+
 test("a settled live view is read-only and ignores steering and cancellation", async () => {
   const steers: string[] = [];
   let aborted = 0;
