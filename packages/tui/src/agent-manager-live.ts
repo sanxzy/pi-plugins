@@ -109,7 +109,7 @@ export class AgentLiveManager implements Component {
     body.push(...transcriptLines.slice(start, end));
     if (this.hint) body.push(this.theme.fg("warning", this.hint));
     if (!snapshot.settled && this.draftInput) {
-      body.push(this.theme.fg("accent", `steer> ${this.draftInput}`));
+      body.push(this.theme.fg("accent", `steer> ${this.draftInput}█`));
     }
     const legend = this.legend(snapshot);
     const statusColorName = statusColor(snapshot.status);
@@ -184,9 +184,11 @@ export class AgentLiveManager implements Component {
       this.hint = undefined;
       void this.live.steer(prompt).then(
         () => {
+          if (this.disposed || this.settled || this.live.snapshot.settled) return;
           this.refresh();
         },
         () => {
+          if (this.disposed || this.settled || this.live.snapshot.settled) return;
           this.hint = "Steer failed. The child may have settled.";
           this.refresh();
         },
@@ -282,10 +284,12 @@ export class AgentLiveManager implements Component {
       this.refresh();
       void this.abort().then(
         () => {
+          if (this.disposed || this.settled) return;
           this.hint = "Cancelled.";
           this.refresh();
         },
         () => {
+          if (this.disposed || this.settled) return;
           this.hint = "Cancel failed. The child may have settled.";
           this.refresh();
         },

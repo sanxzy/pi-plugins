@@ -532,11 +532,12 @@ test("Enter clears the draft synchronously, sends once, and blank Enter never st
     },
     done: () => {},
   });
-  view.handleInput(" ");
+  view.handleInput("h");
+  view.handleInput("i");
   view.handleInput(ENTER);
   assert.doesNotMatch(render(view).join("\n"), /steer> /, "draft clears before steer resolves");
+  assert.deepEqual(steers, ["hi"], "the prompt sends once");
   view.handleInput(ENTER);
-  assert.deepEqual(steers, [""], "the first test prompt is not blank");
   resolveSteer?.();
   await new Promise((resolve) => setImmediate(resolve));
   const blanks: string[] = [];
