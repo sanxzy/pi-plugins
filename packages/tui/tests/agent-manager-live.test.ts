@@ -126,6 +126,141 @@ test("the live child view renders transcript and status from the retained snapsh
   assert.match(output, /╯/, "bottom-right border");
 });
 
+test("tool-call parameters are rendered under the tool name", () => {
+  const manager = new AgentManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    view: { scopeSessionId: "root", rows: ROWS },
+    done: () => {},
+    onEnter: (selected) =>
+      manager.pushLiveView({
+        sessionId: selected.sessionId,
+        description: selected.description,
+        live: {
+          snapshot: {
+            status: "running" as const,
+            settled: false,
+            transcript: [
+              {
+                id: "t1",
+                kind: "tool" as const,
+                toolCallId: "call-1",
+                toolName: "bash" as const,
+                args: { command: "ls -la", cwd: "/repo" },
+                text: "",
+                complete: false,
+                isError: false,
+              },
+            ],
+          },
+          steer: async () => {},
+          subscribe: () => () => {},
+        },
+      }),
+  });
+  manager.handleInput(raw("down"));
+  manager.handleInput("\r");
+
+  const output = render(manager).join("\n");
+  assert.match(output, /⌘ bash/, "tool name header remains");
+  assert.match(output, /command: ls -la/, "tool arg key/value line is rendered");
+  assert.match(output, /cwd: \/repo/, "second tool arg line is rendered");
+});
+
+test("a long transcript is scrollable: tail by default, earlier lines reachable by scrolling", () => {
+  const longTranscript = Array.from({ length: 30 }, (_, index) => ({
+    id: `m${index}`,
+    kind: "message" as const,
+    role: "assistant" as const,
+    text: `message line ${index}`,
+    complete: true,
+  }));
+  const manager = new AgentManager({
+    tui: fakeTUI(12),
+    theme: textTheme,
+    view: { scopeSessionId: "root", rows: ROWS },
+    done: () => {},
+    onEnter: (selected) =>
+      manager.pushLiveView({
+        sessionId: selected.sessionId,
+        description: "child",
+        live: {
+          snapshot: { status: "running" as const, settled: false, transcript: longTranscript },
+          steer: async () => {},
+          subscribe: () => () => {},
+        },
+      }),
+  });
+  manager.handleInput(raw("down"));
+  manager.handleInput("\r");
+
+  // Tail is shown by default: the last message is visible, the first is not.
+  let output = render(manager).join("\n");
+  assert.match(output, /message line 29/, "tail message is visible by default");
+  assert.doesNotMatch(output, /message line 0/, "oldest message is off-screen initially");
+
+  // Scroll up to the top: the oldest message becomes visible.
+  manager.handleInput("[6~"); // PageUp
+  output = render(manager).join("\n");
+  assert.match(output, /message line 0/, "scrolling up reveals the oldest message");
+  assert.match(output, /↑ scroll/, "scroll indicator appears while scrolled");
+  assert.doesNotMatch(output, /message line 29/, "tail is off-screen at the top");
+
+  // Home returns to the tail.
+  manager.handleInput("[H"); // Home
+  output = render(manager).join("\n");
+  assert.match(output, /message line 29/, "Home returns to the tail");
+  assert.doesNotMatch(output, /↑ scroll/, "no scroll indicator at the tail");
+
+  // End jumps to the top again.
+  manager.handleInput("[F"); // End
+  output = render(manager).join("\n");
+  assert.match(output, /message line 0/, "End jumps to the oldest message");
+});
+
+test("scrolling keys do not type into the steer draft and steering still works after scrolling", () => {
+  const steers: string[] = [];
+  const longTranscript = Array.from({ length: 20 }, (_, index) => ({
+    id: `m${index}`,
+    kind: "message" as const,
+    role: "assistant" as const,
+    text: `message line ${index}`,
+    complete: true,
+  }));
+  const manager = new AgentManager({
+    tui: fakeTUI(10),
+    theme: textTheme,
+    view: { scopeSessionId: "root", rows: ROWS },
+    done: () => {},
+    onEnter: (selected) =>
+      manager.pushLiveView({
+        sessionId: selected.sessionId,
+        description: "child",
+        live: {
+          snapshot: { status: "running" as const, settled: false, transcript: longTranscript },
+          steer: async (prompt: string): Promise<void> => {
+            steers.push(prompt);
+          },
+          subscribe: () => () => {},
+        },
+      }),
+  });
+  manager.handleInput(raw("down"));
+  manager.handleInput("\r");
+
+  manager.handleInput("[6~"); // PageUp — scroll, not draft text
+  manager.handleInput("h");
+  manager.handleInput("i");
+  manager.handleInput("\r");
+  manager.handleInput("[5~"); // PageDown after steering
+  return new Promise<void>((resolve) => {
+    setImmediate(() => {
+      assert.deepEqual(steers, ["hi"], "PageUp/PageDown never enter the draft; typed text still steers");
+      resolve();
+    });
+  });
+});
+
 test("a live child with no activity renders an intentional empty state and status legend", () => {
   const manager = new AgentManager({
     tui: fakeTUI(),

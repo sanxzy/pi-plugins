@@ -38,8 +38,34 @@ test("maps SDK message and tool events to the core live feed", () => {
     { type: "message", id: "assistant-1", phase: "update", role: "assistant", text: "hello" },
   );
   assert.deepEqual(
-    mapAgentSessionEvent({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: {} }),
-    { type: "tool", id: "call-1", phase: "start", toolCallId: "call-1", toolName: "bash", text: "" },
+    mapAgentSessionEvent({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "ls" } }),
+    {
+      type: "tool",
+      id: "call-1",
+      phase: "start",
+      toolCallId: "call-1",
+      toolName: "bash",
+      args: { command: "ls" },
+      text: "",
+    },
+  );
+  assert.deepEqual(
+    mapAgentSessionEvent({
+      type: "tool_execution_update",
+      toolCallId: "call-2",
+      toolName: "read",
+      args: { path: "file.ts" },
+      partialResult: { content: [{ type: "text", text: "partial" }] },
+    }),
+    {
+      type: "tool",
+      id: "call-2",
+      phase: "update",
+      toolCallId: "call-2",
+      toolName: "read",
+      args: { path: "file.ts" },
+      text: "partial",
+    },
   );
   assert.deepEqual(
     mapAgentSessionEvent({
@@ -59,6 +85,34 @@ test("maps SDK message and tool events to the core live feed", () => {
       isError: false,
     },
   );
+});
+
+test("live feed retains tool-call args in the transcript entry", () => {
+  const feed = createChildLiveFeed();
+  feed.emit({
+    type: "tool",
+    id: "call-1",
+    phase: "start",
+    toolCallId: "call-1",
+    toolName: "bash",
+    args: { command: "ls -la", cwd: "/repo" },
+    text: "",
+  });
+  feed.emit({
+    type: "tool",
+    id: "call-1",
+    phase: "end",
+    toolCallId: "call-1",
+    toolName: "bash",
+    text: "done",
+    isError: false,
+  });
+  assert.equal(feed.snapshot.transcript.length, 1);
+  const entry = feed.snapshot.transcript[0];
+  assert.equal(entry.kind, "tool");
+  if (entry.kind === "tool") {
+    assert.deepEqual(entry.args, { command: "ls -la", cwd: "/repo" }, "args are retained on the completed entry");
+  }
 });
 
 test("maps agent end and settlement boundaries without treating streaming as settlement", () => {
