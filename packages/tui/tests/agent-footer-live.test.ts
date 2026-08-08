@@ -3,7 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 import { test } from "node:test";
 import type { TUI } from "@earendil-works/pi-tui";
 import { AgentFooter, type AgentFooterInfo, type FooterTreeRow } from "../src/agent-footer.ts";
-import { AgentLiveManager, type AgentLiveSession } from "../src/agent-manager-live.ts";
+import { AgentLiveManager, type AgentLiveManagerTheme, type AgentLiveSession } from "../src/agent-manager-live.ts";
 import { textTheme } from "./test-theme.ts";
 
 const DOWN = "\x1b[B";
@@ -81,6 +81,19 @@ function runningLive(steers: string[] = [], onUnsubscribe?: () => void): AgentLi
 
 function render(component: { render(width: number): string[] }, width = 100): string[] {
   return component.render(width).map(stripVTControlCharacters);
+}
+
+/** Tagging theme: colors every call as `[color]text[/color]` for assertions. */
+function tagTheme(): AgentLiveManagerTheme {
+  return { fg: (color, text) => `[${color}]${text}[/${color}]` };
+}
+
+function settledLive(status: AgentLiveSession["snapshot"]["status"], transcript: AgentLiveSession["snapshot"]["transcript"] = []): AgentLiveSession {
+  return {
+    snapshot: { status, settled: true, transcript },
+    subscribe: () => () => {},
+    steer: async () => {},
+  };
 }
 
 test("Enter on an enterable running child invokes onEnter with the selected row", () => {
@@ -399,6 +412,92 @@ test("a settled live view remains scrollable while ignoring steering and cancell
   view.handleInput(ALT_X);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(steers, [], "settled view ignores steering while scrolling remains available");
+});
+
+test("each terminal status has a semantic icon color and retains the event count", () => {
+  const cases: readonly [AgentLiveSession["snapshot"]["status"], string, string][] = [
+    ["running", "●", "accent"],
+    ["completed", "✓", "success"],
+    ["failed", "✗", "error"],
+    ["cancelled", "■", "warning"],
+    ["interrupted", "■", "warning"],
+  ];
+  for (const [status, icon, color] of cases) {
+    const view = new AgentLiveManager({
+      tui: fakeTUI(),
+      theme: tagTheme(),
+      live: settledLive(status, [{ id: "m1", kind: "message", role: "assistant", text: "done", complete: true }]),
+      done: () => {},
+    });
+    const output = view.render(100).join("\n");
+    assert.match(output, new RegExp(`\\[${color}\\]${icon} ${status}\\[/${color}\\]`), `${status} uses its semantic status color`);
+    assert.match(output, new RegExp(`1 events`), `${status} keeps the event count`);
+  }
+});
+
+test("empty running and settled states explain what the user can do", () => {
+  const running = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: {
+      snapshot: { status: "running", settled: false, transcript: [] },
+      subscribe: () => () => {},
+      steer: async () => {},
+    },
+    done: () => {},
+  });
+  const runningOutput = render(running).join("\\n");
+  assert.match(runningOutput, /No activity yet/);
+  assert.match(runningOutput, /waiting|steer/i, "running empty state gives an actionable next step");
+
+  const settled = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: settledLive("completed"),
+    done: () => {},
+  });
+  const settledOutput = render(settled).join("\\n");
+  assert.match(settledOutput, /No activity recorded|No transcript/i);
+  assert.match(settledOutput, /read-only|back|close/i, "settled empty state explains its read-only action");
+});
+
+test("the legend changes for tail, scrolled, settled, and transient states", async () => {
+  const view = new AgentLiveManager({
+    tui: fakeTUI(10),
+    theme: textTheme,
+    live: longLive(20),
+    done: () => {},
+  });
+  let output = render(view).join("\\n");
+  assert.match(output, /Type to steer this child.*Enter send.*Alt\\+x cancel/);
+  view.handleInput(END);
+  output = render(view).join("\\n");
+  assert.match(output, /scroll.*Home.*tail|scroll.*PageDown/i, "scrolled legend explains how to return to the tail");
+
+  const failing = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: {
+      snapshot: { status: "running", settled: false, transcript: [] },
+      subscribe: () => () => {},
+      steer: async () => {
+        throw new Error("no");
+      },
+    },
+    done: () => {},
+  });
+  failing.handleInput("h");
+  failing.handleInput(ENTER);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(render(failing).join("\\n"), /Steer failed/);
+
+  const settled = new AgentLiveManager({
+    tui: fakeTUI(),
+    theme: textTheme,
+    live: settledLive("completed", [{ id: "m1", kind: "message", role: "assistant", text: "done", complete: true }]),
+    done: () => {},
+  });
+  assert.match(render(settled).join("\\n"), /read-only.*back.*close/i, "settled legend is contextual and non-mutating");
 });
 
 test("a settled live view is read-only and ignores steering and cancellation", async () => {
