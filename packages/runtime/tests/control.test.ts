@@ -24,16 +24,17 @@ import { prepareResumeSessionFile } from "@xzy-ai/runtime";
  */
 
 function makeJob(jobId: string, status = "queued", extra: Partial<Job> = {}): Job {
-  const job = createJob({
+  const parentJobId = extra.parentJobId;
+  const parentSessionId = extra.parentSessionId ?? (parentJobId ?? "root-session");
+  return createJob({
     jobId,
     status: status as Job["status"],
     description: "d",
     subagentType: "default",
     ...extra,
+    parentJobId,
+    parentSessionId,
   });
-  return extra.parentJobId !== undefined
-    ? { ...job, parentJobId: extra.parentJobId, rootJobId: extra.rootJobId ?? job.rootJobId, depth: extra.depth ?? job.depth }
-    : job;
 }
 
 /** Parent-chain view over a job map, matching the registry seam. */
@@ -43,7 +44,7 @@ function getJobFrom(map: Map<string, Job>): (jobId: string) => Job | undefined {
 
 test("checkControlScope: the root orchestrator controls every job", () => {
   const jobs = new Map<string, Job>([["a", makeJob("a", "running")]]);
-  const root: ControlCaller = { jobId: undefined };
+  const root: ControlCaller = { sessionId: "root-session", jobId: undefined };
   assert.deepEqual(checkControlScope(root, jobs.get("a")!, getJobFrom(jobs)), { allowed: true });
 });
 
@@ -168,9 +169,80 @@ test("statusFor: root controls everything, a child cannot control an ancestor", 
     ["a", makeJob("a", "running")],
     ["b", makeJob("b", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
-  assert.equal(statusFor({ jobId: undefined }, jobs.get("a")!, getJobFrom(jobs)).controllable, true);
+  assert.equal(statusFor({ sessionId: "root-a", jobId: undefined }, jobs.get("a")!, getJobFrom(jobs)).controllable, true);
   assert.equal(statusFor({ jobId: "b" }, jobs.get("a")!, getJobFrom(jobs)).controllable, false);
   assert.equal(statusFor({ jobId: "b" }, jobs.get("b")!, getJobFrom(jobs)).controllable, true);
+});
+
+test("session-scoped root callers cannot see or control another parent session", () => {
+  const jobs = new Map<string, Job>([
+    ["a-running", makeJob("a-running", "running", { parentSessionId: "root-a" })],
+    ["a-done", makeJob("a-done", "completed", { parentJobId: "a-running", rootJobId: "a-running", depth: 1 })],
+    ["a-cancelled", makeJob("a-cancelled", "cancelled", { parentJobId: "a-running", rootJobId: "a-running", depth: 1 })],
+    ["b-running", makeJob("b-running", "running", { parentSessionId: "root-b" })],
+    ["b-done", makeJob("b-done", "completed", { parentJobId: "b-running", rootJobId: "b-running", depth: 1 })],
+    ["b-cancelled", makeJob("b-cancelled", "cancelled", { parentJobId: "b-running", rootJobId: "b-running", depth: 1 })],
+  ]);
+  const getJob = getJobFrom(jobs);
+  const caller: ControlCaller = { sessionId: "root-a" };
+
+  assert.deepEqual(visibleJobs(caller, jobs.values(), getJob).map((job) => job.jobId), [
+    "a-running",
+    "a-done",
+    "a-cancelled",
+  ]);
+  assert.deepEqual(checkControlScope(caller, jobs.get("a-running")!, getJob), { allowed: true });
+  assert.deepEqual(checkControlScope(caller, jobs.get("b-running")!, getJob), {
+    allowed: false,
+    reason: "not a descendant",
+  });
+  assert.equal(statusFor(caller, jobs.get("b-done")!, getJob).controllable, false);
+  assert.deepEqual(canCancel(caller, jobs.get("b-running")!, getJob), {
+    allowed: false,
+    reason: "not a descendant",
+  });
+  assert.deepEqual(resumeDisposition(caller, jobs.get("b-cancelled")!, getJob), {
+    kind: "reject",
+    reason: "not a descendant",
+    job: jobs.get("b-cancelled"),
+  });
+});
+
+test("a nested caller sees its own job and recursive descendants, not siblings or ancestors", () => {
+  const jobs = new Map<string, Job>([
+    ["a", makeJob("a", "running", { parentSessionId: "root-a" })],
+    ["b", makeJob("b", "completed", { parentJobId: "a", rootJobId: "a", depth: 1 })],
+    ["c", makeJob("c", "cancelled", { parentJobId: "b", rootJobId: "a", depth: 2 })],
+    ["sibling", makeJob("sibling", "running", { parentSessionId: "root-a" })],
+    ["other", makeJob("other", "running", { parentSessionId: "root-b" })],
+  ]);
+  const getJob = getJobFrom(jobs);
+  const caller: ControlCaller = { sessionId: "a", jobId: "a", rootJobId: "a" };
+
+  assert.deepEqual(visibleJobs(caller, jobs.values(), getJob).map((job) => job.jobId), ["a", "b", "c"]);
+  assert.deepEqual(checkControlScope(caller, jobs.get("b")!, getJob), { allowed: true });
+  assert.deepEqual(checkControlScope(caller, jobs.get("c")!, getJob), { allowed: true });
+  assert.deepEqual(checkControlScope(caller, jobs.get("sibling")!, getJob), {
+    allowed: false,
+    reason: "not a descendant",
+  });
+  assert.deepEqual(checkControlScope(caller, jobs.get("other")!, getJob), {
+    allowed: false,
+    reason: "not a descendant",
+  });
+});
+
+test("session scope accepts a rehydrated descendant when its parent chain is present", () => {
+  const jobs = new Map<string, Job>([
+    ["root-child", makeJob("root-child", "completed", { parentSessionId: "root-a" })],
+    ["grandchild", makeJob("grandchild", "interrupted", { parentJobId: "root-child", rootJobId: "root-child", depth: 1 })],
+  ]);
+  const caller: ControlCaller = { sessionId: "root-a" };
+
+  assert.deepEqual(visibleJobs(caller, jobs.values(), getJobFrom(jobs)).map((job) => job.jobId), [
+    "root-child",
+    "grandchild",
+  ]);
 });
 
 test("prepareResumeSessionFile rewrites the header id and trims a trailing tool call", () => {
