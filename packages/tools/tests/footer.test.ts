@@ -48,8 +48,10 @@ let restoredToNative = false;
 let capturedCustomFactory:
   | ((tui: unknown, theme: unknown, keybindings: unknown, done: (value: unknown) => void) => unknown)
   | undefined;
-function recordedCustom(factory: unknown, _options?: unknown): Promise<unknown> {
+let capturedCustomOptions: unknown;
+function recordedCustom(factory: unknown, options?: unknown): Promise<unknown> {
   capturedCustomFactory = factory as typeof capturedCustomFactory;
+  capturedCustomOptions = options;
   return Promise.resolve(undefined);
 }
 let terminalInputHandler: ((data: string) => { consume?: boolean; data?: string } | undefined) | undefined;
@@ -277,6 +279,41 @@ test("live transcript events repaint the mounted live view without steering", as
     assert.equal(doneCalls, 1, "closing the live view resolves the host done callback");
 
     mounted.dispose();
+    footer.dispose();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("the live overlay mount does not delegate height truncation to the host", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  try {
+    const d = piDouble();
+    registerAgentFooter(d.pi);
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd));
+
+    const pool = getChildPool(cwd, "root-session");
+    const feed = createChildLiveFeed();
+    pool.liveChildren.set("job-a", {
+      sessionFile: join(cwd, "sessions", "job-a.jsonl"),
+      live: feed,
+      steer: async () => {},
+      abort: async () => {},
+    });
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "default" }));
+
+    const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
+    const footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+    }) as { handleInput(data: string): boolean; dispose(): void };
+    footer.handleInput(DOWN);
+    footer.handleInput(DOWN);
+    footer.handleInput(ENTER);
+
+    const options = capturedCustomOptions as { overlayOptions?: { maxHeight?: unknown } } | undefined;
+    assert.equal(options?.overlayOptions?.maxHeight, undefined, "the host must not slice the bottom of the panel");
     footer.dispose();
   } finally {
     rmSync(cwd, { recursive: true, force: true });
