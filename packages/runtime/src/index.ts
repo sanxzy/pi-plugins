@@ -7,7 +7,7 @@ export {
 } from "./infrastructure/pi-sdk/child-live.ts";
 export { observeChildStatus, type ChildStatus, type ChildStatusInput } from "./infrastructure/pi-sdk/child-status.ts";
 export { backgroundModeError, formatBackgroundResult, runBackgroundJob } from "./infrastructure/pool/background.ts";
-export { getChildPool, type ChildPool, type LiveActivitySource } from "./infrastructure/pool/child-pool.ts";
+export { getChildPool, type ChildPool } from "./infrastructure/pool/child-pool.ts";
 export { createConcurrencyGate, type ConcurrencyGate } from "./infrastructure/pool/concurrency-gate.ts";
 export { createDeliveryCoordinator, type DeliveryCoordinator } from "./infrastructure/pool/delivery.ts";
 export { createInterruptionSweep, interruptRunningJobs } from "./infrastructure/pool/interruption.ts";

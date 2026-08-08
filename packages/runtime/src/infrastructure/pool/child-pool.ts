@@ -29,15 +29,6 @@ export interface ChildPool {
   /** Live child handles keyed by job id; populated while a child runs. */
   readonly liveChildren: Map<string, ChildSessionControl>;
   /**
-   * Observable source of live child activity.
-   *
-   * Fires whenever a live child is published or its feed emits, so UI surfaces
-   * (the agent-activity ticker) can re-read the live children without reaching
-   * into pool internals. The event carries no payload: consumers read
-   * `liveChildren` for the current state.
-   */
-  readonly liveActivity: LiveActivitySource;
-  /**
    * Mark running jobs interrupted and abort their children.
    *
    * Idempotent and shared: invoked from the lifecycle adapter when the host
@@ -46,11 +37,6 @@ export interface ChildPool {
   readonly interruptRunningJobs: () => Promise<void>;
   /** Reset the per-response agent-call counter; called from `turn_start`. */
   resetParallelAgents(): void;
-}
-
-/** Subscription surface for live child activity changes. */
-export interface LiveActivitySource {
-  subscribe(listener: () => void): () => void;
 }
 
 declare global {
@@ -77,16 +63,6 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
   // id and route to their parent's folder on append.
   const registry = createScopedRegistry(projectRoot, rootSessionId);
   const liveChildren = new Map<string, ChildSessionControl>();
-  const activityListeners = new Set<() => void>();
-  const notifyActivity = (): void => {
-    for (const listener of [...activityListeners]) listener();
-  };
-  const liveActivity: LiveActivitySource = {
-    subscribe(listener: () => void): () => void {
-      activityListeners.add(listener);
-      return () => activityListeners.delete(listener);
-    },
-  };
 
   const pool: ChildPool = {
     projectRoot,
@@ -96,23 +72,12 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
     concurrency: createConcurrencyGate(MAX_CONCURRENCY),
     delivery: createDeliveryCoordinator(),
     liveChildren,
-    liveActivity,
     interruptRunningJobs: createInterruptionSweep({ registry, liveChildren }),
     resetParallelAgents(): void {
       pool.concurrency.resetParallelCount();
     },
   };
 
-  // Publish live children into the activity source as they appear so the ticker
-  // observes each running agent. The child's own feed drives subsequent
-  // notifications, so the ticker re-reads the latest transcript on every emit.
-  const originalSet = liveChildren.set.bind(liveChildren);
-  liveChildren.set = (jobId: string, control: ChildSessionControl): Map<string, ChildSessionControl> => {
-    const result = originalSet(jobId, control);
-    control.live?.subscribe(() => notifyActivity());
-    notifyActivity();
-    return result;
-  };
 
   if (!globalThis.piCodePool) {
     globalThis.piCodePool = {};

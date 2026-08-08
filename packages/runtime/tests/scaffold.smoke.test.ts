@@ -34,25 +34,3 @@ test("child pool slot is namespaced by project root", () => {
   a.registry.all().set("j1", undefined as never);
   assert.ok(!c.registry.all().has("j1"));
 });
-
-test("publishing a live child notifies live-activity subscribers", () => {
-  const pool = getChildPool("/tmp/projects/activity");
-  let notified = 0;
-  const unsubscribe = pool.liveActivity.subscribe(() => {
-    notified++;
-  });
-
-  pool.liveChildren.set("job-a", {
-    steer: async () => {},
-    abort: async () => {},
-    live: {
-      snapshot: { status: "running", settled: false, transcript: [] },
-      subscribe: () => () => {},
-      steer: async () => {},
-      abort: async () => {},
-    },
-  });
-
-  assert.ok(notified >= 1, "publishing a live child notifies activity subscribers");
-  unsubscribe();
-});
