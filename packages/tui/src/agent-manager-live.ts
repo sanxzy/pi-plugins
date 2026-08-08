@@ -1,5 +1,5 @@
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
-import { fitPanelToHeight, renderBorderedPanel, statusIcon } from "./agent-manager-chrome.ts";
+import { fitPanelToHeight, renderBorderedPanel, statusColor, statusIcon } from "./agent-manager-chrome.ts";
 
 /** How a live child view was left, for the manager's return-stack bookkeeping. */
 export type LiveViewReason = "escape" | "shortcut" | "back";
@@ -111,17 +111,15 @@ export class AgentLiveManager implements Component {
     if (!snapshot.settled && this.draftInput) {
       body.push(this.theme.fg("accent", `steer> ${this.draftInput}`));
     }
-    const scrollHint = this.liveScroll > 0 ? "  ↑ scroll" : "";
-    const footer = snapshot.settled
-      ? this.theme.fg("dim", `${statusIcon(snapshot.status)} ${snapshot.status} • read-only • ← back • Esc close${scrollHint}`)
-      : this.theme.fg("dim", `Type to steer this child • Enter send • Alt+x cancel • ← back • Esc close${scrollHint}`);
-    const status = `${statusIcon(snapshot.status)} ${snapshot.status}  •  ${snapshot.transcript.length} events`;
+    const legend = this.legend(snapshot);
+    const statusColorName = statusColor(snapshot.status);
+    const status = `${this.theme.fg(statusColorName, `${statusIcon(snapshot.status)} ${snapshot.status}`)}  •  ${snapshot.transcript.length} events`;
     const lines = renderBorderedPanel(this.theme, {
       width: renderWidth,
       title: `${this.theme.fg("accent", "Child Session")} ─ ${this.theme.fg("dim", snapshot.status)}`,
       status,
       body,
-      footer,
+      footer: legend,
     });
     this.cachedLines = fitPanelToHeight(lines, viewportRows);
     return this.cachedLines;
@@ -131,7 +129,16 @@ export class AgentLiveManager implements Component {
     snapshot: AgentLiveSession["snapshot"],
     contentWidth: number,
   ): string[] {
-    if (snapshot.transcript.length === 0) return [this.theme.fg("muted", "No activity yet.")];
+    if (snapshot.transcript.length === 0) {
+      return [
+        this.theme.fg(
+          "muted",
+          snapshot.settled
+            ? "No transcript recorded — this child finished without activity."
+            : "No activity yet — waiting for the child to start. Type a prompt to steer it.",
+        ),
+      ];
+    }
     const lines: string[] = [];
     for (const entry of snapshot.transcript) {
       if (entry.kind === "tool") {
@@ -195,6 +202,17 @@ export class AgentLiveManager implements Component {
       this.draftInput += data;
       this.refresh();
     }
+  }
+
+  private legend(snapshot: AgentLiveSession["snapshot"]): string {
+    const scrollHint = this.liveScroll > 0 ? "  ↑ scroll • Home tail • PageDown next" : "";
+    if (snapshot.settled) {
+      return this.theme.fg("dim", `read-only • ← back • Esc close${scrollHint}`);
+    }
+    if (this.hint) {
+      return this.theme.fg("warning", `${this.hint} • Esc close${scrollHint}`);
+    }
+    return this.theme.fg("dim", `Type to steer • Enter send • Alt+x cancel • ← back • Esc close${scrollHint}`);
   }
 
   /**

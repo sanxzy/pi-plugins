@@ -85,6 +85,27 @@ export function fitPanelToHeight(lines: readonly string[], height: number): stri
   ];
 }
 
+export function statusColor(status: string): string {
+  switch (status) {
+    case "running":
+    case "active":
+      return "accent";
+    case "completed":
+    case "done":
+      return "success";
+    case "failed":
+    case "error":
+      return "error";
+    case "cancelled":
+    case "interrupted":
+    case "stopped":
+    case "aborted":
+      return "warning";
+    default:
+      return "muted";
+  }
+}
+
 export function statusIcon(status: string): string {
   switch (status) {
     case "running":

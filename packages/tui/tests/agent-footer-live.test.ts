@@ -404,9 +404,10 @@ test("a settled live view remains scrollable while ignoring steering and cancell
     done: () => {},
   });
   view.handleInput(END);
-  let output = render(view).join("\\n");
+  let output = render(view).join("\n");
   assert.match(output, /message line 0/, "settled transcript scrolls to its oldest line");
   assert.match(output, /read-only/, "settled view remains read-only");
+  assert.match(output, /← back • Esc close/, "settled legend keeps its navigation actions");
   view.handleInput("x");
   view.handleInput(ENTER);
   view.handleInput(ALT_X);
@@ -446,7 +447,7 @@ test("empty running and settled states explain what the user can do", () => {
     },
     done: () => {},
   });
-  const runningOutput = render(running).join("\\n");
+  const runningOutput = render(running).join("\n");
   assert.match(runningOutput, /No activity yet/);
   assert.match(runningOutput, /waiting|steer/i, "running empty state gives an actionable next step");
 
@@ -456,7 +457,7 @@ test("empty running and settled states explain what the user can do", () => {
     live: settledLive("completed"),
     done: () => {},
   });
-  const settledOutput = render(settled).join("\\n");
+  const settledOutput = render(settled).join("\n");
   assert.match(settledOutput, /No activity recorded|No transcript/i);
   assert.match(settledOutput, /read-only|back|close/i, "settled empty state explains its read-only action");
 });
@@ -468,10 +469,10 @@ test("the legend changes for tail, scrolled, settled, and transient states", asy
     live: longLive(20),
     done: () => {},
   });
-  let output = render(view).join("\\n");
-  assert.match(output, /Type to steer this child.*Enter send.*Alt\\+x cancel/);
+  let output = render(view).join("\n");
+  assert.match(output, /Type to steer.*Enter send.*Alt\+x cancel/);
   view.handleInput(END);
-  output = render(view).join("\\n");
+  output = render(view).join("\n");
   assert.match(output, /scroll.*Home.*tail|scroll.*PageDown/i, "scrolled legend explains how to return to the tail");
 
   const failing = new AgentLiveManager({
@@ -489,7 +490,7 @@ test("the legend changes for tail, scrolled, settled, and transient states", asy
   failing.handleInput("h");
   failing.handleInput(ENTER);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.match(render(failing).join("\\n"), /Steer failed/);
+  assert.match(render(failing).join("\n"), /Steer failed/);
 
   const settled = new AgentLiveManager({
     tui: fakeTUI(),
@@ -497,7 +498,7 @@ test("the legend changes for tail, scrolled, settled, and transient states", asy
     live: settledLive("completed", [{ id: "m1", kind: "message", role: "assistant", text: "done", complete: true }]),
     done: () => {},
   });
-  assert.match(render(settled).join("\\n"), /read-only.*back.*close/i, "settled legend is contextual and non-mutating");
+  assert.match(render(settled).join("\n"), /read-only.*back.*close/i, "settled legend is contextual and non-mutating");
 });
 
 test("a settled live view is read-only and ignores steering and cancellation", async () => {
