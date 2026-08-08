@@ -6,20 +6,50 @@ import type {
   Theme,
   ReadonlyFooterDataProvider,
 } from "@earendil-works/pi-coding-agent";
-import { AgentFooter, type AgentFooterInfo } from "@xzy-ai/tui";
-import { getChildPool } from "@xzy-ai/runtime";
+import {
+  AgentFooter,
+  type AgentFooterInfo,
+  type FooterTreeRow,
+} from "@xzy-ai/tui";
+import { getChildPool, scopeDescendants } from "@xzy-ai/runtime";
+
+/** Debounce job-status and live-leaf repaints so bursty child activity coalesces. */
+const REPAINT_DEBOUNCE_MS = 250;
 
 /** Install the permanent native-information footer for TUI sessions. */
 export function registerAgentFooter(pi: ExtensionAPI): void {
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
+    // The root session id scopes the descendant projection; the pool is created
+    // with it so the root (which is not a job) is the tree root.
+    const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
     ctx.ui.setFooter((tui, theme, footerData) => {
+      let repaintTimer: ReturnType<typeof setTimeout> | undefined;
+      const requestRepaint = (): void => {
+        if (repaintTimer) return;
+        repaintTimer = setTimeout(
+          () => {
+            repaintTimer = undefined;
+            tui.requestRender();
+          },
+          REPAINT_DEBOUNCE_MS,
+        );
+      };
       const branchUnsubscribe = footerData.onBranchChange(() => tui.requestRender());
+      const subscribeTree = subscribeFooterTree(pool, requestRepaint);
       const footer = new AgentFooter({
         tui,
         theme: footerTheme(theme),
         getInfo: () => footerInfo(ctx, footerData),
-        dispose: branchUnsubscribe,
+        getRows: () => footerRows(ctx, pool),
+        dispose: () => {
+          if (repaintTimer !== undefined) {
+            clearTimeout(repaintTimer);
+            repaintTimer = undefined;
+          }
+          branchUnsubscribe();
+          subscribeTree();
+        },
       });
       return footer;
     });
@@ -30,6 +60,98 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
     if (pool.registry.get(ctx.sessionManager.getSessionId()) !== undefined) return;
     ctx.ui.setFooter(undefined);
   });
+}
+
+/**
+ * Subscribe to the runtime's per-job transitions and live-child feed so the
+ * footer's descendant tree repaints as jobs move and transcripts advance. The
+ * subscription is independent of child control: it never aborts or steers.
+ */
+function subscribeFooterTree(
+  pool: ReturnType<typeof getChildPool>,
+  repaint: () => void,
+): () => void {
+  const subscriptions = new Map<string, () => void>();
+
+  const attachLiveChildren = (): void => {
+    for (const [jobId, control] of pool.liveChildren) {
+      if (subscriptions.has(jobId) || !control.live) continue;
+      const live = control.live;
+      subscriptions.set(jobId, live.subscribe(() => repaint()));
+    }
+    for (const jobId of [...subscriptions.keys()]) {
+      if (pool.liveChildren.has(jobId)) continue;
+      subscriptions.get(jobId)?.();
+      subscriptions.delete(jobId);
+    }
+  };
+
+  // The registry has no event emitter; poll the scoped descendant projection on
+  // the same debounce cadence so newly created/settled jobs appear in the tree.
+  const poll = setInterval(attachLiveChildren, REPAINT_DEBOUNCE_MS);
+  attachLiveChildren();
+  return () => {
+    clearInterval(poll);
+    for (const unsubscribe of subscriptions.values()) unsubscribe();
+    subscriptions.clear();
+  };
+}
+
+/** Project the root session's descendant scope into footer tree rows. */
+function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>): FooterTreeRow[] {
+  const rootSessionId = ctx.sessionManager.getSessionId();
+  const descendants = scopeDescendants(
+    (jobId) => pool.registry.get(jobId),
+    pool.registry.all(),
+    rootSessionId,
+    pool.liveChildren,
+    new Date(),
+  );
+  if (descendants.length === 0) return [];
+
+  const root: FooterTreeRow = {
+    rowId: rootSessionId,
+    root: true,
+    status: "active",
+    depth: 0,
+    description: "main",
+    durationMs: 0,
+    enterable: false,
+  };
+  return [
+    root,
+    ...descendants.map((row) => ({
+      rowId: row.rowId,
+      status: row.status,
+      depth: row.depth + 1,
+      description: row.description,
+      durationMs: row.durationMs,
+      leaf: latestLeaf(pool.liveChildren.get(row.jobId)),
+      enterable: row.enterable,
+      updatedAtMs: isTerminal(row.status) ? settledMs(pool.registry.get(row.jobId)) : undefined,
+    })),
+  ];
+}
+
+function latestLeaf(
+  control: { live?: { snapshot: { transcript: readonly { kind: "message" | "tool"; text: string; toolName?: string }[] } } } | undefined,
+): string | undefined {
+  const transcript = control?.live?.snapshot?.transcript;
+  const entry = transcript?.[transcript.length - 1];
+  if (!entry) return undefined;
+  if (entry.kind === "tool") return `⌘ ${entry.toolName ?? "tool"}`;
+  const text = entry.text.replace(/[\r\n\t]+/g, " ").replace(/ +/g, " ").trim();
+  return text || undefined;
+}
+
+function settledMs(job: { updatedAt: string } | undefined): number | undefined {
+  if (!job) return undefined;
+  const ms = Date.parse(job.updatedAt);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function isTerminal(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted";
 }
 
 function footerTheme(theme: Theme): { fg: (color: string, text: string) => string } {

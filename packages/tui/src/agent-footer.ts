@@ -29,28 +29,57 @@ export interface AgentFooterInfo {
   readonly reasoning: boolean;
 }
 
+export type FooterTreeStatus =
+  | "active"
+  | "created"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+/** One projected descendant row rendered below the native information rows. */
+export interface FooterTreeRow {
+  readonly rowId: string;
+  /** True for the host session row that anchors a non-empty descendant tree. */
+  readonly root?: boolean;
+  readonly status: FooterTreeStatus;
+  readonly depth: number;
+  readonly description: string;
+  readonly durationMs: number;
+  readonly leaf?: string;
+  readonly enterable: boolean;
+  readonly updatedAt?: string;
+  /** Test and adapter seam when the caller already has a settled timestamp. */
+  readonly updatedAtMs?: number;
+}
+
 export interface AgentFooterOptions {
   readonly tui: TUI;
   readonly theme: AgentFooterTheme;
   readonly getInfo: () => AgentFooterInfo;
+  readonly getRows?: () => readonly FooterTreeRow[];
   readonly dispose?: () => void;
 }
 
+const SETTLED_RETENTION_MS = 2 * 60 * 1000;
+
 /**
- * Compact native-style footer. Agent rows are added in a later phase; this
- * component owns the stable information rows and host subscription lifecycle.
+ * Compact native-style footer with an optional descendant tree. The host owns
+ * repaint scheduling; callers provide fresh immutable projections on render.
  */
 export class AgentFooter implements Component {
-  private readonly tui: TUI;
   private readonly theme: AgentFooterTheme;
   private readonly getInfo: () => AgentFooterInfo;
+  private readonly getRows?: () => readonly FooterTreeRow[];
   private readonly release?: () => void;
   private disposed = false;
 
   constructor(options: AgentFooterOptions) {
-    this.tui = options.tui;
     this.theme = options.theme;
     this.getInfo = options.getInfo;
+    this.getRows = options.getRows;
     this.release = options.dispose;
   }
 
@@ -59,7 +88,15 @@ export class AgentFooter implements Component {
     const info = this.getInfo();
     const pathLine = formatPathLine(info, renderWidth, this.theme);
     const statsLine = formatStatsLine(info, renderWidth, this.theme);
-    return [pathLine, statsLine];
+    const rows = filterFooterRows(this.getRows?.() ?? [], new Date());
+    if (rows.length === 0) return [pathLine, statsLine];
+
+    const lastByDepth = computeLastByDepth(rows);
+    const lines = [pathLine, statsLine, this.theme.fg("dim", "-- current active subagents --")];
+    for (let index = 0; index < rows.length; index++) {
+      lines.push(renderTreeRow(rows[index]!, index, rows, lastByDepth, renderWidth, this.theme));
+    }
+    return lines;
   }
 
   invalidate(): void {
@@ -71,6 +108,94 @@ export class AgentFooter implements Component {
     this.disposed = true;
     this.release?.();
   }
+}
+
+/** Remove terminal rows after the two-minute settled retention window. */
+export function filterFooterRows(
+  rows: readonly FooterTreeRow[],
+  now: Date,
+): FooterTreeRow[] {
+  const nowMs = now.getTime();
+  return rows.filter((row) => {
+    if (!isTerminalFooterStatus(row.status)) return true;
+    const settledAt = row.updatedAtMs ?? (row.updatedAt ? Date.parse(row.updatedAt) : Number.NaN);
+    return !Number.isFinite(settledAt) || nowMs - settledAt <= SETTLED_RETENTION_MS;
+  });
+}
+
+export function formatDuration(durationMs: number): string {
+  const seconds = Math.max(0, Math.floor(durationMs / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return minutes === 0 ? `${remaining}s` : `${minutes}m ${remaining}s`;
+}
+
+function isTerminalFooterStatus(status: FooterTreeStatus): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted";
+}
+
+function computeLastByDepth(rows: readonly FooterTreeRow[]): boolean[] {
+  return rows.map((row, index) => {
+    for (let next = index + 1; next < rows.length; next++) {
+      if (rows[next]!.depth < row.depth) return true;
+      if (rows[next]!.depth === row.depth) return false;
+    }
+    return true;
+  });
+}
+
+function renderTreeRow(
+  row: FooterTreeRow,
+  index: number,
+  rows: readonly FooterTreeRow[],
+  lastByDepth: readonly boolean[],
+  width: number,
+  theme: AgentFooterTheme,
+): string {
+  const prefix = row.root
+    ? ""
+    : row.depth === 0
+      ? "  "
+      : treePrefix(row.depth, lastByDepth, rows, index);
+  const status = statusGlyph(row.status, theme);
+  const leaf = row.leaf ? ` · ${sanitizeLeaf(row.leaf)}` : "";
+  const text = `${prefix}${status} ${row.description} ${formatDuration(row.durationMs)}${leaf}`;
+  return truncateToWidth(text, width, theme.fg("dim", "..."));
+}
+
+function treePrefix(
+  depth: number,
+  lastByDepth: readonly boolean[],
+  rows: readonly FooterTreeRow[],
+  index: number,
+): string {
+  const chars: string[] = [];
+  for (let level = 0; level < depth - 1; level++) {
+    const ancestorIndex = findAncestorIndex(rows, index, level);
+    chars.push(ancestorIndex >= 0 && !lastByDepth[ancestorIndex] ? "│  " : "   ");
+  }
+  chars.push(lastByDepth[index] ? "└─ " : "├─ ");
+  return chars.join("");
+}
+
+function findAncestorIndex(rows: readonly FooterTreeRow[], index: number, depth: number): number {
+  for (let previous = index - 1; previous >= 0; previous--) {
+    if (rows[previous]!.depth === depth) return previous;
+    if (rows[previous]!.depth < depth) break;
+  }
+  return -1;
+}
+
+function statusGlyph(status: FooterTreeStatus, theme: AgentFooterTheme): string {
+  if (status === "active") return theme.fg("text", "⏺");
+  if (status === "completed") return theme.fg("success", "✓");
+  if (status === "failed") return theme.fg("error", "✗");
+  if (status === "cancelled" || status === "interrupted") return theme.fg("warning", "■");
+  return theme.fg("muted", "◯");
+}
+
+function sanitizeLeaf(leaf: string): string {
+  return leaf.replace(/[\r\n\t]+/g, " ").replace(/ +/g, " ").trim();
 }
 
 export function formatTokens(count: number): string {
