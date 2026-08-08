@@ -55,21 +55,22 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async (event: SessionShutdownEvent, ctx: ExtensionContext) => {
-    const pool = getChildPool(ctx.cwd);
+    const rootSessionId = ctx.sessionManager.getSessionId();
+    const pool = getChildPool(ctx.cwd, rootSessionId);
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (sessionFile) {
       pool.delivery.unregister(sessionFile);
     }
     // Child sessions also emit `quit` when they are disposed after settling.
-    // Only the root orchestrator may sweep the project's shared jobs; a child
-    // must never abort its siblings or its parent while it is being cleaned up.
-    const isChildSession = pool.registry.get(ctx.sessionManager.getSessionId()) !== undefined;
+    // Only the root orchestrator may sweep its own session tree; a child must
+    // never abort its siblings or its parent while it is being cleaned up.
+    const isChildSession = pool.registry.get(rootSessionId) !== undefined;
     if (isChildSession) return;
 
     // Process quit and a confirmed `/new` both terminate the current host
     // session's background work. Reload/resume/fork preserve live children.
     if (event.reason === "quit" || event.reason === "new") {
-      await pool.interruptRunningJobs();
+      await pool.interruptRunningJobs(rootSessionId);
     }
   });
 }

@@ -22,12 +22,14 @@ function makeJob(jobId: string, status: Job["status"], sessionFile?: string): Jo
 function createFakeRegistry(jobs: Job[]): {
   jobs: Map<string, Job>;
   all(): Map<string, Job>;
+  get(jobId: string): Job | undefined;
   updateJob(jobId: string, update: JobUpdate): void;
 } {
   const state = new Map(jobs.map((job) => [job.jobId, job]));
   return {
     jobs: state,
     all: () => state,
+    get: (jobId) => state.get(jobId),
     updateJob(jobId, update): void {
       const current = state.get(jobId);
       if (!current) return;
@@ -65,6 +67,36 @@ test("interruptRunningJobs marks every running job interrupted and aborts live c
   assert.equal(registry.jobs.get("queued")?.status, "queued");
   assert.equal(registry.jobs.get("done")?.status, "completed");
   assert.deepEqual(aborted.sort(), ["running-a", "running-b"]);
+});
+
+test("a session-scoped sweep interrupts only the active parent session's tree", async () => {
+  const registry = createFakeRegistry([
+    makeJob("a-running", "running"),
+    makeJob("a-child", "running"),
+    makeJob("b-running", "running"),
+  ]);
+  // Wire the parent-session lineage so the tree projection can walk it.
+  const a = registry.get("a-running")!;
+  registry.updateJob("a-running", {});
+  registry.jobs.set("a-running", { ...a, parentSessionId: "root-a" });
+  const ac = registry.get("a-child")!;
+  registry.jobs.set("a-child", { ...ac, parentSessionId: "a-running", parentJobId: "a-running" });
+  const b = registry.get("b-running")!;
+  registry.jobs.set("b-running", { ...b, parentSessionId: "root-b" });
+
+  const aborted: string[] = [];
+  const liveChildren = new Map<string, ChildSessionControl>([
+    ["a-running", control(async () => { aborted.push("a-running"); })],
+    ["a-child", control(async () => { aborted.push("a-child"); })],
+    ["b-running", control(async () => { aborted.push("b-running"); })],
+  ]);
+
+  await interruptRunningJobs({ registry, liveChildren, rootSessionId: "root-a" });
+
+  assert.equal(registry.get("a-running")?.status, "interrupted");
+  assert.equal(registry.get("a-child")?.status, "interrupted");
+  assert.equal(registry.get("b-running")?.status, "running");
+  assert.deepEqual(aborted.sort(), ["a-child", "a-running"]);
 });
 
 test("the interruption sweep tolerates a running job without a transcript or live control", async () => {

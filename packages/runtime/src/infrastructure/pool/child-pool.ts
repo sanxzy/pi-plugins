@@ -34,7 +34,7 @@ export interface ChildPool {
    * Idempotent and shared: invoked from the lifecycle adapter when the host
    * process quits, and per-session when a root session is replaced by `/new`.
    */
-  readonly interruptRunningJobs: () => Promise<void>;
+  readonly interruptRunningJobs: (rootSessionId?: string) => Promise<void>;
   /** Reset the per-response agent-call counter; called from `turn_start`. */
   resetParallelAgents(): void;
 }
@@ -72,7 +72,7 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
     concurrency: createConcurrencyGate(MAX_CONCURRENCY),
     delivery: createDeliveryCoordinator(),
     liveChildren,
-    interruptRunningJobs: createInterruptionSweep({ registry, liveChildren }),
+    interruptRunningJobs: createInterruptionSweep({ registry, liveChildren, rootSessionId }),
     resetParallelAgents(): void {
       pool.concurrency.resetParallelCount();
     },

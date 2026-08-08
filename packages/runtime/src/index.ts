@@ -14,7 +14,7 @@ export { createInterruptionSweep, interruptRunningJobs } from "./infrastructure/
 export { createRegistry, foldLog, recordNewJob, type Registry } from "./infrastructure/registry/registry.ts";
 export { createScopedRegistry, scopedRegistryForSession, type ScopedRegistry } from "./infrastructure/registry/scoped-registry.ts";
 export { prepareResumeSessionFile } from "./infrastructure/sessions/resume-file.ts";
-export { scopeDescendants, scopeRegistry, type ScopedSessionRow, type ScopeRegistry } from "./infrastructure/sessions/scope.ts";
+export { scopeDescendants, scopeRegistry, sessionTreeJobs, type ScopedSessionRow, type ScopeRegistry } from "./infrastructure/sessions/scope.ts";
 export {
   assertSessionId,
   childSessionDir,

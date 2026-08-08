@@ -78,7 +78,7 @@ test("shutdown interrupts only running jobs rooted at the active parent session"
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-lifecycle-isolation-"));
   try {
     addRunningJob(cwd, "root-a", "a-running");
-    addRunningJob(cwd, "job-a", "a-grandchild", "a-running");
+    addRunningJob(cwd, "a-running", "a-grandchild", "a-running");
     addRunningJob(cwd, "root-b", "b-running");
     const pool = getChildPool(cwd, "root-a");
     const aborted: string[] = [];

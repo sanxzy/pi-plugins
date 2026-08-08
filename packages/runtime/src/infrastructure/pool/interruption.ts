@@ -3,15 +3,18 @@
  *
  * The sweep is deliberately independent of the PI SDK. The pool supplies the
  * folded registry and live child controls; the lifecycle adapter decides when
- * the sweep should run for the host session.
+ * the sweep should run for the host session. When a session root is supplied,
+ * only jobs rooted at that live parent session are interrupted.
  */
 import type { Job } from "@xzy-ai/core";
 import type { ChildSessionControl } from "@xzy-ai/core";
 import type { Registry } from "../registry/registry.ts";
+import { sessionTreeJobs } from "../sessions/scope.ts";
 
 export interface InterruptionSweepDeps {
-  readonly registry: Pick<Registry, "all" | "updateJob">;
+  readonly registry: Pick<Registry, "all" | "get" | "updateJob">;
   readonly liveChildren: Map<string, ChildSessionControl>;
+  readonly rootSessionId?: string;
 }
 
 /**
@@ -23,9 +26,14 @@ export interface InterruptionSweepDeps {
  * admission and child-control registration when shutdown begins.
  */
 export async function interruptRunningJobs(deps: InterruptionSweepDeps): Promise<void> {
-  const runningJobs = Array.from(deps.registry.all().values()).filter(
-    (job): job is Job => job.status === "running",
-  );
+  const scopedJobs = deps.rootSessionId === undefined
+    ? Array.from(deps.registry.all().values())
+    : sessionTreeJobs((jobId) => deps.registry.get(jobId), deps.registry.all(), deps.rootSessionId);
+  const runningJobs = scopedJobs.filter((job): job is Job => job.status === "running");
+
+  // A caller that provides a session root must only see that root's recursive
+  // descendants. The unscoped form remains available to direct runtime users
+  // and preserves the existing sweep contract for tests and adapters.
 
   for (const job of runningJobs) {
     deps.registry.updateJob(job.jobId, { status: "interrupted" });
@@ -50,12 +58,15 @@ export async function interruptRunningJobs(deps: InterruptionSweepDeps): Promise
  * The shared pool uses one instance, so concurrent shutdown handlers share the
  * same in-flight operation instead of aborting a child twice.
  */
-export function createInterruptionSweep(deps: InterruptionSweepDeps): () => Promise<void> {
+export function createInterruptionSweep(deps: InterruptionSweepDeps): (rootSessionId?: string) => Promise<void> {
   let inFlight: Promise<void> | undefined;
 
-  return (): Promise<void> => {
+  return (rootSessionId?: string): Promise<void> => {
     if (inFlight) return inFlight;
-    inFlight = interruptRunningJobs(deps).finally(() => {
+    inFlight = interruptRunningJobs({
+      ...deps,
+      rootSessionId: rootSessionId ?? deps.rootSessionId,
+    }).finally(() => {
       inFlight = undefined;
     });
     return inFlight;

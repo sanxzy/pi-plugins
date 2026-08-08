@@ -3,7 +3,7 @@ import type {
   ExtensionContext,
   SessionBeforeSwitchEvent,
 } from "@earendil-works/pi-coding-agent";
-import { getChildPool } from "@xzy-ai/runtime";
+import { getChildPool, sessionTreeJobs } from "@xzy-ai/runtime";
 
 /**
  * Ask the user to confirm `/new` when orchestrator background jobs are running.
@@ -17,8 +17,16 @@ async function confirmNewWithRunningJobs(
   _event: SessionBeforeSwitchEvent,
   ctx: ExtensionContext,
 ): Promise<{ cancel?: boolean }> {
-  const pool = getChildPool(ctx.cwd);
-  const running = Array.from(pool.registry.all().values()).filter((job) => job.status === "running");
+  const rootSessionId = ctx.sessionManager.getSessionId();
+  const pool = getChildPool(ctx.cwd, rootSessionId);
+  const running = sessionTreeJobs(
+    (jobId) => pool.registry.get(jobId),
+    pool.registry.all(),
+    rootSessionId,
+  ).filter((job) => job.status === "running");
+
+  // Only the active session's recursive tree participates in the `/new` gate;
+  // sibling parent sessions continue running independently.
   if (running.length === 0) return {};
 
   if (!ctx.hasUI) {

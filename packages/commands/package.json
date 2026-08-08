@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "private": true,
   "scripts": {
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "node --test --import tsx tests/lifecycle-isolation.test.ts"
   },
   "dependencies": {
     "@xzy-ai/runtime": "workspace:*",

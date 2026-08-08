@@ -7,14 +7,39 @@ import type { ScopedRegistry } from "../registry/scoped-registry.ts";
 export type ScopeRegistry = Pick<Registry | ScopedRegistry, "all" | "get">;
 
 /**
- * Pure session-tree projection over the scoped job registry.
+ * Return the recursive job tree rooted at one live parent session.
  *
- * The tree is scoped to one live session id: it returns exactly that session's
- * descendants, never its siblings or ancestors. Rows carry the status,
- * description, duration, and enterability the manager renders. A row is
- * enterable exactly when it is `running` AND a live child handle is published;
- * a `running` row without a handle, and all queued/terminal rows, are visible
- * but not enterable.
+ * Direct children are selected by `parentSessionId`; each child session then
+ * becomes the focus for the next level. Terminal records remain in the result so
+ * callers can use the projection for both live lifecycle work and history views.
+ */
+export function sessionTreeJobs(
+  getJob: (jobId: string) => Job | undefined,
+  jobs: ReadonlyMap<string, Job>,
+  rootSessionId: string,
+): Job[] {
+  const byParent = new Map<string, Job[]>();
+  for (const job of jobs.values()) {
+    if (!job.parentSessionId) continue;
+    const children = byParent.get(job.parentSessionId) ?? [];
+    children.push(job);
+    byParent.set(job.parentSessionId, children);
+  }
+
+  const result: Job[] = [];
+  const visit = (parentSessionId: string): void => {
+    for (const job of byParent.get(parentSessionId) ?? []) {
+      result.push(job);
+      const childSessionId = sessionIdOf(job, getJob);
+      if (childSessionId) visit(childSessionId);
+    }
+  };
+  visit(rootSessionId);
+  return result;
+}
+
+/**
+ * A rendered row from a recursive session-tree projection.
  */
 export interface ScopedSessionRow {
   readonly jobId: string;
