@@ -19,6 +19,9 @@ import { registerManagerShortcut } from "../src/registrations/manager.ts";
  * re-hosting any child and without invoking the shutdown interruption sweep.
  */
 
+/** The host `setWidget` calls the ticker registration issues, keyed by widget key. */
+const widgetFactories = new Map<string, ((tui: unknown, theme: unknown) => unknown) | string[]>();
+
 /** ExtensionContext double exposing the surfaces the manager uses. */
 function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
   return {
@@ -27,6 +30,10 @@ function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
     cwd,
     ui: {
       custom: capturedCustom,
+      setWidget: (key: string, content: ((tui: unknown, theme: unknown) => unknown) | undefined) => {
+        if (content === undefined) widgetFactories.delete(key);
+        else widgetFactories.set(key, content);
+      },
       getEditorText: () => "draft",
       setEditorText: (_text: string) => {},
     },
@@ -151,6 +158,51 @@ test("host reset on session_shutdown disposes the mounted manager without aborti
   // Navigation and teardown never invoke the interruption sweep: the child
   // stays running in the pool after a live manager is torn down.
   assert.equal(pool.liveChildren.has("job-a"), true);
+
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test("the agent activity ticker mounts above the composer for TUI sessions only", () => {
+  const d = piDouble();
+  registerManagerShortcut(d.pi);
+  startManager(d, mkdtempSync(join(tmpdir(), "pi-code-ticker-")));
+
+  // The ticker registration is part of the manager registration; a TUI start
+  // wires the widget above the editor.
+  assert.ok(widgetFactories.has("pi-code-agent-ticker"), "the ticker widget is registered for TUI sessions");
+  const factory = widgetFactories.get("pi-code-agent-ticker");
+  assert.ok(typeof factory === "function", "the ticker is mounted as a component, not plain lines");
+});
+
+test("the ticker widget reflects a running child's latest activity", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-ticker-"));
+  const pool = getChildPool(cwd);
+  pool.liveChildren.set("job-a", {
+    live: {
+      snapshot: {
+        status: "running",
+        settled: false,
+        transcript: [
+          { id: "t1", kind: "tool", toolCallId: "call-1", toolName: "bash", text: "", complete: false },
+        ],
+      },
+      subscribe: () => () => {},
+      steer: async () => {},
+      abort: async () => {},
+    },
+  });
+
+  const d = piDouble();
+  registerManagerShortcut(d.pi);
+  startManager(d, cwd);
+  const factory = widgetFactories.get("pi-code-agent-ticker");
+  assert.ok(typeof factory === "function", "the ticker is registered");
+  const mounted = factory!({ terminal: { rows: 24, columns: 100 }, requestRender: () => {} }, {
+    fg: (_color: string, text: string) => text,
+  }) as unknown as { render(width: number): string[] };
+  const lines = mounted.render(80).map((line) => line);
+  assert.match(lines.join("\n"), /bash/, "the running child's tool activity feeds the ticker");
+  (mounted as unknown as { dispose?: () => void }).dispose?.();
 
   rmSync(cwd, { recursive: true, force: true });
 });
