@@ -17,6 +17,7 @@ export type ChildLiveTranscriptEntry =
       readonly kind: "tool";
       readonly toolCallId: string;
       readonly toolName: string;
+      readonly args?: unknown;
       readonly text: string;
       readonly complete: boolean;
       readonly isError?: boolean;
@@ -37,6 +38,7 @@ export type ChildLiveEvent =
       readonly phase: "start" | "update" | "end";
       readonly toolCallId: string;
       readonly toolName: string;
+      readonly args?: unknown;
       readonly text: string;
       readonly isError?: boolean;
     }
@@ -83,11 +85,15 @@ export function createChildLiveFeed(): ChildLiveFeed {
     }
     if (event.type === "tool") {
       const previous = snapshot.transcript.find((entry) => entry.id === event.id);
+      // The end event carries no args; keep the start-time args so the final
+      // entry still shows the call's parameters.
+      const args = event.args !== undefined ? event.args : previous?.kind === "tool" ? previous.args : undefined;
       const next: ChildLiveTranscriptEntry = {
         id: event.id,
         kind: "tool",
         toolCallId: event.toolCallId,
         toolName: event.toolName,
+        args,
         text: event.text,
         complete: event.phase === "end",
         isError: event.isError,

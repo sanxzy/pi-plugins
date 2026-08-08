@@ -199,10 +199,10 @@ test("a long transcript is scrollable: tail by default, earlier lines reachable 
   assert.match(output, /message line 29/, "tail message is visible by default");
   assert.doesNotMatch(output, /message line 0/, "oldest message is off-screen initially");
 
-  // Scroll up to the top: the oldest message becomes visible.
-  manager.handleInput("[6~"); // PageUp
+  // End jumps to the top: the oldest message becomes visible.
+  manager.handleInput("[F"); // End
   output = render(manager).join("\n");
-  assert.match(output, /message line 0/, "scrolling up reveals the oldest message");
+  assert.match(output, /message line 0/, "End reveals the oldest message");
   assert.match(output, /↑ scroll/, "scroll indicator appears while scrolled");
   assert.doesNotMatch(output, /message line 29/, "tail is off-screen at the top");
 
@@ -212,10 +212,14 @@ test("a long transcript is scrollable: tail by default, earlier lines reachable 
   assert.match(output, /message line 29/, "Home returns to the tail");
   assert.doesNotMatch(output, /↑ scroll/, "no scroll indicator at the tail");
 
-  // End jumps to the top again.
-  manager.handleInput("[F"); // End
+  // PageDown then PageUp page through the transcript.
+  manager.handleInput("[F"); // End (top)
+  manager.handleInput("[6~"); // PageDown — move toward the tail
   output = render(manager).join("\n");
-  assert.match(output, /message line 0/, "End jumps to the oldest message");
+  assert.doesNotMatch(output, /message line 0/, "PageDown moves off the very top");
+  manager.handleInput("[5~"); // PageUp — back toward the top
+  output = render(manager).join("\n");
+  assert.match(output, /message line 0/, "PageUp returns toward the oldest message");
 });
 
 test("scrolling keys do not type into the steer draft and steering still works after scrolling", () => {

@@ -5,6 +5,7 @@ import {
   type Component,
   type TUI,
   visibleWidth,
+  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { AgentLiveSession } from "./agent-manager-live.ts";
 import { fitPanelToHeight, renderBorderedPanel, statusIcon } from "./agent-manager-chrome.ts";
@@ -98,6 +99,8 @@ export class AgentManager implements Component {
   private liveView: { sessionId: string; rowId?: string; description: string; live: AgentLiveSession } | undefined;
   private liveUnsubscribe: (() => void) | undefined;
   private draftInput = "";
+  /** 0 = bottom/tail (auto-follow); positive values reveal earlier transcript. */
+  private liveScroll = 0;
 
   constructor(options: AgentManagerOptions) {
     this.tui = options.tui;
@@ -190,32 +193,44 @@ export class AgentManager implements Component {
     const live = this.liveView!.live;
     const viewportRows = Math.max(1, this.tui.terminal?.rows ?? 24);
     const snapshot = live.snapshot;
+    const contentWidth = Math.max(1, renderWidth - 4);
+
+    // Build the full transcript layout so the dialog can be scrolled.
+    const transcriptLines = this.liveTranscriptLines(snapshot, contentWidth);
+    if (transcriptLines.length === 0) {
+      transcriptLines.push(this.theme.fg("dim", "No activity yet."));
+    }
+
+    // Reserve rows for the fixed chrome (description, header, steer) and the
+    // footer the panel adds; the scroll window fits in what remains.
+    const reserved = 1 + 1 + (this.hint ? 1 : 0) + (!snapshot.settled && this.draftInput ? 1 : 0);
+    const visibleBody = Math.max(1, viewportRows - 6 - reserved);
+    const totalBody = transcriptLines.length + (this.hint ? 1 : 0) + (!snapshot.settled && this.draftInput ? 1 : 0);
+    const maxScroll = Math.max(0, totalBody - visibleBody);
+    this.liveScroll = Math.max(0, Math.min(this.liveScroll, maxScroll));
+
     const body: string[] = [];
     body.push(this.theme.fg("dim", this.liveView!.description));
     body.push(this.theme.fg("dim", "Transcript"));
 
-    const transcriptBudget = Math.max(1, viewportRows - 8 - (this.hint ? 1 : 0) - (this.draftInput && !snapshot.settled ? 1 : 0));
-    const entries = [...snapshot.transcript].slice(-transcriptBudget);
-    if (entries.length === 0) {
-      body.push(this.theme.fg("dim", "No activity yet."));
-    } else {
-      for (const entry of entries) {
-        const icon = entry.kind === "tool" ? "⌘" : entry.role === "user" ? "›" : "·";
-        const text = entry.kind === "tool"
-          ? `${icon} ${entry.toolName ?? "tool"}${entry.complete ? "" : " (running)"}`
-          : `${icon} ${entry.role === "user" ? "you: " : ""}${entry.text}`;
-        body.push(this.theme.fg(entry.kind === "tool" ? "muted" : "text", text));
-      }
+    const start = totalBody - visibleBody - this.liveScroll;
+    const end = totalBody - this.liveScroll;
+    for (const line of transcriptLines.slice(start < 0 ? 0 : start, end < 0 ? 0 : end)) {
+      body.push(this.styleTranscriptLine(line));
     }
-
     if (this.hint) body.push(this.theme.fg("warning", this.hint));
     if (!snapshot.settled && this.draftInput) {
       body.push(this.theme.fg("accent", `steer> ${this.draftInput}`));
     }
 
+    const help = snapshot.settled
+      ? "← back • Esc close"
+      : "Type to steer this child • Enter send • ← back • Esc close";
+    const scrollHint = this.liveScroll > 0 ? "  ↑ scroll" : "";
+    const footerCmd = `${help}${scrollHint}`;
     const footer = snapshot.settled
-      ? this.theme.fg("dim", `${statusIcon(snapshot.status)} ${snapshot.status} • read-only • ← back • Esc close`)
-      : this.theme.fg("dim", "Type to steer this child • Enter send • ← back • Esc close");
+      ? this.theme.fg("dim", `${statusIcon(snapshot.status)} ${snapshot.status} • read-only • ${footerCmd}`)
+      : this.theme.fg("dim", footerCmd);
     const status = `${this.theme.fg(statusColor(snapshot.status), statusIcon(snapshot.status))} ${snapshot.status}  •  ${snapshot.transcript.length} events`;
     const panel = renderBorderedPanel(this.theme, {
       width: renderWidth,
@@ -225,6 +240,22 @@ export class AgentManager implements Component {
       footer,
     });
     return fitPanelToHeight(panel, viewportRows);
+  }
+
+  /** Render a tool call's arguments as compact, skimmable `key: value` lines. */
+  private renderToolArgs(args: unknown, width: number): string[] {
+    if (args === undefined || args === null) return [];
+    if (typeof args !== "object" || Array.isArray(args)) {
+      return [`  ${formatArgValue(args)}`];
+    }
+    const entries = Object.entries(args as Record<string, unknown>);
+    if (entries.length === 0) return [];
+    const lines: string[] = [];
+    for (const [key, value] of entries) {
+      const line = `  ${key}: ${formatArgValue(value)}`;
+      lines.push(...wrapTextWithAnsi(line, width));
+    }
+    return lines;
   }
 
   invalidate(): void {
@@ -311,6 +342,7 @@ export class AgentManager implements Component {
   pushLiveView(next: { sessionId: string; rowId?: string; description: string; live: AgentLiveSession }): void {
     this.returnStack.push({ view: this.view, selectedIndex: this.selectedIndex });
     this.liveView = next;
+    this.liveScroll = 0;
     this.liveUnsubscribe = next.live.subscribe(() => this.refresh());
     this.invalidate();
     this.tui.requestRender();
@@ -366,6 +398,7 @@ export class AgentManager implements Component {
     }
     const live = this.liveView!.live;
     if (live.snapshot.settled) return;
+    if (this.handleLiveScroll(data)) return;
     if (matchesKey(data, Key.enter)) {
       const prompt = this.draftInput.trim();
       this.draftInput = "";
@@ -385,6 +418,81 @@ export class AgentManager implements Component {
       this.draftInput += data;
       this.refresh();
     }
+  }
+
+  /**
+   * Handle transcript scrolling for the live child view. Returns true when a
+   * scroll key was consumed so it never reaches the steer draft.
+   */
+  private handleLiveScroll(data: string): boolean {
+    const live = this.liveView!.live;
+    const viewportRows = Math.max(1, this.tui.terminal?.rows ?? 24);
+    const snapshot = live.snapshot;
+    const transcriptLines = this.liveTranscriptLines(snapshot, Math.max(1, Math.floor(this.tui.terminal?.columns ?? 100) - 4));
+    const reserved = 1 + 1 + (this.hint ? 1 : 0) + (!snapshot.settled && this.draftInput ? 1 : 0);
+    const visibleBody = Math.max(1, viewportRows - 6 - reserved);
+    const totalBody = transcriptLines.length + (this.hint ? 1 : 0) + (!snapshot.settled && this.draftInput ? 1 : 0);
+    const maxScroll = Math.max(0, totalBody - visibleBody);
+
+    if (matchesKey(data, Key.pageUp)) {
+      this.liveScroll = Math.min(maxScroll, this.liveScroll + visibleBody);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, Key.pageDown)) {
+      this.liveScroll = Math.max(0, this.liveScroll - visibleBody);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, Key.end)) {
+      this.liveScroll = maxScroll;
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, Key.home)) {
+      this.liveScroll = 0;
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, Key.up) && maxScroll > 0) {
+      this.liveScroll = Math.min(maxScroll, this.liveScroll + 1);
+      this.refresh();
+      return true;
+    }
+    if (matchesKey(data, Key.down) && maxScroll > 0) {
+      this.liveScroll = Math.max(0, this.liveScroll - 1);
+      this.refresh();
+      return true;
+    }
+    return false;
+  }
+
+  /** Apply per-line theme styling to a transcript layout line. */
+  private styleTranscriptLine(line: string): string {
+    if (line.startsWith("⌘ ")) return this.theme.fg("muted", line);
+    if (line.startsWith("  ")) return this.theme.fg("dim", line);
+    return this.theme.fg("text", line);
+  }
+
+  /** Layout the retained transcript into renderable lines (tool args expand). */
+  private liveTranscriptLines(
+    snapshot: AgentLiveSession["snapshot"],
+    contentWidth: number,
+  ): string[] {
+    const lines: string[] = [];
+    if (snapshot.transcript.length === 0) return lines;
+    for (const entry of snapshot.transcript) {
+      if (entry.kind === "tool") {
+        const running = entry.complete ? "" : " (running)";
+        lines.push(`⌘ ${entry.toolName ?? "tool"}${running}`);
+        for (const argLine of this.renderToolArgs(entry.args, contentWidth)) lines.push(argLine);
+        continue;
+      }
+      const icon = entry.role === "user" ? "›" : "·";
+      const text = `${icon} ${entry.role === "user" ? "you: " : ""}${entry.text}`;
+      lines.push(text);
+    }
+    return lines;
   }
 
   /**
@@ -471,6 +579,19 @@ function formatDuration(durationMs: number): string {
 function overlayHeight(rows: number): number {
   return Math.max(1, Math.floor(Math.max(1, rows) * 0.8));
 }
+
+/** Single-line display of a scalar arg value, JSON for anything structured. */
+function formatArgValue(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") {
+    if (value === "") return '""';
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
 
 function statusColor(status: string): string {
   switch (status) {

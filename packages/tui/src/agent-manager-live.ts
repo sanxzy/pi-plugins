@@ -1,4 +1,5 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
+import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { fitPanelToHeight, renderBorderedPanel, statusIcon } from "./agent-manager-chrome.ts";
 
 /** How a live child view was left, for the manager's return-stack bookkeeping. */
@@ -31,6 +32,7 @@ export interface AgentLiveSession {
       readonly complete: boolean;
       readonly toolCallId?: string;
       readonly toolName?: string;
+      readonly args?: unknown;
       readonly isError?: boolean;
     }[];
   };
@@ -74,6 +76,7 @@ export class AgentLiveManager implements Component {
     this.cachedWidth = renderWidth;
     const snapshot = this.live.snapshot;
     const viewportRows = Math.max(1, this.tui.terminal?.rows ?? 24);
+    const contentWidth = Math.max(1, Math.floor(width) - 4);
     const body: string[] = [this.theme.fg("dim", "Transcript")];
 
     if (snapshot.transcript.length === 0) {
@@ -84,10 +87,13 @@ export class AgentLiveManager implements Component {
         if (entry.kind === "tool") {
           const name = entry.toolName ?? "tool";
           body.push(this.theme.fg("muted", `⌘ ${name}${entry.complete ? "" : " (running)"}`));
+          for (const argLine of renderToolArgs(entry.args, contentWidth)) {
+            body.push(this.theme.fg("dim", argLine));
+          }
           continue;
         }
         const prefix = entry.role === "user" ? "› you: " : "· ";
-        body.push(this.theme.fg("text", `${prefix}${entry.text}`));
+        body.push(this.theme.fg("text", truncateToWidth(`${prefix}${entry.text}`, contentWidth)));
       }
     }
 
@@ -156,4 +162,28 @@ function matchesEscape(data: string): boolean {
 
 function matchesLeft(data: string): boolean {
   return data === "[D";
+}
+
+/** Render a tool call's arguments as compact `key: value` lines. */
+function renderToolArgs(args: unknown, width: number): string[] {
+  if (args === undefined || args === null) return [];
+  const entries =
+    typeof args === "object" && !Array.isArray(args)
+      ? Object.entries(args as Record<string, unknown>)
+      : [["value", args]];
+  if (entries.length === 0) return [];
+  const lines: string[] = [];
+  for (const [key, value] of entries) {
+    const line = `  ${key}: ${formatArgValue(value)}`;
+    lines.push(...wrapTextWithAnsi(line, width));
+  }
+  return lines;
+}
+
+function formatArgValue(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return value === "" ? '""' : value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
 }

@@ -89,6 +89,7 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         phase: "start",
         toolCallId: event.toolCallId,
         toolName: event.toolName,
+        args: event.args,
         text: "",
       };
     case "tool_execution_update":
@@ -98,6 +99,7 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         phase: "update",
         toolCallId: event.toolCallId,
         toolName: event.toolName,
+        args: event.args,
         text: resultText(event.partialResult),
       };
     case "tool_execution_end":
