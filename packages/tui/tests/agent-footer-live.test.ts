@@ -367,13 +367,13 @@ test("very short heights keep chrome and height changes re-clamp the panel", () 
     done: () => {},
   });
   const lines = render(view, 30);
-  assert.ok(lines.length <= 5, `short viewport stays bounded: ${lines.length}`);
+  assert.equal(lines.length, 10, "the panel floor keeps a usable bounded height");
   assert.match(lines.join("\n"), /╭/, "top border survives a short viewport");
   assert.match(lines.join("\n"), /╰/, "bottom border survives a short viewport");
 
   (tui.terminal as unknown as { rows: number }).rows = 12;
   const expanded = render(view, 30);
-  assert.ok(expanded.length <= 12, `height changes re-clamp the rendered panel: ${expanded.length}`);
+  assert.equal(expanded.length, 10, "12-row terminal renders the ~80% panel floor");
   assert.match(expanded.join("\n"), /message line 29/, "tail content re-lays out at the larger height");
 });
 

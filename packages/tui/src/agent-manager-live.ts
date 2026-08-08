@@ -1,5 +1,5 @@
 import { Key, matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
-import { fitPanelToHeight, renderBorderedPanel, statusColor, statusIcon } from "./agent-manager-chrome.ts";
+import { renderBorderedPanel, statusColor, statusIcon } from "./agent-manager-chrome.ts";
 
 /** How a live child view was left, for the manager's return-stack bookkeeping. */
 export type LiveViewReason = "escape" | "shortcut" | "back";
@@ -76,6 +76,17 @@ export class AgentLiveManager implements Component {
   /** 0 = transcript tail (auto-follow); positive values reveal earlier lines. */
   private liveScroll = 0;
 
+  /**
+   * The overlay panel is a stable ~80% of the terminal height. The host mounts
+   * it without a maxHeight (see footer.ts), so this panel height is the only
+   * bound; sizing to the full terminal would let the newest activity slip
+   * below the host's slice.
+   */
+  private panelHeight(): number {
+    const rows = Math.max(1, this.tui.terminal?.rows ?? 24);
+    return Math.max(10, Math.floor(rows * 0.8));
+  }
+
   constructor(options: AgentLiveManagerOptions) {
     this.tui = options.tui;
     this.theme = options.theme;
@@ -88,17 +99,17 @@ export class AgentLiveManager implements Component {
 
   render(width: number): string[] {
     const renderWidth = Math.max(1, Math.floor(width));
-    const viewportRows = Math.max(1, this.tui.terminal?.rows ?? 24);
-    if (this.cachedLines && this.cachedWidth === renderWidth && this.cachedHeight === viewportRows) {
+    const panelHeight = this.panelHeight();
+    if (this.cachedLines && this.cachedWidth === renderWidth && this.cachedHeight === panelHeight) {
       return this.cachedLines;
     }
     this.cachedWidth = renderWidth;
-    this.cachedHeight = viewportRows;
+    this.cachedHeight = panelHeight;
     const snapshot = this.live.snapshot;
     const contentWidth = Math.max(1, renderWidth - 4);
     const transcriptLines = this.liveTranscriptLines(snapshot, contentWidth);
     const reserved = 1 + (this.hint ? 1 : 0) + (!snapshot.settled && this.draftInput ? 1 : 0);
-    const visibleBody = Math.max(1, viewportRows - 6 - reserved);
+    const visibleBody = Math.max(1, panelHeight - 6 - reserved);
     const totalBody = transcriptLines.length + (this.hint ? 1 : 0) + (!snapshot.settled && this.draftInput ? 1 : 0);
     const maxScroll = Math.max(0, totalBody - visibleBody);
     this.liveScroll = Math.max(0, Math.min(this.liveScroll, maxScroll));
@@ -111,6 +122,8 @@ export class AgentLiveManager implements Component {
     if (!snapshot.settled && this.draftInput) {
       body.push(this.theme.fg("accent", `steer> ${this.draftInput}█`));
     }
+    const bodyRows = Math.max(0, panelHeight - 6);
+    while (body.length < bodyRows) body.push("");
     const legend = this.legend(snapshot);
     const statusColorName = statusColor(snapshot.status);
     const status = `${this.theme.fg(statusColorName, `${statusIcon(snapshot.status)} ${snapshot.status}`)}  •  ${snapshot.transcript.length} events`;
@@ -121,7 +134,7 @@ export class AgentLiveManager implements Component {
       body,
       footer: legend,
     });
-    this.cachedLines = fitPanelToHeight(lines, viewportRows);
+    this.cachedLines = lines.slice(0, panelHeight);
     return this.cachedLines;
   }
 
@@ -224,7 +237,7 @@ export class AgentLiveManager implements Component {
    */
   private handleLiveScroll(data: string): boolean {
     const snapshot = this.live.snapshot;
-    const viewportRows = Math.max(1, this.tui.terminal?.rows ?? 24);
+    const panelHeight = this.panelHeight();
     // Input normally follows a render, so use the overlay's last rendered
     // width rather than the full terminal width. The fallback keeps key input
     // deterministic before the first render.
@@ -234,7 +247,7 @@ export class AgentLiveManager implements Component {
     const contentWidth = Math.max(1, renderWidth - 4);
     const transcriptLines = this.liveTranscriptLines(snapshot, contentWidth);
     const reserved = 1 + (this.hint ? 1 : 0) + (!snapshot.settled && this.draftInput ? 1 : 0);
-    const visibleBody = Math.max(1, viewportRows - 6 - reserved);
+    const visibleBody = Math.max(1, panelHeight - 6 - reserved);
     const totalBody = transcriptLines.length + (this.hint ? 1 : 0) + (!snapshot.settled && this.draftInput ? 1 : 0);
     const maxScroll = Math.max(0, totalBody - visibleBody);
     if (matchesKey(data, Key.pageUp)) {
