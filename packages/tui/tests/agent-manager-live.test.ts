@@ -178,9 +178,11 @@ test("a settled live child renders a terminal status and disabled-input legend",
   manager.handleInput("\r");
 
   const output = render(manager).join("\n");
-  assert.match(output, /Child Session failed/, "terminal status in title");
+  assert.match(output, /Child Session/, "child title remains visible");
+  assert.match(output, /✗ failed/, "terminal status icon and label");
   assert.match(output, /failed/, "final transcript remains visible");
-  assert.match(output, /settled|read-only|back.*close/i, "input is described as disabled");
+  assert.match(output, /read-only/, "input is described as disabled");
+  assert.match(output, /← back.*Esc close/, "back/close hints remain");
 });
 
 test("entering and leaving the child view never touches the parent session", () => {

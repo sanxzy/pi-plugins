@@ -1,4 +1,5 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
+import { fitPanelToHeight, renderBorderedPanel, statusIcon } from "./agent-manager-chrome.ts";
 
 /** How a live child view was left, for the manager's return-stack bookkeeping. */
 export type LiveViewReason = "escape" | "shortcut" | "back";
@@ -72,35 +73,38 @@ export class AgentLiveManager implements Component {
     if (this.cachedLines && this.cachedWidth === renderWidth) return this.cachedLines;
     this.cachedWidth = renderWidth;
     const snapshot = this.live.snapshot;
-    const lines: string[] = [];
-    lines.push(this.theme.fg("accent", `Child Session ${snapshot.status}`));
+    const viewportRows = Math.max(1, this.tui.terminal?.rows ?? 24);
+    const body: string[] = [this.theme.fg("dim", "Transcript")];
 
     if (snapshot.transcript.length === 0) {
-      lines.push(this.theme.fg("muted", "No activity yet."));
+      body.push(this.theme.fg("muted", "No activity yet."));
     } else {
-      for (const entry of snapshot.transcript) {
+      const budget = Math.max(1, viewportRows - 8 - (this.hint ? 1 : 0));
+      for (const entry of snapshot.transcript.slice(-budget)) {
         if (entry.kind === "tool") {
           const name = entry.toolName ?? "tool";
-          lines.push(this.theme.fg("muted", `  ⌘ ${name} ${entry.complete ? "" : "(running)"}`));
+          body.push(this.theme.fg("muted", `⌘ ${name}${entry.complete ? "" : " (running)"}`));
           continue;
         }
-        if (entry.role === "user") {
-          lines.push(this.theme.fg("text", `  you: ${entry.text}`));
-        } else {
-          lines.push(this.theme.fg("text", `  ${entry.text}`));
-        }
+        const prefix = entry.role === "user" ? "› you: " : "· ";
+        body.push(this.theme.fg("text", `${prefix}${entry.text}`));
       }
     }
 
-    if (this.hint) {
-      lines.push(this.theme.fg("warning", this.hint));
-    }
-    const help = snapshot.settled
-      ? "← back • Esc close"
-      : "Type to steer this child • ← back • Esc close";
-    lines.push(this.theme.fg("dim", help));
-    this.cachedLines = lines;
-    return lines;
+    if (this.hint) body.push(this.theme.fg("warning", this.hint));
+    const footer = snapshot.settled
+      ? this.theme.fg("dim", `${statusIcon(snapshot.status)} ${snapshot.status} • read-only • ← back • Esc close`)
+      : this.theme.fg("dim", "Type to steer this child • Enter send • ← back • Esc close");
+    const status = `${statusIcon(snapshot.status)} ${snapshot.status}  •  ${snapshot.transcript.length} events`;
+    const lines = renderBorderedPanel(this.theme, {
+      width: renderWidth,
+      title: `${this.theme.fg("accent", "Child Session")} ─ ${this.theme.fg("dim", snapshot.status)}`,
+      status,
+      body,
+      footer,
+    });
+    this.cachedLines = fitPanelToHeight(lines, viewportRows);
+    return this.cachedLines;
   }
 
   invalidate(): void {

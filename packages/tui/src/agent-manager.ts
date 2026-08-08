@@ -7,6 +7,7 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { AgentLiveSession } from "./agent-manager-live.ts";
+import { fitPanelToHeight, renderBorderedPanel, statusIcon } from "./agent-manager-chrome.ts";
 
 /** Status values rendered by the manager, including the active host session. */
 export type ManagerStatus =
@@ -91,6 +92,7 @@ export class AgentManager implements Component {
   private selectedIndex = 0;
   private cachedLines: string[] | undefined;
   private cachedWidth = -1;
+  private cachedHeight = -1;
   private hint: string | undefined;
   private settled = false;
   private liveView: { sessionId: string; rowId?: string; description: string; live: AgentLiveSession } | undefined;
@@ -113,15 +115,20 @@ export class AgentManager implements Component {
   }
 
   private renderTree(renderWidth: number): string[] {
-    // The cache is width-keyed so a terminal resize always re-wraps rows.
-    if (this.cachedLines && this.cachedWidth === renderWidth) return this.cachedLines;
+    // The cache is width- and height-keyed so a terminal resize (width change
+    // re-wraps rows; a same-width height shrink must re-clamp the panel) always
+    // re-renders the tree.
+    const fitHeight = overlayHeight(this.tui.terminal?.rows ?? 24);
+    if (this.cachedLines && this.cachedWidth === renderWidth && this.cachedHeight === fitHeight) {
+      return this.cachedLines;
+    }
     this.cachedWidth = renderWidth;
-    const lines: string[] = [];
-    lines.push(this.theme.fg("accent", truncateToWidth("Agent Manager", renderWidth)));
-    lines.push(this.theme.fg("muted", truncateToWidth(`Session ${this.view.scopeSessionId}`, renderWidth)));
+    this.cachedHeight = fitHeight;
 
+    const body: string[] = [];
     if (this.view.rows.length === 0) {
-      lines.push(this.theme.fg("muted", truncateToWidth("No child sessions", renderWidth)));
+      body.push(this.theme.fg("muted", "No child sessions yet"));
+      body.push(this.theme.fg("dim", "Sessions spawned by this session will appear here."));
     } else {
       const isLast = this.computeLastSiblingFlags();
       const ancestorStack: number[] = [];
@@ -129,32 +136,51 @@ export class AgentManager implements Component {
         const row = this.view.rows[index]!;
         while (ancestorStack.length > row.depth) ancestorStack.pop();
         const prefix = this.treePrefix(row.depth, isLast, ancestorStack, index);
-        const cursor = index === this.selectedIndex ? this.theme.fg("accent", "› ") : "  ";
+        const cursor = index === this.selectedIndex ? this.theme.fg("accent", "▸ ") : "  ";
         const indicator = this.statusIndicator(row.status);
         const duration = formatDuration(row.durationMs);
-        const body = `${prefix}${indicator} ${row.description} (${duration})`;
+        const entrySuffix = row.enterable && row.status === "running" ? this.theme.fg("dim", "  enter") : "";
+        const bodyText = `${prefix}${indicator} ${row.description} (${duration})${entrySuffix}`;
         const available = Math.max(1, renderWidth - visibleWidth(cursor));
-        lines.push(cursor + truncateToWidth(body, available));
+        body.push(cursor + truncateToWidth(bodyText, available));
         ancestorStack.push(index);
       }
     }
 
-    if (this.view.rows.length > 0) {
-      lines.push(
-        this.theme.fg("muted", truncateToWidth(`(${this.selectedIndex + 1}/${this.view.rows.length})`, renderWidth)),
-      );
-    }
-    if (this.hint) {
-      lines.push(this.theme.fg("warning", truncateToWidth(this.hint, renderWidth)));
-    }
-    lines.push(
-      this.theme.fg(
-        "dim",
-        truncateToWidth("↑/↓ move • Enter view • ← back • Esc close", renderWidth),
-      ),
-    );
-    this.cachedLines = lines;
-    return lines;
+    const footer = this.hint
+      ? `${this.theme.fg("warning", this.hint)}  ${this.theme.fg("dim", "↑/↓ move • Enter view • ← back • Esc close")}`
+      : this.theme.fg("dim", "↑/↓ move • Enter view • ← back • Esc close");
+
+    const panel = renderBorderedPanel(this.theme, {
+      width: renderWidth,
+      title: `${this.theme.fg("accent", "Agent Manager")} ─ ${this.theme.fg("dim", `Session ${this.view.scopeSessionId}`)}`,
+      status: this.statusBar(),
+      body,
+      footer,
+    });
+    this.cachedLines = fitPanelToHeight(panel, fitHeight);
+    return this.cachedLines;
+  }
+
+  private statusBar(): string {
+    const rows = this.view.rows;
+    if (rows.length === 0) return this.theme.fg("dim", "No child sessions");
+    const counts = new Map<ManagerStatus, number>();
+    for (const row of rows) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
+    const parts: string[] = [
+      this.theme.fg("accent", `${rows.length} sessions`),
+    ];
+    const running = counts.get("running") ?? 0;
+    if (running > 0) parts.push(`${running} running`);
+    const completed = counts.get("completed") ?? 0;
+    if (completed > 0) parts.push(`${completed} done`);
+    const failed = counts.get("failed") ?? 0;
+    if (failed > 0) parts.push(this.theme.fg("error", `${failed} failed`));
+    const pending = (counts.get("queued") ?? 0) + (counts.get("created") ?? 0);
+    if (pending > 0) parts.push(`${pending} queued`);
+    const cancelled = (counts.get("cancelled") ?? 0) + (counts.get("interrupted") ?? 0) + (counts.get("stopped") ?? 0) + (counts.get("aborted") ?? 0);
+    if (cancelled > 0) parts.push(`${cancelled} cancelled`);
+    return parts.join("  •  ");
   }
 
   private renderLive(renderWidth: number): string[] {
@@ -163,57 +189,48 @@ export class AgentManager implements Component {
     this.cachedWidth = -1;
     const live = this.liveView!.live;
     const viewportRows = Math.max(1, this.tui.terminal?.rows ?? 24);
-    const lines: string[] = [];
-    const title = `Child Session ${live.snapshot.status}`;
-    const description = `  ${this.liveView!.description}`;
-    lines.push(this.theme.fg("accent", truncateToWidth(title, renderWidth)));
-    lines.push(this.theme.fg("muted", truncateToWidth(description, renderWidth)));
-    const footerHelp = live.snapshot.settled
-      ? "← back • Esc close"
-      : "Type to steer this child • Enter to send • ← back • Esc close";
-    const footer = this.theme.fg("dim", truncateToWidth(footerHelp, renderWidth));
-    const steerLine = !live.snapshot.settled && this.draftInput
-      ? `  steer> ${this.draftInput}`
-      : undefined;
+    const snapshot = live.snapshot;
+    const body: string[] = [];
+    body.push(this.theme.fg("dim", this.liveView!.description));
+    body.push(this.theme.fg("dim", "Transcript"));
 
-    const reserved = 3 + (this.hint ? 1 : 0) + (steerLine ? 1 : 0);
-    const transcriptBudget = Math.max(0, viewportRows - reserved);
-    const entries = [...live.snapshot.transcript].slice(-transcriptBudget);
-
-    if (entries.length === 0 && transcriptBudget === 0) {
-      lines.push(this.theme.fg("muted", truncateToWidth("…", renderWidth)));
+    const transcriptBudget = Math.max(1, viewportRows - 8 - (this.hint ? 1 : 0) - (this.draftInput && !snapshot.settled ? 1 : 0));
+    const entries = [...snapshot.transcript].slice(-transcriptBudget);
+    if (entries.length === 0) {
+      body.push(this.theme.fg("dim", "No activity yet."));
     } else {
       for (const entry of entries) {
+        const icon = entry.kind === "tool" ? "⌘" : entry.role === "user" ? "›" : "·";
         const text = entry.kind === "tool"
-          ? `  ⌘ ${entry.toolName ?? "tool"}${entry.complete ? "" : " (running)"}`
-          : `  ${entry.role === "user" ? "you: " : ""}${entry.text}`;
-        lines.push(this.theme.fg(entry.kind === "tool" ? "muted" : "text", truncateToWidth(text, renderWidth)));
-      }
-      if (entries.length === 0) {
-        lines.push(this.theme.fg("muted", truncateToWidth("No activity yet.", renderWidth)));
+          ? `${icon} ${entry.toolName ?? "tool"}${entry.complete ? "" : " (running)"}`
+          : `${icon} ${entry.role === "user" ? "you: " : ""}${entry.text}`;
+        body.push(this.theme.fg(entry.kind === "tool" ? "muted" : "text", text));
       }
     }
 
-    if (this.hint) {
-      lines.push(this.theme.fg("warning", truncateToWidth(this.hint, renderWidth)));
+    if (this.hint) body.push(this.theme.fg("warning", this.hint));
+    if (!snapshot.settled && this.draftInput) {
+      body.push(this.theme.fg("accent", `steer> ${this.draftInput}`));
     }
-    if (steerLine) {
-      lines.push(this.theme.fg("text", truncateToWidth(steerLine, renderWidth)));
-    }
-    lines.push(footer);
 
-    // Drop older transcript lines that overflowed the viewport; the retained
-    // snapshot is never truncated, only the in-view window prunes the tail.
-    if (lines.length > viewportRows) {
-      lines.length = viewportRows;
-      lines[viewportRows - 1] = footer;
-    }
-    return lines;
+    const footer = snapshot.settled
+      ? this.theme.fg("dim", `${statusIcon(snapshot.status)} ${snapshot.status} • read-only • ← back • Esc close`)
+      : this.theme.fg("dim", "Type to steer this child • Enter send • ← back • Esc close");
+    const status = `${this.theme.fg(statusColor(snapshot.status), statusIcon(snapshot.status))} ${snapshot.status}  •  ${snapshot.transcript.length} events`;
+    const panel = renderBorderedPanel(this.theme, {
+      width: renderWidth,
+      title: `${this.theme.fg("accent", "Child Session")} ─ ${this.theme.fg("dim", this.liveView!.description)}`,
+      status,
+      body,
+      footer,
+    });
+    return fitPanelToHeight(panel, viewportRows);
   }
 
   invalidate(): void {
     this.cachedLines = undefined;
     this.cachedWidth = -1;
+    this.cachedHeight = -1;
   }
 
   handleInput(data: string): void {
@@ -404,23 +421,14 @@ export class AgentManager implements Component {
   }
 
   private statusIndicator(status: ManagerStatus): string {
-    switch (status) {
-      case "active":
-        return this.theme.fg("text", "●");
-      case "completed":
-        return this.theme.fg("success", "●");
-      case "failed":
-        return this.theme.fg("error", "●");
-      case "cancelled":
-      case "interrupted":
-      case "stopped":
-      case "aborted":
-        return this.theme.fg("warning", "●");
-      case "created":
-      case "queued":
-      case "running":
-        return this.theme.fg("muted", "◯");
+    const icon = statusIcon(status);
+    if (status === "completed") return this.theme.fg("success", icon);
+    if (status === "failed") return this.theme.fg("error", icon);
+    if (["cancelled", "interrupted", "stopped", "aborted"].includes(status)) {
+      return this.theme.fg("warning", icon);
     }
+    if (status === "active") return this.theme.fg("text", icon);
+    return this.theme.fg("muted", icon);
   }
 
   private computeLastSiblingFlags(): boolean[] {
@@ -458,4 +466,24 @@ function formatDuration(durationMs: number): string {
   const remainingSeconds = seconds % 60;
   if (minutes === 0) return `${remainingSeconds}s`;
   return `${minutes}m ${remainingSeconds}s`;
+}
+
+function overlayHeight(rows: number): number {
+  return Math.max(1, Math.floor(Math.max(1, rows) * 0.8));
+}
+
+function statusColor(status: string): string {
+  switch (status) {
+    case "completed":
+    case "done":
+      return "success";
+    case "failed":
+    case "interrupted":
+    case "cancelled":
+    case "stopped":
+    case "aborted":
+      return "error";
+    default:
+      return "accent";
+  }
 }

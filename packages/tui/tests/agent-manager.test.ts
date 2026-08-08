@@ -105,6 +105,29 @@ test("an empty scope renders a polished bordered empty state with a legend", () 
   assert.match(output, /Esc close/, "legend is still rendered on an empty scope");
 });
 
+test("short viewports retain the tree panel chrome and legend", () => {
+  const manyRows = Array.from({ length: 12 }, (_, index) =>
+    row(`child-${index}`, index % 3 === 0 ? "completed" : "running", 1, {
+      description: `Child session ${index}`,
+      enterable: index % 3 !== 0,
+    }),
+  );
+  const manager = new AgentManager({
+    tui: fakeTUI(10),
+    theme: textTheme,
+    view: { scopeSessionId: "root", rows: [ROWS[0]!, ...manyRows] },
+    done: () => {},
+  });
+
+  const lines = render(manager);
+  const output = lines.join("\n");
+  assert.ok(lines.length <= 8, `panel respects the host's 80% overlay height: ${lines.length}`);
+  assert.match(output, /Agent Manager/, "title remains visible");
+  assert.match(output, /sessions/, "status bar remains visible");
+  assert.match(output, /Esc close/, "legend remains visible");
+  assert.match(output, /╯$/, "bottom border remains visible");
+});
+
 test("plain Up and Down move across the complete flattened tree", () => {
   const manager = new AgentManager({
     tui: fakeTUI(),
