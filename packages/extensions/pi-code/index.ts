@@ -5,7 +5,6 @@ import {
   registerQuestionTool,
   registerStatusTool,
   registerJobsTool,
-  registerManagerShortcut,
   registerAgentFooter,
 } from "@xzy-ai/tools";
 import {
@@ -32,7 +31,6 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerCancelTool(pi);
   registerStatusTool(pi);
   registerJobsTool(pi);
-  registerManagerShortcut(pi);
   registerAgentFooter(pi);
   registerSessionEvents(pi);
   registerLifecycleGates(pi);

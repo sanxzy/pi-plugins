@@ -10,7 +10,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/extension.test.ts tests/agent-manager.test.ts"
+    "test": "node --test --import tsx tests/extension.test.ts tests/manager-removal.test.ts"
   },
   "dependencies": {
     "@xzy-ai/commands": "workspace:*",

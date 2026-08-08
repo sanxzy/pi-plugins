@@ -8,14 +8,6 @@ export type {
   FooterTreeRow,
   FooterTreeStatus,
 } from "./agent-footer.ts";
-export { AgentManager, MANAGER_SHORTCUT, MANAGER_OVERLAY_OPTIONS } from "./agent-manager.ts";
-export type {
-  AgentManagerOptions,
-  AgentManagerTheme,
-  ManagerRow,
-  ManagerStatus,
-  ManagerView,
-} from "./agent-manager.ts";
 export { AgentLiveManager } from "./agent-manager-live.ts";
 export type {
   AgentLiveManagerOptions,
