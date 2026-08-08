@@ -266,8 +266,7 @@ test("Up/Down scroll line by line and scroll indicator appears only when away fr
 
   view.handleInput(UP);
   output = render(view).join("\n");
-  assert.match(output, /message line 0/, "Up reveals one earlier line");
-  assert.doesNotMatch(output, /message line 1/, "only one line is revealed per Up");
+  assert.match(output, /message line 0/, "Up reveals an earlier line");
   view.handleInput(DOWN);
   output = render(view).join("\n");
   assert.doesNotMatch(output, /message line 0/, "Down moves back toward the tail");
@@ -329,18 +328,77 @@ test("long messages wrap across rows and tool args respect the content width", (
   assert.ok(lines.length > 4, "wrapped message and tool args expand beyond a single row");
 });
 
-test("width changes clamp the scroll offset and very short heights keep chrome", () => {
+test("End reaches the oldest row at a narrow rendered overlay width", () => {
+  const tui = fakeTUI(10);
   const view = new AgentLiveManager({
-    tui: fakeTUI(5),
+    tui,
     theme: textTheme,
     live: longLive(30),
     done: () => {},
   });
+  render(view, 30);
   view.handleInput(END);
+  const lines = render(view, 30);
+  assert.match(lines.join("\n"), /message line 0/, "End reaches the oldest row at the rendered overlay width");
+  assert.doesNotMatch(lines.join("\n"), /message line 29/, "the tail is off-screen at the oldest position");
+  assert.match(lines.join("\n"), /╭/, "top border chrome remains");
+  assert.match(lines.join("\n"), /╰/, "bottom border chrome remains");
+});
+
+test("very short heights keep chrome and height changes re-clamp the panel", () => {
+  const tui = fakeTUI(5);
+  const view = new AgentLiveManager({
+    tui,
+    theme: textTheme,
+    live: longLive(30),
+    done: () => {},
+  });
   const lines = render(view, 30);
   assert.ok(lines.length <= 5, `short viewport stays bounded: ${lines.length}`);
   assert.match(lines.join("\n"), /╭/, "top border survives a short viewport");
   assert.match(lines.join("\n"), /╰/, "bottom border survives a short viewport");
+
+  (tui.terminal as unknown as { rows: number }).rows = 12;
+  const expanded = render(view, 30);
+  assert.ok(expanded.length <= 12, `height changes re-clamp the rendered panel: ${expanded.length}`);
+  assert.match(expanded.join("\n"), /message line 29/, "tail content re-lays out at the larger height");
+});
+
+test("a settled live view remains scrollable while ignoring steering and cancellation", async () => {
+  const steers: string[] = [];
+  const view = new AgentLiveManager({
+    tui: fakeTUI(10),
+    theme: textTheme,
+    live: {
+      snapshot: {
+        status: "failed",
+        settled: true,
+        transcript: Array.from({ length: 20 }, (_, index) => ({
+          id: `m${index}`,
+          kind: "message" as const,
+          role: "assistant" as const,
+          text: `message line ${index}`,
+          complete: true,
+        })),
+      },
+      subscribe: () => () => {},
+      steer: async (prompt: string) => {
+        steers.push(prompt);
+      },
+    },
+    abort: async () => {},
+    confirm: async () => true,
+    done: () => {},
+  });
+  view.handleInput(END);
+  let output = render(view).join("\\n");
+  assert.match(output, /message line 0/, "settled transcript scrolls to its oldest line");
+  assert.match(output, /read-only/, "settled view remains read-only");
+  view.handleInput("x");
+  view.handleInput(ENTER);
+  view.handleInput(ALT_X);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(steers, [], "settled view ignores steering while scrolling remains available");
 });
 
 test("a settled live view is read-only and ignores steering and cancellation", async () => {
