@@ -8,6 +8,10 @@ import { textTheme } from "./test-theme.ts";
 
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";
+const PAGE_UP = "\x1b[5~";
+const PAGE_DOWN = "\x1b[6~";
+const HOME = "\x1b[H";
+const END = "\x1b[F";
 const ESC = "\x1b";
 const ENTER = "\r";
 const ALT_X = "\x1bx";
@@ -195,6 +199,148 @@ test("closing or disposing the live view never aborts a running child", () => {
   view.dispose();
   assert.equal(aborted, 0, "escape and dispose never abort the child");
   assert.equal(unsubscribed, 1, "dispose releases the subscription exactly once");
+});
+
+function longLive(count: number): AgentLiveSession {
+  return {
+    snapshot: {
+      status: "running",
+      settled: false,
+      transcript: Array.from({ length: count }, (_, index) => ({
+        id: `m${index}`,
+        kind: "message" as const,
+        role: "assistant" as const,
+        text: `message line ${index}`,
+        complete: true,
+      })),
+    },
+    subscribe: () => () => {},
+    steer: async () => {},
+  };
+}
+
+test("a long transcript starts at the tail and scrolls to earlier lines while keeping chrome", () => {
+  const view = new AgentLiveManager({
+    tui: fakeTUI(12),
+    theme: textTheme,
+    live: longLive(30),
+    done: () => {},
+  });
+  let output = render(view).join("\n");
+  assert.match(output, /message line 29/, "tail message is visible by default");
+  assert.doesNotMatch(output, /message line 0/, "oldest message is off-screen initially");
+  assert.match(output, /╭/, "top border chrome remains");
+  assert.match(output, /╰/, "bottom border chrome remains");
+
+  view.handleInput(END);
+  output = render(view).join("\n");
+  assert.match(output, /message line 0/, "End reveals the oldest message");
+  assert.doesNotMatch(output, /message line 29/, "tail is off-screen at the top");
+
+  view.handleInput(HOME);
+  output = render(view).join("\n");
+  assert.match(output, /message line 29/, "Home returns to the tail");
+
+  view.handleInput(END);
+  view.handleInput(PAGE_DOWN);
+  output = render(view).join("\n");
+  assert.doesNotMatch(output, /message line 0/, "PageDown moves off the very top");
+  view.handleInput(PAGE_UP);
+  output = render(view).join("\n");
+  assert.match(output, /message line 0/, "PageUp returns toward the oldest message");
+});
+
+test("Up/Down scroll line by line and scroll indicator appears only when away from the tail", () => {
+  const view = new AgentLiveManager({
+    tui: fakeTUI(10),
+    theme: textTheme,
+    live: longLive(20),
+    done: () => {},
+  });
+  let output = render(view).join("\n");
+  assert.doesNotMatch(output, /↑ scroll/, "no scroll indicator at the tail");
+
+  view.handleInput(END);
+  output = render(view).join("\n");
+  assert.match(output, /↑ scroll/, "scroll indicator appears while scrolled");
+
+  view.handleInput(UP);
+  output = render(view).join("\n");
+  assert.match(output, /message line 0/, "Up reveals one earlier line");
+  assert.doesNotMatch(output, /message line 1/, "only one line is revealed per Up");
+  view.handleInput(DOWN);
+  output = render(view).join("\n");
+  assert.doesNotMatch(output, /message line 0/, "Down moves back toward the tail");
+});
+
+test("scrolling keys never enter the steering draft and steering still works after scrolling", async () => {
+  const steers: string[] = [];
+  const view = new AgentLiveManager({
+    tui: fakeTUI(10),
+    theme: textTheme,
+    live: {
+      snapshot: {
+        status: "running",
+        settled: false,
+        transcript: Array.from({ length: 20 }, (_, index) => ({
+          id: `m${index}`,
+          kind: "message" as const,
+          role: "assistant" as const,
+          text: `message line ${index}`,
+          complete: true,
+        })),
+      },
+      subscribe: () => () => {},
+      steer: async (prompt: string) => {
+        steers.push(prompt);
+      },
+    },
+    done: () => {},
+  });
+  view.handleInput(PAGE_UP);
+  view.handleInput("h");
+  view.handleInput("i");
+  view.handleInput(ENTER);
+  view.handleInput(PAGE_DOWN);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(steers, ["hi"], "scroll keys never enter the draft; typed text still steers");
+});
+
+test("long messages wrap across rows and tool args respect the content width", () => {
+  const view = new AgentLiveManager({
+    tui: fakeTUI(24),
+    theme: textTheme,
+    live: {
+      snapshot: {
+        status: "running",
+        settled: false,
+        transcript: [
+          { id: "m1", kind: "message", role: "assistant", text: "a very long sentence that should wrap onto more than one display row to stay readable", complete: true },
+          { id: "t1", kind: "tool", toolCallId: "call-1", toolName: "bash", args: { command: "printf 'x'.repeat(200)" }, text: "", complete: false },
+        ],
+      },
+      subscribe: () => () => {},
+      steer: async () => {},
+    },
+    done: () => {},
+  });
+  const lines = render(view, 40);
+  for (const line of lines) assert.ok(line.length <= 40, `line fits within width: ${line}`);
+  assert.ok(lines.length > 4, "wrapped message and tool args expand beyond a single row");
+});
+
+test("width changes clamp the scroll offset and very short heights keep chrome", () => {
+  const view = new AgentLiveManager({
+    tui: fakeTUI(5),
+    theme: textTheme,
+    live: longLive(30),
+    done: () => {},
+  });
+  view.handleInput(END);
+  const lines = render(view, 30);
+  assert.ok(lines.length <= 5, `short viewport stays bounded: ${lines.length}`);
+  assert.match(lines.join("\n"), /╭/, "top border survives a short viewport");
+  assert.match(lines.join("\n"), /╰/, "bottom border survives a short viewport");
 });
 
 test("a settled live view is read-only and ignores steering and cancellation", async () => {
