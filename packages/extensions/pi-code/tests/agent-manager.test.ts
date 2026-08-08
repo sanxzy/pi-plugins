@@ -44,6 +44,7 @@ function makeContext(cwd: string, mode: ExtensionContext["mode"], custom: Extens
     cwd,
     ui: {
       custom,
+      setWidget: () => {},
       getEditorText: () => draft,
       setEditorText: (text: string) => editorWrites.push(text),
       notify: () => {},

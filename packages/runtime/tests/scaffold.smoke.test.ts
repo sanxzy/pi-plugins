@@ -43,6 +43,8 @@ test("publishing a live child notifies live-activity subscribers", () => {
   });
 
   pool.liveChildren.set("job-a", {
+    steer: async () => {},
+    abort: async () => {},
     live: {
       snapshot: { status: "running", settled: false, transcript: [] },
       subscribe: () => () => {},

@@ -19,10 +19,13 @@ function fakeTUI(renders: number[] = []): TUI {
 
 const theme = { fg: (_color: string, text: string) => text };
 
-function source(items: string[]): AgentActivitySource {
+function source(items: string[], subscribes: number[] = []): AgentActivitySource {
   return {
-    getItems: () => items,
-    subscribe: () => () => {},
+    getItems: () => items.map((text, index) => ({ jobId: `job-${index}`, text })),
+    subscribe: (listener: () => void) => {
+      subscribes.push(subscribes.length);
+      return () => {};
+    },
   };
 }
 
@@ -49,29 +52,37 @@ function plainLines(lines: string[]): string[] {
 }
 
 test("an empty activity source renders no lines so the composer stays untouched", () => {
+  const { driver } = manualDriver();
   const ticker = new AgentActivityTicker({
     tui: fakeTUI(),
     theme,
+    ticker: driver,
     source: source([]),
   });
   assert.deepEqual(ticker.render(80), [], "no running agents -> no ticker row");
+  ticker.dispose();
 });
 
 test("a single running agent renders one line containing its latest activity", () => {
+  const { driver } = manualDriver();
   const ticker = new AgentActivityTicker({
     tui: fakeTUI(),
     theme,
+    ticker: driver,
     source: source(["⌘ bash"]),
   });
   const lines = plainLines(ticker.render(80));
   assert.equal(lines.length, 1, "exactly one ticker line");
   assert.match(lines[0], /bash/, "activity text is present");
+  ticker.dispose();
 });
 
 test("multiple agents are joined by a separator and the visible window never exceeds the width", () => {
+  const { driver } = manualDriver();
   const ticker = new AgentActivityTicker({
     tui: fakeTUI(),
     theme,
+    ticker: driver,
     source: source([
       "⌘ bash",
       "· implementing the feature",
@@ -83,6 +94,7 @@ test("multiple agents are joined by a separator and the visible window never exc
   assert.equal(lines.length, 1, "still a single ticker line");
   assert.ok(lines[0].length <= width, `window is at most ${width} columns, got ${lines[0].length}`);
   assert.match(lines[0], /bash/, "first agent appears in the window");
+  ticker.dispose();
 });
 
 test("the marquee advances on each tick and dispose stops further animation", () => {
@@ -127,4 +139,5 @@ test("a source refresh re-reads activity and starts the marquee from the beginni
   const after = plainLines(ticker.render(width))[0];
   assert.notEqual(after, before, "a refreshed render restarts the marquee window");
   assert.ok(renders.length >= 2, "animation and refresh both request renders");
+  ticker.dispose();
 });

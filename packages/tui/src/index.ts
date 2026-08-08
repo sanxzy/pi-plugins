@@ -14,3 +14,11 @@ export type {
   AgentLiveSession,
   LiveViewReason,
 } from "./agent-manager-live.ts";
+export { AgentActivityTicker } from "./agent-activity-ticker.ts";
+export type {
+  AgentActivityItem,
+  AgentActivitySource,
+  AgentActivityTickerOptions,
+  AgentActivityTickerTheme,
+  TickerDriver,
+} from "./agent-activity-ticker.ts";

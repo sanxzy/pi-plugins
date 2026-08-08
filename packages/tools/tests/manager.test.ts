@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createJob, type ChildSessionControl } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
-import { registerManagerShortcut } from "../src/registrations/manager.ts";
+import { registerManagerShortcut, registerAgentTicker } from "../src/registrations/manager.ts";
 
 /**
  * Host-lifecycle tests for the agent manager registration.
@@ -165,10 +165,11 @@ test("host reset on session_shutdown disposes the mounted manager without aborti
 test("the agent activity ticker mounts above the composer for TUI sessions only", () => {
   const d = piDouble();
   registerManagerShortcut(d.pi);
+  registerAgentTicker(d.pi);
   startManager(d, mkdtempSync(join(tmpdir(), "pi-code-ticker-")));
 
-  // The ticker registration is part of the manager registration; a TUI start
-  // wires the widget above the editor.
+  // The ticker is registered alongside the manager; a TUI start wires the
+  // widget above the editor.
   assert.ok(widgetFactories.has("pi-code-agent-ticker"), "the ticker widget is registered for TUI sessions");
   const factory = widgetFactories.get("pi-code-agent-ticker");
   assert.ok(typeof factory === "function", "the ticker is mounted as a component, not plain lines");
@@ -178,6 +179,8 @@ test("the ticker widget reflects a running child's latest activity", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-ticker-"));
   const pool = getChildPool(cwd);
   pool.liveChildren.set("job-a", {
+    steer: async () => {},
+    abort: async () => {},
     live: {
       snapshot: {
         status: "running",
@@ -194,15 +197,16 @@ test("the ticker widget reflects a running child's latest activity", () => {
 
   const d = piDouble();
   registerManagerShortcut(d.pi);
+  registerAgentTicker(d.pi);
   startManager(d, cwd);
   const factory = widgetFactories.get("pi-code-agent-ticker");
   assert.ok(typeof factory === "function", "the ticker is registered");
   const mounted = factory!({ terminal: { rows: 24, columns: 100 }, requestRender: () => {} }, {
     fg: (_color: string, text: string) => text,
-  }) as unknown as { render(width: number): string[] };
+  }) as unknown as { render(width: number): string[]; dispose?(): void };
   const lines = mounted.render(80).map((line) => line);
   assert.match(lines.join("\n"), /bash/, "the running child's tool activity feeds the ticker");
-  (mounted as unknown as { dispose?: () => void }).dispose?.();
+  mounted.dispose?.();
 
   rmSync(cwd, { recursive: true, force: true });
 });

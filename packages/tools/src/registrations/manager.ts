@@ -6,13 +6,19 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
+  AgentActivityTicker,
   AgentManager,
   MANAGER_SHORTCUT,
+  type AgentActivityItem,
+  type AgentActivitySource,
   type AgentManagerTheme,
   type ManagerRow,
   type ManagerView,
 } from "@xzy-ai/tui";
-import { getChildPool, scopeRegistry } from "@xzy-ai/runtime";
+import { getChildPool, scopeRegistry, type LiveActivitySource } from "@xzy-ai/runtime";
+
+/** Widget key that keeps the ticker mounted across re-renders. */
+export const AGENT_TICKER_WIDGET_KEY = "pi-code-agent-ticker";
 
 /**
  * Register the agent-manager shortcut.
@@ -138,6 +144,66 @@ function buildViewForSession(
     ),
   ];
   return { scopeSessionId: sessionId, rows };
+}
+
+/**
+ * Register the agent-activity news ticker above the composer.
+ *
+ * TUI-only, mounted once per session as a `setWidget` above the editor. The
+ * widget shows the latest activity of each running background agent as a
+ * continuously scrolling single line, so the user sees sub-agents progressing
+ * without opening the manager. The widget disappears entirely when no agents
+ * run. On host reset the widget is cleared so it never leaks across a session
+ * replacement.
+ */
+export function registerAgentTicker(pi: ExtensionAPI): void {
+  pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
+    if (ctx.mode !== "tui" || !ctx.hasUI) return;
+    const source = createActivitySource(ctx);
+    ctx.ui.setWidget(AGENT_TICKER_WIDGET_KEY, (tui, theme) => {
+      const ticker = new AgentActivityTicker({
+        tui,
+        theme: { fg: (color: string, text: string) => theme.fg(color as Parameters<Theme["fg"]>[0] || "muted", text) },
+        source,
+      });
+      // Keep the widget alive for the widget's host-managed lifetime; the TUI
+      // disposes it on reset. The local handle is only for symmetry with the
+      // manager registration's explicit teardown.
+      return ticker;
+    });
+  });
+
+  pi.on("session_shutdown", (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    if (ctx.mode !== "tui" || !ctx.hasUI) return;
+    // Child AgentSessions emit their own `quit` shutdown after settling; only
+    // the root host session owns the widget, so a child teardown leaves it up.
+    const pool = getChildPool(ctx.cwd);
+    if (pool.registry.get(ctx.sessionManager.getSessionId()) !== undefined) return;
+    ctx.ui.setWidget(AGENT_TICKER_WIDGET_KEY, undefined);
+  });
+}
+
+/** Bridge the pool's live activity into the ticker's minimal source surface. */
+function createActivitySource(ctx: ExtensionContext): AgentActivitySource {
+  const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
+  const liveActivity = pool.liveActivity as LiveActivitySource;
+  return {
+    getItems(): readonly AgentActivityItem[] {
+      const items: AgentActivityItem[] = [];
+      for (const [jobId, control] of pool.liveChildren) {
+        const snapshot = control.live?.snapshot;
+        if (!snapshot) continue;
+        const last = snapshot.transcript[snapshot.transcript.length - 1];
+        if (!last) continue;
+        const text = last.kind === "tool" ? `⌘ ${last.toolName ?? "tool"}` : `· ${last.text}`;
+        items.push({ jobId, text });
+      }
+      return items;
+    },
+    subscribe(listener: () => void): () => void {
+      return liveActivity.subscribe(listener);
+    },
+  };
 }
 
 function toManagerRow(row: {
