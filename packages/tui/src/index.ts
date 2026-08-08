@@ -16,6 +16,7 @@ export type {
   ManagerStatus,
   ManagerView,
 } from "./agent-manager.ts";
+export { AgentLiveManager } from "./agent-manager-live.ts";
 export type {
   AgentLiveManagerOptions,
   AgentLiveManagerTheme,

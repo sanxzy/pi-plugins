@@ -59,6 +59,7 @@ export interface AgentFooterOptions {
   readonly theme: AgentFooterTheme;
   readonly getInfo: () => AgentFooterInfo;
   readonly getRows?: () => readonly FooterTreeRow[];
+  readonly onEnter?: (row: FooterTreeRow | undefined) => void;
   readonly dispose?: () => void;
 }
 
@@ -75,17 +76,20 @@ export class AgentFooter implements Component {
   private readonly theme: AgentFooterTheme;
   private readonly getInfo: () => AgentFooterInfo;
   private readonly getRows?: () => readonly FooterTreeRow[];
+  private readonly onEnter?: (row: FooterTreeRow | undefined) => void;
   private readonly release?: () => void;
   private disposed = false;
   private management = false;
   private selectedIndex = 0;
   private scrollTop = 0;
+  private hint: string | undefined;
 
   constructor(options: AgentFooterOptions) {
     this.tui = options.tui;
     this.theme = options.theme;
     this.getInfo = options.getInfo;
     this.getRows = options.getRows;
+    this.onEnter = options.onEnter;
     this.release = options.dispose;
   }
 
@@ -101,6 +105,7 @@ export class AgentFooter implements Component {
 
     const lastByDepth = computeLastByDepth(rows);
     const lines = [pathLine, statsLine, this.theme.fg("dim", "-- current active subagents --")];
+    if (this.hint) lines.push(this.theme.fg("warning", this.hint));
 
     const visible = this.management
       ? rows.slice(this.scrollTop, this.scrollTop + MAX_VISIBLE_MANAGEMENT_ROWS)
@@ -141,6 +146,10 @@ export class AgentFooter implements Component {
       }
       if (matchesKey(data, Key.enter)) {
         const row = this.selectedRow();
+        if (row && !row.enterable && !row.root) {
+          this.setHint("This session is not enterable right now.");
+          return true;
+        }
         this.exitManagement();
         this.onEnter?.(row);
         return true;
@@ -149,8 +158,11 @@ export class AgentFooter implements Component {
     return false;
   }
 
-  /** Closure invoked when the user activates a selected non-root row. */
-  onEnter?: (row: FooterTreeRow | undefined) => void;
+  /** Show a transient hint line in the footer while management mode is active. */
+  setHint(hint: string | undefined): void {
+    this.hint = hint;
+    this.refresh();
+  }
 
   invalidate(): void {
     // The host owns repaint scheduling; live data subscriptions request renders.
@@ -166,17 +178,20 @@ export class AgentFooter implements Component {
     this.management = true;
     this.selectedIndex = 0;
     this.scrollTop = 0;
+    this.hint = undefined;
     this.refresh();
   }
 
   private exitManagement(): void {
     this.management = false;
+    this.hint = undefined;
     this.refresh();
   }
 
   private moveSelection(step: number): void {
     const rows = filterFooterRows(this.getRows?.() ?? [], new Date());
     if (rows.length === 0) return;
+    this.hint = undefined;
     const next = Math.max(0, Math.min(rows.length - 1, this.selectedIndex + step));
     this.selectedIndex = next;
     if (next < this.scrollTop) this.scrollTop = next;

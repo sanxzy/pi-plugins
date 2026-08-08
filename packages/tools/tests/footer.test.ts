@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createJob } from "@xzy-ai/core";
+import { createChildLiveFeed, createJob } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
 import { registerAgentFooter } from "../src/registrations/footer.ts";
 
@@ -12,6 +12,14 @@ const DOWN = "\x1b[B";
 const UP = "\x1b[A";
 const LEFT = "\x1b[D";
 const ENTER = "\r";
+const ESC = "\x1b";
+const ALT_X = "\x1bx";
+
+/** Pending confirmation promise surface wired into the ctx double. */
+let confirmResult: Promise<boolean> = Promise.resolve(true);
+function recordedConfirm(_title: string, _message: string): Promise<boolean> {
+  return confirmResult;
+}
 
 /** ExtensionContext double exposing the UI surfaces the footer registration uses. */
 function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
@@ -22,6 +30,8 @@ function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
     ui: {
       setFooter: recordedSetFooter,
       onTerminalInput: recordedOnTerminalInput,
+      custom: recordedCustom,
+      confirm: recordedConfirm,
     },
     sessionManager: {
       getSessionId: () => sessionId,
@@ -35,6 +45,13 @@ let capturedFooterFactory:
   | ((tui: unknown, theme: unknown, footerData: unknown) => unknown)
   | undefined;
 let restoredToNative = false;
+let capturedCustomFactory:
+  | ((tui: unknown, theme: unknown, keybindings: unknown, done: (value: unknown) => void) => unknown)
+  | undefined;
+function recordedCustom(factory: unknown, _options?: unknown): Promise<unknown> {
+  capturedCustomFactory = factory as typeof capturedCustomFactory;
+  return Promise.resolve(undefined);
+}
 let terminalInputHandler: ((data: string) => { consume?: boolean; data?: string } | undefined) | undefined;
 function recordedOnTerminalInput(handler: (data: string) => { consume?: boolean; data?: string } | undefined): () => void {
   terminalInputHandler = handler;
@@ -144,6 +161,70 @@ test("footer management mode consumes navigation keys and passes others through"
 
     footer.dispose();
     assert.equal(terminalInputHandler, undefined, "dispose releases the input listener");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("Enter on a running child mounts the live view; cancel aborts, close does not", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  try {
+    const d = piDouble();
+    registerAgentFooter(d.pi);
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd));
+    assert.ok(capturedFooterFactory);
+
+    const pool = getChildPool(cwd, "root-session");
+    const feed = createChildLiveFeed();
+    let aborted = 0;
+    pool.liveChildren.set("job-a", {
+      sessionFile: join(cwd, "sessions", "job-a.jsonl"),
+      live: feed,
+      steer: async () => {},
+      abort: async () => {
+        aborted++;
+      },
+    });
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "default" }));
+
+    const context = ctx(cwd);
+    const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
+    const footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+    }) as { handleInput(data: string): boolean; dispose(): void };
+
+    // Outside management, ↓ enters; ↓ to the child; Enter mounts the live view.
+    assert.equal(footer.handleInput(DOWN), true);
+    assert.equal(footer.handleInput(DOWN), true);
+    assert.equal(footer.handleInput(ENTER), true);
+    assert.ok(capturedCustomFactory, "Enter mounts the focused live view overlay");
+
+    const mounted = capturedCustomFactory!({ requestRender: () => {}, terminal: { rows: 24 } }, { fg: (_c: string, t: string) => t }, {}, () => {}) as {
+      handleInput(data: string): void;
+      dispose(): void;
+    };
+    assert.ok(mounted, "live view component mounted");
+
+    // Closing the view never aborts the child.
+    mounted.handleInput(ESC);
+    assert.equal(aborted, 0, "closing the live view never aborts the child");
+
+    // Re-enter and cancel with Alt+x; the confirmation accepts and aborts.
+    terminalInputHandler!(DOWN);
+    terminalInputHandler!(DOWN);
+    terminalInputHandler!(ENTER);
+    const liveView = capturedCustomFactory!({ requestRender: () => {}, terminal: { rows: 24 } }, { fg: (_c: string, t: string) => t }, {}, () => {}) as {
+      handleInput(data: string): void;
+      dispose(): void;
+    };
+    assert.ok(confirmResult, "confirmation surface is wired");
+    liveView.handleInput(ALT_X);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(aborted, 1, "confirmed cancellation aborts the child via the runtime path");
+
+    footer.dispose();
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

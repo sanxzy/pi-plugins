@@ -8,6 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentFooter,
+  AgentLiveManager,
   type AgentFooterInfo,
   type FooterTreeRow,
 } from "@xzy-ai/tui";
@@ -42,6 +43,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         theme: footerTheme(theme),
         getInfo: () => footerInfo(ctx, footerData),
         getRows: () => footerRows(ctx, pool),
+        onEnter: (row) => openChildLiveView(ctx, pool, footer, row),
         dispose: () => {
           if (repaintTimer !== undefined) {
             clearTimeout(repaintTimer);
@@ -167,6 +169,39 @@ function settledMs(job: { updatedAt: string } | undefined): number | undefined {
 
 function isTerminal(status: string): boolean {
   return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted";
+}
+
+/** Mount a focused live child view without changing the host session. */
+function openChildLiveView(
+  ctx: ExtensionContext,
+  pool: ReturnType<typeof getChildPool>,
+  footer: AgentFooter,
+  row: FooterTreeRow | undefined,
+): void {
+  if (!row || row.root || !row.enterable || row.status !== "running") return;
+  const control = pool.liveChildren.get(row.rowId);
+  if (!control?.live) {
+    footer.setHint("This session is no longer available.");
+    return;
+  }
+  const live = control.live;
+  ctx.ui.custom(
+    (tui, theme, _keybindings, done) => new AgentLiveManager({
+      tui,
+      theme: footerTheme(theme),
+      live: {
+        get snapshot() {
+          return live.snapshot;
+        },
+        subscribe: (listener) => live.subscribe(() => listener()),
+        steer: (prompt) => live.steer(prompt),
+      },
+      abort: () => control.abort(),
+      confirm: (title, message) => ctx.ui.confirm(title, message),
+      done: () => done(undefined),
+    }),
+    { overlay: true, overlayOptions: { anchor: "center", width: "80%", maxHeight: "80%" } },
+  );
 }
 
 function footerTheme(theme: Theme): { fg: (color: string, text: string) => string } {
