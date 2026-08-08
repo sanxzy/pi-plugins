@@ -1,5 +1,5 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { canCancel } from "@xzy-ai/core";
+import { canCancel, isInSessionScope } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
 import { cancelParams, type CancelParams } from "../tools.ts";
 import type { CancelDetails } from "../types.ts";
@@ -23,6 +23,13 @@ export function registerCancelTool(pi: ExtensionAPI): void {
       const caller = callerFor(ctx, pool);
       const job = pool.registry.get(params.job_id);
       if (!job) {
+        return errorResult(`unknown job id: ${params.job_id}`, {
+          jobId: params.job_id,
+          success: false,
+          reason: "unknown job id",
+        });
+      }
+      if (!isInSessionScope(caller, job, (jobId) => pool.registry.get(jobId))) {
         return errorResult(`unknown job id: ${params.job_id}`, {
           jobId: params.job_id,
           success: false,

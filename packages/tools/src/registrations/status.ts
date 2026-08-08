@@ -1,5 +1,5 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { statusFor } from "@xzy-ai/core";
+import { isInSessionScope, statusFor } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
 import { statusParams, type StatusParams } from "../tools.ts";
 import type { StatusDetails } from "../types.ts";
@@ -29,7 +29,14 @@ export function registerStatusTool(pi: ExtensionAPI): void {
           reason: "unknown job id",
         });
       }
-      const result = statusFor(caller, job, (jobId) => pool.registry.get(jobId));
+      const getJob = (jobId: string) => pool.registry.get(jobId);
+      if (!isInSessionScope(caller, job, getJob)) {
+        return errorResult(`unknown job id: ${params.job_id}`, {
+          status: "failed",
+          reason: "unknown job id",
+        });
+      }
+      const result = statusFor(caller, job, getJob);
       return textResult(`Agent ${params.job_id} is ${job.status}.`, {
         status: job.status,
         job: toJobSummary(job),

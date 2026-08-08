@@ -8,7 +8,7 @@ import {
   makeJobId,
   spawnWithControl,
 } from "../agent-execution.ts";
-import { resumeDisposition } from "@xzy-ai/core";
+import { isInSessionScope, resumeDisposition } from "@xzy-ai/core";
 import { createAgentDiscovery } from "@xzy-ai/runtime";
 import { backgroundModeError, runBackgroundJob } from "@xzy-ai/runtime";
 import { getChildPool } from "@xzy-ai/runtime";
@@ -77,6 +77,12 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       if (params.agent_id) {
         const job = pool.registry.get(params.agent_id);
         if (!job) {
+          return errorResult(`unknown agent id: ${params.agent_id}`, {
+            jobId: params.agent_id,
+            reason: "unknown agent id",
+          });
+        }
+        if (!isInSessionScope(caller, job, (jobId) => pool.registry.get(jobId))) {
           return errorResult(`unknown agent id: ${params.agent_id}`, {
             jobId: params.agent_id,
             reason: "unknown agent id",
