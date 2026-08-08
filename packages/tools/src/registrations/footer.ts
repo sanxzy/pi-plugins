@@ -200,7 +200,7 @@ function openChildLiveView(
       confirm: (title, message) => ctx.ui.confirm(title, message),
       done: () => done(undefined),
     }),
-    { overlay: true, overlayOptions: { anchor: "center", width: "80%", maxHeight: "80%" } },
+    { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
   );
 }
 
