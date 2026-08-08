@@ -1,5 +1,5 @@
 import { relative, resolve, sep, isAbsolute } from "node:path";
-import { Key, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
+import { Key, matchesKey, truncateToWidth, visibleWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 
 /** Theme surface required by the host-owned footer component. */
 export interface AgentFooterTheme {
@@ -62,8 +62,6 @@ export interface AgentFooterOptions {
   readonly dispose?: () => void;
 }
 
-export type FooterInputResult = { consumed: boolean; data?: string };
-
 const MAX_VISIBLE_MANAGEMENT_ROWS = 4;
 
 const SETTLED_RETENTION_MS = 2 * 60 * 1000;
@@ -124,7 +122,7 @@ export class AgentFooter implements Component {
 
   /** Handle raw terminal input; returns true when the input was consumed. */
   handleInput(data: string): boolean {
-    if (data === Key.down) {
+    if (matchesKey(data, Key.down)) {
       if (!this.management) {
         this.enterManagement();
         return true;
@@ -133,15 +131,15 @@ export class AgentFooter implements Component {
       return true;
     }
     if (this.management) {
-      if (data === Key.up) {
+      if (matchesKey(data, Key.up)) {
         this.moveSelection(-1);
         return true;
       }
-      if (data === Key.left) {
+      if (matchesKey(data, Key.left)) {
         this.exitManagement();
         return true;
       }
-      if (data === Key.enter) {
+      if (matchesKey(data, Key.enter)) {
         const row = this.selectedRow();
         this.exitManagement();
         this.onEnter?.(row);

@@ -7,7 +7,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { createJob } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
 import { registerAgentFooter } from "../src/registrations/footer.ts";
-import { Key } from "@earendil-works/pi-tui";
+
+const DOWN = "\x1b[B";
+const UP = "\x1b[A";
+const LEFT = "\x1b[D";
+const ENTER = "\r";
 
 /** ExtensionContext double exposing the UI surfaces the footer registration uses. */
 function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
@@ -124,18 +128,18 @@ test("footer management mode consumes navigation keys and passes others through"
     // Outside management mode, ordinary input and upward navigation pass through.
     assert.equal(terminalInputHandler!("hello")?.consume, false);
     assert.equal(terminalInputHandler!("hello")?.data, "hello");
-    assert.equal(terminalInputHandler!(Key.up)?.consume, false, "up passes through outside management");
+    assert.equal(terminalInputHandler!(UP)?.consume, false, "up passes through outside management");
 
     // `↓` enters management mode; navigation keys are then consumed and Enter on main exits.
-    assert.equal(terminalInputHandler!(Key.down)?.consume, true);
-    assert.equal(terminalInputHandler!(Key.down)?.consume, true);
-    assert.equal(terminalInputHandler!(Key.up)?.consume, true);
-    assert.equal(terminalInputHandler!(Key.left)?.consume, true);
-    assert.equal(terminalInputHandler!(Key.enter)?.consume, false, "Enter reaches composer after left exits management");
+    assert.equal(terminalInputHandler!(DOWN)?.consume, true);
+    assert.equal(terminalInputHandler!(DOWN)?.consume, true);
+    assert.equal(terminalInputHandler!(UP)?.consume, true);
+    assert.equal(terminalInputHandler!(LEFT)?.consume, true);
+    assert.equal(terminalInputHandler!(ENTER)?.consume, false, "Enter reaches composer after left exits management");
 
     // Re-enter and confirm Enter on the root exits management mode.
-    terminalInputHandler!(Key.down);
-    assert.equal(terminalInputHandler!(Key.enter)?.consume, true);
+    terminalInputHandler!(DOWN);
+    assert.equal(terminalInputHandler!(ENTER)?.consume, true);
     assert.equal(terminalInputHandler!("x")?.consume, false, "after exit, text passes through");
 
     footer.dispose();
