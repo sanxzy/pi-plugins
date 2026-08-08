@@ -50,7 +50,7 @@ test("checkControlScope: the root orchestrator controls every job", () => {
 
 test("checkControlScope: a job may not control itself", () => {
   const jobs = new Map<string, Job>([["a", makeJob("a", "running")]]);
-  const caller: ControlCaller = { jobId: "a" };
+  const caller: ControlCaller = { sessionId: "a", jobId: "a" };
   assert.deepEqual(checkControlScope(caller, jobs.get("a")!, getJobFrom(jobs)), {
     allowed: false,
     reason: "not a descendant",
@@ -64,7 +64,7 @@ test("checkControlScope: a caller controls its direct and deeper descendants", (
     ["b", makeJob("b", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
     ["c", makeJob("c", "running", { parentJobId: "b", rootJobId: "a", depth: 2 })],
   ]);
-  const caller: ControlCaller = { jobId: "a" };
+  const caller: ControlCaller = { sessionId: "a", jobId: "a" };
   assert.deepEqual(checkControlScope(caller, jobs.get("b")!, getJobFrom(jobs)), { allowed: true });
   assert.deepEqual(checkControlScope(caller, jobs.get("c")!, getJobFrom(jobs)), { allowed: true });
 });
@@ -78,7 +78,7 @@ test("checkControlScope: siblings and ancestors are not controllable", () => {
     ["c", makeJob("c", "running", { parentJobId: "b", rootJobId: "a", depth: 2 })],
     ["d", makeJob("d", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
-  const caller: ControlCaller = { jobId: "b" };
+  const caller: ControlCaller = { sessionId: "b", jobId: "b" };
   assert.deepEqual(checkControlScope(caller, jobs.get("a")!, getJobFrom(jobs)), {
     allowed: false,
     reason: "not a descendant",
@@ -97,12 +97,12 @@ test("canCancel: only a running in-scope job may be cancelled", () => {
     ["c", makeJob("c", "queued", { parentJobId: "a", rootJobId: "a", depth: 1 })],
     ["done", makeJob("done", "completed", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
-  const caller: ControlCaller = { jobId: "a" };
+  const caller: ControlCaller = { sessionId: "a", jobId: "a" };
   assert.deepEqual(canCancel(caller, jobs.get("b")!, getJobFrom(jobs)), { allowed: true });
   assert.equal(canCancel(caller, jobs.get("c")!, getJobFrom(jobs)).reason, "not running");
   assert.equal(canCancel(caller, jobs.get("done")!, getJobFrom(jobs)).reason, "already terminal");
   // A sibling cannot be cancelled from a sibling's own view.
-  const sibling: ControlCaller = { jobId: "sib" };
+  const sibling: ControlCaller = { sessionId: "sib", jobId: "sib" };
   assert.equal(canCancel(sibling, jobs.get("b")!, getJobFrom(jobs)).reason, "not a descendant");
 });
 
@@ -111,7 +111,7 @@ test("resumeDisposition: running jobs are steered", () => {
     ["a", makeJob("a", "running")],
     ["b", makeJob("b", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
-  const disposition = resumeDisposition({ jobId: "a" }, jobs.get("b")!, getJobFrom(jobs));
+  const disposition = resumeDisposition({ sessionId: "a", jobId: "a" }, jobs.get("b")!, getJobFrom(jobs));
   assert.equal(disposition.kind, "steer");
 });
 
@@ -128,7 +128,7 @@ test("resumeDisposition: terminal jobs resume from their stored transcript", () 
       }),
     ],
   ]);
-  const disposition = resumeDisposition({ jobId: "a" }, jobs.get("done")!, getJobFrom(jobs));
+  const disposition = resumeDisposition({ sessionId: "a", jobId: "a" }, jobs.get("done")!, getJobFrom(jobs));
   assert.equal(disposition.kind, "resume");
 });
 
@@ -138,14 +138,14 @@ test("resumeDisposition: a created job re-spawns fresh and a queued job resumes"
     ["created", makeJob("created", "created", { parentJobId: "a", rootJobId: "a", depth: 1 })],
     ["queued", makeJob("queued", "queued", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
-  const caller: ControlCaller = { jobId: "a" };
+  const caller: ControlCaller = { sessionId: "a", jobId: "a" };
   assert.equal(resumeDisposition(caller, jobs.get("created")!, getJobFrom(jobs)).kind, "fresh-spawn");
   assert.equal(resumeDisposition(caller, jobs.get("queued")!, getJobFrom(jobs)).kind, "resume");
 });
 
 test("resumeDisposition: out-of-scope jobs are rejected", () => {
   const jobs = new Map<string, Job>([["other", makeJob("other", "interrupted")]]);
-  const disposition = resumeDisposition({ jobId: "a" }, jobs.get("other")!, getJobFrom(jobs));
+  const disposition = resumeDisposition({ sessionId: "a", jobId: "a" }, jobs.get("other")!, getJobFrom(jobs));
   assert.equal(disposition.kind, "reject");
   assert.equal(disposition.reason, "not a descendant");
 });
@@ -157,10 +157,10 @@ test("visibleJobs: the root sees everything, a child sees its own lineage", () =
     ["c", makeJob("c", "running", { parentJobId: "b", rootJobId: "a", depth: 2 })],
     ["d", makeJob("d", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
-  const rootVisible = visibleJobs({ jobId: undefined }, jobs.values(), getJobFrom(jobs)).map((j) => j.jobId);
+  const rootVisible = visibleJobs({ sessionId: "root-session", jobId: undefined }, jobs.values(), getJobFrom(jobs)).map((j) => j.jobId);
   assert.deepEqual(rootVisible, ["a", "b", "c", "d"]);
 
-  const childVisible = visibleJobs({ jobId: "b" }, jobs.values(), getJobFrom(jobs)).map((j) => j.jobId);
+  const childVisible = visibleJobs({ sessionId: "b", jobId: "b" }, jobs.values(), getJobFrom(jobs)).map((j) => j.jobId);
   assert.deepEqual(childVisible, ["b", "c"]);
 });
 
@@ -169,9 +169,9 @@ test("statusFor: root controls everything, a child cannot control an ancestor", 
     ["a", makeJob("a", "running")],
     ["b", makeJob("b", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
-  assert.equal(statusFor({ sessionId: "root-a", jobId: undefined }, jobs.get("a")!, getJobFrom(jobs)).controllable, true);
-  assert.equal(statusFor({ jobId: "b" }, jobs.get("a")!, getJobFrom(jobs)).controllable, false);
-  assert.equal(statusFor({ jobId: "b" }, jobs.get("b")!, getJobFrom(jobs)).controllable, true);
+  assert.equal(statusFor({ sessionId: "root-session", jobId: undefined }, jobs.get("a")!, getJobFrom(jobs)).controllable, true);
+  assert.equal(statusFor({ sessionId: "b", jobId: "b" }, jobs.get("a")!, getJobFrom(jobs)).controllable, false);
+  assert.equal(statusFor({ sessionId: "b", jobId: "b" }, jobs.get("b")!, getJobFrom(jobs)).controllable, true);
 });
 
 test("session-scoped root callers cannot see or control another parent session", () => {

@@ -5,11 +5,16 @@ import type { ChildPool } from "@xzy-ai/runtime";
 /**
  * The caller's own control view.
  *
- * The caller's job id is its child session id when that session is itself a
- * registered job; the root orchestrator session is not a job, so it controls
- * and views every job in the project.
+ * The live session id bounds every caller to its own parent-session tree. A
+ * nested child also carries its registered job id and root lineage so the core
+ * control rules can preserve recursive descendant management.
  */
 export function callerFor(ctx: ExtensionContext, pool: ChildPool): ControlCaller {
   const sessionId = ctx.sessionManager.getSessionId();
-  return { jobId: pool.registry.get(sessionId) ? sessionId : undefined };
+  const job = pool.registry.get(sessionId);
+  return {
+    sessionId,
+    jobId: job ? sessionId : undefined,
+    rootJobId: job?.rootJobId,
+  };
 }

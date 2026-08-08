@@ -12,6 +12,8 @@ import { isTerminal } from "../../domain/jobs/status.ts";
 
 /** A caller's view of a job, keyed by its own session id / job id. */
 export interface ControlCaller {
+  /** The live session id whose descendant tree this caller owns. */
+  readonly sessionId: string;
   /** The caller's own job id (its child session id), if it is itself a job. */
   readonly jobId?: string;
   /** The caller's root job id, if its lineage is known. */
@@ -33,21 +35,50 @@ export type ScopeCheck =
   | { allowed: false; reason: "unknown job id" | "not a descendant" };
 
 /**
+ * Whether the target job belongs to the caller's live session tree.
+ *
+ * A parent session sees the jobs whose lineage is rooted at that exact live
+ * session id, including historical terminal records. A nested caller retains
+ * its own job plus its recursive descendants, never its siblings or ancestors.
+ * The session boundary is applied before lineage control: a job owned by
+ * another parent session is indistinguishable from an unknown job.
+ */
+export function isInSessionScope(caller: ControlCaller, target: Job, getJob: (jobId: string) => Job | undefined): boolean {
+  const sessionId = caller.sessionId;
+  if (target.jobId === caller.jobId && caller.jobId !== undefined) return true;
+  if (target.parentSessionId === sessionId) return true;
+  if (target.parentJobId === undefined) return false;
+  // Walk the target's parent chain upward: the caller's session must be the
+  // session that rooted this lineage. The immediate parent session is the
+  // session that spawned the job, so the root ancestor's parent session id is
+  // the live parent session that owns the tree.
+  let current: Job | undefined = target;
+  while (current?.parentJobId !== undefined) {
+    const parent = getJob(current.parentJobId);
+    if (!parent) return false;
+    if (parent.parentSessionId === sessionId) return true;
+    current = parent;
+  }
+  return false;
+}
+
+/**
  * Whether the caller may control the target job.
  *
  * A caller may control only jobs in its own descendant lineage. The check is
  * rooted at the caller's own job id: the target must be reached by walking the
  * target's parent chain up to the caller. Sibling and ancestor jobs are never
- * controllable.
+ * controllable. The caller's own live session tree is the outer boundary.
  */
 export function checkControlScope(
   caller: ControlCaller,
   target: Job,
   getJob: (jobId: string) => Job | undefined,
 ): ScopeCheck {
+  if (!isInSessionScope(caller, target, getJob)) return { allowed: false, reason: "not a descendant" };
   if (!caller.jobId) {
     // The root orchestrator has no job id of its own; it may control every job
-    // in the project registry.
+    // in its own live session tree.
     return { allowed: true };
   }
   if (target.jobId === caller.jobId) {
@@ -66,6 +97,7 @@ export function checkControlScope(
 
 /** Visibility includes the caller's own job, while control remains strict. */
 function isVisibleToCaller(caller: ControlCaller, target: Job, getJob: (jobId: string) => Job | undefined): boolean {
+  if (!isInSessionScope(caller, target, getJob)) return false;
   if (!caller.jobId) return true;
   if (target.jobId === caller.jobId) return true;
   return checkControlScope(caller, target, getJob).allowed;
