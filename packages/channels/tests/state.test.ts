@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -13,7 +13,7 @@ import {
   uploadsDir,
   type ChannelConfig,
   type ConnectionMarker,
-} from "../src/state.ts";
+} from "../src/state/index.ts";
 
 function projectRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-channels-"));
@@ -118,6 +118,7 @@ test("marker saves are atomic and leave no temp file behind", () => {
 
 test("malformed marker resolves to unset", () => {
   const root = projectRoot();
+  mkdirSync(runtimeDir(root), { recursive: true });
   writeFileSync(join(runtimeDir(root), "user_last_connection.json"), "not json", "utf-8");
   assert.equal(loadConnectionMarker(root), null);
 });

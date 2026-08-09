@@ -1,0 +1,21 @@
+{
+  "name": "@xzy-ai/channels",
+  "version": "0.1.0",
+  "description": "pi-code channels: Telegram client, channel/connection state, setup, inbound/outbound, and final forwarding",
+  "type": "module",
+  "main": "./src/index.ts",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "node --test --import tsx tests/state.test.ts"
+  },
+  "dependencies": {
+    "@xzy-ai/runtime": "workspace:*",
+    "grammy": "^1.45.1",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.22.2"
+  }
+}

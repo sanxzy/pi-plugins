@@ -23,6 +23,8 @@
       "@xzy-ai/commands/*": ["./packages/commands/src/*", "./packages/commands/src/*.ts"],
       "@xzy-ai/tui": ["./packages/tui/src/index.ts"],
       "@xzy-ai/tui/*": ["./packages/tui/src/*", "./packages/tui/src/*.ts"],
+      "@xzy-ai/channels": ["./packages/channels/src/index.ts"],
+      "@xzy-ai/channels/*": ["./packages/channels/src/*", "./packages/channels/src/*.ts"],
       "@xzy-ai/pi-code": ["./packages/extensions/pi-code/index.ts"]
     }
   }
