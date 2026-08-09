@@ -12,10 +12,16 @@ import { assertSessionId, runtimeDir } from "@xzy-ai/runtime";
 export const CHANNEL_CONFIG_FILE_NAME = "channel.json";
 export const LAST_CONNECTION_FILE_NAME = "user_last_connection.json";
 export const CHANNEL_LOGS_DIR_NAME = "logs";
+export const CHANNEL_OWNER_FILE_NAME = "channel.owner.json";
 
 /** Project channel configuration (token, approvals, pairing state). */
 export function channelConfigFile(projectRoot: string): string {
   return join(runtimeDir(projectRoot), CHANNEL_CONFIG_FILE_NAME);
+}
+
+/** Crash-safe per-project Telegram connection owner record. */
+export function channelOwnerFile(projectRoot: string): string {
+  return join(runtimeDir(projectRoot), CHANNEL_OWNER_FILE_NAME);
 }
 
 /** Persisted last-connection marker gating outbound Telegram delivery. */

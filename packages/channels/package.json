@@ -7,11 +7,12 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/state.test.ts tests/logger.test.ts"
+    "test": "node --test --import tsx tests/state.test.ts tests/logger.test.ts tests/ownership.test.ts tests/manager.test.ts"
   },
   "dependencies": {
     "@xzy-ai/runtime": "workspace:*",
-    "pino": "^10.3.1"
+    "pino": "^10.3.1",
+    "proper-lockfile": "^4.1.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

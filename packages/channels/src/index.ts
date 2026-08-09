@@ -2,6 +2,7 @@ export {
   channelConfigFile,
   channelLogFile,
   channelLogsDir,
+  channelOwnerFile,
   lastConnectionFile,
 } from "./shared/paths.ts";
 export {
@@ -23,3 +24,19 @@ export {
   type ChannelLogOptions,
   type ChannelLogResult,
 } from "./logger.ts";
+export {
+  canonicalProjectRoot,
+  createChannelManager,
+  type ChannelConnectionState,
+  type ChannelConnectionStatus,
+  type ChannelManager,
+  type ChannelManagerDeps,
+  type ChannelPoller,
+} from "./manager.ts";
+export {
+  createChannelOwner,
+  isProcessAlive,
+  type ChannelOwner,
+  type ChannelOwnerRecord,
+  type OwnerRead,
+} from "./ownership.ts";

@@ -16,6 +16,9 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+      proper-lockfile:
+        specifier: ^4.1.2
+        version: 4.1.2
     devDependencies:
       '@types/node':
         specifier: ^24.13.3
