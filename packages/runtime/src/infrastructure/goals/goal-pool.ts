@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   GOAL_DELIVERY_FOOTER,
+  splitGoalPromptInterval,
   validateGoalInput,
   type Goal,
 } from "@xzy-ai/core";
@@ -162,9 +163,15 @@ export function createGoalPool(projectRoot: string): GoalPool {
     create(input) {
       const cwd = normalizeGoalCwd(input.cwd);
       const result = withCwdMutation(cwd, () => {
+        // A request such as "2m testing goal" carries interval metadata before
+        // the exact prompt. Split that leading duration into the scheduling
+        // configuration so it is never persisted or delivered as prompt text.
+        const split = input.intervalMs === undefined && input.interval === undefined
+          ? splitGoalPromptInterval(input.prompt)
+          : { prompt: input.prompt, interval: input.interval };
         const validation = input.intervalMs === undefined
-          ? validateGoalInput({ prompt: input.prompt, interval: input.interval })
-          : validateGoalInput({ prompt: input.prompt });
+          ? validateGoalInput(split)
+          : validateGoalInput({ prompt: split.prompt });
         if (!validation.ok) return validation;
         const intervalMs = input.intervalMs ?? validation.value.intervalMs;
         if (!Number.isSafeInteger(intervalMs) || intervalMs <= 0) {

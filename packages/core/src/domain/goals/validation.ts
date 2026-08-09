@@ -25,6 +25,22 @@ export function parseGoalInterval(value: string | undefined):
   return { ok: true, value: intervalMs };
 }
 
+/**
+ * Separate the optional leading interval syntax from a goal request.
+ *
+ * `/goal 2m check the build` is represented as interval metadata plus the
+ * remaining exact prompt. A caller that already supplied `interval` should
+ * pass the prompt directly to validation instead of using this helper.
+ */
+export function splitGoalPromptInterval(prompt: string): {
+  readonly prompt: string;
+  readonly interval?: string;
+} {
+  const match = /^(\d+[smhd])[ \t]+(.+)$/.exec(prompt);
+  if (!match) return { prompt };
+  return { prompt: match[2]!, interval: match[1]! };
+}
+
 /** Validate a goal prompt while preserving every accepted character exactly. */
 export function validateGoalInput(input: {
   readonly prompt: string;

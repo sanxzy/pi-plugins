@@ -22,8 +22,8 @@ function isMainHost(ctx: ExtensionContext): boolean {
 }
 
 function unavailableToChild(): GoalToolResult {
-  return errorResult("goal tools are available only to the main host session", {
-    reason: "main host only",
+  return errorResult("goal tools are unavailable in child sessions", {
+    reason: "child session",
   });
 }
 
@@ -110,7 +110,7 @@ export function registerGoalTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "goal_clear",
     label: "Clear goal",
-    description: "Clear the current goal when the model decides it is complete.",
+    description: "Clear my current goal when I decide it is complete.",
     parameters: goalNoArgsParams,
     async execute(_toolCallId: string, _params: unknown, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
       const target = goalOrError(ctx);
