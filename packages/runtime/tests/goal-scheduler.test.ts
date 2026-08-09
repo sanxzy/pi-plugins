@@ -115,3 +115,55 @@ test("shutdown clears timers and bindings idempotently", () => {
   pool.shutdown();
   assert.equal(clearCount, 1);
 });
+
+test("session confirmation pauses delivery and continuation waits for a fresh interval", () => {
+  const pool = createGoalPool(projectRoot());
+  const sent = { values: [] as string[] };
+  const callbacks: Array<() => void> = [];
+  let clearCount = 0;
+  pool.setScheduler((callback) => {
+    callbacks.push(callback);
+    return { clear: () => { clearCount += 1; } };
+  });
+  pool.bind(binding({ sendUserMessage: (content) => sent.values.push(content) }));
+  assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  assert.equal(callbacks.length, 1);
+
+  assert.equal(pool.beginSessionConfirmation(), true);
+  assert.equal(clearCount, 1);
+  callbacks[0]!();
+  assert.deepEqual(sent.values, []);
+
+  pool.shutdown();
+  const send = (content: string): void => { sent.values.push(content); };
+  pool.bind({
+    cwd: "/project",
+    sendUserMessage: send,
+    hasUI: true,
+    notify: () => {},
+  });
+  pool.resumeDelivery();
+  assert.deepEqual(sent.values, []);
+  assert.equal(callbacks.length, 2);
+  callbacks[0]!();
+  assert.deepEqual(sent.values, []);
+  callbacks[1]!();
+  assert.deepEqual(sent.values, [`p\n${GOAL_DELIVERY_FOOTER}`]);
+});
+
+test("clearing confirmed active goals removes them and prevents stale callbacks", () => {
+  const pool = createGoalPool(projectRoot());
+  const sent: string[] = [];
+  const callbacks: Array<() => void> = [];
+  pool.setScheduler((callback) => {
+    callbacks.push(callback);
+    return { clear() {} };
+  });
+  pool.bind(binding({ sendUserMessage: (content) => sent.push(content) }));
+  assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  assert.equal(pool.beginSessionConfirmation(), true);
+  assert.equal(pool.clearActiveGoals(), 1);
+  assert.equal(pool.get("/project"), undefined);
+  callbacks[0]!();
+  assert.deepEqual(sent, []);
+});
