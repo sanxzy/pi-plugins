@@ -1,6 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { canSendTelegram, sendTelegramMessage, type OutboundTextResult } from "@xzy-ai/channels";
+import { canSendTelegram, recordTelegramToolSend, sendTelegramMessage, type OutboundTextResult } from "@xzy-ai/channels";
 import { telegramChatParams, type TelegramChatParams } from "../tools.ts";
 import { errorResult, textResult } from "../results.ts";
 
@@ -46,6 +46,8 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           error: result.error,
         });
       }
+      // Record the exact text so automatic final forwarding does not duplicate it.
+      recordTelegramToolSend(ctx.cwd, params.message);
       return textResult(`Telegram message sent (${result.sent} message${result.sent === 1 ? "" : "s"})`, {
         sent: true,
         message: params.message,

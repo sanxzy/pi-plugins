@@ -14,6 +14,7 @@ import {
   registerConnectionMarker,
   registerSetupChannelCommand,
   registerTelegramInbound,
+  registerTelegramFinalForwarding,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -42,6 +43,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerConnectionMarker(pi);
   registerSetupChannelCommand(pi);
   registerTelegramInbound(pi);
+  registerTelegramFinalForwarding(pi);
 }
 
 export { extensionName };
