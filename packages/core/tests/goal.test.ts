@@ -4,6 +4,7 @@ import {
   DEFAULT_GOAL_INTERVAL_MS,
   createGoalRecord,
   foldGoalEvents,
+  parseGoalEvent,
   parseGoalInterval,
   pauseGoalRecord,
   resumeGoalRecord,
@@ -57,4 +58,43 @@ test("goal events fold current state for multiple cwd values and clear records",
   assert.equal(folded.get("/a")?.status, "active");
   assert.equal(folded.get("/a")?.prompt, "A");
   assert.equal(folded.has("/b"), false);
+});
+
+test("goal event parsing skips malformed payloads and mismatched lifecycle ids", () => {
+  assert.equal(parseGoalEvent("{not json}"), null);
+  assert.equal(parseGoalEvent('{"event":"goal_created"}'), null);
+  assert.equal(parseGoalEvent(JSON.stringify({
+    event: "goal_created",
+    cwd: "/a",
+    goalId: "a",
+    timestamp: 1,
+    prompt: "A",
+    intervalMs: 10,
+  }))?.event, "goal_created");
+
+  const folded = foldGoalEvents([
+    { event: "goal_created", cwd: "/a", goalId: "a", timestamp: 1, prompt: "A", intervalMs: 10 },
+    { event: "goal_paused", cwd: "/a", goalId: "other", timestamp: 2, reason: "wrong goal" },
+    { event: "goal_cleared", cwd: "/a", goalId: "other", timestamp: 3 },
+  ]);
+  assert.equal(folded.get("/a")?.status, "active");
+});
+
+test("pause and resume preserve exact timestamps and retain fields", () => {
+  const created = createGoalRecord({
+    goalId: "goal-1",
+    cwd: "/project",
+    prompt: "  exact  ",
+    intervalMs: 60_000,
+    timestamp: 100,
+  });
+  const paused = pauseGoalRecord(created, "waiting", 200);
+  assert.equal(paused.createdAt, 100);
+  assert.equal(paused.updatedAt, 200);
+  assert.equal(paused.pauseReason, "waiting");
+  const resumed = resumeGoalRecord(paused, 300);
+  assert.equal(resumed.createdAt, 100);
+  assert.equal(resumed.updatedAt, 300);
+  assert.equal(resumed.pauseReason, undefined);
+  assert.equal(resumed.prompt, "  exact  ");
 });

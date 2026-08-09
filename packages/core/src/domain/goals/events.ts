@@ -20,12 +20,39 @@ export function serializeGoalEvent(event: GoalEvent): string {
   return JSON.stringify(event);
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isValidGoalEvent(parsed: unknown): parsed is GoalEvent {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const event = parsed as Record<string, unknown>;
+  if (!isNonEmptyString(event.cwd) || !isNonEmptyString(event.goalId) || !isPositiveSafeInteger(event.timestamp)) {
+    return false;
+  }
+  switch (event.event) {
+    case "goal_created":
+      return isNonEmptyString(event.prompt) && isPositiveSafeInteger(event.intervalMs);
+    case "goal_paused":
+      return isNonEmptyString(event.reason);
+    case "goal_resumed":
+    case "goal_cleared":
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** Parse a single goal JSONL line back into an event, or null when malformed. */
 export function parseGoalEvent(line: string): GoalEvent | null {
   if (!line) return null;
   try {
-    const parsed = JSON.parse(line) as GoalEvent;
-    if (parsed && typeof parsed.event === "string") return parsed;
+    const parsed = JSON.parse(line);
+    if (isValidGoalEvent(parsed)) return parsed;
   } catch {
     // Malformed line: skip it and keep the rest of the log intact.
   }
@@ -55,15 +82,19 @@ export function foldGoalEvents(events: Iterable<GoalEvent>): Map<string, Goal> {
         break;
       }
       case "goal_paused": {
-        if (current) result.set(event.cwd, pauseGoalRecord(current, event.reason, event.timestamp));
+        if (current && current.goalId === event.goalId) {
+          result.set(event.cwd, pauseGoalRecord(current, event.reason, event.timestamp));
+        }
         break;
       }
       case "goal_resumed": {
-        if (current) result.set(event.cwd, resumeGoalRecord(current, event.timestamp));
+        if (current && current.goalId === event.goalId) {
+          result.set(event.cwd, resumeGoalRecord(current, event.timestamp));
+        }
         break;
       }
       case "goal_cleared": {
-        result.delete(event.cwd);
+        if (current?.goalId === event.goalId) result.delete(event.cwd);
         break;
       }
     }
