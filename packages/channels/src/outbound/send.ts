@@ -119,6 +119,47 @@ export interface BotSendSurface {
   };
 }
 
+export interface ChoiceMessageButton {
+  text: string;
+  callback_data: string;
+}
+
+export interface ChoiceSendResult {
+  ok: boolean;
+  chatId: string;
+  sent: number;
+  messageId?: number;
+  error?: string;
+}
+
+/**
+ * Send a question with an inline keyboard. The question is chunked at the
+ * 4096-limit with the keyboard attached only to the final chunk; the caller is
+ * responsible for registering the pending choice and its callback handler.
+ */
+export async function sendChoiceQuery(
+  api: BotSendSurface["api"],
+  chatId: string,
+  question: string,
+  buttons: ChoiceMessageButton[],
+): Promise<ChoiceSendResult> {
+  const chunks = splitTextChunks(question);
+  try {
+    let messageId: number | undefined;
+    for (let index = 0; index < chunks.length; index++) {
+      const last = index === chunks.length - 1;
+      const response = await api.sendMessage(chatId, chunks[index]!, last ? { reply_markup: { inline_keyboard: [buttons.map((button) => ({ text: button.text, callback_data: button.callback_data }))] } } : undefined);
+      if (last && typeof response === "object" && response !== null && "message_id" in response) {
+        const candidate = (response as { message_id?: unknown }).message_id;
+        if (typeof candidate === "number") messageId = candidate;
+      }
+    }
+    return { ok: true, chatId, sent: chunks.length, messageId };
+  } catch (error) {
+    return { ok: false, chatId, sent: 0, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /**
  * Send text with a real grammY bot, using its own API surface. Used when a
  * bot instance is available; otherwise `sendTelegramMessage` builds one.

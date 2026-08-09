@@ -37,9 +37,17 @@ export const statusParams = Type.Object({
 
 export const jobsParams = Type.Object({});
 
+export const telegramChoiceSchema = Type.Object({
+  label: Type.String({ description: "Button label shown in Telegram." }),
+  value: Type.Optional(Type.String({ description: "Value returned to the host when selected." })),
+});
+
 export const telegramChatParams = Type.Object({
   message: Type.String({ description: "The communication or report text to send to Telegram." }),
+  choices: Type.Optional(Type.Array(telegramChoiceSchema, { description: "Optional 2-8 inline choices." })),
 });
+
+export type TelegramChoice = Static<typeof telegramChoiceSchema>;
 
 export type QuestionParams = Static<typeof questionParams>;
 export type AgentParams = Static<typeof agentParams>;

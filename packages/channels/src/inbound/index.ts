@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join, isAbsolute } from "node:path";
 import { uploadsDir } from "../state/index.ts";
 import { defaultSharpAdapter, fitImageToBudget, MAX_IMAGE_BYTES, type SharpAdapter } from "./media.ts";
+import { dispatchChoiceCallback, parseChoiceCallbackData } from "../choices/index.ts";
 
 export { defaultSharpAdapter, fitImageToBudget, MAX_IMAGE_BYTES } from "./media.ts";
 export type { SharpAdapter, SharpEncodeRequest, SharpEncodeResult } from "./media.ts";
@@ -34,10 +35,12 @@ export interface NormalizedTelegramMessage {
 
 /** The minimal grammY Bot surface the listener needs (injectable for tests). */
 export interface TelegramListenerBot {
-  on(event: "message", middleware: (context: unknown) => Promise<unknown>): void;
+  on(event: "message" | "callback_query:data", middleware: (context: unknown) => Promise<unknown>): void;
   api: {
     getFile(fileId: string): Promise<{ file_path?: string; file_size?: number }>;
     sendChatAction(chatId: string | number, action: "typing"): Promise<unknown>;
+    answerCallbackQuery?(queryId: string, other?: { text?: string }): Promise<unknown>;
+    editMessageReplyMarkup?(chatId: string | number, messageId: number, other?: { reply_markup?: unknown }): Promise<unknown>;
     setMyCommands?(commands: readonly { command: string; description: string }[], other?: { scope?: { type: "default" } }): Promise<unknown>;
   };
   start(): Promise<void>;
@@ -326,6 +329,52 @@ export function createTelegramListener(options: TelegramListenerOptions) {
   }
 
   options.bot.on("message", handleMessage);
+
+  options.bot.on("callback_query:data", async (context: unknown) => {
+    const callback = context as {
+      callbackQuery?: {
+        id?: string;
+        data?: string;
+        from?: { id?: string | number };
+        message?: { chat?: { id?: string | number }; message_id?: number };
+      };
+    };
+    const inner = callback.callbackQuery;
+    const data = inner?.data;
+    const parsed = data === undefined ? undefined : parseChoiceCallbackData(data);
+    if (!inner?.id || !parsed) return;
+
+    // Authorization is keyed by the chat the callback message lives in, not the
+    // pressing user; group callbacks must still match the allowed default chat.
+    const chatId = String(inner?.message?.chat?.id ?? "");
+    const effects = {
+      answer: async (text?: string): Promise<void> => {
+        if (inner.id) await options.bot.api.answerCallbackQuery?.(inner.id, { text });
+      },
+      removeKeyboard: async (): Promise<void> => {
+        const message = inner.message;
+        if (message?.chat?.id !== undefined && message.message_id !== undefined) {
+          await options.bot.api.editMessageReplyMarkup?.(message.chat.id, message.message_id, { reply_markup: { inline_keyboard: [] } });
+        }
+      },
+      beginTyping: () => {
+        if (chatId.length > 0) {
+          typing.active += 1;
+          typingChats.add(chatId);
+          startTyping();
+        }
+      },
+      endTyping: () => {
+        if (chatId.length > 0) {
+          typing.active = Math.max(0, typing.active - 1);
+          typingChats.delete(chatId);
+          stopTypingIfIdle();
+        }
+      },
+    };
+
+    await dispatchChoiceCallback(options.projectRoot, { id: inner.id, data, chatId }, effects);
+  });
 
   return {
     async start(): Promise<void> {

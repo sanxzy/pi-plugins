@@ -13,17 +13,18 @@ import {
   type InboundContent,
   type TelegramListenerBot,
 } from "../src/inbound/index.ts";
+import { choiceCallbackData, registerChoice, resetChoices } from "../src/choices/index.ts";
 
 function projectRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-channels-inbound-"));
 }
 
 function fakeBot() {
-  let handler: ((context: unknown) => Promise<unknown>) | undefined;
+  const handlers = new Map<string, (context: unknown) => Promise<unknown>>();
   const calls: string[] = [];
   const bot: TelegramListenerBot = {
-    on: (_event, next) => {
-      handler = next;
+    on: (event, next) => {
+      handlers.set(event, next);
     },
     api: {
       getFile: async (fileId) => {
@@ -41,7 +42,7 @@ function fakeBot() {
       calls.push("stop");
     },
   };
-  return { bot, calls, getHandler: () => handler! };
+  return { bot, calls, getHandler: () => handlers.get("message")!, getCallbackHandler: () => handlers.get("callback_query:data")! };
 }
 
 function messageContext(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -291,6 +292,55 @@ test("typing send failures do not become unhandled rejections", async () => {
   await listener.start();
   await fake.getHandler()(messageContext());
   assert.equal(followUps.length, 1);
+  await listener.stop();
+});
+
+test("choice callbacks authorize by message chat, remove the keyboard, answer, and re-enter the host", async () => {
+  resetChoices();
+  const root = projectRoot();
+  const { options, followUps, markers, fake } = baseOptions(root);
+  const callbackFake = fakeBot();
+  options.bot = callbackFake.bot;
+  const callbackEvents: string[] = [];
+  options.bot.api.answerCallbackQuery = async (_id, other) => {
+    callbackEvents.push(`answer:${other?.text ?? ""}`);
+  };
+  options.bot.api.editMessageReplyMarkup = async (chatId, messageId) => {
+    callbackEvents.push(`remove:${chatId}:${messageId}`);
+  };
+  registerChoice(root, {
+    id: "choice",
+    question: "Pick",
+    options: [{ label: "A", value: "alpha" }, { label: "B" }],
+    defaultChatId: "-100",
+    expiresAt: Date.now() + 60_000,
+    answered: false,
+    onAnswer: async (option, effects) => {
+      await effects.removeKeyboard();
+      effects.beginTyping();
+      await options.setTelegramMarker();
+      await options.sendFollowUp(
+        `Based on your question: Pick\nAnswer: ${option.value ?? option.label}\n\n---\n[from:telegram:-100]\n---`,
+        { deliverAs: "followUp" },
+      );
+      effects.endTyping();
+    },
+  });
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await callbackFake.getCallbackHandler()({
+    callbackQuery: {
+      id: "query",
+      data: choiceCallbackData("choice", 0),
+      from: { id: 77 },
+      message: { chat: { id: -100 }, message_id: 9 },
+    },
+  });
+  // The answer path removes the keyboard, then dispatch confirms the tap.
+  assert.deepEqual(callbackEvents, ["remove:-100:9", "answer:"]);
+  assert.deepEqual(markers, ["telegram"]);
+  assert.equal(followUps.length, 1);
+  assert.equal(callbackFake.calls.includes("typing:-100:typing"), true);
   await listener.stop();
 });
 

@@ -1,22 +1,43 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { canSendTelegram, recordTelegramToolSend, sendTelegramMessage, type OutboundTextResult } from "@xzy-ai/channels";
-import { telegramChatParams, type TelegramChatParams } from "../tools.ts";
+import {
+  canSendTelegram,
+  recordTelegramToolSend,
+  sendTelegramChoice,
+  sendTelegramMessage,
+  type OutboundTextResult,
+} from "@xzy-ai/channels";
+import { saveConnectionMarker, validateChoices } from "@xzy-ai/channels";
+import { telegramChatParams, type TelegramChatParams, type TelegramChoice } from "../tools.ts";
 import { errorResult, textResult } from "../results.ts";
 
 export interface TelegramChatDetails {
   sent: boolean;
   message: string;
   chunks?: number;
+  choices?: number;
+  waiting?: boolean;
+  error?: string;
+}
+
+export interface TelegramChoiceSendResult {
+  ok: boolean;
+  sent?: number;
   error?: string;
 }
 
 export interface TelegramChatDeps {
   /** Injectable send seam so tests verify the gate without creating a bot. */
   send?: (projectRoot: string, message: string) => Promise<OutboundTextResult>;
+  /** Injectable choice sender; when choices are supplied this is used instead. */
+  sendChoice?: (projectRoot: string, message: string, choices: TelegramChoice[]) => Promise<TelegramChoiceSendResult>;
+  /** Injectable host follow-up so the choice answer re-enters the model. */
+  sendFollowUp?: (content: string) => Promise<void>;
+  /** Injectable marker writer so a choice answer marks Telegram as the origin. */
+  setTelegramMarker?: () => void | Promise<void>;
 }
 
-/** Register the text-only Telegram communication/reporting tool. */
+/** Register the Telegram communication/reporting tool (text or inline choices). */
 export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDeps = {}): void {
   const send = deps.send ?? sendTelegramMessage;
   pi.registerTool({
@@ -37,6 +58,55 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           message: params.message,
           error: "connection_not_telegram",
         });
+      }
+      if (params.choices !== undefined) {
+        const validationError = validateChoices(params.choices);
+        if (validationError !== undefined) {
+          return errorResult(`Telegram choices failed: ${validationError}`, {
+            sent: false,
+            message: params.message,
+            choices: params.choices.length,
+            error: validationError,
+          });
+        }
+        const sendChoice =
+          deps.sendChoice ??
+          ((projectRoot: string, message: string, choices: TelegramChoice[]) =>
+            sendTelegramChoice(projectRoot, message, choices, {
+              sendFollowUp:
+                deps.sendFollowUp ??
+                (async (content: string) => {
+                  pi.sendUserMessage(content, { deliverAs: "followUp" });
+                }),
+              setTelegramMarker:
+                deps.setTelegramMarker ??
+                (() => {
+                  saveConnectionMarker(ctx.cwd, {
+                    lastConnection: "telegram",
+                    updatedAt: new Date().toISOString(),
+                  });
+                }),
+            }));
+        const result = await sendChoice(ctx.cwd, params.message, params.choices);
+        if (!result.ok) {
+          return errorResult(`Telegram choices failed: ${result.error}`, {
+            sent: false,
+            message: params.message,
+            choices: params.choices.length,
+            error: result.error,
+          });
+        }
+        // The question carries inline choices; the answer arrives later through
+        // a callback, so this is not a final-forward candidate.
+        return textResult(
+          `Telegram question sent with ${params.choices.length} choices; waiting for an answer.`,
+          {
+            sent: true,
+            message: params.message,
+            choices: params.choices.length,
+            waiting: true,
+          },
+        );
       }
       const result = await send(ctx.cwd, params.message);
       if (!result.ok) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   choiceCallbackData,
+  dispatchChoiceCallback,
   isChoiceExpired,
   MAX_CHOICE_LENGTH,
   MAX_CHOICES,
@@ -55,6 +56,34 @@ test("choices are single-use and expire after the TTL", () => {
   assert.equal(isChoiceExpired(pending, now + 600_001), true);
   const resolved = resolveChoice(root, "abc");
   assert.ok(resolved);
+});
+
+test("callback dispatch enforces chat authorization, expiry, and single use", async () => {
+  const root = "callback-project";
+  const events: string[] = [];
+  registerChoice(root, {
+    id: "abc",
+    question: "Pick",
+    options: [{ label: "A", value: "alpha" }, { label: "B", value: "beta" }],
+    defaultChatId: "42",
+    expiresAt: 2_000_000,
+    answered: false,
+    onAnswer: async (option) => {
+      events.push(option.value ?? option.label);
+    },
+  });
+  const effects = {
+    answer: async (text?: string) => { events.push(`answer:${text ?? ""}`); },
+    removeKeyboard: async () => { events.push("remove"); },
+    beginTyping: () => {},
+    endTyping: () => {},
+  };
+  await dispatchChoiceCallback(root, { id: "query", data: choiceCallbackData("abc", 0), chatId: "7" }, effects, 1_000_000);
+  assert.deepEqual(events, ["answer:This choice is not for this chat."]);
+  events.length = 0;
+  await dispatchChoiceCallback(root, { id: "query", data: choiceCallbackData("abc", 0), chatId: "42" }, effects, 1_000_000);
+  await dispatchChoiceCallback(root, { id: "query", data: choiceCallbackData("abc", 0), chatId: "42" }, effects, 1_000_000);
+  assert.deepEqual(events, ["alpha", "answer:", "answer:This choice was already answered."]);
 });
 
 test("invalid index and unknown id resolve to undefined", () => {
