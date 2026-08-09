@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/state.test.ts tests/outbound.test.ts tests/setup-controller.test.ts tests/inbound.test.ts tests/lifecycle.test.ts"
+    "test": "node --test --import tsx tests/state.test.ts tests/outbound.test.ts tests/setup-controller.test.ts tests/inbound.test.ts tests/lifecycle.test.ts tests/menu.test.ts"
   },
   "dependencies": {
     "@xzy-ai/runtime": "workspace:*",
