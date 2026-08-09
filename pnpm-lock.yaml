@@ -113,6 +113,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: ^0.80.2
         version: 0.80.10
+      '@xzy-ai/channels':
+        specifier: workspace:*
+        version: link:../channels
       '@xzy-ai/core':
         specifier: workspace:*
         version: link:../core

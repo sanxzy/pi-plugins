@@ -36,6 +36,8 @@ export interface ChannelConfig {
 export interface LastConnectionState {
   lastConnection?: LastConnection;
   chatRoomId?: string;
+  /** Highest accepted Telegram update identity, used to suppress replay after restart. */
+  lastUpdateId?: number;
   updatedAt?: string;
 }
 
@@ -108,12 +110,16 @@ function parseLastConnection(value: unknown): StateResult<LastConnectionState> {
   if (value.chatRoomId !== undefined && (typeof value.chatRoomId !== "string" || !CHAT_ID_PATTERN.test(value.chatRoomId))) {
     return { ok: false, code: "invalid", message: "Last-connection state has an invalid chat ID" };
   }
+  if (value.lastUpdateId !== undefined && (!Number.isSafeInteger(value.lastUpdateId) || (value.lastUpdateId as number) < 0)) {
+    return { ok: false, code: "invalid", message: "Last-connection state has an invalid update ID" };
+  }
   if (value.updatedAt !== undefined && typeof value.updatedAt !== "string") {
     return { ok: false, code: "invalid", message: "Last-connection state has an invalid timestamp" };
   }
   const result: LastConnectionState = {};
   if (value.lastConnection !== undefined) result.lastConnection = value.lastConnection;
   if (value.chatRoomId !== undefined) result.chatRoomId = value.chatRoomId;
+  if (value.lastUpdateId !== undefined) result.lastUpdateId = value.lastUpdateId as number;
   if (value.updatedAt !== undefined) result.updatedAt = value.updatedAt;
   return { ok: true, value: result };
 }

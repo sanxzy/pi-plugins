@@ -58,6 +58,27 @@ export {
   type BotLike,
   type RunnerHandleLike,
   type TelegramBotFactory,
+  type TelegramMessageHandler,
   type TelegramRunnerFactory,
   type TelegramTransportDeps,
 } from "./transport.ts";
+export {
+  createTelegramInbound,
+  decodeAcceptedText,
+  formatTelegramSignature,
+  type TelegramInboundListener,
+  type TelegramInboundOptions,
+  type TelegramUpdate,
+} from "./inbound.ts";
+export {
+  canSendTelegram,
+  createTelegramOutbound,
+  sendTelegramMessage,
+  sendTextChunks,
+  splitTextChunks,
+  MAX_TEXT_LENGTH,
+  type OutboundTextResult,
+  type TelegramOutbound,
+  type TelegramOutboundOptions,
+  type TelegramSendApi,
+} from "./outbound.ts";

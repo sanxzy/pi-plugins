@@ -6,12 +6,14 @@ import {
   registerStatusTool,
   registerJobsTool,
   registerAgentFooter,
+  registerTelegramChatTool,
 } from "@xzy-ai/tools";
 import {
   registerSessionEvents,
   registerLifecycleGates,
   registerTelegramSetup,
   registerTelegramLifecycle,
+  registerTelegramInbound,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -29,6 +31,9 @@ const extensionName = "pi-code";
 /** PI extension entry point. */
 export default function piCodeExtension(pi: ExtensionAPI): void {
   registerTelegramSetup(pi);
+  // Inbound registration precedes the connection lifecycle so its message
+  // middleware is attached before the shared manager starts polling.
+  registerTelegramInbound(pi);
   registerTelegramLifecycle(pi);
   registerQuestionTool(pi);
   registerAgentTool(pi);
@@ -36,6 +41,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerStatusTool(pi);
   registerJobsTool(pi);
   registerAgentFooter(pi);
+  registerTelegramChatTool(pi);
   registerSessionEvents(pi);
   registerLifecycleGates(pi);
 }

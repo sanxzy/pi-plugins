@@ -21,6 +21,7 @@ const TOKEN = "123456789:ABCDEFGHIJKLMNOPQRSTUVWX";
 interface FakeBotMeta {
   initError?: Error;
   catchHandler?: (error: unknown) => unknown;
+  messageHandler?: (context: unknown) => unknown;
   stopCalled?: number;
 }
 
@@ -39,6 +40,9 @@ function fakeBot(meta: FakeBotMeta = {}): { bot: BotLike; handle: RunnerHandleLi
   };
   const bot: BotLike = {
     api: { getMe: async () => ({ id: 1 }) },
+    on(_event, handler) {
+      meta.messageHandler = handler;
+    },
     async init() {
       if (meta.initError) throw meta.initError;
     },
@@ -140,6 +144,23 @@ test("a second transport never starts a competing poller for the same token", as
   // After the first stops, the second may proceed.
   assert.equal((await second.start({ token: TOKEN, approvedUserIds: [] })).ok, true);
   await second.stop();
+});
+
+test("wires the supplied message middleware onto the bot before polling", async () => {
+  const { logger } = transportDeps();
+  const created = fakeBot();
+  const seen: unknown[] = [];
+  const transport = createTelegramTransport({
+    logger,
+    createBot: () => created.bot,
+    runBot: makeRunBot(created.handle),
+    onMessage: (context) => { seen.push(context); },
+  });
+  const result = await transport.start({ token: TOKEN, approvedUserIds: [] });
+  assert.equal(result.ok, true);
+  created.meta.messageHandler?.({ update_id: 1 });
+  assert.equal(seen.length, 1, "the message middleware is invoked");
+  await transport.stop();
 });
 
 test("telegramTokenFingerprint is deterministic and never contains the raw token", () => {

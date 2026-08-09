@@ -1,0 +1,158 @@
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createTelegramInbound, channelConfigFile, readLastConnection, type TelegramInboundListener } from "@xzy-ai/channels";
+import { getChildPool } from "@xzy-ai/runtime";
+import { createJob } from "@xzy-ai/core";
+
+function markChild(cwd: string, sessionId: string): void {
+  const pool = getChildPool(cwd, "root-a");
+  pool.registry.createJob(createJob({
+    jobId: sessionId,
+    parentSessionId: "root-a",
+    rootJobId: sessionId,
+    depth: 0,
+    sessionId,
+    status: "running",
+    description: sessionId,
+    subagentType: "default",
+  }));
+}
+import { registerTelegramInbound } from "../src/registrations/telegram-inbound.ts";
+import { clearTelegramProjectManagers } from "../src/registrations/telegram-project.ts";
+
+type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
+
+function projectRoot(): string {
+  return mkdtempSync(join(tmpdir(), "pi-code-telegram-inbound-"));
+}
+
+function writeConfig(cwd: string): void {
+  const file = channelConfigFile(cwd);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX", approvedUserIds: ["111"] }), "utf8");
+}
+
+function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler>; sent: string[] } {
+  const handlers = new Map<string, Handler>();
+  const sent: string[] = [];
+  return {
+    sent,
+    handlers,
+    pi: {
+      on(event: string, handler: Handler) {
+        handlers.set(event, handler);
+      },
+      sendUserMessage(content: string | { type: string; text: string }[], options?: { deliverAs?: string }) {
+        const text = typeof content === "string" ? content : content.map((p) => p.text).join("");
+        sent.push(text);
+      },
+    } as unknown as ExtensionAPI,
+  };
+}
+
+function context(cwd: string, sessionId: string): ExtensionContext {
+  return {
+    mode: "tui",
+    hasUI: true,
+    cwd,
+    sessionManager: { getSessionId: () => sessionId },
+  } as unknown as ExtensionContext;
+}
+
+function privateText(updateId: number, fromId: string, text: string): unknown {
+  return { update_id: updateId, message: { chat: { id: 777, type: "private" }, from: { id: Number(fromId) }, text } };
+}
+
+test("root session start delivers accepted text as a follow-up with the exact signature and marker", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers, sent } = registrations();
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => {
+      listener = createTelegramInbound(opts);
+      return listener;
+    },
+  });
+
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  await listener!.handle(privateText(1, "111", "hello"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(sent.length, 1, "one follow-up is injected");
+  assert.equal(sent[0], "hello\n\n---\n[from:telegram:777]\n---", "exact signature is appended");
+  const marker = readLastConnection(cwd);
+  assert.equal(marker.ok, true);
+  if (marker.ok) {
+    assert.equal(marker.value.lastConnection, "telegram");
+    assert.equal(marker.value.chatRoomId, "777");
+  }
+  clearTelegramProjectManagers();
+});
+
+test("child sessions never start an inbound listener or inject follow-ups", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers, sent } = registrations();
+  let listenerCreated = false;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => {
+      listenerCreated = true;
+      return createTelegramInbound(opts);
+    },
+  });
+
+  // A child session id that is also a job in the pool is not the root.
+  markChild(cwd, "child-session");
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "child-session"));
+  assert.equal(listenerCreated, false, "no listener is created for a child session");
+  assert.equal(sent.length, 0, "no follow-up is injected for a child session");
+  clearTelegramProjectManagers();
+});
+
+test("turn_start marks busy and agent_settled releases one queued follow-up", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers, sent } = registrations();
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => (listener = createTelegramInbound(opts)),
+  });
+
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  await handlers.get("turn_start")!({}, context(cwd, "root-a"));
+  await listener!.handle(privateText(1, "111", "one"));
+  await listener!.handle(privateText(2, "111", "two"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(sent.length, 0, "accepted messages queue while the turn is busy");
+
+  await handlers.get("agent_settled")!({}, context(cwd, "root-a"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(sent, ["one\n\n---\n[from:telegram:777]\n---"], "one follow-up is released after settlement");
+  clearTelegramProjectManagers();
+});
+
+test("session shutdown stops the inbound listener", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers, sent } = registrations();
+  let stopped = false;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => {
+      const listener = createTelegramInbound(opts);
+      const originalStop = listener.stop;
+      listener.stop = () => { stopped = true; originalStop.call(listener); };
+      return listener;
+    },
+  });
+
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  await handlers.get("session_shutdown")!({ reason: "quit" }, context(cwd, "root-a"));
+  assert.equal(stopped, true, "the listener stops on shutdown");
+  clearTelegramProjectManagers();
+});

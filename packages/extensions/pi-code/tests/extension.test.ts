@@ -36,6 +36,7 @@ test("pi-code extension registers the question tool and setup command", () => {
   assert.ok(names.includes("question"), "question tool registered");
   assert.ok(names.includes("agent"), "agent tool registered");
   assert.ok(names.includes("agent_status"), "agent_status tool registered");
+  assert.ok(names.includes("user_telegram_chat"), "user_telegram_chat tool registered");
   assert.equal(
     commands.filter((name) => name === "setup-channel-telegram").length,
     1,
@@ -67,7 +68,7 @@ test("question registration is main-agent-only (no child tool registrations)", (
   // Child sessions receive only the built-in allowlist; the extension never
   // registers anything scoped to child sessions, so the question tool (like the
   // other pi-code tools) is structurally main-agent-only.
-  assert.deepEqual(names, ["question", "agent", "agent_cancel", "agent_status", "agent_jobs"]);
+  assert.deepEqual(names, ["question", "agent", "agent_cancel", "agent_status", "agent_jobs", "user_telegram_chat"]);
 });
 
 test("extension re-exports QuestionDetails", () => {

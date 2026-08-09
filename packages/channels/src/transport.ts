@@ -11,10 +11,14 @@ import type { ChannelConfig, StateResult } from "./state.ts";
  */
 export interface BotApiLike {
   getMe(): Promise<unknown>;
+  sendMessage?(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
 }
+
+export type TelegramMessageHandler = (context: unknown) => Promise<unknown> | unknown;
 
 export interface BotLike {
   readonly api: BotApiLike;
+  on?(event: "message", middleware: TelegramMessageHandler): void;
   init(signal?: AbortSignal): Promise<void>;
   catch(handler: (error: unknown) => unknown): void;
   stop(): Promise<void>;
@@ -36,6 +40,11 @@ export interface TelegramTransportDeps {
   createBot?: TelegramBotFactory;
   /** Injectable long-polling runner; defaults to `@grammyjs/runner`'s `run`. */
   runBot?: TelegramRunnerFactory;
+  /**
+   * Optional message middleware installed on the bot before polling starts.
+   * Phase 6 uses this to route accepted private text to the root parent.
+   */
+  onMessage?: TelegramMessageHandler;
 }
 
 /**
@@ -104,6 +113,9 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
         // Middleware errors must never become unhandled host rejections.
         deps.logger.warn("telegram_middleware_error", { error: safeTransportError(error) });
       });
+      if (deps.onMessage && candidate.on) {
+        candidate.on("message", deps.onMessage);
+      }
 
       try {
         await candidate.init();

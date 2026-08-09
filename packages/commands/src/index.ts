@@ -13,3 +13,7 @@ export {
   registerTelegramLifecycle,
   type TelegramLifecycleRegistrationDeps,
 } from "./registrations/telegram-lifecycle.ts";
+export {
+  registerTelegramInbound,
+  type TelegramInboundDeps,
+} from "./registrations/telegram-inbound.ts";

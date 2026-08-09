@@ -71,3 +71,13 @@ export interface CancelDetails {
   reason?: string;
   allowed?: boolean;
 }
+
+/** Details payload for the parent-only Telegram communication tool. */
+export interface TelegramChatDetails {
+  sent: boolean;
+  message: string;
+  chunks?: number;
+  sentChunks?: number;
+  failedChunks?: number;
+  error?: string;
+}
