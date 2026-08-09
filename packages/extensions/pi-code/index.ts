@@ -5,11 +5,13 @@ import {
   registerQuestionTool,
   registerStatusTool,
   registerJobsTool,
+  registerGoalTools,
   registerAgentFooter,
 } from "@xzy-ai/tools";
 import {
   registerSessionEvents,
   registerLifecycleGates,
+  registerGoalCommand,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -31,9 +33,11 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerCancelTool(pi);
   registerStatusTool(pi);
   registerJobsTool(pi);
+  registerGoalTools(pi);
   registerAgentFooter(pi);
   registerSessionEvents(pi);
   registerLifecycleGates(pi);
+  registerGoalCommand(pi);
 }
 
 export { extensionName };

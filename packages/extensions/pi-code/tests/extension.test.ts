@@ -11,14 +11,17 @@ import piCodeExtension, { extensionName, type QuestionDetails } from "../index.t
  * registration stays main-agent-only (nothing is registered for child
  * sessions), and the extension re-exports `QuestionDetails`.
  */
-test("pi-code extension registers the question tool", () => {
+test("pi-code extension registers the goal workflow alongside existing tools", () => {
   const names: string[] = [];
+  const commands: string[] = [];
   const pi = {
     registerTool(tool: { name: string }) {
       names.push(tool.name);
     },
     registerShortcut() {},
-    registerCommand() {},
+    registerCommand(name: string) {
+      commands.push(name);
+    },
     on() {},
     setActiveTools() {},
     getAllTools() {
@@ -30,6 +33,11 @@ test("pi-code extension registers the question tool", () => {
   assert.ok(names.includes("question"), "question tool registered");
   assert.ok(names.includes("agent"), "agent tool registered");
   assert.ok(names.includes("agent_status"), "agent_status tool registered");
+  assert.deepEqual(
+    names.filter((name) => name.startsWith("goal_")),
+    ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"],
+  );
+  assert.deepEqual(commands, ["goal"]);
 });
 
 test("question registration is main-agent-only (no child tool registrations)", () => {
@@ -51,7 +59,18 @@ test("question registration is main-agent-only (no child tool registrations)", (
   // Child sessions receive only the built-in allowlist; the extension never
   // registers anything scoped to child sessions, so the question tool (like the
   // other pi-code tools) is structurally main-agent-only.
-  assert.deepEqual(names, ["question", "agent", "agent_cancel", "agent_status", "agent_jobs"]);
+  assert.deepEqual(names, [
+    "question",
+    "agent",
+    "agent_cancel",
+    "agent_status",
+    "agent_jobs",
+    "goal_create",
+    "goal_pause",
+    "goal_resume",
+    "goal_status",
+    "goal_clear",
+  ]);
 });
 
 test("extension re-exports QuestionDetails", () => {
