@@ -119,13 +119,27 @@ export function createChannelManager(deps: ChannelManagerDeps): ChannelManager {
     let candidate: ChannelPoller | undefined;
     try {
       candidate = deps.createPoller(config);
+      const active = candidate;
+      candidate.onError = () => {
+        if (poller !== active) return;
+        poller = undefined;
+        owner.release();
+        setStatus({ kind: "failed", message: "Telegram polling stopped unexpectedly" });
+        void active.stop().catch(() => undefined);
+      };
+      // Publish the candidate before startup so an immediately-ending runner
+      // still reaches the same cleanup boundary as a later polling failure.
+      poller = candidate;
       const started = await candidate.start(config);
       if (!started.ok) {
+        poller = undefined;
         owner.release();
+        candidate.onError = undefined;
         setStatus({ kind: "failed", message: started.message });
         return { ok: false, code: started.code, message: started.message };
       }
     } catch {
+      poller = undefined;
       owner.release();
       setStatus({ kind: "failed", message: "Channel connection failed to start" });
       return { ok: false, code: "io", message: "Channel connection failed to start" };

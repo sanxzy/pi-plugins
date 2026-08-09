@@ -100,3 +100,39 @@ test("replacement serializes so a candidate never runs concurrently with the cur
   assert.equal(meta.stopped, 1);
   await manager.stop();
 });
+
+test("an asynchronous polling failure releases ownership and exposes failed state", async () => {
+  const root = projectRoot();
+  const captured: { poller?: ChannelPoller } = {};
+  const manager = createChannelManager({
+    projectRoot: root,
+    createPoller: () => {
+      const poller: ChannelPoller = {
+        onError: undefined,
+        async start() {
+          return { ok: true, value: undefined } as const;
+        },
+        async stop() {
+          return undefined;
+        },
+      };
+      captured.poller = poller;
+      return poller;
+    },
+  });
+
+  const first = await manager.start(config);
+  assert.equal(first.ok, true);
+  assert.equal(manager.owner.isOwner, true);
+  assert.equal(manager.state().status.kind, "ready");
+
+  // Simulate the runner reporting an unexpected polling failure.
+  captured.poller?.onError?.(new Error("polling died"));
+  assert.equal(manager.owner.isOwner, false);
+  assert.equal(manager.state().status.kind, "failed");
+
+  // A later start is allowed again after the failure released ownership.
+  const again = await manager.start(config);
+  assert.equal(again.ok, true);
+  await manager.stop();
+});

@@ -40,3 +40,13 @@ export {
   type ChannelOwnerRecord,
   type OwnerRead,
 } from "./ownership.ts";
+export {
+  createTelegramTransport,
+  telegramTokenFingerprint,
+  type BotApiLike,
+  type BotLike,
+  type RunnerHandleLike,
+  type TelegramBotFactory,
+  type TelegramRunnerFactory,
+  type TelegramTransportDeps,
+} from "./transport.ts";
