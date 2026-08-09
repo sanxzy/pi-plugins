@@ -12,6 +12,23 @@ export interface ChannelConfig {
 
 export const CHANNEL_FILE_MODE = 0o600;
 
+/**
+ * Validate the fields that must be structurally usable before a poller can be
+ * created. The token check intentionally validates only Telegram's stable
+ * shape; the API remains the authority for whether the token is valid.
+ */
+export function isValidChannelConfig(config: ChannelConfig): boolean {
+  const validToken = /^[0-9]+:[A-Za-z0-9_-]+$/.test(config.botToken);
+  const validChatId = (chatId: string): boolean => /^-?[0-9]+$/.test(chatId);
+  const uniqueAllowed = new Set(config.allowedChatIds).size === config.allowedChatIds.length;
+  return validToken &&
+    validChatId(config.defaultChatId) &&
+    config.allowedChatIds.length > 0 &&
+    uniqueAllowed &&
+    config.allowedChatIds.every(validChatId) &&
+    config.allowedChatIds.includes(config.defaultChatId);
+}
+
 export function channelFilePath(projectRoot: string): string {
   return join(runtimeDir(projectRoot), "channel.json");
 }

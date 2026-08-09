@@ -38,6 +38,10 @@ export interface TelegramListenerBot {
   on(event: "message" | "callback_query:data", middleware: (context: unknown) => Promise<unknown>): void;
   api: {
     getFile(fileId: string): Promise<{ file_path?: string; file_size?: number }>;
+    getMe?(): Promise<unknown>;
+    getUpdates?(other?: { offset?: number; limit?: number; timeout?: number }, signal?: AbortSignal): Promise<readonly unknown[]>;
+    deleteWebhook?(other?: { drop_pending_updates?: boolean }, signal?: AbortSignal): Promise<unknown>;
+    handleUpdate?(update: unknown): Promise<void>;
     sendChatAction(chatId: string | number, action: "typing"): Promise<unknown>;
     answerCallbackQuery?(queryId: string, other?: { text?: string }): Promise<unknown>;
     editMessageReplyMarkup?(chatId: string | number, messageId: number, other?: { reply_markup?: unknown }): Promise<unknown>;

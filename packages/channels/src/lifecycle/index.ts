@@ -2,6 +2,19 @@ import { loadChannelConfig } from "../state/index.ts";
 import { createBot } from "../outbound/bot.ts";
 import { createTelegramListener, type InboundContent, type TelegramListenerBot } from "../inbound/index.ts";
 import { syncTelegramCommands } from "../menu/index.ts";
+export {
+  acquireTelegramChannelManager,
+  resetTelegramChannelManagers,
+  channelStatusPath,
+  loadChannelStatus,
+} from "./manager.ts";
+export type {
+  TelegramChannelManager,
+  TelegramChannelManagerOptions,
+  TelegramChannelStatus,
+  TelegramPoller,
+  TelegramPollerCallbacks,
+} from "./manager.ts";
 
 /** Minimal command shape from `pi.getCommands()` (channels never imports Pi). */
 export interface TelegramCommandInfo {

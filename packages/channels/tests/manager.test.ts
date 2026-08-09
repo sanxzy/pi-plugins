@@ -32,25 +32,26 @@ function writeConfig(root: string, overrides: Partial<ChannelConfig> = {}): void
 class DeferredPoller implements TelegramPoller {
   readonly calls: string[] = [];
   private readonly callbacks: TelegramPollerCallbacks;
+  private readonly validationError: unknown;
+  private resolveStarted!: () => void;
+  private resolveTask!: () => void;
+  private rejectTask!: (error: unknown) => void;
   private readonly started = new Promise<void>((resolve) => {
     this.resolveStarted = resolve;
   });
-  private resolveStarted!: () => void;
-  private resolveStopped!: () => void;
-  private readonly stopped = new Promise<void>((resolve) => {
-    this.resolveStopped = resolve;
-  });
-  private resolveTask!: () => void;
-  readonly task = new Promise<void>((resolve) => {
+  readonly task = new Promise<void>((resolve, reject) => {
     this.resolveTask = resolve;
+    this.rejectTask = reject;
   });
 
-  constructor(callbacks: TelegramPollerCallbacks) {
+  constructor(callbacks: TelegramPollerCallbacks, validationError?: unknown) {
     this.callbacks = callbacks;
+    this.validationError = validationError;
   }
 
   async validate(): Promise<void> {
     this.calls.push("validate");
+    if (this.validationError !== undefined) throw this.validationError;
   }
 
   async start(): Promise<void> {
@@ -62,8 +63,10 @@ class DeferredPoller implements TelegramPoller {
   async stop(): Promise<void> {
     this.calls.push("stop");
     this.resolveTask();
-    this.resolveStopped();
-    await this.stopped;
+  }
+
+  fail(error: unknown): void {
+    this.rejectTask(error);
   }
 
   async emitCycle(updates: readonly unknown[] = []): Promise<void> {
@@ -93,7 +96,7 @@ function managerWithPollers(root: string): { manager: TelegramChannelManager; po
 
 async function cleanup(manager: TelegramChannelManager, root: string): Promise<void> {
   await manager.dispose();
-  resetTelegramChannelManagers();
+  await resetTelegramChannelManagers();
   rmSync(root, { recursive: true, force: true });
 }
 
@@ -109,7 +112,7 @@ test("manager acquisition is singleton per canonical cwd and isolated across cwd
   assert.notEqual(first, separate);
   await first.dispose();
   await separate.dispose();
-  resetTelegramChannelManagers();
+  await resetTelegramChannelManagers();
   rmSync(root, { recursive: true, force: true });
   rmSync(other, { recursive: true, force: true });
 });
@@ -132,6 +135,24 @@ test("readiness follows the first completed empty or non-empty poll cycle, not t
   await starting;
   assert.equal(manager.status().state, "connected");
   assert.equal(taskResolved, false);
+  await cleanup(manager, root);
+});
+
+test("authentication validation failures block safely and release the poller", async () => {
+  const root = projectRoot();
+  writeConfig(root);
+  const pollers: DeferredPoller[] = [];
+  const manager = acquireTelegramChannelManager(root, {
+    createPoller: (_config, callbacks) => {
+      const poller = new DeferredPoller(callbacks, { error_code: 401, description: "Unauthorized" });
+      pollers.push(poller);
+      return poller;
+    },
+  });
+  await assert.rejects(manager.start([]), /Telegram authentication failed/);
+  assert.equal(manager.status().state, "blocked");
+  assert.equal(manager.status().lastError, "Telegram authentication failed");
+  assert.deepEqual(pollers[0]!.calls, ["validate", "stop"]);
   await cleanup(manager, root);
 });
 
@@ -189,6 +210,65 @@ test("replacement is serialized and late callbacks from the old generation are f
   await manager.stop();
   await manager.stop();
   await cleanup(manager, root);
+});
+
+test("non-empty first cycle establishes readiness", async () => {
+  const root = projectRoot();
+  writeConfig(root);
+  const { manager, pollers } = managerWithPollers(root);
+  const starting = manager.start([]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const poller = pollers[0]!;
+  await poller.waitUntilStarted();
+  await poller.emitCycle([{ update_id: 1 }]);
+  await starting;
+  assert.equal(manager.status().state, "connected");
+  await cleanup(manager, root);
+});
+
+test("polling task exit before readiness rejects and releases the poller", async () => {
+  const root = projectRoot();
+  writeConfig(root);
+  const { manager, pollers } = managerWithPollers(root);
+  const starting = manager.start([]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const poller = pollers[0]!;
+  await poller.waitUntilStarted();
+  poller.fail(new Error("polling stopped"));
+  await assert.rejects(starting, /temporarily unavailable/);
+  assert.equal(manager.status().state, "blocked");
+  assert.deepEqual(poller.calls, ["validate", "start", "stop"]);
+  await cleanup(manager, root);
+});
+
+test("semantically invalid configuration is unconfigured without a poller", async () => {
+  const root = projectRoot();
+  writeConfig(root, { defaultChatId: "not-a-chat", allowedChatIds: ["42"] });
+  const created: unknown[] = [];
+  const manager = acquireTelegramChannelManager(root, {
+    createPoller: () => {
+      created.push(true);
+      throw new Error("must not create");
+    },
+  });
+  await manager.start([]);
+  assert.equal(manager.status().state, "unconfigured");
+  assert.deepEqual(created, []);
+  await cleanup(manager, root);
+});
+
+test("reset disposes active managers before clearing the registry", async () => {
+  const root = projectRoot();
+  writeConfig(root);
+  const { manager, pollers } = managerWithPollers(root);
+  const starting = manager.start([]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await pollers[0]!.waitUntilStarted();
+  await pollers[0]!.emitCycle([]);
+  await starting;
+  await resetTelegramChannelManagers();
+  assert.deepEqual(pollers[0]!.calls, ["validate", "start", "stop"]);
+  rmSync(root, { recursive: true, force: true });
 });
 
 test("invalid configuration is unconfigured without a poller or status secret", async () => {
