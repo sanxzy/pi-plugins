@@ -123,6 +123,24 @@ test("inbound queues FIFO and delivers one at a time while busy", async () => {
   listener.stop();
 });
 
+test("settlement permits are retained when the active delivery is still unwinding", async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const { listener, accepted } = makeListener(["111"], async () => { await gate; });
+
+  await listener.handle(privateText(1, "111", "first"));
+  // Simulate agent_settled racing with the follow-up callback's promise.
+  listener.releaseNext();
+  await listener.handle(privateText(2, "111", "second"));
+  release!();
+  await gate;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(accepted.map((item) => item.text), ["first", "second"], "the queued follow-up drains after the in-flight delivery settles");
+  listener.stop();
+});
+
 test("inbound reports delivery failures through onError", async () => {
   const { listener, errors } = makeListener(["111"], async () => { throw new Error("boom"); });
   await listener.handle(privateText(1, "111", "fail"));

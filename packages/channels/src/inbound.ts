@@ -186,6 +186,14 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     }
   };
 
+  const deliverySettled = (): void => {
+    delivering = false;
+    // A permit granted while a delivery was in flight (e.g. by releaseNext
+    // landing during the same turn) is consumed now, so a queued follow-up
+    // never stalls behind an already-completed delivery.
+    attemptDrain();
+  };
+
   const attemptDrain = (): void => {
     if (busy || delivering || permits <= 0 || queue.length === 0) return;
     const item = queue.shift()!;
@@ -193,11 +201,9 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     delivering = true;
     Promise.resolve()
       .then(() => options.onAccepted(item.updateId, item.chatId, item.text))
-      .then(() => {
-        delivering = false;
-      })
+      .then(deliverySettled)
       .catch((error: unknown) => {
-        delivering = false;
+        deliverySettled();
         options.onError?.(error);
       });
   };
@@ -232,7 +238,9 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     },
 
     releaseNext(): void {
-      if (delivering) return;
+      // Always retain the settlement permit. The host may settle the turn while
+      // the follow-up callback is still unwinding; dropping the permit here
+      // leaves queued Telegram messages permanently stuck.
       permits += 1;
       attemptDrain();
     },
