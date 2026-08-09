@@ -14,6 +14,7 @@ export {
   type TelegramLifecycleRegistrationDeps,
 } from "./registrations/telegram-lifecycle.ts";
 export {
+  refreshTelegramInbound,
   registerTelegramInbound,
   type TelegramInboundDeps,
 } from "./registrations/telegram-inbound.ts";

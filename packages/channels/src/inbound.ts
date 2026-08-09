@@ -3,9 +3,17 @@
  *
  * Phase 6 accepts only private text messages from approved identities, delivers
  * them to the root parent one follow-up at a time in FIFO order, and ignores
- * non-text, edited, and unauthorized updates. The decoder is pure and
- * side-effect free so offline tests drive it without a live token or network.
+ * non-text, edited, and unauthorized updates. Unknown private users enter the
+ * persisted DM pairing flow and never enter the parent session until approved.
  */
+
+import {
+  readChannelConfig,
+  writeChannelConfig,
+  type ChannelConfig,
+  type StateResult,
+} from "./state.ts";
+import { formatPairingChallenge, upsertPairingRequest } from "./pairing.ts";
 
 /** A single accepted private text update. */
 export interface TelegramUpdate {
@@ -17,18 +25,33 @@ export interface TelegramUpdate {
   text: string;
 }
 
+/**
+ * The narrow update shape the decoder reads. A real grammY `Context` exposes
+ * the update at `context.update` and the message at `context.update.message`,
+ * while offline tests pass a flat `{ update_id, message }` object. The decoder
+ * reads both shapes so the same path works live and in tests.
+ */
 interface TelegramRawMessageContext {
   update_id?: unknown;
-  message?: {
-    chat?: { id?: number | string; type?: string };
-    from?: { id?: number | string };
-    text?: string;
-    edit_date?: number;
-  };
+  update?: { update_id?: unknown; message?: TelegramRawMessage };
+  api?: { sendMessage?: (chatId: number | string, text: string) => Promise<unknown> };
+  message?: TelegramRawMessage;
+}
+
+interface TelegramRawMessage {
+  chat?: { id?: number | string; type?: string };
+  from?: { id?: number | string };
+  text?: string;
+  edit_date?: number;
 }
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNumericId(value: unknown): value is number | string {
+  return (typeof value === "number" && Number.isSafeInteger(value))
+    || (typeof value === "string" && /^-?\d+$/.test(value));
 }
 
 /**
@@ -39,14 +62,15 @@ function isNumber(value: unknown): value is number {
  * missing or non-text messages, and missing sender or update identities.
  */
 export function decodeAcceptedText(context: unknown): TelegramUpdate | undefined {
-  const message = (context as TelegramRawMessageContext)?.message;
+  const raw = context as TelegramRawMessageContext;
+  const message = raw?.message ?? raw?.update?.message;
   if (!message?.chat?.type || message.chat.type !== "private") return undefined;
   if (message.edit_date !== undefined) return undefined;
   if (typeof message.text !== "string" || message.text.trim().length === 0) return undefined;
-  if (message.chat.id === undefined || message.chat.id === null) return undefined;
-  if (message.from?.id === undefined || message.from.id === null) return undefined;
+  if (!isNumericId(message.chat.id)) return undefined;
+  if (!isNumericId(message.from?.id)) return undefined;
 
-  const updateId = (context as TelegramRawMessageContext).update_id;
+  const updateId = raw?.update_id ?? raw?.update?.update_id;
   if (!isNumber(updateId)) return undefined;
 
   return {
@@ -75,14 +99,20 @@ interface QueuedUpdate {
 export interface TelegramInboundOptions {
   /** Approved numeric sender ids read from the current channel config. */
   approvedUserIds: readonly string[];
+  /** Project config reader used to refresh approvals and persist pairing state. */
+  readConfig?: () => StateResult<ChannelConfig>;
+  /** Project config writer used for challenge creation/refresh. */
+  writeConfig?: (config: ChannelConfig) => StateResult<void>;
+  /** Send a newly-created pairing challenge back to the requesting DM. */
+  onChallenge?: (context: unknown, chatId: string, text: string) => Promise<void>;
+  /** Optional local boundary for pairing/delivery failures and capped requests. */
+  onError?(error: unknown): void;
   /**
    * Deliver one accepted message. The exact origin signature is appended before
    * calling this callback; the callback writes the connection marker and
    * injects the follow-up.
    */
   onAccepted(updateId: number, chatId: string, text: string): Promise<void>;
-  /** Optional local boundary for delivery failures. */
-  onError?(error: unknown): void;
 }
 
 export interface TelegramInboundListener {
@@ -106,8 +136,8 @@ export interface TelegramInboundListener {
  * Accepted updates are deduplicated by update identity and queued in arrival
  * order. At most one follow-up is ever in flight: while the root turn is busy
  * or a delivery is outstanding, further accepted updates queue; `setBusy(false)`
- * or `releaseNext` drains exactly one. Unauthorized and undecodable updates are
- * silently ignored.
+ * or `releaseNext` drains exactly one. Unauthorized private updates create or
+ * refresh one persisted pairing request and are never delivered.
  */
 export function createTelegramInbound(options: TelegramInboundOptions): TelegramInboundListener {
   const queue: QueuedUpdate[] = [];
@@ -119,6 +149,42 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
   // One initial delivery is allowed immediately; every later delivery requires
   // an explicit root-turn settlement/release permit.
   let permits = 1;
+
+  const refreshConfig = (): ChannelConfig | undefined => {
+    const result = options.readConfig?.();
+    if (!result) return undefined;
+    if (!result.ok) {
+      options.onError?.(new Error("Unable to read Telegram pairing state"));
+      return undefined;
+    }
+    approvedUserIds = new Set(result.value.approvedUserIds);
+    return result.value;
+  };
+
+  const handleUnauthorized = async (
+    context: unknown,
+    update: TelegramUpdate,
+    config: ChannelConfig | undefined,
+  ): Promise<void> => {
+    if (!config || !options.writeConfig || !options.onChallenge) return;
+    const pairing = upsertPairingRequest(config, update.fromId);
+    if (pairing.kind === "capped") {
+      // Do not reveal the cap or produce Telegram chatter. The host may route
+      // this safe local event to its structured channel logger.
+      options.onError?.(new Error("Telegram pairing request cap reached"));
+      return;
+    }
+    const written = options.writeConfig(pairing.config);
+    if (!written.ok) {
+      options.onError?.(new Error("Unable to persist Telegram pairing request"));
+      return;
+    }
+    // Existing requests deliberately send no second challenge, even though
+    // their expiry is refreshed above.
+    if (pairing.kind === "created") {
+      await options.onChallenge(context, update.chatId, formatPairingChallenge(pairing.request));
+    }
+  };
 
   const attemptDrain = (): void => {
     if (busy || delivering || permits <= 0 || queue.length === 0) return;
@@ -140,8 +206,12 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     async handle(context: unknown): Promise<void> {
       const update = decodeAcceptedText(context);
       if (update === undefined) return;
+      const config = refreshConfig();
+      if (!approvedUserIds.has(update.fromId)) {
+        await handleUnauthorized(context, update, config);
+        return;
+      }
       if (update.updateId <= lastUpdateId || seen.has(update.updateId)) return;
-      if (!approvedUserIds.has(update.fromId)) return;
       seen.add(update.updateId);
       lastUpdateId = Math.max(lastUpdateId, update.updateId);
       queue.push({ updateId: update.updateId, chatId: update.chatId, text: update.text });
@@ -171,5 +241,13 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
       busy = true;
       queue.length = 0;
     },
+  };
+}
+
+/** Default state seams for callers that do not need project-specific injection. */
+export function defaultTelegramPairingState(projectRoot: string): Pick<TelegramInboundOptions, "readConfig" | "writeConfig"> {
+  return {
+    readConfig: () => readChannelConfig(projectRoot),
+    writeConfig: (config) => writeChannelConfig(projectRoot, config),
   };
 }

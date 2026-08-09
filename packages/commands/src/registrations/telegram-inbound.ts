@@ -10,10 +10,12 @@ import { getChildPool } from "@xzy-ai/runtime";
 import {
   canonicalProjectRoot,
   createTelegramInbound,
+  defaultTelegramPairingState,
   formatTelegramSignature,
   readChannelConfig,
   readLastConnection,
   writeLastConnection,
+  type ChannelConfig,
   type TelegramInboundListener,
 } from "@xzy-ai/channels";
 import { getTelegramProjectManager } from "./telegram-project.ts";
@@ -21,6 +23,13 @@ import { getTelegramProjectManager } from "./telegram-project.ts";
 export interface TelegramInboundDeps {
   /** Injectable inbound factory for offline tests. */
   createInbound?: (options: Parameters<typeof createTelegramInbound>[0]) => TelegramInboundListener;
+}
+
+const listenersByProject = new Map<string, TelegramInboundListener>();
+
+/** Refresh authorization state after setup approves a pending DM request. */
+export function refreshTelegramInbound(projectRoot: string, config: ChannelConfig): void {
+  listenersByProject.get(canonicalProjectRoot(projectRoot))?.setApprovedUserIds(config.approvedUserIds);
 }
 
 /** True only for the root orchestrator session. */
@@ -42,8 +51,19 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
 
     const sessionId = ctx.sessionManager.getSessionId();
     const previousMarker = readLastConnection(projectRoot);
+    const pairingState = defaultTelegramPairingState(projectRoot);
     const listener = createInbound({
       approvedUserIds: channel.value.approvedUserIds,
+      ...pairingState,
+      onChallenge: async (context, chatId, text) => {
+        const api = (context as { api?: { sendMessage?: (target: string, content: string) => Promise<unknown> } }).api;
+        if (!api?.sendMessage) throw new Error("Telegram challenge sender is unavailable");
+        await api.sendMessage(chatId, text);
+      },
+      onError: () => {
+        // Pairing and delivery failures are local-only. The channel logger and
+        // lifecycle status remain the operator's diagnostic surfaces.
+      },
       async onAccepted(updateId, chatId, text) {
         const marker = writeLastConnection(projectRoot, {
           lastConnection: "telegram",
@@ -68,6 +88,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
       createMessageHandler: () => (context) => listener.handle(context),
     });
     runningByProject.set(projectRoot, listener);
+    listenersByProject.set(projectRoot, listener);
     listener.setBusy(false);
   });
 

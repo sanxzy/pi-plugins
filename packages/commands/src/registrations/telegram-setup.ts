@@ -12,6 +12,7 @@ import {
   type TelegramSetupResult,
 } from "@xzy-ai/tui";
 import { getTelegramProjectManager } from "./telegram-project.ts";
+import { refreshTelegramInbound } from "./telegram-inbound.ts";
 
 export interface TelegramSetupRegistrationDeps {
   createManager?: (projectRoot: string) => ChannelManager;
@@ -43,7 +44,11 @@ export function registerTelegramSetup(
         createManager: deps.createManager,
         createPoller: deps.createPoller,
       });
-      const controller = createTelegramSetupController({ projectRoot, manager });
+      const controller = createTelegramSetupController({
+        projectRoot,
+        manager,
+        onConfigChanged: (config) => refreshTelegramInbound(projectRoot, config),
+      });
       const result = await ctx.ui.custom<TelegramSetupResult>(
         (tui, theme, _keybindings, done) => new TelegramChannelSetup({
           tui,

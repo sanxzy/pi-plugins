@@ -69,6 +69,27 @@ test("a failed candidate restores the prior listener and leaves prior config int
   await m.stop();
 });
 
+test("lists and approves pending pairing requests without changing the token", async () => {
+  const root = projectRoot();
+  const { writeChannelConfig } = await import("../src/state.ts");
+  writeChannelConfig(root, {
+    token: VALID,
+    approvedUserIds: [],
+    pendingPairings: [{ userId: "111", code: "ABCD2345", createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString() }],
+  });
+  const controller = createTelegramSetupController({ projectRoot: root, manager: manager(root) });
+  assert.deepEqual(controller.listPendingPairings().map((item) => ({ id: item.id, userId: item.userId, code: item.code })), [
+    { id: 1, userId: "111", code: "ABCD2345" },
+  ]);
+  assert.deepEqual(controller.approvePairing(1), { ok: true, message: "Approved Telegram user 111." });
+  const config = readChannelConfig(root);
+  assert.equal(config.ok, true);
+  if (config.ok) {
+    assert.deepEqual(config.value.approvedUserIds, ["111"]);
+    assert.deepEqual(config.value.pendingPairings, []);
+  }
+});
+
 test("a submission cancelled while in flight reports cancelled and does not own the connection", async () => {
   const root = projectRoot();
   let releaseStart: (() => void) | undefined;

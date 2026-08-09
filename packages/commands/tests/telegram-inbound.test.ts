@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createTelegramInbound, channelConfigFile, readLastConnection, type TelegramInboundListener } from "@xzy-ai/channels";
+import { approvePairingAt, channelConfigFile, createTelegramInbound, readChannelConfig, readLastConnection, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
 
@@ -64,7 +64,11 @@ function context(cwd: string, sessionId: string): ExtensionContext {
 }
 
 function privateText(updateId: number, fromId: string, text: string): unknown {
-  return { update_id: updateId, message: { chat: { id: 777, type: "private" }, from: { id: Number(fromId) }, text } };
+  return {
+    update_id: updateId,
+    api: { sendMessage: async () => undefined },
+    message: { chat: { id: 777, type: "private" }, from: { id: Number(fromId) }, text },
+  };
 }
 
 test("root session start delivers accepted text as a follow-up with the exact signature and marker", async () => {
@@ -134,6 +138,40 @@ test("turn_start marks busy and agent_settled releases one queued follow-up", as
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(sent, ["one\n\n---\n[from:telegram:777]\n---"], "one follow-up is released after settlement");
+  clearTelegramProjectManagers();
+});
+
+test("an unauthorized DM creates a pairing request and is never delivered; approval unlocks the next DM", async () => {
+  const cwd = projectRoot();
+  mkdirSync(dirname(channelConfigFile(cwd)), { recursive: true });
+  writeFileSync(channelConfigFile(cwd), JSON.stringify({ token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX", approvedUserIds: [] }), "utf8");
+  const { pi, handlers, sent } = registrations();
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => (listener = createTelegramInbound(opts)),
+  });
+
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  await listener!.handle(privateText(1, "222", "challenged"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(sent.length, 0, "unauthorized text never enters the parent");
+
+  // The operator approves the pending request via setup; the listener refreshes.
+  const config = readChannelConfig(cwd);
+  assert.equal(config.ok, true);
+  if (config.ok) {
+    assert.equal(config.value.pendingPairings?.length, 1);
+    const approved = approvePairingAt(config.value, 1);
+    assert.equal(approved.ok, true);
+    if (approved.ok) {
+      writeChannelConfig(cwd, approved.config);
+      listener!.setApprovedUserIds(approved.config.approvedUserIds);
+    }
+  }
+
+  await listener!.handle(privateText(2, "222", "later"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(sent, ["later\n\n---\n[from:telegram:777]\n---"], "the post-approval DM is delivered");
   clearTelegramProjectManagers();
 });
 

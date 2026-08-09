@@ -21,9 +21,23 @@ export {
 } from "./state.ts";
 export {
   createTelegramSetupController,
+  type PairingApprovalResult,
+  type PendingPairingView,
   type TelegramSetupController,
   type TelegramSetupControllerOptions,
 } from "./setup.ts";
+export {
+  PAIRING_CODE_ALPHABET,
+  PAIRING_CODE_LENGTH,
+  PAIRING_PENDING_MAX,
+  PAIRING_PENDING_TTL_MS,
+  approvePairingAt,
+  createPairingCode,
+  formatPairingChallenge,
+  pruneExpiredPairings,
+  upsertPairingRequest,
+  type PairingRequestResult,
+} from "./pairing.ts";
 export {
   createTelegramChannelLifecycle,
   type TelegramChannelLifecycle,
@@ -64,6 +78,7 @@ export {
 } from "./transport.ts";
 export {
   createTelegramInbound,
+  defaultTelegramPairingState,
   decodeAcceptedText,
   formatTelegramSignature,
   type TelegramInboundListener,

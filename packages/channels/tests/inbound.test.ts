@@ -4,8 +4,11 @@ import {
   createTelegramInbound,
   decodeAcceptedText,
   formatTelegramSignature,
+  type ChannelConfig,
   type TelegramInboundListener,
-} from "../src/inbound.ts";
+} from "../src/index.ts";
+
+const TOKEN = "123456789:ABCDEFGHIJKLMNOPQRSTUVWX";
 
 function privateText(updateId: number, fromId: string, text: string, type = "private", extra: Record<string, unknown> = {}): unknown {
   return {
@@ -22,6 +25,20 @@ function privateText(updateId: number, fromId: string, text: string, type = "pri
 test("decodeAcceptedText accepts a private text message from an approved identity", () => {
   const decoded = decodeAcceptedText(privateText(1, "111", "hello"));
   assert.deepEqual(decoded, { updateId: 1, chatId: "123", fromId: "111", text: "hello" });
+});
+
+test("decodeAcceptedText also accepts the nested update shape used by grammY Context", () => {
+  const decoded = decodeAcceptedText({
+    update: {
+      update_id: 2,
+      message: {
+        chat: { id: 123, type: "private" },
+        from: { id: 111 },
+        text: "hello",
+      },
+    },
+  });
+  assert.deepEqual(decoded, { updateId: 2, chatId: "123", fromId: "111", text: "hello" });
 });
 
 test("decodeAcceptedText rejects non-private, edited, non-text, and identity-missing updates", () => {

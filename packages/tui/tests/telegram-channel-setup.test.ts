@@ -146,3 +146,44 @@ test("remains usable at a narrow width", () => {
   }
   assert.ok(lines.length > 0, "a narrow render still produces content");
 });
+
+test("press a reveals pending pairing requests and a numeric ID approves one, settling as saved", async () => {
+  const approvals: number[] = [];
+  const controller = makeController();
+  controller.listPendingPairings = () => [
+    { id: 1, userId: "111", code: "ABCD2345", createdAt: "t", expiresAt: "t" },
+  ];
+  controller.approvePairing = (id) => {
+    approvals.push(id);
+    return { ok: true, message: "Approved." };
+  };
+  const { promise, resolve } = collectResult();
+  const component = new TelegramChannelSetup({ tui: fakeTUI(), theme, controller, done: resolve });
+
+  component.handleInput("a");
+  const lines = dirty(component, 40);
+  assert.ok(lines.some((l) => l.includes("1") && l.includes("111")), "pending request is listed");
+
+  const esc = String.fromCharCode(27);
+  // The operator selects the ID using the numpad, which in application-keypad
+  // mode sends an SS3 sequence (ESC O q) for the digit 1. The widget maps it.
+  component.handleInput(`${esc}Oq`);
+  component.handleInput("\r");
+  assert.deepEqual(approvals, [1], "the numeric ID is approved");
+  const approved = dirty(component, 40);
+  assert.ok(approved.some((l) => l.includes("Approved.")), "approval result is shown");
+  const result = await promise;
+  assert.deepEqual(result, { status: "saved", message: "Approved." }, "approval settles the setup as saved");
+});
+
+test("Escape returns from the approval screen to the token view", () => {
+  const controller = makeController();
+  controller.listPendingPairings = () => [
+    { id: 1, userId: "111", code: "ABCD2345", createdAt: "t", expiresAt: "t" },
+  ];
+  const component = new TelegramChannelSetup({ tui: fakeTUI(), theme, controller, done: () => {} });
+  component.handleInput("a");
+  assert.ok(dirty(component, 40).some((l) => l.includes("pairing")), "approval screen is shown");
+  component.handleInput("\x1b");
+  assert.ok(dirty(component, 40).some((l) => l.includes("Bot token:")), "returns to the token view");
+});

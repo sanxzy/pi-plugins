@@ -6,12 +6,32 @@ import {
   type ChannelConfig,
   type StateResult,
 } from "./state.ts";
+import { approvePairingAt, pruneExpiredPairings } from "./pairing.ts";
 import type { ChannelManager } from "./manager.ts";
+
+/** A pending pairing request surfaced to the operator for review. */
+export interface PendingPairingView {
+  /** One-based numeric ID used for approval. */
+  id: number;
+  userId: string;
+  code: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PairingApprovalResult {
+  ok: boolean;
+  message: string;
+}
 
 /** UI-agnostic controller consumed structurally by @xzy-ai/tui. */
 export interface TelegramSetupController {
   getInitialToken(): string;
   submitToken(token: string): Promise<{ ok: true; message?: string } | { ok: false; message: string }>;
+  /** Active, unexpired pairing requests for the operator to review. */
+  listPendingPairings(): PendingPairingView[];
+  /** Approve one active request by its one-based numeric ID. */
+  approvePairing(id: number): PairingApprovalResult;
   cancel(): Promise<void> | void;
 }
 
@@ -20,6 +40,8 @@ export interface TelegramSetupControllerOptions {
   manager: ChannelManager;
   readConfig?: (projectRoot: string) => StateResult<ChannelConfig>;
   writeConfig?: (projectRoot: string, config: ChannelConfig) => StateResult<void>;
+  /** Notify a live inbound listener after setup changes approval state. */
+  onConfigChanged?: (config: ChannelConfig) => void;
 }
 
 function safeFailure(message: string): { ok: false; message: string } {
@@ -39,10 +61,35 @@ export function createTelegramSetupController(
   const writeConfig = options.writeConfig ?? writeChannelConfig;
   let cancelled = false;
 
+  const pending = (): PendingPairingView[] => {
+    const current = readConfig(options.projectRoot);
+    if (!current.ok) return [];
+    return pruneExpiredPairings(current.value.pendingPairings).map((request, index) => ({
+      id: index + 1,
+      userId: request.userId,
+      code: request.code,
+      createdAt: request.createdAt,
+      expiresAt: request.expiresAt,
+    }));
+  };
+
+  const approve = (id: number): PairingApprovalResult => {
+    const current = readConfig(options.projectRoot);
+    if (!current.ok) return { ok: false, message: "Telegram channel is not configured" };
+    const result = approvePairingAt(current.value, id);
+    if (!result.ok) return { ok: false, message: result.message };
+    const written = writeConfig(options.projectRoot, result.config);
+    if (!written.ok) return { ok: false, message: "Unable to save Telegram pairing approval" };
+    options.onConfigChanged?.(result.config);
+    return { ok: true, message: `Approved Telegram user ${result.request.userId}.` };
+  };
+
   return {
     // Never preload the stored credential into the widget. Rerunning setup is
     // supported without making the old token available to the presentation.
     getInitialToken: () => "",
+    listPendingPairings: pending,
+    approvePairing: approve,
 
     async submitToken(rawToken: string) {
       cancelled = false;

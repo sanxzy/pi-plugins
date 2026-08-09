@@ -19,6 +19,7 @@ export { TelegramChannelSetup } from "./telegram-channel-setup.ts";
 export type {
   TelegramChannelSetupOptions,
   TelegramChannelSetupTheme,
+  TelegramPendingPairing,
   TelegramSetupController,
   TelegramSetupResult,
   TelegramSetupStatus,
