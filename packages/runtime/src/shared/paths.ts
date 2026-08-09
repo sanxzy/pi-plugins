@@ -10,9 +10,14 @@ export const RUNTIME_DIR_NAME = "pi-code";
 export const SESSIONS_DIR_NAME = "sessions";
 export const SCOPED_REGISTRY_PREFIX = "jobs-";
 export const SCOPED_REGISTRY_SUFFIX = ".jsonl";
+export const GOALS_FILE_NAME = "goals.jsonl";
 
 export function runtimeDir(projectRoot: string): string {
   return join(projectRoot, ".pi", RUNTIME_DIR_NAME);
+}
+
+export function goalsFile(projectRoot: string): string {
+  return join(runtimeDir(projectRoot), GOALS_FILE_NAME);
 }
 
 export function scopedSessionsDir(projectRoot: string): string {
