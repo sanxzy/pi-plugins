@@ -21,12 +21,76 @@ export interface TelegramDocument {
   fileName?: string;
 }
 
-export interface TelegramInboundMessage {
+/** A single ordered content item decoded from a Telegram update. */
+export type TelegramContentItem =
+  | { kind: "text"; text: string }
+  | { kind: "photo"; fileId: string; width?: number; height?: number }
+  | { kind: "document"; fileId: string; fileSize?: number; fileName?: string };
+
+export interface NormalizedTelegramMessage {
   chatId: string;
-  text?: string;
-  caption?: string;
-  photos?: TelegramPhoto[];
-  documents?: TelegramDocument[];
+  items: TelegramContentItem[];
+}
+
+/** The minimal grammY Bot surface the listener needs (injectable for tests). */
+export interface TelegramListenerBot {
+  on(event: "message", middleware: (context: unknown) => Promise<unknown>): void;
+  api: {
+    getFile(fileId: string): Promise<{ file_path?: string; file_size?: number }>;
+    sendChatAction(chatId: string | number, action: "typing"): Promise<unknown>;
+  };
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+interface TelegramRawPhoto {
+  file_id: string;
+  width?: number;
+  height?: number;
+}
+
+interface TelegramRawDocument {
+  file_id: string;
+  file_size?: number;
+  file_name?: string;
+}
+
+interface TelegramRawMessageContext {
+  message?: {
+    chat?: { id?: string | number };
+    text?: string;
+    caption?: string;
+    photo?: TelegramRawPhoto[];
+    document?: TelegramRawDocument;
+  };
+}
+
+/**
+ * Decode a grammY `message` context into ordered content items. Photos pick the
+ * largest available size (last entry); never the smallest. Chat ids are always
+ * strings, including negative group ids.
+ */
+export function normalizeTelegramMessage(context: unknown): NormalizedTelegramMessage | undefined {
+  const message = (context as TelegramRawMessageContext)?.message;
+  if (!message?.chat?.id) return undefined;
+  const chatId = String(message.chat.id);
+  const items: TelegramContentItem[] = [];
+  if (message.caption) items.push({ kind: "text", text: message.caption });
+  if (message.text) items.push({ kind: "text", text: message.text });
+  if (message.photo && message.photo.length > 0) {
+    const largest = message.photo[message.photo.length - 1]!;
+    items.push({ kind: "photo", fileId: largest.file_id, width: largest.width, height: largest.height });
+  }
+  if (message.document) {
+    items.push({
+      kind: "document",
+      fileId: message.document.file_id,
+      fileSize: message.document.file_size,
+      fileName: message.document.file_name,
+    });
+  }
+  if (items.length === 0) return undefined;
+  return { chatId, items };
 }
 
 export interface TextContent {
@@ -77,24 +141,6 @@ export function formatTelegramSignature(chatId: string): string {
   return signature(chatId);
 }
 
-function defaultDownload(token: string): NonNullable<InboundHandlerOptions["downloadFile"]> {
-  return async (fileId: string, maxBytes: number): Promise<DownloadedTelegramFile> => {
-    const metadataResponse = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`);
-    if (!metadataResponse.ok) throw new Error("Telegram file metadata request failed");
-    const metadata = (await metadataResponse.json()) as { ok?: boolean; result?: { file_path?: string } };
-    const filePath = metadata.result?.file_path;
-    if (!metadata.ok || !filePath) throw new Error("Telegram file metadata was incomplete");
-
-    const response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
-    if (!response.ok) throw new Error("Telegram file download failed");
-    const length = Number(response.headers.get("content-length") ?? "0");
-    if (length > maxBytes) throw new Error("Telegram file exceeds the size limit");
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) throw new Error("Telegram file exceeds the size limit");
-    return { bytes, size: bytes.byteLength };
-  };
-}
-
 function generatedUploadPath(projectRoot: string, sessionId: string, extension: "webp" | "bin"): string {
   const directory = uploadsDir(projectRoot, sessionId);
   mkdirSync(directory, { recursive: true });
@@ -103,15 +149,6 @@ function generatedUploadPath(projectRoot: string, sessionId: string, extension: 
 
 function textPart(text: string): TextContent {
   return { type: "text", text };
-}
-
-function hasSupportedContent(message: TelegramInboundMessage): boolean {
-  return Boolean(
-    (message.text && message.text.length > 0) ||
-    (message.caption && message.caption.length > 0) ||
-    (message.photos && message.photos.length > 0) ||
-    (message.documents && message.documents.length > 0),
-  );
 }
 
 function failureText(label: string): string {
@@ -123,21 +160,60 @@ interface TypingLoop {
   timer: ReturnType<typeof setInterval> | undefined;
 }
 
+export interface TelegramListenerOptions {
+  projectRoot: string;
+  sessionId: string;
+  allowedChatIds: readonly string[];
+  token: string;
+  bot: TelegramListenerBot;
+  sendFollowUp(content: InboundContent, options: { deliverAs: "followUp" }): Promise<void>;
+  setTelegramMarker(): void | Promise<void>;
+  sharp?: SharpAdapter;
+  /** Injectable grammY `getFile` result downloader (defaults to the Bot API URL). */
+  downloadFile?: (fileId: string, maxBytes: number) => Promise<DownloadedTelegramFile>;
+  /** Injectable fetch for the file download URL (seam for network-free tests). */
+  fetchImpl?: typeof fetch;
+  /** Injecting the interval keeps lifecycle tests deterministic. */
+  setInterval?: typeof setInterval;
+  clearInterval?: typeof clearInterval;
+}
+
 /**
- * Create an authorized Telegram inbound bridge. All media is completed before
- * exactly one follow-up is sent. Telegram messages are accepted only for the
- * supplied allow-list; accepted messages mark the connection as Telegram.
+ * The authorized Telegram inbound path, wired to a grammY bot.
+ *
+ * Registers a `message` middleware on the supplied bot, normalizes each update
+ * into an ordered content sequence, processes all media before exactly one
+ * follow-up is injected, and drives a shared best-effort typing loop. Files are
+ * retrieved through the grammY `getFile` API and downloaded from the resulting
+ * URL; the token is never logged and Telegram-provided names are never used for
+ * saved files.
  */
-export function createInboundHandler(options: InboundHandlerOptions) {
+export function createTelegramListener(options: TelegramListenerOptions) {
   const sharp: SharpAdapter = options.sharp ?? defaultSharpAdapter;
-  const downloadFile: NonNullable<InboundHandlerOptions["downloadFile"]> =
-    options.downloadFile ?? defaultDownload(options.token);
+  const fetchImpl = options.fetchImpl ?? fetch;
   const timerSet = options.setInterval ?? setInterval;
   const timerClear = options.clearInterval ?? clearInterval;
   const typing: TypingLoop = { active: 0, timer: undefined };
 
+  const downloadFile = async (fileId: string, maxBytes: number): Promise<DownloadedTelegramFile> => {
+    const remote = await options.bot.api.getFile(fileId);
+    const filePath = remote.file_path;
+    if (!filePath) throw new Error("Telegram file metadata was incomplete");
+    if (remote.file_size !== undefined && remote.file_size > maxBytes) {
+      throw new Error("Telegram file exceeds the size limit");
+    }
+    // The download URL embeds the bot token; it is only ever used here and is
+    // never exposed to logs, prompts, tool results, or Telegram messages.
+    const response = await fetchImpl(`https://api.telegram.org/file/bot${options.token}/${filePath}`);
+    if (!response.ok) throw new Error("Telegram file download failed");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) throw new Error("Telegram file exceeds the size limit");
+    return { bytes, size: bytes.byteLength };
+  };
+  const download = options.downloadFile ?? downloadFile;
+
   const sendTypingSafely = (): void => {
-    void options.sendTyping().catch(() => {
+    void options.bot.api.sendChatAction(options.allowedChatIds[0] ?? 0, "typing").catch(() => {
       // Typing is best-effort; an unavailable chat action must not reject input.
     });
   };
@@ -157,8 +233,8 @@ export function createInboundHandler(options: InboundHandlerOptions) {
     typing.timer = undefined;
   };
 
-  async function processPhoto(photo: TelegramPhoto): Promise<{ content: ImageContent; upload: string }> {
-    const downloaded = await downloadFile(photo.fileId, MAX_DOCUMENT_BYTES);
+  async function processPhoto(photo: { fileId: string }): Promise<{ content: ImageContent; upload: string }> {
+    const downloaded = await download(photo.fileId, MAX_DOCUMENT_BYTES);
     const encoded = await fitImageToBudget(downloaded.bytes, sharp);
     // The adapter contract measures the encoded output; retain a second guard
     // here so an adapter cannot accidentally write an over-budget image.
@@ -177,81 +253,82 @@ export function createInboundHandler(options: InboundHandlerOptions) {
     };
   }
 
-  async function processDocument(document: TelegramDocument): Promise<{ line: string; upload: string }> {
+  async function processDocument(document: { fileId: string; fileSize?: number }): Promise<{ line: string; upload: string }> {
     if (document.fileSize !== undefined && document.fileSize > MAX_DOCUMENT_BYTES) {
       throw new Error("document exceeds 20 MB limit");
     }
-    const downloaded = await downloadFile(document.fileId, MAX_DOCUMENT_BYTES);
+    const downloaded = await download(document.fileId, MAX_DOCUMENT_BYTES);
     if (downloaded.size > MAX_DOCUMENT_BYTES) throw new Error("document exceeds 20 MB limit");
     const path = generatedUploadPath(options.projectRoot, options.sessionId, "bin");
     writeFileSync(path, downloaded.bytes, { mode: 0o600 });
     return { upload: path, line: `Telegram file saved at: ${isAbsolute(path) ? path : join(options.projectRoot, path)}` };
   }
 
-  async function handleMessage(message: TelegramInboundMessage): Promise<InboundResult> {
-    if (!options.allowedChatIds.includes(String(message.chatId))) {
-      return { accepted: false, reason: "unauthorized", uploads: [] };
-    }
-    if (!hasSupportedContent(message)) {
-      return { accepted: false, reason: "unsupported", uploads: [] };
-    }
+  async function handleMessage(context: unknown): Promise<void> {
+    const normalized = normalizeTelegramMessage(context);
+    if (normalized === undefined) return;
+    if (!options.allowedChatIds.includes(normalized.chatId)) return;
 
     typing.active += 1;
     startTyping();
-    const uploads: string[] = [];
     try {
       await options.setTelegramMarker();
-      const header = `Telegram message from chat ${message.chatId}:`;
-      const body = message.text ?? message.caption;
+      const header = `Telegram message from chat ${normalized.chatId}:`;
       const images: ImageContent[] = [];
       const lines: string[] = [];
       const failures: string[] = [];
 
-      if (body) lines.push(body);
-      for (const photo of message.photos ?? []) {
-        try {
-          const result = await processPhoto(photo);
-          images.push(result.content);
-          uploads.push(result.upload);
-        } catch {
-          failures.push(failureText("Photo"));
-        }
-      }
-      for (const document of message.documents ?? []) {
-        try {
-          const result = await processDocument(document);
-          lines.push(result.line);
-          uploads.push(result.upload);
-        } catch {
-          failures.push(failureText("Document"));
+      // Process each ordered item in source order, keeping successful items on
+      // failure so one bad file never drops the rest of the message.
+      for (const item of normalized.items) {
+        if (item.kind === "text") {
+          lines.push(item.text);
+        } else if (item.kind === "photo") {
+          try {
+            const result = await processPhoto(item);
+            images.push(result.content);
+            lines.push(`   (photo ${images.length})`);
+          } catch {
+            failures.push(failureText("Photo"));
+          }
+        } else {
+          try {
+            const result = await processDocument(item);
+            lines.push(result.line);
+          } catch {
+            failures.push(failureText("Document"));
+          }
         }
       }
 
-      const suffixLines = [...lines, ...failures];
-      const marker = signature(message.chatId);
+      const marker = signature(normalized.chatId);
       let content: InboundContent;
       if (images.length > 0) {
         const parts: Array<TextContent | ImageContent> = [textPart(header)];
-        if (images.length > 0) parts.push(...images);
-        parts.push(textPart(`${suffixLines.length > 0 ? `\n${suffixLines.join("\n")}` : ""}${marker}`));
+        parts.push(...images);
+        parts.push(textPart(`${lines.length > 0 ? `\n${lines.join("\n")}` : ""}${failures.length > 0 ? `\n${failures.join("\n")}` : ""}${marker}`));
         content = parts;
       } else {
-        const text = [header, ...suffixLines].join("\n") + marker;
+        const text = [header, ...lines, ...failures].join("\n") + marker;
         content = text;
       }
       await options.sendFollowUp(content, { deliverAs: "followUp" });
-      return { accepted: true, uploads };
     } finally {
       typing.active -= 1;
       stopTypingIfIdle();
     }
   }
 
+  options.bot.on("message", handleMessage);
+
   return {
-    handleMessage,
-    async dispose(): Promise<void> {
+    async start(): Promise<void> {
+      await options.bot.start();
+    },
+    async stop(): Promise<void> {
       typing.active = 0;
       stopTypingIfIdle();
+      await options.bot.stop();
     },
   };
 }

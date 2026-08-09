@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/lifecycle-isolation.test.ts tests/connection-marker.test.ts tests/setup-channel.test.ts"
+    "test": "node --test --import tsx tests/lifecycle-isolation.test.ts tests/connection-marker.test.ts tests/setup-channel.test.ts tests/telegram-inbound.test.ts"
   },
   "dependencies": {
     "@xzy-ai/channels": "workspace:*",

@@ -4,112 +4,145 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  createInboundHandler,
+  createTelegramListener,
   formatTelegramSignature,
   MAX_DOCUMENT_BYTES,
   MAX_IMAGE_BYTES,
+  normalizeTelegramMessage,
   type DownloadedTelegramFile,
   type InboundContent,
-  type TelegramInboundMessage,
+  type TelegramListenerBot,
 } from "../src/inbound/index.ts";
 
 function projectRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-channels-inbound-"));
 }
 
-function textMessage(overrides: Partial<TelegramInboundMessage> = {}): TelegramInboundMessage {
+function fakeBot() {
+  let handler: ((context: unknown) => Promise<unknown>) | undefined;
+  const calls: string[] = [];
+  const bot: TelegramListenerBot = {
+    on: (_event, next) => {
+      handler = next;
+    },
+    api: {
+      getFile: async (fileId) => {
+        calls.push(`getFile:${fileId}`);
+        return { file_path: "documents/file.bin", file_size: 8 };
+      },
+      sendChatAction: async (chatId, action) => {
+        calls.push(`typing:${chatId}:${action}`);
+      },
+    },
+    start: async () => {
+      calls.push("start");
+    },
+    stop: async () => {
+      calls.push("stop");
+    },
+  };
+  return { bot, calls, getHandler: () => handler! };
+}
+
+function messageContext(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    chatId: "42",
-    text: "hello from Telegram",
-    ...overrides,
+    message: { chat: { id: 42 }, text: "hello from Telegram", ...overrides },
   };
 }
 
 function baseOptions(root: string, overrides: Record<string, unknown> = {}) {
+  const fake = fakeBot();
   const followUps: Array<{ content: InboundContent; options: { deliverAs: "followUp" } }> = [];
   const markers: string[] = [];
-  const typing: string[] = [];
   const options = {
     projectRoot: root,
     sessionId: "root-session",
     allowedChatIds: ["42"],
-    defaultChatId: "42",
     token: "123456:SECRET-TOKEN",
+    bot: fake.bot,
     sendFollowUp: async (content: InboundContent, sendOptions: { deliverAs: "followUp" }) => {
       followUps.push({ content, options: sendOptions });
     },
     setTelegramMarker: () => {
       markers.push("telegram");
     },
-    sendTyping: async () => {
-      typing.push("typing");
-    },
-    sleep: async () => {},
     sharp: {
       encode: async () => ({ data: Buffer.from("webp"), info: { size: 4 } }),
     },
     ...overrides,
   };
-  return { options, followUps, markers, typing };
+  return { options, followUps, markers, fake, ...(overrides.fake ? {} : {}) };
 }
 
 test("formatTelegramSignature produces the exact origin block", () => {
   assert.equal(formatTelegramSignature("-100123"), "\n\n---\n[from:telegram:-100123]\n---");
 });
 
-test("unauthorized chats are ignored without marker, typing, download, or follow-up", async () => {
-  const root = projectRoot();
-  let downloads = 0;
-  const { options, followUps, markers, typing } = baseOptions(root, {
-    allowedChatIds: ["42"],
-    downloadFile: async () => {
-      downloads++;
-      throw new Error("must not download");
+test("normalizeTelegramMessage decodes ordered items and string chat ids", () => {
+  const normalized = normalizeTelegramMessage({
+    message: {
+      chat: { id: -100123 },
+      caption: "caption",
+      photo: [
+        { file_id: "small", width: 100, height: 100 },
+        { file_id: "large", width: 1000, height: 800 },
+      ],
     },
   });
-  const handler = createInboundHandler(options);
-  const result = await handler.handleMessage(textMessage({ chatId: "7", photos: [{ fileId: "photo" }] }));
-  assert.equal(result.accepted, false);
-  assert.equal(result.reason, "unauthorized");
+  assert.equal(normalized?.chatId, "-100123");
+  assert.deepEqual(normalized?.items, [
+    { kind: "text", text: "caption" },
+    { kind: "photo", fileId: "large", width: 1000, height: 800 },
+  ]);
+});
+
+test("unauthorized chats are ignored without marker, typing, download, or follow-up", async () => {
+  const root = projectRoot();
+  const { options, followUps, markers, fake } = baseOptions(root);
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()({ message: { chat: { id: 7 }, text: "hi" } });
   assert.deepEqual(followUps, []);
   assert.deepEqual(markers, []);
-  assert.deepEqual(typing, []);
-  assert.equal(downloads, 0);
+  assert.equal(fake.calls.includes("typing:7:typing"), false);
+  assert.equal(fake.calls.includes("getFile"), false);
+  await listener.stop();
 });
 
 test("authorized text injects one follow-up with the chat-ID signature", async () => {
   const root = projectRoot();
-  const { options, followUps, markers, typing } = baseOptions(root);
-  const handler = createInboundHandler(options);
-  const result = await handler.handleMessage(textMessage());
-  assert.equal(result.accepted, true);
+  const { options, followUps, markers, fake } = baseOptions(root);
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()(messageContext());
   assert.deepEqual(markers, ["telegram"]);
-  assert.deepEqual(typing, ["typing"]);
+  assert.equal(fake.calls.includes("typing:42:typing"), true);
   assert.equal(followUps.length, 1);
   assert.equal(followUps[0]?.options.deliverAs, "followUp");
   assert.equal(
     followUps[0]?.content,
     "Telegram message from chat 42:\nhello from Telegram\n\n---\n[from:telegram:42]\n---",
   );
+  await listener.stop();
 });
 
 test("unsupported-only messages are ignored without starting typing", async () => {
   const root = projectRoot();
-  const { options, followUps, markers, typing } = baseOptions(root);
-  const handler = createInboundHandler(options);
-  const result = await handler.handleMessage(textMessage({ text: undefined, caption: undefined }));
-  assert.equal(result.accepted, false);
-  assert.equal(result.reason, "unsupported");
+  const { options, followUps, markers, fake } = baseOptions(root);
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()({ message: { chat: { id: 42 }, sticker: {} } });
   assert.deepEqual(followUps, []);
   assert.deepEqual(markers, []);
-  assert.deepEqual(typing, []);
+  assert.equal(fake.calls.includes("typing:42:typing"), false);
+  await listener.stop();
 });
 
 test("a photo is processed through the injectable Sharp adapter, saved as WebP, and attached as image content", async () => {
   const root = projectRoot();
   const source = Buffer.from("telegram-photo");
   const sharpCalls: Array<{ quality: number; longestEdge: number }> = [];
-  const { options, followUps } = baseOptions(root, {
+  const { options, followUps, fake } = baseOptions(root, {
     downloadFile: async (): Promise<DownloadedTelegramFile> => ({ bytes: source, size: source.length }),
     sharp: {
       encode: async (_input: Buffer, request: { quality: number; longestEdge: number }) => {
@@ -118,12 +151,9 @@ test("a photo is processed through the injectable Sharp adapter, saved as WebP, 
       },
     },
   });
-  const handler = createInboundHandler(options);
-  const result = await handler.handleMessage(textMessage({
-    text: undefined,
-    photos: [{ fileId: "photo-file", width: 1920, height: 1080 }],
-  }));
-  assert.equal(result.accepted, true);
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()({ message: { chat: { id: 42 }, photo: [{ file_id: "photo-file", width: 1920, height: 1080 }] } });
   assert.ok(sharpCalls.length >= 1);
   assert.ok(sharpCalls[0]!.quality <= 80);
   assert.ok(sharpCalls[0]!.longestEdge > 0);
@@ -135,16 +165,13 @@ test("a photo is processed through the injectable Sharp adapter, saved as WebP, 
   assert.equal(image.mimeType, "image/webp");
   assert.equal(Buffer.from(image.data, "base64").toString(), "processed-webp");
   assert.ok(content.some((part) => part.type === "text" && part.text.includes("[from:telegram:42]")));
-  const uploadPath = result.uploads[0];
-  assert.ok(uploadPath?.endsWith(".webp"));
-  assert.equal(existsSync(uploadPath!), true);
-  assert.equal(statSync(uploadPath!).size, "processed-webp".length);
+  await listener.stop();
 });
 
 test("photo output must be strictly under 1 MB and retains the best fitting result", async () => {
   const root = projectRoot();
   const attempts: Array<{ quality: number; longestEdge: number }> = [];
-  const { options, followUps } = baseOptions(root, {
+  const { options, followUps, fake } = baseOptions(root, {
     downloadFile: async (): Promise<DownloadedTelegramFile> => ({ bytes: Buffer.from("source"), size: 6 }),
     sharp: {
       encode: async (_input: Buffer, request: { quality: number; longestEdge: number }) => {
@@ -154,60 +181,67 @@ test("photo output must be strictly under 1 MB and retains the best fitting resu
       },
     },
   });
-  const handler = createInboundHandler(options);
-  const result = await handler.handleMessage(textMessage({
-    text: undefined,
-    photos: [{ fileId: "photo-file", width: 8000, height: 6000 }],
-  }));
-  assert.equal(result.accepted, true);
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()({ message: { chat: { id: 42 }, photo: [{ file_id: "photo-file", width: 8000, height: 6000 }] } });
   assert.ok(attempts.length >= 2);
-  assert.ok(result.uploads.length === 1);
-  assert.ok(statSync(result.uploads[0]!).size < MAX_IMAGE_BYTES);
-  assert.ok(followUps.length === 1);
+  assert.equal(followUps.length, 1);
+  const content = followUps[0]?.content;
+  assert.ok(Array.isArray(content));
+  const image = content.find((part) => part.type === "image") as { type: "image"; data: string; mimeType: string } | undefined;
+  assert.ok(image);
+  assert.equal(Buffer.from(image.data, "base64").byteLength, 500_000);
+  await listener.stop();
 });
 
 test("a document uses a generated safe name, absolute session upload path, and path line", async () => {
   const root = projectRoot();
-  const { options, followUps } = baseOptions(root, {
+  const { options, followUps, fake } = baseOptions(root, {
     downloadFile: async (): Promise<DownloadedTelegramFile> => ({ bytes: Buffer.from("document"), size: 8 }),
   });
-  const handler = createInboundHandler(options);
-  const result = await handler.handleMessage(textMessage({
-    text: undefined,
-    documents: [{ fileId: "document-file", fileSize: 8, fileName: "../../secret.txt" }],
-  }));
-  assert.equal(result.accepted, true);
-  assert.equal(result.uploads.length, 1);
-  assert.equal(result.uploads[0]?.startsWith(join(root, ".pi", "pi-code", "sessions", "root-session", "uploads")), true);
-  assert.equal(result.uploads[0]?.includes("secret"), false);
-  assert.equal(readFileSync(result.uploads[0]!, "utf-8"), "document");
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()({
+    message: { chat: { id: 42 }, document: { file_id: "document-file", file_size: 8, file_name: "../../secret.txt" } },
+  });
   const content = followUps[0]?.content;
   assert.ok(typeof content === "string");
   assert.match(content, /Telegram file saved at:/);
+  const uploadPath = content.match(/saved at: (.+)/)?.[1] ?? "";
+  assert.equal(uploadPath.startsWith(join(root, ".pi", "pi-code", "sessions", "root-session", "uploads")), true);
+  assert.equal(uploadPath.includes("secret"), false);
+  assert.equal(uploadPath.endsWith(".bin"), true);
+  assert.equal(readFileSync(uploadPath, "utf-8"), "document");
   assert.match(content, /\[from:telegram:42\]/);
+  await listener.stop();
 });
 
 test("documents over 20 MB add a failure line while other successful items still deliver", async () => {
   const root = projectRoot();
-  const { options, followUps } = baseOptions(root, {
+  const { options, followUps, fake } = baseOptions(root, {
     downloadFile: async (): Promise<DownloadedTelegramFile> => ({ bytes: Buffer.from("ok"), size: 2 }),
   });
-  const handler = createInboundHandler(options);
-  const result = await handler.handleMessage(textMessage({
-    text: "caption",
-    documents: [
-      { fileId: "too-big", fileSize: MAX_DOCUMENT_BYTES + 1 },
-      { fileId: "small", fileSize: 2 },
-    ],
-  }));
-  assert.equal(result.accepted, true);
-  assert.equal(result.uploads.length, 1);
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()({
+    message: {
+      chat: { id: 42 },
+      caption: "caption",
+      document: { file_id: "too-big", file_size: MAX_DOCUMENT_BYTES + 1 },
+    },
+  });
   const content = followUps[0]?.content;
   assert.ok(typeof content === "string");
   assert.match(content, /caption/);
-  assert.match(content, /failed/i);
-  assert.match(content, /Telegram file saved at:/);
+  assert.match(content, /failed to process/);
   assert.match(content, /\[from:telegram:42\]/);
+  assert.equal(existsSync(uploadPathFrom(content)), false);
+  await listener.stop();
+
+  function uploadPathFrom(text: string): string {
+    const match = text.match(/saved at: (.+)/);
+    return match ? match[1]! : "";
+  }
 });
 
 test("typing is shared across concurrent accepted messages and stops after the last settles", async () => {
@@ -216,32 +250,55 @@ test("typing is shared across concurrent accepted messages and stops after the l
   const gate = new Promise<void>((resolve) => {
     releaseFirst = resolve;
   });
-  const { options, typing } = baseOptions(root, {
+  const { options, fake } = baseOptions(root, {
     sendFollowUp: async () => {
       await gate;
     },
   });
-  const handler = createInboundHandler(options);
-  const first = handler.handleMessage(textMessage({ text: "first" }));
-  const second = handler.handleMessage(textMessage({ text: "second" }));
+  const listener = createTelegramListener(options);
+  await listener.start();
+  const first = fake.getHandler()(messageContext({ text: "first" }));
+  const second = fake.getHandler()(messageContext({ text: "second" }));
   await Promise.resolve();
-  assert.deepEqual(typing, ["typing"]);
+  assert.equal(fake.calls.filter((call) => call.startsWith("typing:")).length, 1);
   releaseFirst!();
   await Promise.all([first, second]);
-  await handler.dispose();
-  assert.equal(typing.length, 1);
+  await listener.stop();
+  assert.equal(fake.calls.filter((call) => call.startsWith("typing:")).length, 1);
 });
 
 test("typing send failures do not become unhandled rejections", async () => {
   const root = projectRoot();
-  const { options, followUps } = baseOptions(root, {
-    sendTyping: async () => {
-      throw new Error("typing unavailable");
+  const { options, followUps, fake } = baseOptions(root);
+  options.bot.api.sendChatAction = async () => {
+    throw new Error("typing unavailable");
+  };
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()(messageContext());
+  assert.equal(followUps.length, 1);
+  await listener.stop();
+});
+
+test("the listener downloads through the grammY getFile seam and never exposes Telegram names", async () => {
+  const root = projectRoot();
+  let fetchedUrl = "";
+  const { options, fake } = baseOptions(root, {
+    fetchImpl: async (input: string | URL | Request) => {
+      fetchedUrl = String(input);
+      return {
+        ok: true,
+        headers: { get: () => "8" },
+        arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+      } as unknown as Response;
     },
   });
-  const handler = createInboundHandler(options);
-  const result = await handler.handleMessage(textMessage());
-  assert.equal(result.accepted, true);
-  assert.equal(followUps.length, 1);
-  await handler.dispose();
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()({
+    message: { chat: { id: 42 }, document: { file_id: "doc", file_size: 8, file_name: "unsafe.txt" } },
+  });
+  assert.equal(fake.calls.includes("getFile:doc"), true);
+  assert.match(fetchedUrl, /api\.telegram\.org\/file\/bot123456:SECRET-TOKEN\/documents\/file\.bin/);
+  await listener.stop();
 });
