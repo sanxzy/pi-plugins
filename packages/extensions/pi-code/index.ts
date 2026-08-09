@@ -11,6 +11,7 @@ import {
   registerSessionEvents,
   registerLifecycleGates,
   registerTelegramSetup,
+  registerTelegramLifecycle,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -28,6 +29,7 @@ const extensionName = "pi-code";
 /** PI extension entry point. */
 export default function piCodeExtension(pi: ExtensionAPI): void {
   registerTelegramSetup(pi);
+  registerTelegramLifecycle(pi);
   registerQuestionTool(pi);
   registerAgentTool(pi);
   registerCancelTool(pi);

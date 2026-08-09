@@ -11,9 +11,10 @@ import piCodeExtension, { extensionName, type QuestionDetails } from "../index.t
  * registration stays main-agent-only (nothing is registered for child
  * sessions), and the extension re-exports `QuestionDetails`.
  */
-test("pi-code extension registers the question tool", () => {
+test("pi-code extension registers the question tool and setup command", () => {
   const names: string[] = [];
   const commands: string[] = [];
+  const events: string[] = [];
   const pi = {
     registerTool(tool: { name: string }) {
       names.push(tool.name);
@@ -22,7 +23,9 @@ test("pi-code extension registers the question tool", () => {
     registerCommand(name: string) {
       commands.push(name);
     },
-    on() {},
+    on(event: string) {
+      events.push(event);
+    },
     setActiveTools() {},
     getAllTools() {
       return [];
@@ -33,7 +36,16 @@ test("pi-code extension registers the question tool", () => {
   assert.ok(names.includes("question"), "question tool registered");
   assert.ok(names.includes("agent"), "agent tool registered");
   assert.ok(names.includes("agent_status"), "agent_status tool registered");
-  assert.ok(commands.includes("setup-channel-telegram"), "setup command registered exactly once");
+  assert.equal(
+    commands.filter((name) => name === "setup-channel-telegram").length,
+    1,
+    "setup command registered exactly once",
+  );
+  // The raw event stream also carries session_start/session_shutdown handlers
+  // from the other registrars (registerSessionEvents, registerLifecycleGates);
+  // the Telegram lifecycle handler is present and wired once by construction.
+  assert.ok(events.includes("session_start"), "session_start lifecycle handler registered");
+  assert.ok(events.includes("session_shutdown"), "session_shutdown lifecycle handler registered");
 });
 
 test("question registration is main-agent-only (no child tool registrations)", () => {

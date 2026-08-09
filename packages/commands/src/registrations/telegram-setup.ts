@@ -1,11 +1,9 @@
 import type { ExtensionAPI, ExtensionCommandContext, ThemeColor } from "@earendil-works/pi-coding-agent";
 import {
-  createChannelLogger,
-  createChannelManager,
   createTelegramSetupController,
   canonicalProjectRoot,
-  createTelegramTransport,
   type ChannelConfig,
+  type ChannelManager,
   type ChannelPoller,
 } from "@xzy-ai/channels";
 import {
@@ -13,18 +11,16 @@ import {
   type TelegramChannelSetupTheme,
   type TelegramSetupResult,
 } from "@xzy-ai/tui";
+import { getTelegramProjectManager } from "./telegram-project.ts";
 
 export interface TelegramSetupRegistrationDeps {
-  createManager?: (projectRoot: string) => ReturnType<typeof createChannelManager>;
-  createPoller?: (config: ChannelConfig) => ChannelPoller;
+  createManager?: (projectRoot: string) => ChannelManager;
+  createPoller?: (config: ChannelConfig, projectRoot: string, sessionId: string) => ChannelPoller;
 }
 
 function setupTheme(theme: { fg: (color: ThemeColor, text: string) => string }): TelegramChannelSetupTheme {
   return { fg: (color, text) => theme.fg(color as ThemeColor, text) };
 }
-
-/** Per-project manager registry so rerunning setup reuses the active listener. */
-const managersByProject = new Map<string, ReturnType<typeof createChannelManager>>();
 
 /** Register the rerunnable, dedicated `/setup-channel-telegram` command. */
 export function registerTelegramSetup(
@@ -40,20 +36,13 @@ export function registerTelegramSetup(
       }
 
       const projectRoot = canonicalProjectRoot(ctx.cwd);
-      let manager = managersByProject.get(projectRoot);
-      if (!manager) {
-        manager = deps.createManager?.(projectRoot) ?? createChannelManager({
-          projectRoot,
-          createPoller: deps.createPoller ?? ((config: ChannelConfig) => {
-            const loggerResult = createChannelLogger({ projectRoot, sessionId: ctx.sessionManager.getSessionId() });
-            if (!loggerResult.ok) {
-              throw new Error("Unable to create Telegram connection log");
-            }
-            return createTelegramTransport({ logger: loggerResult.value });
-          }),
-        });
-        managersByProject.set(projectRoot, manager);
-      }
+      const sessionId = ctx.sessionManager?.getSessionId?.() ?? "setup";
+      const manager = getTelegramProjectManager({
+        projectRoot,
+        sessionId,
+        createManager: deps.createManager,
+        createPoller: deps.createPoller,
+      });
       const controller = createTelegramSetupController({ projectRoot, manager });
       const result = await ctx.ui.custom<TelegramSetupResult>(
         (tui, theme, _keybindings, done) => new TelegramChannelSetup({

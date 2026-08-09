@@ -25,6 +25,11 @@ export {
   type TelegramSetupControllerOptions,
 } from "./setup.ts";
 export {
+  createTelegramChannelLifecycle,
+  type TelegramChannelLifecycle,
+  type TelegramChannelLifecycleOptions,
+} from "./lifecycle.ts";
+export {
   createChannelLogger,
   type ChannelLogger,
   type ChannelLogOptions,
