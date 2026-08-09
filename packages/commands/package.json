@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/lifecycle-isolation.test.ts tests/goal-command.test.ts"
+    "test": "node --test --import tsx tests/lifecycle-isolation.test.ts tests/goal-command.test.ts tests/goal-lifecycle.test.ts"
   },
   "dependencies": {
     "@xzy-ai/runtime": "workspace:*",

@@ -46,6 +46,16 @@ export interface GoalPool {
   bind(binding: GoalDeliveryBinding): void;
   /** Stop every timer and detach every host handle. */
   shutdown(): void;
+  /** Pause all active delivery while a fresh session is confirmed. */
+  beginSessionConfirmation(): boolean;
+  /** Resume delivery after the replacement confirmation chooses Continue. */
+  continueAfterReplacement(): void;
+  /** Consume a prior replacement approval at the fresh session start. */
+  takeReplacementContinuation(): boolean;
+  /** Clear all active persisted goals after the replacement confirmation chooses Clear. */
+  clearActiveGoals(): number;
+  /** Resume timers after a fresh host binding is ready. */
+  resumeDelivery(): void;
   /** Replace timer creation for deterministic unit tests. */
   setScheduler(factory: (callback: () => void, cwd: string, intervalMs: number) => GoalTimerHandle): void;
   /** Drive one persisted goal scheduler tick directly in tests. */
@@ -65,6 +75,7 @@ export function normalizeGoalCwd(cwd: string): string {
 interface SchedulerRecord {
   readonly timer: GoalTimerHandle;
   readonly intervalMs: number;
+  readonly generation: number;
 }
 
 export function createGoalPool(projectRoot: string): GoalPool {
@@ -73,6 +84,14 @@ export function createGoalPool(projectRoot: string): GoalPool {
   const bindings = new Map<string, GoalDeliveryBinding>();
   const schedulers = new Map<string, SchedulerRecord>();
   let currentBinding: GoalDeliveryBinding | undefined;
+  let deliverySuspended = false;
+  let schedulerGeneration = 0;
+  let replacementContinued = false; // set by the pre-switch confirmation until the fresh host binds
+
+  const clearAllSchedulers = (): void => {
+    advanceSchedulerGeneration();
+    for (const cwd of Array.from(schedulers.keys())) clearScheduler(cwd);
+  };
 
   let schedule = (callback: () => void, cwd: string, intervalMs: number): GoalTimerHandle => {
     const timer = setInterval(callback, intervalMs);
@@ -88,6 +107,7 @@ export function createGoalPool(projectRoot: string): GoalPool {
   };
 
   const tick = (cwd: string): void => {
+    if (deliverySuspended) return;
     const goals = store.fold();
     const goal = goals.get(cwd);
     if (!goal) {
@@ -110,11 +130,20 @@ export function createGoalPool(projectRoot: string): GoalPool {
   };
 
   const ensureScheduler = (cwd: string): void => {
-    if (schedulers.has(cwd)) return;
+    const existing = schedulers.get(cwd);
+    if (existing) return;
     const goal = store.get(cwd);
     if (!goal) return;
-    const timer = schedule(() => tick(cwd), cwd, goal.intervalMs);
-    schedulers.set(cwd, { timer, intervalMs: goal.intervalMs });
+    const generation = schedulerGeneration;
+    const timer = schedule(() => {
+      if (schedulerGeneration !== generation) return;
+      tick(cwd);
+    }, cwd, goal.intervalMs);
+    schedulers.set(cwd, { timer, intervalMs: goal.intervalMs, generation });
+  };
+
+  const advanceSchedulerGeneration = (): void => {
+    schedulerGeneration += 1;
   };
 
   const withCwdMutation = <T>(cwd: string, operation: () => T): T => {
@@ -177,17 +206,50 @@ export function createGoalPool(projectRoot: string): GoalPool {
       const normalized = { ...binding, cwd: normalizeGoalCwd(binding.cwd) };
       bindings.set(normalized.cwd, normalized);
       currentBinding = normalized;
-      for (const cwd of store.fold().keys()) ensureScheduler(cwd);
+      if (!deliverySuspended) {
+        for (const cwd of store.fold().keys()) ensureScheduler(cwd);
+      }
     },
     shutdown() {
-      for (const cwd of Array.from(schedulers.keys())) clearScheduler(cwd);
+      clearAllSchedulers();
       bindings.clear();
       currentBinding = undefined;
+      deliverySuspended = true;
+    },
+    beginSessionConfirmation() {
+      const activeGoals = Array.from(store.fold().values()).filter((goal) => goal.status === "active");
+      if (activeGoals.length === 0) return false;
+      deliverySuspended = true;
+      // Stop every cwd timer while the host replacement is unresolved. This
+      // also suppresses paused-goal warnings until the decision completes.
+      clearAllSchedulers();
+      return true;
+    },
+    continueAfterReplacement() {
+      replacementContinued = true;
+    },
+    takeReplacementContinuation() {
+      const continued = replacementContinued;
+      replacementContinued = false;
+      return continued;
+    },
+    clearActiveGoals() {
+      const activeGoals = Array.from(store.fold().values()).filter((goal) => goal.status === "active");
+      for (const goal of activeGoals) {
+        clearScheduler(goal.cwd);
+        store.clear(goal.cwd);
+      }
+      deliverySuspended = true;
+      return activeGoals.length;
     },
     setScheduler(factory) {
       schedule = factory;
     },
     tick,
+    resumeDelivery() {
+      deliverySuspended = false;
+      for (const cwd of store.fold().keys()) ensureScheduler(cwd);
+    },
   };
 
   return pool;
