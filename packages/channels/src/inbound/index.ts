@@ -194,6 +194,7 @@ export function createTelegramListener(options: TelegramListenerOptions) {
   const timerSet = options.setInterval ?? setInterval;
   const timerClear = options.clearInterval ?? clearInterval;
   const typing: TypingLoop = { active: 0, timer: undefined };
+  const typingChats = new Set<string | number>();
 
   const downloadFile = async (fileId: string, maxBytes: number): Promise<DownloadedTelegramFile> => {
     const remote = await options.bot.api.getFile(fileId);
@@ -213,9 +214,11 @@ export function createTelegramListener(options: TelegramListenerOptions) {
   const download = options.downloadFile ?? downloadFile;
 
   const sendTypingSafely = (): void => {
-    void options.bot.api.sendChatAction(options.allowedChatIds[0] ?? 0, "typing").catch(() => {
-      // Typing is best-effort; an unavailable chat action must not reject input.
-    });
+    for (const chatId of typingChats) {
+      void options.bot.api.sendChatAction(chatId, "typing").catch(() => {
+        // Typing is best-effort; an unavailable chat action must not reject input.
+      });
+    }
   };
 
   const startTyping = (): void => {
@@ -270,6 +273,7 @@ export function createTelegramListener(options: TelegramListenerOptions) {
     if (!options.allowedChatIds.includes(normalized.chatId)) return;
 
     typing.active += 1;
+    typingChats.add(normalized.chatId);
     startTyping();
     try {
       await options.setTelegramMarker();
@@ -315,6 +319,7 @@ export function createTelegramListener(options: TelegramListenerOptions) {
       await options.sendFollowUp(content, { deliverAs: "followUp" });
     } finally {
       typing.active -= 1;
+      typingChats.delete(String(normalized.chatId));
       stopTypingIfIdle();
     }
   }
@@ -324,6 +329,12 @@ export function createTelegramListener(options: TelegramListenerOptions) {
   return {
     async start(): Promise<void> {
       await options.bot.start();
+    },
+    /** Stop the shared typing loop (e.g. on root settlement) without polling. */
+    stopTyping(): void {
+      typing.active = 0;
+      typingChats.clear();
+      stopTypingIfIdle();
     },
     async stop(): Promise<void> {
       typing.active = 0;
