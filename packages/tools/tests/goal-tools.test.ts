@@ -72,11 +72,10 @@ test("goal_create preserves the exact prompt and returns an active record", asyn
     assert.match(text(result), /Goal created/);
     assert.match(text(result), /active/);
     assert.match(text(result), new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.deepEqual((result.details as { goal: { prompt: string; intervalMs: number; status: string } }).goal, {
-      prompt,
-      intervalMs: 30_000,
-      status: "active",
-    });
+    const goal = (result.details as { goal: { prompt: string; intervalMs: number; status: string } }).goal;
+    assert.equal(goal.prompt, prompt);
+    assert.equal(goal.intervalMs, 30_000);
+    assert.equal(goal.status, "active");
   });
 });
 

@@ -37,7 +37,20 @@ export const statusParams = Type.Object({
 
 export const jobsParams = Type.Object({});
 
+export const goalCreateParams = Type.Object({
+  prompt: Type.String({ description: "Exact goal prompt to deliver on each interval." }),
+  interval: Type.Optional(Type.String({ description: "Optional positive duration such as 30s, 10m, 2h, or 1d; defaults to 10m." })),
+});
+
+export const goalPauseParams = Type.Object({
+  reason: Type.String({ description: "Exact reason the goal is blocked or paused." }),
+});
+
+export const goalNoArgsParams = Type.Object({});
+
 export type QuestionParams = Static<typeof questionParams>;
 export type AgentParams = Static<typeof agentParams>;
 export type CancelParams = Static<typeof cancelParams>;
 export type StatusParams = Static<typeof statusParams>;
+export type GoalCreateParams = Static<typeof goalCreateParams>;
+export type GoalPauseParams = Static<typeof goalPauseParams>;
