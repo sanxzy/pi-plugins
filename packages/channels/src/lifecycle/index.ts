@@ -43,6 +43,9 @@ function realBot(token: string): TelegramListenerBot {
     api: {
       getFile: (fileId) => bot.api.getFile(fileId),
       sendChatAction: (chatId, action) => bot.api.sendChatAction(chatId, action),
+      answerCallbackQuery: (queryId, other) => bot.api.answerCallbackQuery(queryId, other),
+      editMessageReplyMarkup: (chatId, messageId, other) =>
+        bot.api.editMessageReplyMarkup(chatId, messageId, other as Parameters<typeof bot.api.editMessageReplyMarkup>[2]),
       setMyCommands: (commands, other) => bot.api.setMyCommands(commands, other),
     },
     start: () => bot.start(),
