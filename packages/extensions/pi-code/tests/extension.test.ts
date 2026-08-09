@@ -51,7 +51,7 @@ test("question registration is main-agent-only (no child tool registrations)", (
   // Child sessions receive only the built-in allowlist; the extension never
   // registers anything scoped to child sessions, so the question tool (like the
   // other pi-code tools) is structurally main-agent-only.
-  assert.deepEqual(names, ["question", "agent", "agent_cancel", "agent_status", "agent_jobs", "user_telegram_chat"]);
+  assert.deepEqual(names, ["question", "agent", "agent_cancel", "agent_status", "agent_jobs"]);
 });
 
 test("extension re-exports QuestionDetails", () => {

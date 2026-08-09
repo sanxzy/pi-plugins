@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/question-dialog.test.ts tests/agent-footer.test.ts tests/agent-footer-tree.test.ts tests/agent-footer-management.test.ts tests/agent-footer-live.test.ts tests/telegram-setup.test.ts"
+    "test": "node --test --import tsx tests/question-dialog.test.ts tests/agent-footer.test.ts tests/agent-footer-tree.test.ts tests/agent-footer-management.test.ts tests/agent-footer-live.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "^0.80.2"

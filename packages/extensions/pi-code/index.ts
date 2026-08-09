@@ -6,15 +6,10 @@ import {
   registerStatusTool,
   registerJobsTool,
   registerAgentFooter,
-  registerTelegramChatTool,
 } from "@xzy-ai/tools";
 import {
   registerSessionEvents,
   registerLifecycleGates,
-  registerConnectionMarker,
-  registerSetupChannelCommand,
-  registerTelegramInbound,
-  registerTelegramFinalForwarding,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -36,14 +31,9 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerCancelTool(pi);
   registerStatusTool(pi);
   registerJobsTool(pi);
-  registerTelegramChatTool(pi);
   registerAgentFooter(pi);
   registerSessionEvents(pi);
   registerLifecycleGates(pi);
-  registerConnectionMarker(pi);
-  registerSetupChannelCommand(pi);
-  registerTelegramInbound(pi);
-  registerTelegramFinalForwarding(pi);
 }
 
 export { extensionName };

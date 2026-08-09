@@ -1,7 +1,7 @@
 import Type, { type Static } from "typebox";
 
 /**
- * Parameter schemas for the four pi-code tools.
+ * Parameter schemas for the pi-code tools.
  *
  * The `agent` schema mirrors the reference contract
  * `{ description, prompt, subagent_type, background, task_id }`
@@ -37,20 +37,7 @@ export const statusParams = Type.Object({
 
 export const jobsParams = Type.Object({});
 
-export const telegramChoiceSchema = Type.Object({
-  label: Type.String({ description: "Button label shown in Telegram." }),
-  value: Type.Optional(Type.String({ description: "Value returned to the host when selected." })),
-});
-
-export const telegramChatParams = Type.Object({
-  message: Type.String({ description: "The communication or report text to send to Telegram." }),
-  choices: Type.Optional(Type.Array(telegramChoiceSchema, { description: "Optional 2-8 inline choices." })),
-});
-
-export type TelegramChoice = Static<typeof telegramChoiceSchema>;
-
 export type QuestionParams = Static<typeof questionParams>;
 export type AgentParams = Static<typeof agentParams>;
 export type CancelParams = Static<typeof cancelParams>;
 export type StatusParams = Static<typeof statusParams>;
-export type TelegramChatParams = Static<typeof telegramChatParams>;
