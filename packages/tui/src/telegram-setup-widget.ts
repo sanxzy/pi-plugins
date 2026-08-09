@@ -5,7 +5,6 @@ import {
   matchesKey,
   type Component,
   type TUI,
-  visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { TelegramSetupController } from "./telegram-setup-controller.ts";
