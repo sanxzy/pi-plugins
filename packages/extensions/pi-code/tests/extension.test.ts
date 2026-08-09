@@ -13,12 +13,15 @@ import piCodeExtension, { extensionName, type QuestionDetails } from "../index.t
  */
 test("pi-code extension registers the question tool", () => {
   const names: string[] = [];
+  const commands: string[] = [];
   const pi = {
     registerTool(tool: { name: string }) {
       names.push(tool.name);
     },
     registerShortcut() {},
-    registerCommand() {},
+    registerCommand(name: string) {
+      commands.push(name);
+    },
     on() {},
     setActiveTools() {},
     getAllTools() {
@@ -30,6 +33,7 @@ test("pi-code extension registers the question tool", () => {
   assert.ok(names.includes("question"), "question tool registered");
   assert.ok(names.includes("agent"), "agent tool registered");
   assert.ok(names.includes("agent_status"), "agent_status tool registered");
+  assert.ok(commands.includes("setup-channel-telegram"), "setup command registered exactly once");
 });
 
 test("question registration is main-agent-only (no child tool registrations)", () => {

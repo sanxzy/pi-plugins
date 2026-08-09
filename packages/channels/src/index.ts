@@ -9,6 +9,7 @@ export {
   privateFileMode,
   readChannelConfig,
   readLastConnection,
+  validateChannelConfig,
   writeChannelConfig,
   writeLastConnection,
   writePrivateJson,
@@ -18,6 +19,11 @@ export {
   type PairingRequest,
   type StateResult,
 } from "./state.ts";
+export {
+  createTelegramSetupController,
+  type TelegramSetupController,
+  type TelegramSetupControllerOptions,
+} from "./setup.ts";
 export {
   createChannelLogger,
   type ChannelLogger,

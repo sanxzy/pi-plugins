@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/state.test.ts tests/logger.test.ts tests/ownership.test.ts tests/manager.test.ts tests/transport.test.ts"
+    "test": "node --test --import tsx tests/state.test.ts tests/logger.test.ts tests/ownership.test.ts tests/manager.test.ts tests/transport.test.ts tests/setup.test.ts"
   },
   "dependencies": {
     "@grammyjs/runner": "2.0.3",

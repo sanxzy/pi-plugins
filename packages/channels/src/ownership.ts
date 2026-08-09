@@ -1,4 +1,4 @@
-import lockfile from "proper-lockfile";
+import { createRequire } from "node:module";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -35,7 +35,8 @@ interface LockfileModule {
   lockSync(file: string, options?: Record<string, unknown>): () => void;
 }
 
-const lockfileApi = lockfile as unknown as LockfileModule;
+const require = createRequire(import.meta.url);
+const lockfileApi = require("proper-lockfile") as LockfileModule;
 const LOCK_STALE_MS = 10_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

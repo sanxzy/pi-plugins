@@ -158,6 +158,11 @@ export function readChannelConfig(projectRoot: string): StateResult<ChannelConfi
   return readJson(channelConfigFile(projectRoot), parseConfig);
 }
 
+/** Validate a candidate config without touching disk. */
+export function validateChannelConfig(config: ChannelConfig): StateResult<ChannelConfig> {
+  return parseConfig(config);
+}
+
 export function writeChannelConfig(projectRoot: string, config: ChannelConfig): StateResult<void> {
   const validation = parseConfig(config);
   if (!validation.ok) return { ok: false, code: "invalid", message: validation.message };
