@@ -14,6 +14,7 @@ import piCodeExtension, { extensionName, type QuestionDetails } from "../index.t
 test("pi-code extension registers the goal workflow alongside existing tools", () => {
   const names: string[] = [];
   const commands: string[] = [];
+  const events: string[] = [];
   const pi = {
     registerTool(tool: { name: string }) {
       names.push(tool.name);
@@ -22,7 +23,9 @@ test("pi-code extension registers the goal workflow alongside existing tools", (
     registerCommand(name: string) {
       commands.push(name);
     },
-    on() {},
+    on(event: string) {
+      events.push(event);
+    },
     setActiveTools() {},
     getAllTools() {
       return [];
@@ -38,6 +41,9 @@ test("pi-code extension registers the goal workflow alongside existing tools", (
     ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"],
   );
   assert.deepEqual(commands, ["goal"]);
+  assert.ok(events.includes("session_start"), "goal session startup is registered");
+  assert.ok(events.includes("session_shutdown"), "goal session shutdown is registered");
+  assert.ok(events.includes("session_before_switch"), "goal replacement gate is registered");
 });
 
 test("question registration is main-agent-only (no child tool registrations)", () => {
