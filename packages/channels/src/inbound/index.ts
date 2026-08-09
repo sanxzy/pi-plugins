@@ -38,6 +38,7 @@ export interface TelegramListenerBot {
   api: {
     getFile(fileId: string): Promise<{ file_path?: string; file_size?: number }>;
     sendChatAction(chatId: string | number, action: "typing"): Promise<unknown>;
+    setMyCommands?(commands: readonly { command: string; description: string }[], other?: { scope?: { type: "default" } }): Promise<unknown>;
   };
   start(): Promise<void>;
   stop(): Promise<void>;

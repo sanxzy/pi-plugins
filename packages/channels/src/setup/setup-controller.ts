@@ -1,16 +1,27 @@
 import { loadChannelConfig, saveChannelConfig, type ChannelConfig } from "../state/index.ts";
+import { syncTelegramCommands, type TelegramCommandInput } from "../menu/index.ts";
 
 /** The single-polling-consumer contract drives reconfiguration. */
 export interface SetupBotSurface {
   getMe(): Promise<unknown>;
   start(): Promise<void>;
   stop(): Promise<void>;
+  api?: {
+    setMyCommands?: (
+      commands: readonly { command: string; description: string }[],
+      other?: { scope?: { type: "default" } },
+    ) => Promise<unknown>;
+  };
 }
 
 export interface SetupControllerOptions {
   projectRoot: string;
   createBot: (token: string) => SetupBotSurface;
   now?: () => string;
+  /** Optional command list pushed to the Telegram menu on confirmation. */
+  commands?: readonly TelegramCommandInput[];
+  /** Optional warning boundary for menu sync failures. */
+  warn?: (message: string) => void;
 }
 
 export interface SetupControllerState {
@@ -146,6 +157,9 @@ export function createSetupController(options: SetupControllerOptions): SetupCon
     // Start the replacement for the effective token (the validated new bot, or
     // a fresh bot for the kept token) after the old listener is stopped.
     const bot = liveBot ?? options.createBot(token);
+    if (bot.api !== undefined && options.commands !== undefined) {
+      await syncTelegramCommands(bot.api, options.commands, options.warn);
+    }
     await bot.start();
     return { ok: true };
   }

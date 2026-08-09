@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sanitizeTelegramCommands } from "../src/menu/index.ts";
+import { sanitizeTelegramCommands, syncTelegramCommands } from "../src/menu/index.ts";
 
 test("sanitizes Telegram command names and descriptions", () => {
   const commands = sanitizeTelegramCommands([
@@ -22,6 +22,34 @@ test("keeps the first sanitized collision and skips invalid names", () => {
   ]);
 
   assert.deepEqual(commands, [{ command: "status", description: "first" }]);
+});
+
+test("menu sync uses the default scope and does not block on failure", async () => {
+  const calls: Array<{ commands: unknown; other: unknown }> = [];
+  let warning = "";
+  await syncTelegramCommands(
+    {
+      setMyCommands: async (commands, other) => {
+        calls.push({ commands, other });
+      },
+    },
+    [{ name: "/help", description: "Help" }],
+    (message) => {
+      warning = message;
+    },
+  );
+  assert.deepEqual(calls, [{ commands: [{ command: "help", description: "Help" }], other: { scope: { type: "default" } } }]);
+  assert.equal(warning, "");
+
+  const warn: (message: string) => void = (message) => {
+    warning = message;
+  };
+  await syncTelegramCommands(
+    { setMyCommands: async () => { throw new Error("offline"); } },
+    [{ name: "/help", description: "Help" }],
+    warn,
+  );
+  assert.equal(warning, "Telegram command menu sync failed");
 });
 
 test("truncates names and descriptions and publishes at most 100 commands", () => {

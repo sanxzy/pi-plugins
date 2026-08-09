@@ -7,6 +7,9 @@ function createSetupBot(token: string): SetupBotSurface {
   const bot = createBot(token);
   return {
     getMe: () => bot.api.getMe(),
+    api: {
+      setMyCommands: (commands, other) => bot.api.setMyCommands(commands, other),
+    },
     start: () => bot.start(),
     stop: () => bot.stop(),
   };
@@ -31,6 +34,7 @@ export function registerSetupChannelCommand(pi: ExtensionAPI): void {
       const controller = createSetupController({
         projectRoot: ctx.cwd,
         createBot: createSetupBot,
+        commands: pi.getCommands(),
       });
       await controller.stopOldListener();
 

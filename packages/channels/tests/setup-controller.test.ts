@@ -187,6 +187,32 @@ test("keeping the existing token preserves it without loading it into the widget
   assert.equal(controller.getState().maskedTokenExposed, false);
 });
 
+test("confirmation syncs the command menu before starting the replacement bot", async () => {
+  const root = projectRoot();
+  const events: string[] = [];
+  const controller = createSetupController({
+    projectRoot: root,
+    commands: [{ name: "/help", description: "Help" }],
+    createBot: () =>
+      botSurface({
+        api: {
+          setMyCommands: async (commands, other) => {
+            events.push(`menu:${commands[0]?.command}:${other?.scope?.type}`);
+          },
+        },
+        start: async () => {
+          events.push("start");
+        },
+      }),
+  });
+  await controller.setToken("123456:NEW");
+  await controller.acceptDiscoveredChat("42");
+  await controller.setDefaultChat("42");
+  const result = await controller.confirm();
+  assert.equal(result.ok, true);
+  assert.deepEqual(events, ["menu:help:default", "start"]);
+});
+
 test("a malformed existing channel file is treated as unconfigured", () => {
   const root = projectRoot();
   mkdirSync(runtimeDir(root), { recursive: true });

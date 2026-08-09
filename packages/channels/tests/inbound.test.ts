@@ -126,6 +126,20 @@ test("authorized text injects one follow-up with the chat-ID signature", async (
   await listener.stop();
 });
 
+test("slash commands are injected literally without local dispatch", async () => {
+  const root = projectRoot();
+  const { options, followUps, fake } = baseOptions(root);
+  const listener = createTelegramListener(options);
+  await listener.start();
+  await fake.getHandler()(messageContext({ text: "/status unknown" }));
+  assert.equal(followUps.length, 1);
+  assert.equal(
+    followUps[0]?.content,
+    "Telegram message from chat 42:\n/status unknown\n\n---\n[from:telegram:42]\n---",
+  );
+  await listener.stop();
+});
+
 test("unsupported-only messages are ignored without starting typing", async () => {
   const root = projectRoot();
   const { options, followUps, markers, fake } = baseOptions(root);

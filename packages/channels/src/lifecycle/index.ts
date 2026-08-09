@@ -1,6 +1,7 @@
 import { loadChannelConfig } from "../state/index.ts";
 import { createBot } from "../outbound/bot.ts";
 import { createTelegramListener, type InboundContent, type TelegramListenerBot } from "../inbound/index.ts";
+import { syncTelegramCommands } from "../menu/index.ts";
 
 /** Minimal command shape from `pi.getCommands()` (channels never imports Pi). */
 export interface TelegramCommandInfo {
@@ -42,6 +43,7 @@ function realBot(token: string): TelegramListenerBot {
     api: {
       getFile: (fileId) => bot.api.getFile(fileId),
       sendChatAction: (chatId, action) => bot.api.sendChatAction(chatId, action),
+      setMyCommands: (commands, other) => bot.api.setMyCommands(commands, other),
     },
     start: () => bot.start(),
     stop: () => bot.stop(),
@@ -70,17 +72,19 @@ export function createTelegramLifecycle(options: TelegramLifecycleOptions): Tele
       const channel = loadChannelConfig(options.projectRoot);
       if (channel === null) return;
       try {
+        const bot = createBotSurface(channel.botToken);
         listener = createTelegramListener({
           projectRoot: options.projectRoot,
           sessionId: options.sessionId,
           allowedChatIds: channel.allowedChatIds,
           token: channel.botToken,
-          bot: createBotSurface(channel.botToken),
+          bot,
           sendFollowUp: options.sendFollowUp,
           setTelegramMarker: options.setTelegramMarker,
         });
-        // The command list is retained for menu sync (Phase 6).
-        void commands;
+        // Publish the command menu before polling starts; failures warn and
+        // never prevent the listener from starting.
+        await syncTelegramCommands(bot.api, commands, warn);
         await listener.start();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

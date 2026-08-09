@@ -32,6 +32,9 @@ function fakeBot() {
     api: {
       getFile: async () => ({ file_path: "x.bin", file_size: 1 }),
       sendChatAction: async () => {},
+      setMyCommands: async () => {
+        calls.push("menu");
+      },
     },
     start: async () => {
       calls.push("start");
@@ -55,8 +58,13 @@ test("lifecycle start with a channel config starts the listener and passes the c
       setTelegramMarker: () => {},
       createBot: () => fake.bot,
     });
+    const menus: unknown[] = [];
+    fake.bot.api.setMyCommands = async (commands, other) => {
+      menus.push({ commands, other });
+    };
     await lifecycle.start([{ name: "/status", description: "Check status" }]);
     assert.deepEqual(fake.calls, ["start"]);
+    assert.deepEqual(menus, [{ commands: [{ command: "status", description: "Check status" }], other: { scope: { type: "default" } } }]);
     await lifecycle.stop();
     assert.deepEqual(fake.calls, ["start", "stop"]);
   } finally {
@@ -96,7 +104,7 @@ test("lifecycle stopTyping stops the loop without polling", async () => {
     });
     await lifecycle.start([]);
     lifecycle.stopTyping();
-    assert.deepEqual(fake.calls, ["start"]);
+    assert.deepEqual(fake.calls, ["menu", "start"]);
     await lifecycle.stop();
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });

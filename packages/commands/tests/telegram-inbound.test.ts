@@ -28,7 +28,7 @@ function writeChannel(root: string): void {
   );
 }
 
-function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler> } {
+function registrations(commands: readonly { name: string; description?: string }[] = []): { pi: ExtensionAPI; handlers: Map<string, Handler> } {
   const handlers = new Map<string, Handler>();
   return {
     handlers,
@@ -36,7 +36,7 @@ function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler> } {
       on(event: string, handler: Handler) {
         handlers.set(event, handler);
       },
-      getCommands: () => [],
+      getCommands: () => commands,
       sendUserMessage: () => {},
     } as unknown as ExtensionAPI,
   };
@@ -83,12 +83,15 @@ test("session_start only starts the lifecycle for the root session, never a chil
   try {
     writeChannel(root);
     const started: Array<{ projectRoot: string; sessionId: string }> = [];
-    const d = registrations();
+    const menuCommands: unknown[] = [];
+    const d = registrations([{ name: "/status", description: "Check status" }]);
     registerTelegramInbound(d.pi, {
       createLifecycle: (options) => {
         started.push({ projectRoot: options.projectRoot, sessionId: options.sessionId });
         return {
-          start: async () => {},
+          start: async (commands) => {
+            menuCommands.push(commands);
+          },
           stopTyping: () => {},
           stop: async () => {},
         };
@@ -100,6 +103,8 @@ test("session_start only starts the lifecycle for the root session, never a chil
     getChildPool(root, "root-session");
     await start({ reason: "startup" }, context(root, "root-session"));
     assert.deepEqual(started, [{ projectRoot: root, sessionId: "root-session" }]);
+    // The composition root passes the command list into the lifecycle start.
+    assert.deepEqual(menuCommands, [[{ name: "/status", description: "Check status" }]]);
 
     // A child session (its id is a registered job) must not start a listener.
     const pool = getChildPool(root, "root-session");
