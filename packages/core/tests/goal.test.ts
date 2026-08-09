@@ -7,6 +7,7 @@ import {
   parseGoalEvent,
   parseGoalInterval,
   pauseGoalRecord,
+  splitGoalPromptInterval,
   resumeGoalRecord,
   validateGoalInput,
   type GoalEvent,
@@ -19,6 +20,14 @@ test("goal duration parsing accepts simple positive units and defaults to ten mi
   assert.equal(parseGoalInterval("1d").value, 86_400_000);
   assert.equal(parseGoalInterval("0m").ok, false);
   assert.equal(parseGoalInterval("ten minutes").ok, false);
+});
+
+test("goal request parsing separates a leading interval from the exact prompt", () => {
+  assert.deepEqual(splitGoalPromptInterval("2m testing goal"), {
+    interval: "2m",
+    prompt: "testing goal",
+  });
+  assert.deepEqual(splitGoalPromptInterval("testing goal"), { prompt: "testing goal" });
 });
 
 test("goal validation preserves prompt and rejects empty or overlong input", () => {

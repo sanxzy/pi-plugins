@@ -23,9 +23,17 @@ function registrations(): { pi: ExtensionAPI; command?: RegisteredCommand; sent:
   return { pi, command, sent };
 }
 
-test("registerGoalCommand registers a single main-host /goal command", () => {
+test("registerGoalCommand registers a single current-session /goal command", () => {
   const { command } = registrations();
   assert.equal(command?.name, "goal");
+});
+
+test("the workflow describes a self-managed goal and separates leading interval metadata", () => {
+  assert.doesNotMatch(GOAL_WORKFLOW_PROMPT, /main host/i);
+  assert.match(GOAL_WORKFLOW_PROMPT, /current session/i);
+  assert.match(GOAL_WORKFLOW_PROMPT, /your own persistent goal/i);
+  assert.match(GOAL_WORKFLOW_PROMPT, /duration.*interval|interval.*duration/i);
+  assert.match(GOAL_WORKFLOW_PROMPT, /remaining text.*prompt|prompt.*remaining text/i);
 });
 
 test("registerGoalCommand forwards the workflow prompt and exact text as a steer", () => {
@@ -44,4 +52,18 @@ test("a /goal with no text asks the model to propose next steps", () => {
   assert.equal(sent.length, 1);
   assert.match(sent[0].content, /propose next steps/i);
   assert.deepEqual(sent[0].options, { deliverAs: "steer" });
+});
+
+test("the workflow tells the model to separate a leading interval from the exact goal prompt", () => {
+  assert.match(GOAL_WORKFLOW_PROMPT, /leading.*duration|duration.*leading/i);
+  assert.match(GOAL_WORKFLOW_PROMPT, /remove.*interval|interval.*remove/i);
+  assert.match(GOAL_WORKFLOW_PROMPT, /remaining.*exact.*prompt|exact.*prompt.*remaining/i);
+});
+
+test("/goal forwards an interval-prefixed request verbatim for model interpretation", () => {
+  const { command, sent } = registrations();
+  const request = "2m testing goal, is it working, clear after 2nd triggered";
+  command!.handler(request, {} as unknown as ExtensionCommandContext);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].content, `${GOAL_WORKFLOW_PROMPT}\n\n${request}`);
 });

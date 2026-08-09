@@ -79,6 +79,24 @@ test("goal_create preserves the exact prompt and returns an active record", asyn
   });
 });
 
+test("goal_create treats a leading duration as scheduling metadata when interval is omitted", async () => {
+  await withCwd(async (cwd, registered) => {
+    const result = await registered.get("goal_create")!.execute(
+      "call",
+      { prompt: "2m testing goal, is it working, clear after 2nd triggered" },
+      undefined,
+      undefined,
+      context(cwd),
+    );
+    const goal = (result.details as { goal: { prompt: string; intervalMs: number } }).goal;
+    assert.equal(goal.prompt, "testing goal, is it working, clear after 2nd triggered");
+    assert.equal(goal.intervalMs, 120_000);
+    assert.doesNotMatch(text(result), /Prompt: 2m/);
+    assert.match(text(result), /Prompt: testing goal/);
+    assert.match(text(result), /Interval: 120000ms/);
+  });
+});
+
 test("goal lifecycle tools return text-only success and precise errors", async () => {
   await withCwd(async (cwd, registered) => {
     const ctx = context(cwd);
@@ -134,6 +152,6 @@ test("goal tools refuse invocation from a registered child session", async () =>
       sessionId: "child-session",
     }));
     const result = await registered.get("goal_status")!.execute("call", {}, undefined, undefined, context(cwd, "child-session"));
-    assert.match(text(result), /main host/i);
+    assert.match(text(result), /child sessions/i);
   });
 });
