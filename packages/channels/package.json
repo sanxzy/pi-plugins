@@ -1,0 +1,20 @@
+{
+  "name": "@xzy-ai/channels",
+  "version": "0.1.0",
+  "description": "pi-code channel integrations, project state, ownership, and delivery adapters",
+  "type": "module",
+  "main": "./src/index.ts",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "node --test --import tsx tests/state.test.ts tests/logger.test.ts"
+  },
+  "dependencies": {
+    "@xzy-ai/runtime": "workspace:*",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.22.2"
+  }
+}
