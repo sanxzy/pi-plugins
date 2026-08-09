@@ -13,6 +13,7 @@
     "test": "node --test --import tsx tests/extension.test.ts tests/manager-removal.test.ts"
   },
   "dependencies": {
+    "@xzy-ai/channels": "workspace:*",
     "@xzy-ai/commands": "workspace:*",
     "@xzy-ai/core": "workspace:*",
     "@xzy-ai/runtime": "workspace:*",
