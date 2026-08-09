@@ -1,5 +1,5 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
-export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult } from "./infrastructure/goals/goal-pool.ts";
+export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
 export { resolveChildTools, spawnChildSession, copySessionFile } from "./infrastructure/pi-sdk/child-session.ts";
 export {
