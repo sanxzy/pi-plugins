@@ -38,6 +38,9 @@ importers:
       '@xzy-ai/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@xzy-ai/tui':
+        specifier: workspace:*
+        version: link:../tui
     devDependencies:
       '@types/node':
         specifier: ^24.13.3

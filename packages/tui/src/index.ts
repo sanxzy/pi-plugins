@@ -15,3 +15,6 @@ export type {
   AgentLiveSession,
   LiveViewReason,
 } from "./agent-manager-live.ts";
+export type { TelegramSetupController } from "./telegram-setup-controller.ts";
+export { TelegramChannelSetup } from "./telegram-setup-widget.ts";
+export type { TelegramSetupResult, TelegramSetupWidgetOptions } from "./telegram-setup-widget.ts";

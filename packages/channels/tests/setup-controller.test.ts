@@ -20,9 +20,13 @@ function botSurface(overrides: Partial<SetupBotSurface> = {}): SetupBotSurface {
   };
 }
 
+function botFactory(overrides: Partial<SetupBotSurface> = {}): (token: string) => SetupBotSurface {
+  return () => botSurface(overrides);
+}
+
 test("fresh controller reports no existing token and starts with token step", () => {
   const root = projectRoot();
-  const controller = createSetupController({ projectRoot: root, createBot: botSurface });
+  const controller = createSetupController({ projectRoot: root, createBot: botFactory() });
   const state = controller.getState();
   assert.equal(state.hasExistingToken, false);
   assert.equal(state.tokenConfigured, false);
@@ -31,7 +35,7 @@ test("fresh controller reports no existing token and starts with token step", ()
 
 test("a valid token is accepted and moves to discovery", async () => {
   const root = projectRoot();
-  const controller = createSetupController({ projectRoot: root, createBot: botSurface });
+  const controller = createSetupController({ projectRoot: root, createBot: botFactory() });
   const result = await controller.setToken("123456:VALID");
   assert.deepEqual(result, { ok: true });
   assert.equal(controller.getState().tokenConfigured, true);
@@ -63,7 +67,7 @@ test("existing configuration is reflected as masked keep/replace state", async (
     allowedChatIds: ["42"],
     updatedAt: "2026-01-01T00:00:00.000Z",
   });
-  const controller = createSetupController({ projectRoot: root, createBot: botSurface });
+  const controller = createSetupController({ projectRoot: root, createBot: botFactory() });
   const state = controller.getState();
   assert.equal(state.hasExistingToken, true);
   assert.equal(state.tokenConfigured, true);
@@ -125,7 +129,7 @@ test("cancel leaves the previous configuration and listener intact", async () =>
   });
   const controller = createSetupController({
     projectRoot: root,
-    createBot: (token) => botSurface({ token }),
+    createBot: botFactory(),
   });
   await controller.setToken("123456:NEW");
   await controller.cancel();
@@ -172,7 +176,7 @@ test("keeping the existing token preserves it without loading it into the widget
     allowedChatIds: ["42"],
     updatedAt: "2026-01-01T00:00:00.000Z",
   });
-  const controller = createSetupController({ projectRoot: root, createBot: botSurface });
+  const controller = createSetupController({ projectRoot: root, createBot: botFactory() });
   await controller.keepToken();
   await controller.acceptDiscoveredChat("42");
   await controller.setDefaultChat("42");
@@ -187,6 +191,6 @@ test("a malformed existing channel file is treated as unconfigured", () => {
   const root = projectRoot();
   mkdirSync(runtimeDir(root), { recursive: true });
   writeFileSync(join(runtimeDir(root), "channel.json"), "broken", "utf-8");
-  const controller = createSetupController({ projectRoot: root, createBot: botSurface });
+  const controller = createSetupController({ projectRoot: root, createBot: botFactory() });
   assert.equal(controller.getState().hasExistingToken, false);
 });

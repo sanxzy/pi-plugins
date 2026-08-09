@@ -16,6 +16,7 @@ function makePi(shortcuts: ShortcutRegistration[], sessionStarts: SessionStartHa
     registerShortcut(shortcut: string, options: { handler: (ctx: ExtensionContext) => Promise<void> | void }) {
       shortcuts.push({ shortcut, handler: options.handler });
     },
+    registerCommand() {},
     on(event: string, handler: SessionStartHandler) {
       if (event === "session_start") sessionStarts.push(handler);
     },

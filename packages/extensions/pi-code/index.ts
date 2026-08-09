@@ -12,6 +12,7 @@ import {
   registerSessionEvents,
   registerLifecycleGates,
   registerConnectionMarker,
+  registerSetupChannelCommand,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -38,6 +39,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerSessionEvents(pi);
   registerLifecycleGates(pi);
   registerConnectionMarker(pi);
+  registerSetupChannelCommand(pi);
 }
 
 export { extensionName };
