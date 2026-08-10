@@ -6,6 +6,7 @@ import piCodeExtension, {
   type QuestionDetails,
   type WebFetchDetails,
   type WebSearchDetails,
+  type LlmWikisSearchDetails,
 } from "../index.ts";
 
 /**
@@ -44,6 +45,7 @@ test("pi-code extension registers Telegram setup and goal workflow alongside exi
   assert.ok(names.includes("user_telegram_chat"), "user_telegram_chat tool registered");
   assert.ok(names.includes("web_search"), "web_search tool registered");
   assert.ok(names.includes("web_fetch"), "web_fetch tool registered");
+  assert.ok(names.includes("llm_wikis_search"), "llm_wikis_search tool registered");
   assert.deepEqual(
     names.filter((name) => name.startsWith("goal_")),
     ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"],
@@ -91,6 +93,7 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "goal_clear",
     "web_fetch",
     "web_search",
+    "llm_wikis_search",
     "user_telegram_chat",
   ]);
 });
@@ -134,14 +137,17 @@ test("parent startup activates the registered tools including web_search and web
   assert.ok(activeTools, "setActiveTools called on startup");
   assert.ok(activeTools.includes("web_search"), "web_search active in parent session");
   assert.ok(activeTools.includes("web_fetch"), "web_fetch active in parent session");
+  assert.ok(activeTools.includes("llm_wikis_search"), "llm_wikis_search active in parent session");
   assert.equal(activeTools.includes("ls"), false, "ls stays excluded");
 });
 
-test("extension re-exports the web tool details types", () => {
+test("extension re-exports the web and wiki search details types", () => {
   const searchDetails: WebSearchDetails = { query: "typescript", provider: "exa" };
   const fetchDetails: WebFetchDetails = {};
+  const wikiDetails: LlmWikisSearchDetails = { query: "typescript", results: [] };
   assert.equal(searchDetails.provider, "exa");
   assert.deepEqual(fetchDetails, {});
+  assert.deepEqual(wikiDetails.results, []);
 });
 
 test("extension re-exports QuestionDetails", () => {
