@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import piCodeExtension, { extensionName, type QuestionDetails } from "../index.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import piCodeExtension, {
+  extensionName,
+  type QuestionDetails,
+  type WebFetchDetails,
+  type WebSearchDetails,
+} from "../index.ts";
 
 /**
  * Phase 4 extension-wiring tests.
@@ -37,6 +42,8 @@ test("pi-code extension registers Telegram setup and goal workflow alongside exi
   assert.ok(names.includes("agent"), "agent tool registered");
   assert.ok(names.includes("agent_status"), "agent_status tool registered");
   assert.ok(names.includes("user_telegram_chat"), "user_telegram_chat tool registered");
+  assert.ok(names.includes("web_search"), "web_search tool registered");
+  assert.ok(names.includes("web_fetch"), "web_fetch tool registered");
   assert.deepEqual(
     names.filter((name) => name.startsWith("goal_")),
     ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"],
@@ -83,7 +90,56 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "goal_status",
     "goal_clear",
     "user_telegram_chat",
+    "web_search",
+    "web_fetch",
   ]);
+});
+
+test("parent startup activates the registered tools including web_search and web_fetch", async () => {
+  const registered: string[] = [];
+  let activeTools: string[] | undefined;
+  const sessionStarts: Array<(event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown> = [];
+  const pi = {
+    registerTool(tool: { name: string }) {
+      registered.push(tool.name);
+    },
+    registerShortcut() {},
+    registerCommand() {},
+    on(event: string, handler: (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown) {
+      if (event === "session_start") sessionStarts.push(handler);
+    },
+    setActiveTools(toolNames: string[]) {
+      activeTools = toolNames;
+    },
+    getAllTools() {
+      return registered.map((name) => ({ name }));
+    },
+    sendUserMessage() {},
+  } as unknown as ExtensionAPI;
+  piCodeExtension(pi);
+  assert.ok(sessionStarts.length > 0, "session_start handler registered");
+  const ctx = {
+    mode: "tui",
+    hasUI: true,
+    cwd: "/tmp",
+    ui: { notify() {} },
+    sessionManager: {
+      getSessionId: () => "root-session",
+      getSessionFile: () => undefined,
+    },
+  } as unknown as ExtensionContext;
+  await sessionStarts[0]?.({ type: "session_start", reason: "startup" }, ctx);
+  assert.ok(activeTools, "setActiveTools called on startup");
+  assert.ok(activeTools.includes("web_search"), "web_search active in parent session");
+  assert.ok(activeTools.includes("web_fetch"), "web_fetch active in parent session");
+  assert.equal(activeTools.includes("ls"), false, "ls stays excluded");
+});
+
+test("extension re-exports the web tool details types", () => {
+  const searchDetails: WebSearchDetails = { query: "typescript", provider: "exa" };
+  const fetchDetails: WebFetchDetails = {};
+  assert.equal(searchDetails.provider, "exa");
+  assert.deepEqual(fetchDetails, {});
 });
 
 test("extension re-exports QuestionDetails", () => {
