@@ -79,6 +79,37 @@ test("agent_list returns distinct winning agents sorted alphabetically with only
   }
 });
 
+test("agent_list keeps the display to the first paragraph of a long description", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-agent-list-example-"));
+  const userDir = join(cwd, "user");
+  try {
+    mkdirSync(join(userDir, "agents"), { recursive: true });
+    writeFileSync(
+      join(userDir, "agents", "feat-scout.md"),
+      `---\nname: feat-scout\ndescription: |\n  Evidence-only scout.\n\n  <example>\n  long nested usage example block\n  </example>\n---\nbody`,
+      "utf8",
+    );
+
+    const result = await withUserAgentDir(userDir, () =>
+      register().execute("call", {}, undefined, undefined, context(cwd)),
+    );
+
+    assert.equal(
+      result.content[0]?.text,
+      "Available agents:\n1. feat-scout\n   Evidence-only scout.",
+    );
+    // The full description is preserved in the structured payload.
+    assert.deepEqual(result.details.agents, [
+      {
+        name: "feat-scout",
+        description: "Evidence-only scout.\n\n<example>\nlong nested usage example block\n</example>",
+      },
+    ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("agent_list indents each line of a multiline description consistently", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-agent-list-multiline-"));
   const userDir = join(cwd, "user");
