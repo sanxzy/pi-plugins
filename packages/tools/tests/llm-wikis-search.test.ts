@@ -8,7 +8,7 @@ import {
   executeLlmWikisSearch,
   registerLlmWikisSearchTool,
 } from "../src/registrations/llm-wikis-search.ts";
-import { formatWikiEntry } from "../src/wiki.ts";
+import { formatWikiEntry, saveWikiEntry } from "../src/wiki.ts";
 
 type Tool = {
   name: string;
@@ -204,6 +204,96 @@ test("llm_wikis_search breaks equal scores by newest timestamp then filename", a
     const result = await executeLlmWikisSearch({ query: "ties" }, { wikiRoot: root });
     const details = result.details as { results: Array<Record<string, unknown>> };
     assert.deepEqual(details.results.map((item) => item.file), ["alpha.md", "zeta.md"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search retrieves a complete page with metadata", async () => {
+  const root = tempRoot();
+  writeFileSync(
+    join(root, "react.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: react\npage: 1\ntotalPages: 2\nnext: react.part-002.md\n\n[Next](./react.part-002.md)\n<!-- pi-code-wiki-page-end -->\n\nFULL PAGE ONE\n${formatWikiEntry({ topic: "react", source: "web_search", queryOrUrl: "react", format: "markdown", title: "React", text: "one", timestamp: "2026-01-01T00:00:00.000Z" })}`,
+  );
+  writeFileSync(
+    join(root, "react.part-002.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: react\npage: 2\ntotalPages: 2\nprevious: react.md\n\n[Previous](./react.md)\n<!-- pi-code-wiki-page-end -->\n\nFULL PAGE TWO`,
+  );
+  try {
+    const result = await executeLlmWikisSearch({ query: "ignored", topic: "React", page: "2" }, { wikiRoot: root });
+    assert.equal(text(result), readFileSync(join(root, "react.part-002.md"), "utf8"));
+    const details = result.details as Record<string, unknown>;
+    assert.deepEqual(details.page, {
+      file: "react.part-002.md",
+      topic: "react",
+      page: 2,
+      totalPages: 2,
+      previous: "react.md",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search traverses previous and next cursors sequentially", async () => {
+  const root = tempRoot();
+  for (const [file, page, previous, next] of [
+    ["cursor.md", 1, "", "cursor.part-002.md"],
+    ["cursor.part-002.md", 2, "cursor.md", "cursor.part-003.md"],
+    ["cursor.part-003.md", 3, "cursor.part-002.md", ""],
+  ] as const) {
+    writeFileSync(
+      join(root, file),
+      `<!-- pi-code-wiki-page -->\ntopic: cursor\npage: ${page}\ntotalPages: 3\n${previous ? `previous: ${previous}\n` : ""}${next ? `next: ${next}\n` : ""}\n<!-- pi-code-wiki-page-end -->\n\nPAGE ${page}`,
+    );
+  }
+  try {
+    const first = await executeLlmWikisSearch({ query: "", topic: "cursor", page: "1" }, { wikiRoot: root });
+    const firstDetails = first.details as { page: { next?: string } };
+    assert.equal(firstDetails.page.next, "cursor.part-002.md");
+    const second = await executeLlmWikisSearch({ query: "", topic: "cursor", page: firstDetails.page.next }, { wikiRoot: root });
+    const secondDetails = second.details as { page: { previous?: string; next?: string } };
+    assert.equal(secondDetails.page.previous, "cursor.md");
+    assert.equal(secondDetails.page.next, "cursor.part-003.md");
+    const previous = await executeLlmWikisSearch({ query: "", topic: "cursor", page: secondDetails.page.previous }, { wikiRoot: root });
+    assert.match(text(previous), /PAGE 1/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search returns empty results for missing or out-of-range pages", async () => {
+  const root = tempRoot();
+  writeFileSync(join(root, "topic.md"), "<!-- pi-code-wiki-page -->\ntopic: topic\npage: 1\ntotalPages: 1\n<!-- pi-code-wiki-page-end -->\n\nPAGE");
+  try {
+    const missing = await executeLlmWikisSearch({ query: "x", topic: "topic", page: "topic.part-099.md" }, { wikiRoot: root });
+    assert.equal(text(missing), "No local wiki matches found.");
+    const outOfRange = await executeLlmWikisSearch({ query: "x", topic: "topic", page: "99" }, { wikiRoot: root });
+    assert.equal(text(outOfRange), "No local wiki matches found.");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search retrieves pages written by the paginated writer", async () => {
+  const root = tempRoot();
+  try {
+    await saveWikiEntry({
+      root,
+      topic: "writer",
+      source: "web_search",
+      queryOrUrl: "writer",
+      format: "markdown",
+      title: "Writer",
+      text: `${"writer content.\n\n".repeat(100)}END`,
+      pageSize: 512,
+    });
+    const result = await executeLlmWikisSearch({ query: "ignored", topic: "writer", page: "2" }, { wikiRoot: root });
+    assert.match(text(result), /<!-- pi-code-wiki-page -->/);
+    assert.match(text(result), /topic: writer/);
+    const details = result.details as { page: { page: number; totalPages: number } };
+    assert.equal(details.page.page, 2);
+    assert.ok(details.page.totalPages > 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
