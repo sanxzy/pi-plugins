@@ -122,9 +122,9 @@ export interface TelegramInboundListener {
   setApprovedUserIds(userIds: readonly string[]): void;
   /** Skip every update at or below this identity (already delivered previously). */
   setLastUpdateId(updateId: number): void;
-  /** Mark the root turn busy (queue) or idle (drain the next queued follow-up). */
+  /** Mark the agent busy (pause draining) or idle (resume draining). */
   setBusy(busy: boolean): void;
-  /** Drain the next queued follow-up after a turn settles. */
+  /** Compatibility settlement hook; delivery no longer depends on permits. */
   releaseNext(): void;
   /** Drop queued state on shutdown. */
   stop(): void;
@@ -133,11 +133,12 @@ export interface TelegramInboundListener {
 /**
  * Create the authorized text-only inbound path.
  *
- * Accepted updates are deduplicated by update identity and queued in arrival
- * order. At most one follow-up is ever in flight: while the root turn is busy
- * or a delivery is outstanding, further accepted updates queue; `setBusy(false)`
- * or `releaseNext` drains exactly one. Unauthorized private updates create or
- * refresh one persisted pairing request and are never delivered.
+ * Accepted updates are deduplicated by update identity and delivered in arrival
+ * order. At most one update is ever in flight at a time; the caller's
+ * `onAccepted` decides whether the message starts a turn (the bridge holds a
+ * single active-turn guard), so the transport itself never pauses on agent
+ * lifecycle. Unauthorized private updates create or refresh one persisted
+ * pairing request and are never delivered.
  */
 export function createTelegramInbound(options: TelegramInboundOptions): TelegramInboundListener {
   const queue: QueuedUpdate[] = [];
@@ -146,9 +147,6 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
   let lastUpdateId = -1;
   let busy = false;
   let delivering = false;
-  // One initial delivery is allowed immediately; every later delivery requires
-  // an explicit root-turn settlement/release permit.
-  let permits = 1;
 
   const refreshConfig = (): ChannelConfig | undefined => {
     const result = options.readConfig?.();
@@ -188,16 +186,12 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
 
   const deliverySettled = (): void => {
     delivering = false;
-    // A permit granted while a delivery was in flight (e.g. by releaseNext
-    // landing during the same turn) is consumed now, so a queued follow-up
-    // never stalls behind an already-completed delivery.
     attemptDrain();
   };
 
   const attemptDrain = (): void => {
-    if (busy || delivering || permits <= 0 || queue.length === 0) return;
+    if (busy || delivering || queue.length === 0) return;
     const item = queue.shift()!;
-    permits -= 1;
     delivering = true;
     Promise.resolve()
       .then(() => options.onAccepted(item.updateId, item.chatId, item.text))
@@ -238,10 +232,9 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     },
 
     releaseNext(): void {
-      // Always retain the settlement permit. The host may settle the turn while
-      // the follow-up callback is still unwinding; dropping the permit here
-      // leaves queued Telegram messages permanently stuck.
-      permits += 1;
+      // Kept for compatibility with the previous permit model, but delivery no
+      // longer depends on these settlement permits. Draining is continuous and
+      // serialized by the caller's single active-turn guard.
       attemptDrain();
     },
 
