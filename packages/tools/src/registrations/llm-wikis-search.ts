@@ -1,7 +1,7 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { textResult } from "../results.ts";
-import { searchWikis, wikiRoot } from "../wiki.ts";
+import { retrieveWikiPage, searchWikis, wikiRoot } from "../wiki.ts";
 
 const llmWikisSearchParams = Type.Object({
   query: Type.String({ description: "Search local LLM wikis before falling back to web research" }),
@@ -30,6 +30,14 @@ export interface LlmWikisSearchDetails {
     score: number;
     excerpt: string;
   }>;
+  page?: {
+    file: string;
+    topic: string;
+    page: number;
+    totalPages: number;
+    previous?: string;
+    next?: string;
+  };
 }
 
 export interface LlmWikisSearchExecutionOptions {
@@ -60,10 +68,31 @@ export async function executeLlmWikisSearch(
   params: LlmWikisSearchParams,
   options?: LlmWikisSearchExecutionOptions,
 ): Promise<AgentToolResult<LlmWikisSearchDetails>> {
-  // Phase 2 establishes the callable contract and empty-storage behavior.
-  // Reading, ranking, and page traversal are added in Phase 3/5.
-  void (options?.wikiRoot ?? wikiRoot());
-  const results = await searchWikis(options?.wikiRoot ?? wikiRoot(), params.query, {
+  const root = options?.wikiRoot ?? wikiRoot();
+  if (params.topic !== undefined && params.page !== undefined) {
+    const page = await retrieveWikiPage(root, params.topic, params.page);
+    if (!page) {
+      return textResult("No local wiki matches found.", {
+        query: params.query,
+        topic: params.topic,
+        results: [],
+      });
+    }
+    return textResult(page.content, {
+      query: params.query,
+      topic: params.topic,
+      results: [],
+      page: {
+        file: page.file,
+        topic: page.topic,
+        page: page.page,
+        totalPages: page.totalPages,
+        ...(page.previous ? { previous: page.previous } : {}),
+        ...(page.next ? { next: page.next } : {}),
+      },
+    });
+  }
+  const results = await searchWikis(root, params.query, {
     topic: params.topic,
     max: params.maxResults,
   });

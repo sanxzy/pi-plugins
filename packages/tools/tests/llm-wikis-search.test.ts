@@ -222,7 +222,7 @@ test("llm_wikis_search retrieves a complete page with metadata", async () => {
   try {
     const result = await executeLlmWikisSearch({ query: "ignored", topic: "React", page: "2" }, { wikiRoot: root });
     assert.equal(text(result), readFileSync(join(root, "react.part-002.md"), "utf8"));
-    const details = result.details as Record<string, unknown>;
+    const details = result.details as unknown as Record<string, unknown>;
     assert.deepEqual(details.page, {
       file: "react.part-002.md",
       topic: "react",

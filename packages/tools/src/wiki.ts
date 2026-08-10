@@ -27,6 +27,11 @@ export interface WikiPageHeader {
   next?: string;
 }
 
+export interface WikiPageResult extends WikiPageHeader {
+  file: string;
+  content: string;
+}
+
 export interface WikiEntryInput {
   topic: string;
   source: "web_search" | "web_fetch";
@@ -175,6 +180,22 @@ function pageNumber(file: string): number {
 
 function pageFilename(topic: string, page: number): string {
   return page === 1 ? `${topic}.md` : `${topic}.part-${String(page).padStart(3, "0")}.md`;
+}
+
+export async function retrieveWikiPage(root: string, topicInput: string, selector: string): Promise<WikiPageResult | undefined> {
+  const topic = slugify(topicInput);
+  const pages = await listTopicPages(root, topic);
+  if (pages.length === 0) return undefined;
+  const numeric = /^\d+$/.test(selector) ? Number(selector) : undefined;
+  const file = numeric === undefined ? pages.find((candidate) => candidate === selector) : pages[numeric - 1];
+  if (!file) return undefined;
+  try {
+    const content = await readFile(join(root, file), "utf8");
+    const header = parsePageHeader(content);
+    return { ...header, file, content, topic: header.topic || topic, totalPages: header.totalPages || pages.length };
+  } catch {
+    return undefined;
+  }
 }
 
 export function parsePageHeader(document: string): WikiPageHeader {
