@@ -7,7 +7,9 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/question.test.ts tests/question-render.test.ts tests/background-gate.test.ts tests/footer.test.ts tests/registrations-isolation.test.ts tests/telegram.test.ts tests/goal-tools.test.ts"
+
+    "test": "node --test --import tsx tests/question.test.ts tests/question-render.test.ts tests/background-gate.test.ts tests/footer.test.ts tests/registrations-isolation.test.ts tests/telegram.test.ts tests/goal-tools.test.ts tests/web-fetch.test.ts"
+
   },
   "dependencies": {
     "@xzy-ai/channels": "workspace:*",
@@ -16,10 +18,13 @@
     "@xzy-ai/tui": "workspace:*",
     "@earendil-works/pi-coding-agent": "^0.80.2",
     "@earendil-works/pi-tui": "^0.80.2",
+    "htmlparser2": "8.0.2",
+    "turndown": "7.2.0",
     "typebox": "^1.1.38"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
+    "@types/turndown": "5.0.5",
     "tsx": "^4.22.2"
   }
 }

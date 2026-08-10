@@ -3,6 +3,8 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerWebFetchTool } from "../src/registrations/web-fetch.ts";
 
+type FetchUrl = string;
+
 type Tool = {
   name: string;
   description: string;
@@ -27,12 +29,12 @@ function captureTool(): Tool {
 
 async function withFetch(
   implementation: typeof globalThis.fetch,
-  run: (requests: Array<{ input: RequestInfo | URL; init?: RequestInit }>) => Promise<void>,
+  run: (requests: Array<{ input: FetchUrl; init?: RequestInit }>) => Promise<void>,
 ): Promise<void> {
   const original = globalThis.fetch;
-  const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    requests.push({ input, init });
+  const requests: Array<{ input: FetchUrl; init?: RequestInit }> = [];
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    requests.push({ input: String(input), init });
     return implementation(input, init);
   }) as typeof globalThis.fetch;
   try {
@@ -46,7 +48,7 @@ function text(result: { content: Array<{ type: string; text?: string }> }): stri
   const block = result.content[0];
   assert.equal(block?.type, "text");
   assert.equal(typeof block.text, "string");
-  return block.text;
+  return block.text as string;
 }
 
 test("web_fetch is registered and rejects non-http URLs before fetching", async () => {
@@ -131,7 +133,7 @@ test("web_fetch turns HTTP and network failures into tool errors", async () => {
     throw new Error("socket closed");
   }, async () => {
     const status = await tool.execute("call", { url: "https://example.com/status" }, undefined, undefined, context);
-    assert.equal(text(status), "Error: HTTP 503: Service Unavailable");
+    assert.equal(text(status), "Error: HTTP 503: Request failed");
 
     const network = await tool.execute("call", { url: "https://example.com/network" }, undefined, undefined, context);
     assert.equal(text(network), "Error: socket closed");

@@ -4,6 +4,7 @@ export { registerCancelTool } from "./registrations/cancel.ts";
 export { registerStatusTool } from "./registrations/status.ts";
 export { registerJobsTool } from "./registrations/jobs.ts";
 export { registerGoalTools } from "./registrations/goals.ts";
+export { registerWebFetchTool } from "./registrations/web-fetch.ts";
 export { registerAgentFooter } from "./registrations/footer.ts";
 export { registerTelegramChatTool, type TelegramChatDeps } from "./registrations/telegram.ts";
 export { agentExecute, makeJobId, spawnWithControl } from "./agent-execution.ts";
