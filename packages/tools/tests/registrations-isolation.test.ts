@@ -101,7 +101,7 @@ test("agent_status for a running job mentions the subagent type and discourages 
     const result = await tool.execute("call", { job_id: "a-running" }, undefined, undefined, context(cwd, "root-a"));
     assert.equal(
       result.content[0]?.text,
-      "Agent test-agent (a-running) is running. You can wait or continue with other tasks as needed. Do not poll; the agent will send its report as soon as it finishes.",
+      "Agent test-agent (a-running) is running. Take a rest while the agent works. Do not poll; the agent will send its report as soon as it finishes.",
     );
     assert.equal((result.details as { status: string }).status, "running");
   });
@@ -233,7 +233,7 @@ test("agent resumes a terminal job in the background using a copied transcript",
     const resumed = pool.registry.get(resumeJobId);
     assert.equal(
       result.content[0]?.text,
-      "Agent test-agent (" + resumeJobId + ") is running. You can wait or continue with other tasks as needed. Do not poll; the agent will send its report as soon as it finishes.",
+      "Agent test-agent (" + resumeJobId + ") is running. Take a rest while the agent works. Do not poll; the agent will send its report as soon as it finishes.",
     );
     assert.notEqual(resumeJobId, "original");
     assert.equal(resumed?.status, "queued");
