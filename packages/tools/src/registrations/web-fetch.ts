@@ -3,6 +3,7 @@ import { Parser } from "htmlparser2";
 import TurndownService from "turndown";
 import { Type } from "typebox";
 import { errorResult, textResult } from "../results.ts";
+import { saveWikiEntry, slugifyUrl, type WikiSaveResult, wikiRoot } from "../wiki.ts";
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024;
 const DEFAULT_TIMEOUT_SECONDS = 30;
@@ -28,15 +29,27 @@ type WebFetchParams = {
   timeout?: number;
 };
 
-export interface WebFetchDetails {}
+export interface WebFetchDetails {
+  wiki?: {
+    saved: boolean;
+    topic: string;
+    pages: string[];
+  };
+  wikiSaveError?: string;
+}
 
-/** Register the read-only HTTP `web_fetch` tool. */
+export interface WebFetchExecutionOptions {
+  wikiRoot?: string;
+  now?: () => Date;
+}
+
+/** Register the HTTP `web_fetch` tool; successful research is saved to the local wiki. */
 export function registerWebFetchTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "web_fetch",
     label: "Web fetch",
     description:
-      "Fetches content from a specified URL and converts HTML to markdown or text. Use this tool to retrieve and analyze web content. The URL must be a fully-formed HTTP or HTTPS URL. This tool is read-only and does not modify files.",
+      "Fetches content from a specified URL and converts HTML to markdown or text. Use this tool to retrieve and analyze web content. Search local LLM wikis first with llm_wikis_search when possible; successful results from this tool are automatically saved to the local wiki for reuse. The URL must be a fully-formed HTTP or HTTPS URL.",
     parameters: webFetchParams,
     async execute(
       _toolCallId: string,
@@ -57,6 +70,7 @@ export function registerWebFetchTool(pi: ExtensionAPI): void {
 export async function executeWebFetch(
   params: WebFetchParams,
   signal?: AbortSignal,
+  options?: WebFetchExecutionOptions,
 ): Promise<AgentToolResult<WebFetchDetails>> {
   const url = normalizeHttpUrl(params.url);
   const format = params.format ?? "markdown";
@@ -98,12 +112,25 @@ export async function executeWebFetch(
   const title = `${url} (${contentType})`;
 
   if (isRasterImageMime(mime)) {
+    if (body.byteLength === 0) {
+      return {
+        content: [
+          { type: "text" as const, text: "Image fetched successfully" },
+          { type: "image" as const, data: "", mimeType: mime },
+        ],
+        details: {},
+      };
+    }
+    const details: WebFetchDetails = {};
+    const saved = await persistFetchResult(url, title, "Image fetched successfully", "image", options);
+    details.wiki = toWikiDetails(saved);
+    if (saved.error) details.wikiSaveError = saved.error;
     return {
       content: [
         { type: "text" as const, text: "Image fetched successfully" },
         { type: "image" as const, data: Buffer.from(body).toString("base64"), mimeType: mime },
       ],
-      details: {},
+      details,
     };
   }
 
@@ -114,9 +141,19 @@ export async function executeWebFetch(
   const content = decodeBody(body, contentType);
   if (isHtmlContentType(mime)) {
     const output = format === "text" ? extractTextFromHTML(content) : convertHTMLToMarkdown(content);
-    return textResult(`${title}\n\n${output}`, {});
+    if (!output.trim()) return textResult(`${title}\n\n${output}`, {});
+    const details: WebFetchDetails = {};
+    const saved = await persistFetchResult(url, title, output, format, options);
+    details.wiki = toWikiDetails(saved);
+    if (saved.error) details.wikiSaveError = saved.error;
+    return textResult(`${title}\n\n${output}`, details);
   }
-  return textResult(`${title}\n\n${content}`, {});
+  if (!content.trim()) return textResult(`${title}\n\n${content}`, {});
+  const details: WebFetchDetails = {};
+  const saved = await persistFetchResult(url, title, content, format, options);
+  details.wiki = toWikiDetails(saved);
+  if (saved.error) details.wikiSaveError = saved.error;
+  return textResult(`${title}\n\n${content}`, details);
 }
 
 function normalizeHttpUrl(value: string): string {
@@ -269,6 +306,29 @@ function toErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+async function persistFetchResult(
+  url: string,
+  title: string,
+  text: string,
+  format: string,
+  options?: WebFetchExecutionOptions,
+): Promise<WikiSaveResult> {
+  return saveWikiEntry({
+    root: options?.wikiRoot ?? wikiRoot(),
+    topic: slugifyUrl(url),
+    source: "web_fetch",
+    queryOrUrl: url,
+    format,
+    title,
+    text,
+    timestamp: (options?.now ?? (() => new Date()))().toISOString(),
+  });
+}
+
+function toWikiDetails(saved: WikiSaveResult): { saved: boolean; topic: string; pages: string[] } {
+  return { saved: saved.saved, topic: saved.topic, pages: saved.pages };
 }
 
 export { MAX_RESPONSE_SIZE, DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS };

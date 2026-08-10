@@ -150,7 +150,7 @@ test("saveWikiEntry tolerates write failures without throwing", async () => {
       title: "Web Search: React Hooks",
       text: "content",
     });
-    assert.deepEqual(result, { saved: false, topic: "react-hooks", pages: [] });
+    assert.deepEqual(result, { saved: false, topic: "react-hooks", pages: [], error: "Unable to save wiki entry" });
   } finally {
     rmSync(blocker, { recursive: true, force: true });
   }
