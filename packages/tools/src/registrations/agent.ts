@@ -195,7 +195,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
         );
 
         return textResult(
-          `Accepted background agent ${job.jobId}. Its result will be delivered when it finishes.`,
+          `Accepted background agent ${job.jobId}. Its result will be delivered when it finishes. Take a rest or continue as needed; there is no need to poll.`,
           { jobId: job.jobId, status: job.status },
         );
       }
