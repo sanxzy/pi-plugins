@@ -10,10 +10,15 @@ import type { TelegramBotCommand } from "./menu.ts";
  * `Bot` and `@grammyjs/runner` handle satisfy these structurally, while tests
  * inject fakes so no live Telegram network is touched.
  */
+export interface TelegramCommandScope {
+  type: "default" | "all_private_chats" | "chat";
+  chat_id?: number | string;
+}
+
 export interface BotApiLike {
   getMe(): Promise<unknown>;
   sendMessage?(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
-  setMyCommands?(commands: readonly TelegramBotCommand[]): Promise<unknown>;
+  setMyCommands?(commands: readonly TelegramBotCommand[], other?: { scope?: TelegramCommandScope }): Promise<unknown>;
 }
 
 export type TelegramMessageHandler = (context: unknown) => Promise<unknown> | unknown;
@@ -134,19 +139,27 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
         // Middleware errors must never become unhandled host rejections.
         deps.logger.warn("telegram_middleware_error", { error: safeTransportError(error) });
       });
-      const syncCommands = async (): Promise<void> => {
+      const currentApprovedUserIds = [...config.approvedUserIds];
+      const syncCommands = async (approvedUserIds: readonly string[] = currentApprovedUserIds): Promise<void> => {
         if (!candidate.api.setMyCommands || deps.commands === undefined) return;
         const commands = typeof deps.commands === "function" ? deps.commands() : deps.commands;
+        const scopes: TelegramCommandScope[] = [
+          { type: "default" },
+          { type: "all_private_chats" },
+          ...approvedUserIds.map((chat_id) => ({ type: "chat" as const, chat_id })),
+        ];
         try {
-          await candidate.api.setMyCommands(commands);
-          deps.logger.info("telegram_commands_synced", { count: commands.length });
+          for (const scope of scopes) {
+            await candidate.api.setMyCommands(commands, { scope });
+          }
+          deps.logger.info("telegram_commands_synced", { count: commands.length, scopes: scopes.length });
         } catch (error) {
           deps.logger.warn("telegram_commands_sync_failed", { error: safeTransportError(error) });
         }
       };
       if (candidate.on) {
         candidate.on("message", async (context) => {
-          if (telegramCommandFromContext(context)) await syncCommands();
+          if (telegramCommandFromContext(context)) await syncCommands(currentApprovedUserIds);
           return deps.onMessage?.(context);
         });
       }

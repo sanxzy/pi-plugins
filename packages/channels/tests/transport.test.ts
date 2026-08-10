@@ -214,11 +214,12 @@ test("refreshes the command menu when Telegram sends /start or /help", async () 
   const { logger } = transportDeps();
   const created = fakeBot();
   const menus: { command: string; description: string }[][] = [];
+  const scopes: unknown[] = [];
   let version = 1;
   const bot: BotLike = {
     api: {
       getMe: async () => ({ id: 1 }),
-      setMyCommands: async (commands) => { menus.push([...commands]); }
+      setMyCommands: async (commands, other) => { menus.push([...commands]); scopes.push(other?.scope); }
     },
     on(_event, handler) {
       created.meta.messageHandler = handler;
@@ -236,14 +237,26 @@ test("refreshes the command menu when Telegram sends /start or /help", async () 
   });
 
   assert.equal((await transport.start({ token: TOKEN, approvedUserIds: [] })).ok, true);
-  assert.deepEqual(menus, [[{ command: "menu_1", description: "Current menu" }]]);
+  assert.deepEqual(menus, [
+    [{ command: "menu_1", description: "Current menu" }],
+    [{ command: "menu_1", description: "Current menu" }],
+  ]);
+  assert.deepEqual(scopes, [{ type: "default" }, { type: "all_private_chats" }]);
   version = 2;
   await created.meta.messageHandler?.({ update: { message: { text: "/start" } } });
   await created.meta.messageHandler?.({ message: { text: "/help@pi_test_ext_bot" } });
   assert.deepEqual(menus, [
     [{ command: "menu_1", description: "Current menu" }],
+    [{ command: "menu_1", description: "Current menu" }],
     [{ command: "menu_2", description: "Current menu" }],
     [{ command: "menu_2", description: "Current menu" }],
+    [{ command: "menu_2", description: "Current menu" }],
+    [{ command: "menu_2", description: "Current menu" }],
+  ]);
+  assert.deepEqual(scopes, [
+    { type: "default" }, { type: "all_private_chats" },
+    { type: "default" }, { type: "all_private_chats" },
+    { type: "default" }, { type: "all_private_chats" },
   ]);
   await transport.stop();
 });
