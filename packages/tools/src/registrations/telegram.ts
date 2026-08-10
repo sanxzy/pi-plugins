@@ -22,6 +22,16 @@ import type { TelegramChatDetails } from "../types.ts";
 
 export type { TelegramChatDetails } from "../types.ts";
 
+const TELEGRAM_TOKEN_PATTERN = /\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g;
+const SENSITIVE_QUERY_PATTERN = /([?&](?:token|secret|api[_-]?key|password|credential)=)[^&#\s]+/gi;
+
+function safeTelegramError(error: unknown): string {
+  const message = typeof error === "string" ? error : error instanceof Error ? error.message : "Telegram delivery failed";
+  return message
+    .replace(TELEGRAM_TOKEN_PATTERN, "[Redacted]")
+    .replace(SENSITIVE_QUERY_PATTERN, "$1[Redacted]");
+}
+
 export interface TelegramChatDeps {
   /** Injectable send seam so tests verify delivery and partial results offline. */
   send?: (projectRoot: string, chatId: string, message: string, options?: {
@@ -86,6 +96,16 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<TelegramChatDetails>> {
+      const action = (params as { action?: unknown }).action;
+      if (action !== "send_text" && action !== "react" && action !== "send_choices" && action !== "send_media") {
+        return errorResult("Unsupported Telegram action", {
+          action: "send_text",
+          sent: false,
+          chatId: typeof (params as { chat_id?: unknown }).chat_id === "string" ? (params as { chat_id: string }).chat_id : "",
+          error: "Unsupported Telegram action",
+          category: "telegram_rejected",
+        });
+      }
       const target = await validateTarget(ctx.cwd, params.chat_id);
       if (!target.ok) {
         return errorResult(target.error, {
@@ -116,12 +136,13 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         }
         const choiceResult = await sendChoices(ctx.cwd, target.chatId, params.question, params.choices, params.message_id, ctx.sessionManager.getSessionId());
         if (!choiceResult.ok) {
-          return errorResult(`Telegram choices failed: ${choiceResult.error}`, {
+          const error = safeTelegramError(choiceResult.error);
+          return errorResult(`Telegram choices failed: ${error}`, {
             action: params.action,
             sent: false,
             chatId: target.chatId,
             question: params.question,
-            error: choiceResult.error,
+            error,
             category: choiceResult.category,
           });
         }
@@ -161,12 +182,13 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           filename: params.filename,
         }, ctx.sessionManager.getSessionId());
         if (!mediaResult.ok) {
-          return errorResult(`Telegram media failed: ${mediaResult.error}`, {
+          const error = safeTelegramError(mediaResult.error);
+          return errorResult(`Telegram media failed: ${error}`, {
             action: params.action,
             sent: false,
             chatId: target.chatId,
             mediaType: params.media_type,
-            error: mediaResult.error,
+            error,
             category: mediaResult.category,
           });
         }
@@ -195,13 +217,14 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         }
         const reactionResult = await react(ctx.cwd, target.chatId, params.message_id, params.emoji);
         if (!reactionResult.ok) {
-          return errorResult(`Telegram reaction failed: ${reactionResult.error}`, {
+          const error = safeTelegramError(reactionResult.error);
+          return errorResult(`Telegram reaction failed: ${error}`, {
             action: params.action,
             sent: false,
             chatId: target.chatId,
             messageId: params.message_id,
             emoji: params.emoji,
-            error: reactionResult.error,
+            error,
             category: reactionResult.category,
           });
         }
@@ -221,13 +244,14 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         disableNotification: params.disable_notification,
       });
       if (!result.ok) {
-        return errorResult(`Telegram delivery failed: ${result.error}`, {
+        const error = safeTelegramError(result.error);
+        return errorResult(`Telegram delivery failed: ${error}`, {
           action: params.action,
           sent: false,
           chatId: target.chatId,
           sentChunks: result.sent,
           failedChunks: result.failed,
-          error: result.error,
+          error,
           category: result.category,
         });
       }
