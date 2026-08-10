@@ -167,9 +167,14 @@ test("research tool descriptions direct local-first lookup and automatic fallbac
   assert.match(search, /local.*wiki/i);
   assert.match(search, /fall\s*back/i);
   assert.match(search, /automatically saved/i);
+  assert.match(search, /broad discovery/i);
+  assert.match(search, /candidate URLs/i);
   assert.match(fetch, /local.*wiki/i);
-  assert.match(fetch, /fall\s*back/i);
+  assert.match(fetch, /web_search/i);
   assert.match(fetch, /automatically saved/i);
+  assert.match(fetch, /narrow/i);
+  assert.match(fetch, /candidate URL/i);
+  assert.match(fetch, /search response/i);
 });
 
 test("extension re-exports the web and wiki search details types", () => {

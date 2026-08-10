@@ -67,6 +67,14 @@ function text(result: { content: Array<{ type: string; text?: string }> }): stri
   return block.text as string;
 }
 
+test("web_fetch is registered with a narrow source-focused description", () => {
+  const tool = captureTool();
+  assert.match(tool.description, /narrow/i);
+  assert.match(tool.description, /web_search/i);
+  assert.match(tool.description, /candidate URL/i);
+  assert.match(tool.description, /search response/i);
+});
+
 test("web_fetch is registered and rejects non-http URLs before fetching", async () => {
   const tool = captureTool();
   let calls = 0;

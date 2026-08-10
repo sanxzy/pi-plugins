@@ -80,6 +80,9 @@ function text(result: { content: Array<{ type: string; text?: string }> }): stri
 test("web_search is registered, describes the current year, and sends a JSON-RPC tools/call", async () => {
   const tool = captureTool();
   assert.match(tool.description, new RegExp(String(new Date().getFullYear())));
+  assert.match(tool.description, /broad discovery/i);
+  assert.match(tool.description, /candidate URLs/i);
+  assert.match(tool.description, /narrower keyword/i);
   const captured: Array<{ input: string; method?: string; headers: Headers; body: unknown }> = [];
   await withAgentDir(async () => {
     await withFetch(
