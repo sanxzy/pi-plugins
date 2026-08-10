@@ -15,7 +15,7 @@ export {
 export { registerAgentFooter } from "./registrations/footer.ts";
 export { registerTelegramChatTool, type TelegramChatDeps } from "./registrations/telegram.ts";
 export { readBoundedResponseBody } from "./http-body.ts";
-export { agentExecute, makeJobId, spawnWithControl } from "./agent-execution.ts";
+export { makeJobId, spawnWithControl } from "./agent-execution.ts";
 export { callerFor } from "./caller.ts";
 export { toJobSummary } from "./job-summary.ts";
 export { errorResult, textResult } from "./results.ts";

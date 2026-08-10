@@ -158,7 +158,7 @@ test("agent resume remains TUI-only because it runs in background", async () => 
   });
 });
 
-test("agent steer output names the targeted subagent type", async () => {
+test("agent steer output names the targeted subagent type and remains allowed outside TUI mode", async () => {
   await withIsolationPool(async (cwd) => {
     const pool = getChildPool(cwd);
     let steers = 0;
@@ -175,7 +175,7 @@ test("agent steer output names the targeted subagent type", async () => {
       { description: "redirect", prompt: "new direction", subagent_type: "test-agent", agent_id: "a-running" },
       undefined,
       undefined,
-      context(cwd, "root-a"),
+      { ...context(cwd, "root-a"), mode: "print" } as unknown as ExtensionContext,
     );
     assert.equal(result.content[0]?.text, "Steered agent test-agent (a-running).");
     assert.deepEqual(result.details, { jobId: "a-running", status: "running" });

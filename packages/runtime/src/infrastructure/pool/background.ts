@@ -20,14 +20,14 @@ export function backgroundModeError(mode: string): string | undefined {
 }
 
 /** Format a child result for the direct parent. */
-export function formatBackgroundResult(jobId: string, result: ChildRunResult): string {
+export function formatBackgroundResult(subagentType: string, jobId: string, result: ChildRunResult): string {
   if (result.status === "completed") {
-    return `Background agent ${jobId} completed:\n${result.output}`;
+    return `Background agent ${subagentType} (${jobId}) completed:\n${result.output}`;
   }
   if (result.status === "aborted") {
-    return `Background agent ${jobId} was aborted.`;
+    return `Background agent ${subagentType} (${jobId}) was aborted.`;
   }
-  return `Background agent ${jobId} failed: ${result.output}`;
+  return `Background agent ${subagentType} (${jobId}) failed: ${result.output}`;
 }
 
 interface BackgroundJobDeps {
@@ -58,7 +58,7 @@ export async function runBackgroundJob(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.registry.updateJob(job.jobId, { status: "failed" });
-    deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.jobId, {
+    deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
       sessionFile: "",
       output: message,
       status: "failed",
@@ -69,7 +69,7 @@ export async function runBackgroundJob(
 
   if (!result) {
     deps.registry.updateJob(job.jobId, { status: "failed" });
-    deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.jobId, {
+    deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
       sessionFile: "",
       output: "could not spawn child",
       status: "failed",
@@ -85,6 +85,6 @@ export async function runBackgroundJob(
     status: result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed",
   });
   deps.registry.updateJob(job.jobId, { sessionFile: result.sessionFile });
-  deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.jobId, result));
+  deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, result));
   deps.registry.updateJob(job.jobId, { delivered: true });
 }

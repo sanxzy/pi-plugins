@@ -24,7 +24,6 @@ type RegisteredAgent = {
       description: string;
       prompt: string;
       subagent_type: string;
-      background?: boolean;
     },
     signal: AbortSignal | undefined,
     onUpdate: unknown,
