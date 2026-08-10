@@ -11,6 +11,7 @@ import { getChildPool } from "@xzy-ai/runtime";
 import {
   canonicalProjectRoot,
   createChannelLogger,
+  clearTelegramChoicesForSession,
   consumeTelegramChoice,
   createTelegramInbound,
   createTelegramOutbound,
@@ -284,7 +285,9 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   pi.on("session_shutdown", async (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
     if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
-    clearTelegramCompactionOrigin(projectRoot, ctx.sessionManager.getSessionId());
+    const sessionId = ctx.sessionManager.getSessionId();
+    clearTelegramCompactionOrigin(projectRoot, sessionId);
+    clearTelegramChoicesForSession(projectRoot, sessionId);
     const listener = listenersByProject.get(projectRoot);
     runningByProject.delete(projectRoot);
     listenersByProject.delete(projectRoot);

@@ -74,9 +74,19 @@ function safeError(error: unknown): string {
 
 function outboundErrorCategory(error: unknown): OutboundErrorCategory {
   if (typeof error === "object" && error !== null) {
-    const candidate = error as { error_code?: unknown; code?: unknown };
+    const candidate = error as { error_code?: unknown; code?: unknown; description?: unknown };
     if (candidate.error_code === 429) return "rate_limited";
     if (candidate.code === "ETIMEDOUT" || candidate.code === "ECONNRESET") return "network_error";
+    // A 4xx Telegram API rejection (e.g. malformed HTML/Markdown entities,
+    // an invalid reply target, or a rejected upload) is a deterministic
+    // rejection, never an ambiguous partial delivery. It is not retried.
+    if (candidate.error_code === 400 || (typeof candidate.error_code === "number" && candidate.error_code >= 400 && candidate.error_code < 500)) {
+      return "telegram_rejected";
+    }
+    // grammY wraps validation/parse failures in an error with a 400 code.
+    if (typeof candidate.description === "string" && /(bad request|not enough rights|entity\\s+could not be parsed|failed to parse)/i.test(candidate.description)) {
+      return "telegram_rejected";
+    }
   }
   return "partial_delivery";
 }

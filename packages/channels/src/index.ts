@@ -115,6 +115,8 @@ export {
 } from "./inbound.ts";
 export {
   clearTelegramChoiceState,
+  clearTelegramChoiceTokens,
+  clearTelegramChoicesForSession,
   consumeTelegramChoice,
   createTelegramChoice,
   type TelegramChoice,

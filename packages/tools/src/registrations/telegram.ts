@@ -1,6 +1,7 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
+  clearTelegramChoiceTokens,
   createTelegramChoice,
   createTelegramOutbound,
   resolveMediaSource,
@@ -68,13 +69,15 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       choices,
       expiresAt: Date.now() + 10 * 60 * 1000,
     });
-    return createTelegramOutbound().sendChoices(
+    const result = await createTelegramOutbound().sendChoices(
       projectRoot,
       chatId,
       question,
       choices.map((choice, index) => ({ label: choice.label, callbackData: choiceState.callbackData[index]! })),
       replyToMessageId,
     );
+    if (!result.ok) clearTelegramChoiceTokens(choiceState.callbackData);
+    return result;
   });
   const validateTarget = deps.validateTarget ?? (async (projectRoot: string, chatId: string) =>
     validateTelegramTarget(projectRoot, chatId));

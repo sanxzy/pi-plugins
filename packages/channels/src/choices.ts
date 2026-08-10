@@ -102,6 +102,18 @@ export function consumeTelegramChoice(
   return { question: pending.question, value: pending.value };
 }
 
+/** Remove a set of pending tokens after a prompt send fails or is ambiguous. */
+export function clearTelegramChoiceTokens(tokens: readonly string[]): void {
+  for (const token of tokens) pendingByToken.delete(token);
+}
+
+/** Invalidate all pending choices owned by one root session during shutdown. */
+export function clearTelegramChoicesForSession(projectRoot: string, sessionId: string): void {
+  for (const [token, pending] of pendingByToken) {
+    if (pending.projectRoot === projectRoot && pending.sessionId === sessionId) pendingByToken.delete(token);
+  }
+}
+
 /** Drop all pending choice state (test isolation and process restart). */
 export function clearTelegramChoiceState(): void {
   pendingByToken.clear();
