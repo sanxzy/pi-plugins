@@ -70,7 +70,34 @@ test("agent_list returns distinct winning agents sorted alphabetically with only
       { name: "shared", description: "project shared" },
       { name: "zeta", description: "Zeta agent" },
     ]);
-    assert.equal(result.content[0]?.text, "Available agents:\n- alpha: Alpha agent\n- shared: project shared\n- zeta: Zeta agent");
+    assert.equal(
+      result.content[0]?.text,
+      "Available agents:\n1. alpha\n   Alpha agent\n2. shared\n   project shared\n3. zeta\n   Zeta agent",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("agent_list indents each line of a multiline description consistently", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-agent-list-multiline-"));
+  const userDir = join(cwd, "user");
+  try {
+    mkdirSync(join(userDir, "agents"), { recursive: true });
+    writeFileSync(
+      join(userDir, "agents", "scout.md"),
+      `---\nname: scout\ndescription: |\n  Investigates a topic.\n  Writes a report.\n  Read-only.\n---\nbody`,
+      "utf-8",
+    );
+
+    const result = await withUserAgentDir(userDir, () =>
+      register().execute("call", {}, undefined, undefined, context(cwd)),
+    );
+
+    assert.equal(
+      result.content[0]?.text,
+      "Available agents:\n1. scout\n   Investigates a topic.\n   Writes a report.\n   Read-only.",
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
