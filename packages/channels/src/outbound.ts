@@ -232,10 +232,10 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
 }
 
 /**
- * Bounded, idempotence-safe retry for a single text chunk. Only clear network
- * timeouts and Telegram 429 flood waits are retried, at most once. Any other
- * error (including an ambiguous non-idempotent send outcome) is surfaced
- * immediately so no duplicate message is created.
+ * Bounded, idempotence-safe retry for a single text chunk. Telegram 429 flood
+ * waits are retried at most once. Network errors from sendMessage are treated
+ * as ambiguous non-idempotent outcomes and are surfaced immediately so no
+ * duplicate message is created.
  */
 async function attemptSend(
   api: TelegramSendApi,
@@ -274,10 +274,6 @@ function classifyRetry(error: unknown): RetryDecision {
       if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) {
         return { kind: "retry", delayMs: Math.min(1000 * Math.max(0, retryAfter), 5000) };
       }
-    }
-    const code = (error as { code?: unknown }).code;
-    if (code === "ETIMEDOUT" || code === "ECONNRESET") {
-      return { kind: "retry", delayMs: 0 };
     }
   }
   return { kind: "abort" };
