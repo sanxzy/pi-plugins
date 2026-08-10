@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { approvePairingAt, channelConfigFile, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
+import { approvePairingAt, canonicalProjectRoot, channelConfigFile, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
 
@@ -67,11 +67,16 @@ function context(cwd: string, sessionId: string, idle = true): ExtensionContext 
   } as unknown as ExtensionContext;
 }
 
-function privateText(updateId: number, fromId: string, text: string): unknown {
+function privateText(updateId: number, fromId: string, text: string, messageId?: number): unknown {
   return {
     update_id: updateId,
     api: { sendMessage: async () => undefined },
-    message: { chat: { id: 777, type: "private" }, from: { id: Number(fromId) }, text },
+    message: {
+      chat: { id: 777, type: "private" },
+      from: { id: Number(fromId) },
+      text,
+      ...(messageId === undefined ? {} : { message_id: messageId }),
+    },
   };
 }
 
@@ -97,6 +102,56 @@ test("root session start delivers accepted text as a follow-up with the exact si
   assert.equal(runtime.ok, true);
   if (runtime.ok) assert.equal(runtime.value.lastUpdateId, 1);
   clearTelegramProjectManagers();
+});
+
+test("agent_start reacts to the latest Telegram user message", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers } = registrations();
+  const reactions: Array<{ projectRoot: string; chatId: string; messageId?: number }> = [];
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => (listener = createTelegramInbound(opts)),
+    reactTelegramMessage: async (projectRoot, origin) => {
+      reactions.push({ projectRoot, ...origin });
+    },
+  });
+
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  await listener!.handle(privateText(1, "111", "hello", 42));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42), timestamp: 1 } }],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")!({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reactions, [{ projectRoot: canonicalProjectRoot(cwd), chatId: "777", messageId: 42 }]);
+  clearTelegramProjectManagers();
+});
+
+test("agent_start does not react to a TUI-originated latest user message", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers } = registrations();
+  let reactionCount = 0;
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async () => { reactionCount += 1; },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "local prompt", timestamp: 1 } }],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")!({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reactionCount, 0);
 });
 
 test("child sessions never start an inbound listener or inject follow-ups", async () => {

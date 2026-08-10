@@ -16,6 +16,9 @@ import {
   type TelegramMenuCommandSource,
 } from "@xzy-ai/channels";
 import { expandTelegramGoalCommand } from "./goal-command.ts";
+import { isTelegramDevelopmentMode } from "./telegram-controls.ts";
+
+type TelegramNativeMenuSource = TelegramMenuCommandSource & { devOnly?: boolean };
 
 export interface TelegramCommandExpanderOptions {
   /** Read the current Pi command/prompt/skill catalog. */
@@ -23,12 +26,23 @@ export interface TelegramCommandExpanderOptions {
   /** Extension commands dispatched natively from Telegram: name -> expander. */
   extensionExpanders?: Record<string, (args: string) => string>;
   /** Native Telegram controls that do not come from Pi's command catalog. */
-  nativeMenuCommands?: readonly TelegramMenuCommandSource[];
+  nativeMenuCommands?: readonly TelegramNativeMenuSource[];
+  /** True when development-only controls may be shown in the menu. */
+  isDevMode?: () => boolean;
 }
 
 /** Native controls handled directly by the Telegram bridge. */
-export const TELEGRAM_NATIVE_MENU_COMMANDS: readonly TelegramMenuCommandSource[] = [
+/** Native controls handled by the Telegram bridge. Development-only entries are
+ * filtered out unless `isDevMode` reports development mode. */
+export const TELEGRAM_NATIVE_MENU_COMMANDS: readonly TelegramNativeMenuSource[] = [
+  { name: "abort", description: "Abort the current Pi operation", source: "extension" },
+  { name: "stop", description: "Abort Pi operation and clear the Telegram queue", source: "extension" },
   { name: "compact", description: "Compact the current session", source: "extension" },
+  { name: "context", description: "Show context usage", source: "extension" },
+  { name: "status", description: "Show runtime status", source: "extension" },
+  { name: "system_prompt", description: "Show the effective system prompt (development)", source: "extension", devOnly: true },
+  { name: "model", description: "List or switch the active model", source: "extension" },
+  { name: "thinking", description: "Show or set the thinking level", source: "extension" },
 ];
 
 export interface TelegramCommandExpander {
@@ -69,7 +83,12 @@ export function createTelegramCommandExpander(
       const name = telegramExpansionCommandName(command);
       return name ? { ...command, name } : command;
     });
-    return [...(options.nativeMenuCommands ?? []), ...menuCatalogCommands];
+    const isDevMode = options.isDevMode ?? (() => false);
+    const visibleNative = (options.nativeMenuCommands ?? []).filter((command) => {
+      if (command.devOnly) return isDevMode();
+      return true;
+    });
+    return [...visibleNative, ...menuCatalogCommands];
   };
 
   return { expand, menuSources };
@@ -83,5 +102,6 @@ export function createDefaultTelegramCommandExpander(
     getCommands,
     extensionExpanders: { goal: expandTelegramGoalCommand },
     nativeMenuCommands: TELEGRAM_NATIVE_MENU_COMMANDS,
+    isDevMode: isTelegramDevelopmentMode,
   });
 }

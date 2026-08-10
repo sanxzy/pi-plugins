@@ -18,6 +18,8 @@ import { formatPairingChallenge, upsertPairingRequest } from "./pairing.ts";
 /** A single accepted private text update. */
 export interface TelegramUpdate {
   updateId: number;
+  /** Telegram message identity used for reactions. */
+  messageId?: number;
   /** Numeric chat room id, always serialized to a string. */
   chatId: string;
   /** Numeric sender id, always serialized to a string. */
@@ -42,6 +44,7 @@ interface TelegramRawMessage {
   chat?: { id?: number | string; type?: string };
   from?: { id?: number | string };
   text?: string;
+  message_id?: number;
   edit_date?: number;
 }
 
@@ -75,6 +78,7 @@ export function decodeAcceptedText(context: unknown): TelegramUpdate | undefined
 
   return {
     updateId,
+    ...(isNumber(message.message_id) ? { messageId: message.message_id } : {}),
     chatId: String(message.chat.id),
     fromId: String(message.from.id),
     text: message.text,
@@ -85,11 +89,30 @@ export function decodeAcceptedText(context: unknown): TelegramUpdate | undefined
  * Exact Telegram origin marker appended to the content of every accepted
  * Telegram follow-up. Never added to TUI-originated content.
  */
-export function formatTelegramSignature(chatId: string): string {
-  return `\n\n---\n[from:telegram:${chatId}]\nUser active on Telegram. Be indifferent toward the default TUI window: keep thinking and reasoning normally, but write only a minimal concise do/act summary there — no conversational text, no attempt to communicate. To communicate directly with the user, use the \`user_telegram_chat\` tool.\n---`;
+export function formatTelegramSignature(chatId: string, messageId?: number): string {
+  const origin = messageId === undefined ? chatId : `${chatId}:${messageId}`;
+  return `\n\n---\n[from:telegram:${origin}]\nUser active on Telegram. Be indifferent toward the default TUI window: keep thinking and reasoning normally, but write only a minimal concise do/act summary there — no conversational text, no attempt to communicate. To communicate directly with the user, use the \`user_telegram_chat\` tool.\n---`;
 }
 
-const TELEGRAM_SIGNATURE_PATTERN = /\[from:telegram:(-?\d+)\]/g;
+const TELEGRAM_SIGNATURE_PATTERN = /\[from:telegram:(-?\d+)(?::(\d+))?\]/g;
+
+/** Origin metadata embedded in an accepted Telegram user message. */
+export interface TelegramMessageOrigin {
+  chatId: string;
+  messageId?: number;
+}
+
+/** Extract the latest Telegram origin marker, including its message identity. */
+export function extractTelegramMessageOrigin(text: string): TelegramMessageOrigin | undefined {
+  const matches = text.matchAll(TELEGRAM_SIGNATURE_PATTERN);
+  let last: RegExpMatchArray | undefined;
+  for (const match of matches) last = match;
+  if (!last) return undefined;
+  return {
+    chatId: last[1]!,
+    messageId: last[2] === undefined ? undefined : Number(last[2]),
+  };
+}
 
 /**
  * Compact origin marker for Telegram-dispatched commands. Commands do not
@@ -97,8 +120,9 @@ const TELEGRAM_SIGNATURE_PATTERN = /\[from:telegram:(-?\d+)\]/g;
  * message into two blocks); the compact signature still names the chat so the
  * outbound gate keeps working.
  */
-export function formatTelegramCommandSignature(chatId: string): string {
-  return `\n\n---\n[from:telegram:${chatId}]\nUser active on Telegram. Reply through the \`user_telegram_chat\` tool.\n---`;
+export function formatTelegramCommandSignature(chatId: string, messageId?: number): string {
+  const origin = messageId === undefined ? chatId : `${chatId}:${messageId}`;
+  return `\n\n---\n[from:telegram:${origin}]\nUser active on Telegram. Reply through the \`user_telegram_chat\` tool.\n---`;
 }
 
 const TELEGRAM_COMMAND_NAME_PATTERN = /^[a-z0-9_]{1,32}$/;
@@ -130,10 +154,7 @@ export function parseTelegramCommand(text: string): TelegramCommand | undefined 
  * because the bridge always appends the real signature last.
  */
 export function extractTelegramChatId(text: string): string | undefined {
-  const matches = text.matchAll(TELEGRAM_SIGNATURE_PATTERN);
-  let last: RegExpMatchArray | undefined;
-  for (const match of matches) last = match;
-  return last ? last[1] : undefined;
+  return extractTelegramMessageOrigin(text)?.chatId;
 }
 
 /** A queued, accepted private text message awaiting delivery. */
@@ -141,6 +162,7 @@ interface QueuedUpdate {
   updateId: number;
   chatId: string;
   text: string;
+  messageId?: number;
 }
 
 export interface TelegramInboundOptions {
@@ -159,7 +181,7 @@ export interface TelegramInboundOptions {
    * calling this callback; the callback writes the connection marker and
    * injects the follow-up.
    */
-  onAccepted(updateId: number, chatId: string, text: string): Promise<void>;
+  onAccepted(updateId: number, chatId: string, text: string, messageId?: number): Promise<void>;
 }
 
 export interface TelegramInboundListener {
@@ -173,6 +195,8 @@ export interface TelegramInboundListener {
   setBusy(busy: boolean): void;
   /** Compatibility settlement hook; delivery no longer depends on permits. */
   releaseNext(): void;
+  /** Drop queued Telegram items without stopping delivery (used by /stop). */
+  clearQueue(): void;
   /** Drop queued state on shutdown. */
   stop(): void;
 }
@@ -241,7 +265,7 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     const item = queue.shift()!;
     delivering = true;
     Promise.resolve()
-      .then(() => options.onAccepted(item.updateId, item.chatId, item.text))
+      .then(() => options.onAccepted(item.updateId, item.chatId, item.text, item.messageId))
       .then(deliverySettled)
       .catch((error: unknown) => {
         deliverySettled();
@@ -261,7 +285,7 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
       if (update.updateId <= lastUpdateId || seen.has(update.updateId)) return;
       seen.add(update.updateId);
       lastUpdateId = Math.max(lastUpdateId, update.updateId);
-      queue.push({ updateId: update.updateId, chatId: update.chatId, text: update.text });
+      queue.push({ updateId: update.updateId, chatId: update.chatId, text: update.text, messageId: update.messageId });
       attemptDrain();
     },
 
@@ -283,6 +307,10 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
       // longer depends on these settlement permits. Draining is continuous and
       // serialized by the caller's single active-turn guard.
       attemptDrain();
+    },
+
+    clearQueue(): void {
+      queue.length = 0;
     },
 
     stop(): void {

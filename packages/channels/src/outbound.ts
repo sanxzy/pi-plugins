@@ -49,6 +49,7 @@ export type OutboundTextResult =
 /** Minimal grammY API surface needed to send text (injectable for tests). */
 export interface TelegramSendApi {
   sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
+  setMessageReaction?(chatId: number | string, messageId: number, reaction: unknown, other?: Record<string, unknown>): Promise<unknown>;
 }
 
 /**
@@ -90,25 +91,47 @@ export interface TelegramOutboundOptions {
 export interface TelegramOutbound {
   /** Send text to a specific Telegram chat, or fail closed when not configured. */
   send(projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult>;
+  /** React to a specific Telegram message, or fail closed when not configured. */
+  react(projectRoot: string, chatId: string, messageId: number, reaction: unknown): Promise<OutboundTextResult>;
 }
 
 /** Create the outbound sender. The reply chat id is supplied by the caller. */
 export function createTelegramOutbound(options: TelegramOutboundOptions = {}): TelegramOutbound {
   const readConfig = options.readConfig ?? readChannelConfig;
 
-  const send = async (projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult> => {
+  const withConfig = async <T>(projectRoot: string, run: (api: TelegramSendApi, token: string) => Promise<T>): Promise<OutboundTextResult | T> => {
     const channel = readConfig(projectRoot);
     if (!channel.ok) {
       return { ok: false, sent: 0, failed: 1, error: "Telegram channel not configured" };
     }
     const createSendApi = options.createSendApi ?? defaultCreateSendApi;
     const api = createSendApi(channel.value.token);
-    return sendTextChunks(chatId, text, async (target, chunk) => {
-      await api.sendMessage(target, chunk);
-    });
+    return run(api, channel.value.token);
   };
 
-  return { send };
+  const send = async (projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult> => {
+    const result = await withConfig(projectRoot, async (api) =>
+      sendTextChunks(chatId, text, async (target, chunk) => {
+        await api.sendMessage(target, chunk);
+      }),
+    );
+    return result as OutboundTextResult;
+  };
+
+  const react = async (projectRoot: string, chatId: string, messageId: number, reaction: unknown): Promise<OutboundTextResult> => {
+    const result = await withConfig(projectRoot, async (api) => {
+      if (!api.setMessageReaction) return { ok: false as const, sent: 0, failed: 1, error: "Telegram reaction API is unavailable" };
+      try {
+        await api.setMessageReaction(chatId, messageId, reaction);
+        return { ok: true as const, sent: 1, failed: 0 };
+      } catch (error) {
+        return { ok: false as const, sent: 0, failed: 1, error: safeError(error) };
+      }
+    });
+    return result as OutboundTextResult;
+  };
+
+  return { send, react };
 }
 
 /** Default real-grammY API surface; it never starts polling. */
@@ -119,6 +142,8 @@ function defaultCreateSendApi(token: string): TelegramSendApi {
   const bot = new Bot(token);
   return {
     sendMessage: (chatId, text, other) => bot.api.sendMessage(chatId, text, other),
+    setMessageReaction: (chatId, messageId, reaction, other) =>
+      bot.api.setMessageReaction(chatId, messageId, reaction as never, other),
   };
 }
 

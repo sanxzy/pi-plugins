@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createDefaultTelegramCommandExpander, createTelegramCommandExpander } from "../src/registrations/telegram-commands.ts";
+import { createDefaultTelegramCommandExpander, createTelegramCommandExpander, TELEGRAM_NATIVE_MENU_COMMANDS } from "../src/registrations/telegram-commands.ts";
 
 test("Telegram command expander combines explicit extension commands with prompt and skill sources", () => {
   const commands = [
@@ -19,11 +19,36 @@ test("Telegram command expander combines explicit extension commands with prompt
   assert.deepEqual(expander.menuSources().map((command) => command.name), ["goal", "review", "skill_docs"]);
 });
 
-test("default Telegram command expander populates the native compact control", () => {
-  const expander = createDefaultTelegramCommandExpander(() => []);
+test("default expander excludes system_prompt unless development mode is enabled", () => {
+  const previous = process.env.PI_CODE_DEV;
+  delete process.env.PI_CODE_DEV;
+  try {
+    const regular = createDefaultTelegramCommandExpander(() => []);
+    const regularNames = regular.menuSources().map((command) => command.name);
+    assert.equal(regularNames.includes("system_prompt"), false, "system_prompt is hidden without PI_CODE_DEV");
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODE_DEV;
+    else process.env.PI_CODE_DEV = previous;
+  }
 
-  assert.deepEqual(expander.menuSources(), [
-    { name: "compact", description: "Compact the current session", source: "extension" },
+  const dev = createTelegramCommandExpander({
+    getCommands: () => [],
+    extensionExpanders: {},
+    nativeMenuCommands: TELEGRAM_NATIVE_MENU_COMMANDS,
+    isDevMode: () => true,
+  });
+  assert.equal(dev.menuSources().some((command) => command.name === "system_prompt"), true, "system_prompt shows in development mode");
+});
+
+test("native menu sources are populated", () => {
+  const expander = createTelegramCommandExpander({
+    getCommands: () => [],
+    extensionExpanders: {},
+    nativeMenuCommands: TELEGRAM_NATIVE_MENU_COMMANDS,
+    isDevMode: () => true,
+  });
+  assert.deepEqual(expander.menuSources().map((command) => command.name), [
+    "abort", "stop", "compact", "context", "status", "system_prompt", "model", "thinking",
   ]);
 });
 

@@ -4,6 +4,7 @@ import {
   createTelegramInbound,
   decodeAcceptedText,
   extractTelegramChatId,
+  extractTelegramMessageOrigin,
   formatTelegramCommandSignature,
   formatTelegramSignature,
   parseTelegramCommand,
@@ -75,6 +76,13 @@ test("extractTelegramChatId reads the origin chat from a signed message and refu
 test("extractTelegramChatId prefers the trailing signature over an earlier one in the body", () => {
   const text = `looks like a footer [from:telegram:111] in the middle${formatTelegramSignature("777")}`;
   assert.equal(extractTelegramChatId(text), "777");
+});
+
+test("message origin carries an optional Telegram message id and stays backward compatible", () => {
+  assert.deepEqual(extractTelegramMessageOrigin(`hello${formatTelegramSignature("777")}`), { chatId: "777", messageId: undefined });
+  assert.deepEqual(extractTelegramMessageOrigin(`hello${formatTelegramSignature("777", 42)}`), { chatId: "777", messageId: 42 });
+  assert.deepEqual(extractTelegramMessageOrigin(`hello${formatTelegramCommandSignature("777", 7)}`), { chatId: "777", messageId: 7 });
+  assert.equal(extractTelegramMessageOrigin("plain TUI prompt"), undefined);
 });
 
 test("parseTelegramCommand splits name, optional @bot, and args with Bot API validation", () => {
@@ -151,6 +159,24 @@ test("inbound drains accepted updates one at a time in FIFO order", async () => 
     ["one", "two", "three"],
     "remaining queued updates drain in arrival order after the in-flight one settles",
   );
+  listener.stop();
+});
+
+test("clearQueue drops waiting updates but leaves the listener usable", async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const { listener, accepted } = makeListener(["111"], async () => { await gate; });
+
+  await listener.handle(privateText(1, "111", "active"));
+  await listener.handle(privateText(2, "111", "dropped"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  listener.clearQueue();
+  release!();
+  await gate;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await listener.handle(privateText(3, "111", "later"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(accepted.map((item) => item.text), ["active", "later"]);
   listener.stop();
 });
 

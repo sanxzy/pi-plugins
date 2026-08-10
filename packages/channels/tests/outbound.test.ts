@@ -54,6 +54,35 @@ test("outbound sends to an explicit chat id and reports chunk count", async () =
   assert.deepEqual(sent, [{ chat: "777", text: "hello" }]);
 });
 
+test("outbound reacts to a specific Telegram message", async () => {
+  const reactions: Array<{ chat: string | number; messageId: number; reaction: unknown }> = [];
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX", approvedUserIds: [] } }),
+    createSendApi: () => ({
+      async sendMessage() {},
+      async setMessageReaction(chat, messageId, reaction) {
+        reactions.push({ chat, messageId, reaction });
+      },
+    }),
+  });
+
+  const result = await outbound.react("project", "777", 42, [{ type: "emoji", emoji: "👍" }]);
+  assert.deepEqual(result, { ok: true, sent: 1, failed: 0 });
+  assert.deepEqual(reactions, [{ chat: "777", messageId: 42, reaction: [{ type: "emoji", emoji: "👍" }] }]);
+});
+
+test("reaction fails closed when the channel is not configured", async () => {
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: false, code: "missing", message: "missing" }),
+  });
+  assert.deepEqual(await outbound.react("project", "777", 42, [{ type: "emoji", emoji: "👍" }]), {
+    ok: false,
+    sent: 0,
+    failed: 1,
+    error: "Telegram channel not configured",
+  });
+});
+
 test("outbound fails closed when the channel is not configured", async () => {
   const outbound = createTelegramOutbound({
     readConfig: () => ({ ok: false, code: "missing", message: "missing" }),

@@ -1,4 +1,5 @@
 import type {
+  AgentStartEvent,
   ExtensionAPI,
   ExtensionContext,
   SessionShutdownEvent,
@@ -8,12 +9,15 @@ import { getChildPool } from "@xzy-ai/runtime";
 import {
   canonicalProjectRoot,
   createTelegramInbound,
+  createTelegramOutbound,
   defaultTelegramPairingState,
+  extractTelegramMessageOrigin,
   formatTelegramCommandSignature,
   formatTelegramSignature,
   parseTelegramCommand,
   readChannelConfig,
   type TelegramCommand,
+  type TelegramMessageOrigin,
   readChannelRuntime,
   writeChannelRuntime,
   type ChannelConfig,
@@ -33,9 +37,26 @@ export interface TelegramInboundDeps {
   expandCommand?: (name: string, args: string) => string | undefined;
   /** Dispatch a Telegram-native control directly (e.g. /compact). */
   dispatchControl?: (command: TelegramCommand, options: TelegramControlDispatchOptions) => Promise<boolean>;
+  /** Injectable Telegram reaction boundary for agent-start acknowledgement. */
+  reactTelegramMessage?: (projectRoot: string, origin: TelegramMessageOrigin) => Promise<void>;
 }
 
 const listenersByProject = new Map<string, TelegramInboundListener>();
+
+function latestUserMessageText(ctx: ExtensionContext): string | undefined {
+  const branch = ctx.sessionManager.getBranch();
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const entry = branch[index];
+    if (entry?.type !== "message" || entry.message.role !== "user") continue;
+    return typeof entry.message.content === "string"
+      ? entry.message.content
+      : entry.message.content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+  }
+  return undefined;
+}
 
 /** Refresh authorization state after setup approves a pending DM request. */
 export function refreshTelegramInbound(projectRoot: string, config: ChannelConfig): void {
@@ -55,6 +76,22 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   const createInbound = deps.createInbound ?? createTelegramInbound;
   const expandCommand = deps.expandCommand ?? (() => undefined);
   const dispatchControl = deps.dispatchControl ?? ((command, options) => dispatchTelegramControl(command, options));
+  const reactTelegramMessage = deps.reactTelegramMessage ?? ((projectRoot, origin) => {
+    if (origin.messageId === undefined) return Promise.resolve();
+    return createTelegramOutbound().react(projectRoot, origin.chatId, origin.messageId, [{ type: "emoji", emoji: "👍" }]).then(() => undefined);
+  });
+  let activeListener: TelegramInboundListener | undefined;
+
+  // Acknowledge the latest Telegram-originated user message when the agent loop
+  // begins. Non-blocking: a failed reply reaction must not delay or break the run.
+  pi.on("agent_start", (_event: AgentStartEvent, ctx: ExtensionContext) => {
+    const projectRoot = canonicalProjectRoot(ctx.cwd);
+    const latestUserMessage = latestUserMessageText(ctx);
+    if (!latestUserMessage) return;
+    const origin = extractTelegramMessageOrigin(latestUserMessage);
+    if (!origin) return;
+    void reactTelegramMessage(projectRoot, origin).catch(() => undefined);
+  });
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
@@ -77,7 +114,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         // Pairing and delivery failures are local-only. The channel logger and
         // lifecycle status remain the operator's diagnostic surfaces.
       },
-      async onAccepted(updateId, chatId, text) {
+      async onAccepted(updateId, chatId, text, messageId) {
         // Every accepted Telegram message is delivered as a steer, regardless of
         // whether the agent is idle, processing, or waiting on a tool call. PI
         // injects the steer before the next LLM call, so Telegram stays
@@ -93,6 +130,12 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
             projectRoot,
             chatId,
             context: ctx,
+            pi: {
+              setModel: (model) => pi.setModel(model),
+              getThinkingLevel: () => pi.getThinkingLevel(),
+              setThinkingLevel: (level) => pi.setThinkingLevel(level),
+            },
+            clearQueue: () => activeListener?.clearQueue(),
           });
           if (handled) return;
         }
@@ -102,8 +145,8 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         // origin signature.
         const expanded = command ? expandCommand(command.name, command.args) : undefined;
         const content = expanded !== undefined
-          ? `${expanded}${formatTelegramCommandSignature(chatId)}`
-          : `${text}${formatTelegramSignature(chatId)}`;
+          ? `${expanded}${formatTelegramCommandSignature(chatId, messageId)}`
+          : `${text}${formatTelegramSignature(chatId, messageId)}`;
         pi.sendUserMessage(content, { deliverAs: "steer" });
       },
     });
@@ -119,6 +162,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
       sessionId,
       createMessageHandler: () => (context) => listener.handle(context),
     });
+    activeListener = listener;
     runningByProject.set(projectRoot, listener);
     listenersByProject.set(projectRoot, listener);
     listener.setBusy(false);
@@ -130,6 +174,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     const listener = listenersByProject.get(projectRoot);
     runningByProject.delete(projectRoot);
     listenersByProject.delete(projectRoot);
+    activeListener = undefined;
     listener?.stop();
   });
 }

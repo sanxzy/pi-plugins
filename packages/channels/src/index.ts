@@ -102,12 +102,14 @@ export {
   defaultTelegramPairingState,
   decodeAcceptedText,
   extractTelegramChatId,
+  extractTelegramMessageOrigin,
   formatTelegramCommandSignature,
   formatTelegramSignature,
   parseTelegramCommand,
   type TelegramCommand,
   type TelegramInboundListener,
   type TelegramInboundOptions,
+  type TelegramMessageOrigin,
   type TelegramUpdate,
 } from "./inbound.ts";
 export {

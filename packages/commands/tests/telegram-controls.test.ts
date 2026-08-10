@@ -32,7 +32,7 @@ function collectReplies(): { messages: string[]; send: (projectRoot: string, cha
   };
 }
 
-test("non-compact commands are not owned by the control handler", async () => {
+test("non-control commands are not owned by the handler", async () => {
   const { messages, send } = collectReplies();
   const handled = await dispatchTelegramControl(
     command("goal"),
@@ -98,6 +98,132 @@ test("a second compact while one is in flight is refused", async () => {
   onComplete?.();
   await new Promise((resolve) => setTimeout(resolve, 0));
   clearTelegramControlState();
+});
+
+function piControl() {
+  let level = "medium" as const;
+  return {
+    setModel: async () => true,
+    getThinkingLevel: () => level,
+    setThinkingLevel: (next: string) => { level = next as typeof level; },
+  };
+}
+
+function contextWithPi(pi: ReturnType<typeof piControl>, overrides: Partial<ExtensionContext> = {}) {
+  return context({
+    modelRegistry: { getAvailable: () => [{ provider: "anthropic", id: "claude-x", name: "Claude X" }] },
+    model: { provider: "anthropic", id: "claude-x", name: "Claude X" },
+    getContextUsage: () => ({ tokens: 1000, contextWindow: 200000, percent: 0.5 }),
+    getSystemPrompt: () => "SYSTEM",
+    ...overrides,
+  });
+}
+
+test("abort aborts a busy Pi operation and reports", async () => {
+  const { messages, send } = collectReplies();
+  let aborted = false;
+  const ctx = context({ isIdle: () => false, abort: () => { aborted = true; } });
+  const handled = await dispatchTelegramControl(
+    command("abort"),
+    { projectRoot: "/tmp/project", chatId: "555", context: ctx, sendMessage: send },
+  );
+  assert.equal(handled, true);
+  assert.equal(aborted, true);
+  assert.ok(messages.some((m) => m.includes("aborted")));
+});
+
+test("stop aborts and clears the Telegram queue", async () => {
+  const { messages, send } = collectReplies();
+  let aborted = false;
+  let cleared = false;
+  const ctx = context({ isIdle: () => false, abort: () => { aborted = true; } });
+  const handled = await dispatchTelegramControl(
+    command("stop"),
+    { projectRoot: "/tmp/project", chatId: "555", context: ctx, sendMessage: send, clearQueue: () => { cleared = true; } },
+  );
+  assert.equal(handled, true);
+  assert.equal(aborted, true);
+  assert.equal(cleared, true);
+  assert.ok(messages.some((m) => m.includes("cleared")));
+});
+
+test("context reports context usage", async () => {
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(
+    command("context"),
+    { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), sendMessage: send },
+  );
+  assert.equal(handled, true);
+  assert.ok(messages.some((m) => m.includes("1,000")));
+  assert.ok(messages.some((m) => m.includes("200,000")));
+});
+
+test("status reports idle, pending, model, and context", async () => {
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(
+    command("status"),
+    { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), sendMessage: send },
+  );
+  assert.equal(handled, true);
+  assert.ok(messages.some((m) => m.includes("idle")));
+  assert.ok(messages.some((m) => m.includes("anthropic/claude-x")));
+});
+
+test("system_prompt returns the effective system prompt", async () => {
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(
+    command("system_prompt"),
+    { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), sendMessage: send, isDevMode: () => true },
+  );
+  assert.equal(handled, true);
+  assert.ok(messages.some((m) => m.includes("SYSTEM")));
+});
+
+test("model lists available models and switches on match", async () => {
+  const { messages, send } = collectReplies();
+  const listHandled = await dispatchTelegramControl(
+    command("model"),
+    { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), pi: piControl(), sendMessage: send },
+  );
+  assert.equal(listHandled, true);
+  assert.ok(messages.some((m) => m.includes("anthropic/claude-x")));
+
+  const switchMessages: string[] = [];
+  const switchHandled = await dispatchTelegramControl(
+    command("model", "claude-x"),
+    { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), pi: piControl(), sendMessage: async (_p, _c, t) => { switchMessages.push(t); } },
+  );
+  assert.equal(switchHandled, true);
+  assert.ok(switchMessages.some((m) => m.includes("Model set to")));
+});
+
+test("system_prompt is blocked unless development mode is enabled", async () => {
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(
+    command("system_prompt"),
+    { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), sendMessage: send, isDevMode: () => false },
+  );
+  assert.equal(handled, true);
+  assert.ok(messages.some((m) => m.includes("PI_CODE_DEV=1")));
+  assert.equal(messages.some((m) => m.includes("SYSTEM")), false);
+});
+
+test("thinking shows the level and sets a valid new level", async () => {
+  const { messages, send } = collectReplies();
+  const showHandled = await dispatchTelegramControl(
+    command("thinking"),
+    { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), pi: piControl(), sendMessage: send },
+  );
+  assert.equal(showHandled, true);
+  assert.ok(messages.some((m) => m.includes("medium")));
+
+  const setMessages: string[] = [];
+  const setHandled = await dispatchTelegramControl(
+    command("thinking", "high"),
+    { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), pi: piControl(), sendMessage: async (_p, _c, t) => { setMessages.push(t); } },
+  );
+  assert.equal(setHandled, true);
+  assert.ok(setMessages.some((m) => m.includes("high")));
 });
 
 test("a thrown compact still reports a failure notice", async () => {
