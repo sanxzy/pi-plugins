@@ -86,7 +86,7 @@ export function decodeAcceptedText(context: unknown): TelegramUpdate | undefined
  * Telegram follow-up. Never added to TUI-originated content.
  */
 export function formatTelegramSignature(chatId: string): string {
-  return `\n\n---\n[from:telegram:${chatId}]\n[telegram-user-active]\nThe user is currently active on Telegram. Use the \`user_telegram_chat\` tool whenever you want to reply to or communicate directly with the user.\n---`;
+  return `\n\n---\n[from:telegram:${chatId}]\nThe user is currently active on Telegram. Use the \`user_telegram_chat\` tool whenever you want to reply to or communicate directly with the user.\n---`;
 }
 
 /** A queued, accepted private text message awaiting delivery. */

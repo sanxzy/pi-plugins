@@ -58,7 +58,7 @@ test("decodeAcceptedText rejects non-private, edited, non-text, and identity-mis
 test("formatTelegramSignature marks the origin and reminds the agent to use user_telegram_chat", () => {
   assert.equal(
     formatTelegramSignature("123"),
-    "\n\n---\n[from:telegram:123]\n[telegram-user-active]\nThe user is currently active on Telegram. Use the `user_telegram_chat` tool whenever you want to reply to or communicate directly with the user.\n---",
+    "\n\n---\n[from:telegram:123]\nThe user is currently active on Telegram. Use the `user_telegram_chat` tool whenever you want to reply to or communicate directly with the user.\n---",
   );
 });
 
