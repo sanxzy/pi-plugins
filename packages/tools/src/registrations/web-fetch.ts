@@ -63,16 +63,30 @@ export async function executeWebFetch(
   const timeoutSeconds = normalizeTimeout(params.timeout);
   const timeoutSignal = AbortSignal.timeout(timeoutSeconds * 1000);
   const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-  const response = await fetch(url, {
+  const browserHeaders = {
+    "User-Agent": BROWSER_USER_AGENT,
+    Accept: acceptHeader(format),
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+  let response = await fetch(url, {
     method: "GET",
-    headers: {
-      "User-Agent": BROWSER_USER_AGENT,
-      Accept: acceptHeader(format),
-      "Accept-Language": "en-US,en;q=0.9",
-    },
+    headers: browserHeaders,
     redirect: "follow",
     signal: requestSignal,
   });
+
+  // Retry exactly once with a plain user agent when Cloudflare bot detection
+  // challenges the browser-like fingerprint; the retry stays inside the same
+  // total timeout budget because the combined signal is reused.
+  if (response.status === 403 && response.headers.get("cf-mitigated") === "challenge") {
+    await response.body?.cancel().catch(() => {});
+    response = await fetch(url, {
+      method: "GET",
+      headers: { ...browserHeaders, "User-Agent": "opencode" },
+      redirect: "follow",
+      signal: requestSignal,
+    });
+  }
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${response.statusText || "Request failed"}`);
@@ -82,6 +96,16 @@ export async function executeWebFetch(
   const contentType = response.headers.get("content-type") ?? "";
   const mime = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   const title = `${url} (${contentType})`;
+
+  if (isRasterImageMime(mime)) {
+    return {
+      content: [
+        { type: "text" as const, text: "Image fetched successfully" },
+        { type: "image" as const, data: Buffer.from(body).toString("base64"), mimeType: mime },
+      ],
+      details: {},
+    };
+  }
 
   if (!isTextContentType(mime)) {
     return textResult(`Unsupported binary content-type: ${mime || "unknown"}`, {});
@@ -185,6 +209,10 @@ function decodeBody(body: Uint8Array, contentType: string): string {
 
 function isHtmlContentType(mime: string): boolean {
   return mime === "text/html" || mime === "application/xhtml+xml";
+}
+
+function isRasterImageMime(mime: string): boolean {
+  return mime.startsWith("image/") && mime !== "image/svg+xml" && mime !== "image/vnd.fastbidsheet";
 }
 
 function isTextContentType(mime: string): boolean {
