@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { approvePairingAt, channelConfigFile, createTelegramInbound, readChannelConfig, readLastConnection, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
+import { approvePairingAt, channelConfigFile, createTelegramInbound, formatTelegramSignature, readChannelConfig, readLastConnection, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
 
@@ -92,7 +92,7 @@ test("root session start delivers accepted text as a follow-up with the exact si
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(sent.length, 1, "one Telegram message is injected");
-  assert.equal(sent[0], "hello\n\n---\n[from:telegram:777]\n---", "exact signature is appended");
+  assert.equal(sent[0], "hello" + formatTelegramSignature("777"), "exact signature is appended");
   const marker = readLastConnection(cwd);
   assert.equal(marker.ok, true);
   if (marker.ok) {
@@ -140,8 +140,8 @@ test("a busy agent is steered immediately with deliverAs steer, preserving FIFO"
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(sent, [
-    "one\n\n---\n[from:telegram:777]\n---",
-    "two\n\n---\n[from:telegram:777]\n---",
+    "one" + formatTelegramSignature("777"),
+    "two" + formatTelegramSignature("777"),
   ], "each busy message is steered in arrival order");
   assert.deepEqual(deliveryModes, ["steer", "steer"], "busy messages use steer delivery");
   clearTelegramProjectManagers();
@@ -196,7 +196,7 @@ test("an unauthorized DM creates a pairing request and is never delivered; appro
 
   await listener!.handle(privateText(2, "222", "later"));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(sent, ["later\n\n---\n[from:telegram:777]\n---"], "the post-approval DM is delivered");
+  assert.deepEqual(sent, ["later" + formatTelegramSignature("777")], "the post-approval DM is delivered");
   clearTelegramProjectManagers();
 });
 
