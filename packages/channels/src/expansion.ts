@@ -10,6 +10,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { stripFrontmatter } from "@earendil-works/pi-coding-agent";
+import { sanitizeTelegramCommandName } from "./menu.ts";
 
 /** Minimum shape of a Pi slash command source used for expansion. */
 export interface TelegramExpandableSource {
@@ -24,6 +25,15 @@ export interface TelegramExpansionTarget {
   /** The command name users type (prompt name or skill name, sanitized). */
   command: string;
   path: string;
+}
+
+/** Return the Telegram-valid command name used for a prompt or skill source. */
+export function telegramExpansionCommandName(command: TelegramExpandableSource): string | undefined {
+  const rawName = command.source === "skill" && command.name.startsWith("skill:")
+    ? command.name.slice("skill:".length)
+    : command.name;
+  const baseName = command.source === "skill" ? `skill_${rawName}` : rawName;
+  return sanitizeTelegramCommandName(baseName);
 }
 
 /** Skip command names that are already handled by the extension bridge. */
@@ -46,16 +56,7 @@ export function discoverTelegramExpansions(
     if (command.source !== "prompt" && command.source !== "skill") continue;
     const path = command.sourceInfo?.path;
     if (!path) continue;
-    const rawName = command.source === "skill" && command.name.startsWith("skill:")
-      ? command.name.slice("skill:".length)
-      : command.name;
-    const commandName = rawName
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, "_")
-      .replace(/_+/g, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 32)
-      .replace(/_+$/g, "");
+    const commandName = telegramExpansionCommandName(command);
     if (!commandName || reserved.has(commandName)) continue;
     targets.set(commandName, { name: command.name, command: commandName, path });
   }

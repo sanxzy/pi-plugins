@@ -13,12 +13,14 @@ import {
   formatTelegramSignature,
   parseTelegramCommand,
   readChannelConfig,
+  type TelegramCommand,
   readChannelRuntime,
   writeChannelRuntime,
   type ChannelConfig,
   type TelegramInboundListener,
 } from "@xzy-ai/channels";
 import { getTelegramProjectManager } from "./telegram-project.ts";
+import { dispatchTelegramControl, type TelegramControlDispatchOptions } from "./telegram-controls.ts";
 
 export interface TelegramInboundDeps {
   /** Injectable inbound factory for offline tests. */
@@ -29,6 +31,8 @@ export interface TelegramInboundDeps {
    * unknown and should be injected as literal text instead.
    */
   expandCommand?: (name: string, args: string) => string | undefined;
+  /** Dispatch a Telegram-native control directly (e.g. /compact). */
+  dispatchControl?: (command: TelegramCommand, options: TelegramControlDispatchOptions) => Promise<boolean>;
 }
 
 const listenersByProject = new Map<string, TelegramInboundListener>();
@@ -50,6 +54,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   const runningByProject = new Map<string, TelegramInboundListener>();
   const createInbound = deps.createInbound ?? createTelegramInbound;
   const expandCommand = deps.expandCommand ?? (() => undefined);
+  const dispatchControl = deps.dispatchControl ?? ((command, options) => dispatchTelegramControl(command, options));
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
@@ -80,11 +85,21 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         const runtime = writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
         if (!runtime.ok) return;
 
+        const command = parseTelegramCommand(text);
+        // Telegram-native controls are handled directly (e.g. /compact) and
+        // never enter the model prompt stream.
+        if (command) {
+          const handled = await dispatchControl(command, {
+            projectRoot,
+            chatId,
+            context: ctx,
+          });
+          if (handled) return;
+        }
         // A recognized slash command is dispatched natively: inject only the
         // expanded command content with a compact signature so the message is
         // not split by the long guidance footer. Unknown text keeps the full
         // origin signature.
-        const command = parseTelegramCommand(text);
         const expanded = command ? expandCommand(command.name, command.args) : undefined;
         const content = expanded !== undefined
           ? `${expanded}${formatTelegramCommandSignature(chatId)}`

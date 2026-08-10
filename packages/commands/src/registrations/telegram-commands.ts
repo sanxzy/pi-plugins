@@ -11,6 +11,7 @@
 import {
   discoverTelegramExpansions,
   expandTelegramCommand,
+  telegramExpansionCommandName,
   telegramExpansionReservedNames,
   type TelegramMenuCommandSource,
 } from "@xzy-ai/channels";
@@ -21,7 +22,14 @@ export interface TelegramCommandExpanderOptions {
   getCommands: () => readonly TelegramMenuCommandSource[];
   /** Extension commands dispatched natively from Telegram: name -> expander. */
   extensionExpanders?: Record<string, (args: string) => string>;
+  /** Native Telegram controls that do not come from Pi's command catalog. */
+  nativeMenuCommands?: readonly TelegramMenuCommandSource[];
 }
+
+/** Native controls handled directly by the Telegram bridge. */
+export const TELEGRAM_NATIVE_MENU_COMMANDS: readonly TelegramMenuCommandSource[] = [
+  { name: "compact", description: "Compact the current session", source: "extension" },
+];
 
 export interface TelegramCommandExpander {
   /** Expand a recognized command, or undefined when unknown. */
@@ -45,7 +53,7 @@ export function createTelegramCommandExpander(
 
   const menuSources = (): TelegramMenuCommandSource[] => {
     const expanderNames = new Set(Object.keys(options.extensionExpanders ?? {}));
-    return options
+    const catalogCommands = options
       .getCommands()
       .filter((command) => {
         if (command.source === "extension") {
@@ -56,6 +64,12 @@ export function createTelegramCommandExpander(
         // expander are excluded: the explicit expander wins at dispatch time.
         return !reserved.has(command.name);
       });
+    const menuCatalogCommands = catalogCommands.map((command) => {
+      if (command.source !== "skill") return command;
+      const name = telegramExpansionCommandName(command);
+      return name ? { ...command, name } : command;
+    });
+    return [...(options.nativeMenuCommands ?? []), ...menuCatalogCommands];
   };
 
   return { expand, menuSources };
@@ -68,5 +82,6 @@ export function createDefaultTelegramCommandExpander(
   return createTelegramCommandExpander({
     getCommands,
     extensionExpanders: { goal: expandTelegramGoalCommand },
+    nativeMenuCommands: TELEGRAM_NATIVE_MENU_COMMANDS,
   });
 }

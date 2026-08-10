@@ -92,6 +92,7 @@ export {
   parseTelegramTemplateArgs,
   readTelegramExpansionFile,
   substituteTelegramTemplateArgs,
+  telegramExpansionCommandName,
   telegramExpansionReservedNames,
   type TelegramExpandableSource,
   type TelegramExpansionTarget,

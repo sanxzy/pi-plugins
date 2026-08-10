@@ -15,9 +15,9 @@ const SKILL = { name: "skill:generate-doc", source: "skill", sourceInfo: { path:
 
 test("discoverTelegramExpansions maps prompts and skills to sanitized command names", () => {
   const targets = discoverTelegramExpansions([PROMPT, SKILL]);
-  assert.deepEqual([...targets.keys()], ["fix_tests", "generate_doc"]);
+  assert.deepEqual([...targets.keys()], ["fix_tests", "skill_generate_doc"]);
   assert.equal(targets.get("fix_tests")?.path, "/prompts/fix-tests.md");
-  assert.equal(targets.get("generate_doc")?.path, "/skills/generate-doc/SKILL.md");
+  assert.equal(targets.get("skill_generate_doc")?.path, "/skills/generate-doc/SKILL.md");
 });
 
 test("discoverTelegramExpansions skips non-file and reserved commands", () => {
@@ -48,6 +48,6 @@ test("expandTelegramCommand preserves arguments for templates without placeholde
   const targets = discoverTelegramExpansions([
     { name: "skill:generate-plan", source: "skill", sourceInfo: { path: "/skills/generate-plan/SKILL.md" } },
   ]);
-  const expanded = expandTelegramCommand(targets, "generate_plan", "F001", () => "Run the planning workflow.");
+  const expanded = expandTelegramCommand(targets, "skill_generate_plan", "F001", () => "Run the planning workflow.");
   assert.equal(expanded, "Run the planning workflow.\n\n---\nUser request arguments: F001\n---");
 });

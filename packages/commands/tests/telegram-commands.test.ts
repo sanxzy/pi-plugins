@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createTelegramCommandExpander } from "../src/registrations/telegram-commands.ts";
+import { createDefaultTelegramCommandExpander, createTelegramCommandExpander } from "../src/registrations/telegram-commands.ts";
 
 test("Telegram command expander combines explicit extension commands with prompt and skill sources", () => {
   const commands = [
@@ -16,7 +16,15 @@ test("Telegram command expander combines explicit extension commands with prompt
 
   assert.equal(expander.expand("goal", "10s test"), "GOAL:10s test");
   assert.equal(expander.expand("review", "changes"), undefined, "default file reader cannot read fake path");
-  assert.deepEqual(expander.menuSources().map((command) => command.name), ["goal", "review", "skill:docs"]);
+  assert.deepEqual(expander.menuSources().map((command) => command.name), ["goal", "review", "skill_docs"]);
+});
+
+test("default Telegram command expander populates the native compact control", () => {
+  const expander = createDefaultTelegramCommandExpander(() => []);
+
+  assert.deepEqual(expander.menuSources(), [
+    { name: "compact", description: "Compact the current session", source: "extension" },
+  ]);
 });
 
 test("Telegram command expander keeps extension command names reserved from prompt collisions", () => {
