@@ -89,9 +89,9 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "goal_resume",
     "goal_status",
     "goal_clear",
-    "user_telegram_chat",
-    "web_search",
     "web_fetch",
+    "web_search",
+    "user_telegram_chat",
   ]);
 });
 
@@ -122,13 +122,15 @@ test("parent startup activates the registered tools including web_search and web
     mode: "tui",
     hasUI: true,
     cwd: "/tmp",
-    ui: { notify() {} },
+    ui: { notify() {}, setFooter() {}, onTerminalInput() {
+      return () => {};
+    } },
     sessionManager: {
       getSessionId: () => "root-session",
       getSessionFile: () => undefined,
     },
   } as unknown as ExtensionContext;
-  await sessionStarts[0]?.({ type: "session_start", reason: "startup" }, ctx);
+  await Promise.all(sessionStarts.map((handler) => handler?.({ type: "session_start", reason: "startup" }, ctx)));
   assert.ok(activeTools, "setActiveTools called on startup");
   assert.ok(activeTools.includes("web_search"), "web_search active in parent session");
   assert.ok(activeTools.includes("web_fetch"), "web_fetch active in parent session");

@@ -49,19 +49,24 @@ interface ChildSessionServices {
 /** All seven Pi built-in tools; the default allowlist for child sessions. */
 const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
 
+/** pi-code extension tools appended to every child allowlist. */
+const EXTENSION_TOOLS = ["web_search", "web_fetch"] as const;
+
 /**
  * Map a resolved agent to its child tool allowlist.
  *
  * An explicit non-empty frontmatter `tools` list wins, except that goal
  * capabilities are always removed because goals belong to the main host. A
  * default/inherited agent or an absent/empty list enables the full built-in set
- * so the read-only Pi tools (grep, find, ls) are active by default.
+ * so the read-only Pi tools (grep, find, ls) are active by default. The pi-code
+ * web tools are appended in every case so they stay available to subagents.
  */
 export function resolveChildTools(agent: ResolvedAgent): readonly string[] {
-  if (agent.isDefault) return ALL_BUILTIN_TOOLS;
+  if (agent.isDefault) return [...ALL_BUILTIN_TOOLS, ...EXTENSION_TOOLS];
 
   const tools = agent.tools && agent.tools.length > 0 ? agent.tools : ALL_BUILTIN_TOOLS;
-  return tools.filter((name) => !name.startsWith("goal_"));
+  const extensionNames = EXTENSION_TOOLS as readonly string[];
+  return [...tools.filter((name) => !name.startsWith("goal_") && !extensionNames.includes(name)), ...EXTENSION_TOOLS];
 }
 
 /** Convert an unknown thrown value into a stable message string. */
