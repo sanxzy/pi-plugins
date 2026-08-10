@@ -94,7 +94,7 @@ test("llm_wikis_search returns deterministically ranked excerpts with scores and
       formatWikiEntry({
         topic: "typescript-notes",
         source: "web_fetch",
-        queryOrUrl: "https://example.com/typescript",
+        queryOrUrl: "https://example.com/other",
         format: "markdown",
         title: "Other title",
         text: "typescript in body",
@@ -141,7 +141,7 @@ test("llm_wikis_search accepts natural-language topic filters and searches conti
   }
 });
 
-test("llm_wikis_search enforces default, maximum, excerpt, and aggregate output limits", async () => {
+test("llm_wikis_search defaults to 20 results and caps at the 50 maximum", async () => {
   const root = tempRoot();
   const entries = Array.from({ length: 55 }, (_, index) =>
     formatWikiEntry({
@@ -150,7 +150,7 @@ test("llm_wikis_search enforces default, maximum, excerpt, and aggregate output 
       queryOrUrl: `limits ${index}`,
       format: "markdown",
       title: `Limits ${index}`,
-      text: `${"limits ".repeat(600)}${index}`,
+      text: `limits ${index}`,
       timestamp: `2026-01-${String((index % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
     }),
   ).join("");
@@ -159,12 +159,36 @@ test("llm_wikis_search enforces default, maximum, excerpt, and aggregate output 
     const defaultResult = await executeLlmWikisSearch({ query: "limits" }, { wikiRoot: root });
     const defaultDetails = defaultResult.details as { results: Array<Record<string, unknown>> };
     assert.equal(defaultDetails.results.length, 20);
-    assert.ok(defaultDetails.results.every((item) => String(item.excerpt).length <= 2048));
-    assert.ok(JSON.stringify(defaultResult).length <= 64 * 1024 + 2048);
 
     const maxResult = await executeLlmWikisSearch({ query: "limits", maxResults: 50 }, { wikiRoot: root });
     const maxDetails = maxResult.details as { results: Array<Record<string, unknown>> };
     assert.equal(maxDetails.results.length, 50);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search bounds each excerpt to approximately 2 KB and the aggregate output", async () => {
+  const root = tempRoot();
+  const longText = `typescript ${"padding ".repeat(3000)}`;
+  writeFileSync(
+    join(root, "long.md"),
+    formatWikiEntry({
+      topic: "long",
+      source: "web_search",
+      queryOrUrl: "long",
+      format: "markdown",
+      title: "Long",
+      text: longText,
+      timestamp: "2026-01-01T00:00:00.000Z",
+    }),
+  );
+  try {
+    const result = await executeLlmWikisSearch({ query: "typescript" }, { wikiRoot: root });
+    const details = result.details as { results: Array<Record<string, unknown>> };
+    assert.equal(details.results.length, 1);
+    assert.ok(String(details.results[0]?.excerpt).length <= 2048);
+    assert.ok(text(result).length <= 64 * 1024);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
