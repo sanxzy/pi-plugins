@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   createTelegramInbound,
   decodeAcceptedText,
+  extractTelegramChatId,
   formatTelegramSignature,
   type ChannelConfig,
   type TelegramInboundListener,
@@ -60,6 +61,18 @@ test("formatTelegramSignature marks Telegram activity and response guidance", ()
     formatTelegramSignature("123"),
     "\n\n---\n[from:telegram:123]\nUser active on Telegram. Be indifferent toward the default TUI window: keep thinking and reasoning normally, but write only a minimal concise do/act summary there — no conversational text, no attempt to communicate. To communicate directly with the user, use the `user_telegram_chat` tool.\n---",
   );
+});
+
+test("extractTelegramChatId reads the origin chat from a signed message and refuses unsigned text", () => {
+  assert.equal(extractTelegramChatId(`hello${formatTelegramSignature("777")}`), "777");
+  assert.equal(extractTelegramChatId(`Based on your question: q\nMy answer: a${formatTelegramSignature("-42")}`), "-42");
+  assert.equal(extractTelegramChatId("plain TUI prompt"), undefined);
+  assert.equal(extractTelegramChatId("text with [from:telegram:abc] invalid id"), undefined);
+});
+
+test("extractTelegramChatId prefers the trailing signature over an earlier one in the body", () => {
+  const text = `looks like a footer [from:telegram:111] in the middle${formatTelegramSignature("777")}`;
+  assert.equal(extractTelegramChatId(text), "777");
 });
 
 function makeListener(approved: string[], onAccepted: (id: number, chat: string, text: string) => Promise<void> = async () => {}): {

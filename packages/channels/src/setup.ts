@@ -2,7 +2,6 @@ import {
   readChannelConfig,
   validateChannelConfig,
   writeChannelConfig,
-  writeLastConnection,
   type ChannelConfig,
   type StateResult,
 } from "./state.ts";
@@ -120,17 +119,6 @@ export function createTelegramSetupController(
       if (!written.ok) {
         await restorePrevious(options, previous);
         return safeFailure("Telegram connected, but the configuration could not be saved");
-      }
-
-      const marker = writeLastConnection(options.projectRoot, {
-        lastConnection: "tui",
-        updatedAt: new Date().toISOString(),
-      });
-      if (!marker.ok) {
-        // Restore the prior persisted config before restoring the prior listener.
-        if (previous) writeConfig(options.projectRoot, previous);
-        await restorePrevious(options, previous);
-        return safeFailure("Telegram connected, but the connection marker could not be saved");
       }
 
       return { ok: true, message: "Telegram connection ready." };

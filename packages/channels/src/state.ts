@@ -9,15 +9,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { channelConfigFile, lastConnectionFile } from "./shared/paths.ts";
+import { channelConfigFile, channelRuntimeFile } from "./shared/paths.ts";
 
 const PRIVATE_FILE_MODE = 0o600;
 const TEMP_FILE_MODE = 0o600;
 const TOKEN_PATTERN = /^\d{5,}:[A-Za-z0-9_-]{20,}$/;
 const CHAT_ID_PATTERN = /^-?\d+$/;
 const PAIRING_CODE_PATTERN = /^[A-Z2-9]{8}$/;
-
-export type LastConnection = "telegram" | "tui";
 
 export interface PairingRequest {
   userId: string;
@@ -33,12 +31,9 @@ export interface ChannelConfig {
   pendingPairings?: PairingRequest[];
 }
 
-export interface LastConnectionState {
-  lastConnection?: LastConnection;
-  chatRoomId?: string;
+export interface ChannelRuntimeState {
   /** Highest accepted Telegram update identity, used to suppress replay after restart. */
   lastUpdateId?: number;
-  updatedAt?: string;
 }
 
 export type StateResult<T> =
@@ -102,25 +97,13 @@ function parseConfig(value: unknown): StateResult<ChannelConfig> {
   return { ok: true, value: result };
 }
 
-function parseLastConnection(value: unknown): StateResult<LastConnectionState> {
-  if (!isRecord(value)) return { ok: false, code: "invalid", message: "Last-connection state must be an object" };
-  if (value.lastConnection !== undefined && value.lastConnection !== "telegram" && value.lastConnection !== "tui") {
-    return { ok: false, code: "invalid", message: "Last-connection state has an invalid connection" };
-  }
-  if (value.chatRoomId !== undefined && (typeof value.chatRoomId !== "string" || !CHAT_ID_PATTERN.test(value.chatRoomId))) {
-    return { ok: false, code: "invalid", message: "Last-connection state has an invalid chat ID" };
-  }
+function parseChannelRuntime(value: unknown): StateResult<ChannelRuntimeState> {
+  if (!isRecord(value)) return { ok: false, code: "invalid", message: "Channel runtime state must be an object" };
   if (value.lastUpdateId !== undefined && (!Number.isSafeInteger(value.lastUpdateId) || (value.lastUpdateId as number) < 0)) {
-    return { ok: false, code: "invalid", message: "Last-connection state has an invalid update ID" };
+    return { ok: false, code: "invalid", message: "Channel runtime state has an invalid update ID" };
   }
-  if (value.updatedAt !== undefined && typeof value.updatedAt !== "string") {
-    return { ok: false, code: "invalid", message: "Last-connection state has an invalid timestamp" };
-  }
-  const result: LastConnectionState = {};
-  if (value.lastConnection !== undefined) result.lastConnection = value.lastConnection;
-  if (value.chatRoomId !== undefined) result.chatRoomId = value.chatRoomId;
+  const result: ChannelRuntimeState = {};
   if (value.lastUpdateId !== undefined) result.lastUpdateId = value.lastUpdateId as number;
-  if (value.updatedAt !== undefined) result.updatedAt = value.updatedAt;
   return { ok: true, value: result };
 }
 
@@ -175,14 +158,14 @@ export function writeChannelConfig(projectRoot: string, config: ChannelConfig): 
   return writePrivateJson(channelConfigFile(projectRoot), validation.value);
 }
 
-export function readLastConnection(projectRoot: string): StateResult<LastConnectionState> {
-  return readJson(lastConnectionFile(projectRoot), parseLastConnection);
+export function readChannelRuntime(projectRoot: string): StateResult<ChannelRuntimeState> {
+  return readJson(channelRuntimeFile(projectRoot), parseChannelRuntime);
 }
 
-export function writeLastConnection(projectRoot: string, state: LastConnectionState): StateResult<void> {
-  const validation = parseLastConnection(state);
+export function writeChannelRuntime(projectRoot: string, state: ChannelRuntimeState): StateResult<void> {
+  const validation = parseChannelRuntime(state);
   if (!validation.ok) return { ok: false, code: "invalid", message: validation.message };
-  return writePrivateJson(lastConnectionFile(projectRoot), validation.value);
+  return writePrivateJson(channelRuntimeFile(projectRoot), validation.value);
 }
 
 /** Exposed for tests and diagnostics without leaking token values. */

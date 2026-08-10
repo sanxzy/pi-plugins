@@ -89,6 +89,22 @@ export function formatTelegramSignature(chatId: string): string {
   return `\n\n---\n[from:telegram:${chatId}]\nUser active on Telegram. Be indifferent toward the default TUI window: keep thinking and reasoning normally, but write only a minimal concise do/act summary there — no conversational text, no attempt to communicate. To communicate directly with the user, use the \`user_telegram_chat\` tool.\n---`;
 }
 
+const TELEGRAM_SIGNATURE_PATTERN = /\[from:telegram:(-?\d+)\]/g;
+
+/**
+ * Extract the origin chat id from a Telegram-signed user message, or undefined
+ * when the text carries no signature. The signature is the authoritative
+ * connection marker: the outbound gate derives the reply target from the
+ * latest user message instead of a persisted file. The last occurrence wins
+ * because the bridge always appends the real signature last.
+ */
+export function extractTelegramChatId(text: string): string | undefined {
+  const matches = text.matchAll(TELEGRAM_SIGNATURE_PATTERN);
+  let last: RegExpMatchArray | undefined;
+  for (const match of matches) last = match;
+  return last ? last[1] : undefined;
+}
+
 /** A queued, accepted private text message awaiting delivery. */
 interface QueuedUpdate {
   updateId: number;

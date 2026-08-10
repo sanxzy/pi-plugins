@@ -10,7 +10,7 @@ import { assertSessionId, runtimeDir } from "@xzy-ai/runtime";
  * manual removal.
  */
 export const CHANNEL_CONFIG_FILE_NAME = "channel.json";
-export const LAST_CONNECTION_FILE_NAME = "user_last_connection.json";
+export const CHANNEL_RUNTIME_FILE_NAME = "channel.runtime.json";
 export const CHANNEL_LOGS_DIR_NAME = "logs";
 export const CHANNEL_OWNER_FILE_NAME = "channel.owner.json";
 
@@ -24,9 +24,9 @@ export function channelOwnerFile(projectRoot: string): string {
   return join(runtimeDir(projectRoot), CHANNEL_OWNER_FILE_NAME);
 }
 
-/** Persisted last-connection marker gating outbound Telegram delivery. */
-export function lastConnectionFile(projectRoot: string): string {
-  return join(runtimeDir(projectRoot), LAST_CONNECTION_FILE_NAME);
+/** Persisted per-project channel runtime state (e.g. the Telegram update cursor). */
+export function channelRuntimeFile(projectRoot: string): string {
+  return join(runtimeDir(projectRoot), CHANNEL_RUNTIME_FILE_NAME);
 }
 
 /** Directory holding per-session structured channel logs. */

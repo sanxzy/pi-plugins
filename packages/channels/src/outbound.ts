@@ -1,15 +1,16 @@
 /**
- * Marker-gated outbound Telegram text delivery.
+ * Outbound Telegram text delivery keyed by an explicit chat id.
  *
- * Phase 6 sends plain text only, chunked at 4,000 characters in order, to the
- * latest accepted Telegram chat. Delivery is allowed only when the persisted
- * last-connection marker says `telegram`. A failed chunk reports explicit
- * partial delivery instead of silently truncating or blindly retrying an
- * ambiguous non-idempotent send.
+ * The caller resolves the reply target (from the latest Telegram-signed user
+ * message) and passes it in; the sender itself no longer reads a persisted
+ * connection marker. Delivery sends plain text only, chunked at 4,000
+ * characters in order. A failed chunk reports explicit partial delivery
+ * instead of silently truncating or blindly retrying an ambiguous
+ * non-idempotent send.
  */
 
 import { Bot } from "grammy";
-import { readChannelConfig, readLastConnection } from "./state.ts";
+import { readChannelConfig } from "./state.ts";
 
 /** Telegram text chunk limit for outbound delivery. */
 export const MAX_TEXT_LENGTH = 4000;
@@ -84,36 +85,18 @@ export interface TelegramOutboundOptions {
   /** Injectable send surface, defaulting to a grammY bot API obtained from the config token. */
   createSendApi?(token: string): TelegramSendApi;
   readConfig?: typeof readChannelConfig;
-  readMarker?: typeof readLastConnection;
 }
 
 export interface TelegramOutbound {
-  /** True only when the persisted marker says `telegram` and a chat is recorded. */
-  canSend(projectRoot: string): boolean;
-  /** The latest accepted Telegram chat id, or undefined when the marker is TUI/unset. */
-  targetChat(projectRoot: string): string | undefined;
-  /** Send text to the latest accepted Telegram chat, or fail closed. */
-  send(projectRoot: string, text: string): Promise<OutboundTextResult>;
+  /** Send text to a specific Telegram chat, or fail closed when not configured. */
+  send(projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult>;
 }
 
-/** Create the marker-gated outbound sender. */
+/** Create the outbound sender. The reply chat id is supplied by the caller. */
 export function createTelegramOutbound(options: TelegramOutboundOptions = {}): TelegramOutbound {
   const readConfig = options.readConfig ?? readChannelConfig;
-  const readMarker = options.readMarker ?? readLastConnection;
 
-  const targetChat = (projectRoot: string): string | undefined => {
-    const marker = readMarker(projectRoot);
-    if (!marker.ok || marker.value.lastConnection !== "telegram") return undefined;
-    return marker.value.chatRoomId;
-  };
-
-  const canSend = (projectRoot: string): boolean => targetChat(projectRoot) !== undefined;
-
-  const send = async (projectRoot: string, text: string): Promise<OutboundTextResult> => {
-    const chatId = targetChat(projectRoot);
-    if (chatId === undefined) {
-      return { ok: false, sent: 0, failed: 1, error: "connection_not_telegram" };
-    }
+  const send = async (projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult> => {
     const channel = readConfig(projectRoot);
     if (!channel.ok) {
       return { ok: false, sent: 0, failed: 1, error: "Telegram channel not configured" };
@@ -125,7 +108,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
     });
   };
 
-  return { canSend, targetChat, send };
+  return { send };
 }
 
 /** Default real-grammY API surface; it never starts polling. */
@@ -139,12 +122,7 @@ function defaultCreateSendApi(token: string): TelegramSendApi {
   };
 }
 
-/** Convenience gate used by the model-callable tool. */
-export function canSendTelegram(projectRoot: string): boolean {
-  return createTelegramOutbound().canSend(projectRoot);
-}
-
 /** Convenience sender used by the model-callable tool. */
-export function sendTelegramMessage(projectRoot: string, text: string): Promise<OutboundTextResult> {
-  return createTelegramOutbound().send(projectRoot, text);
+export function sendTelegramMessage(projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult> {
+  return createTelegramOutbound().send(projectRoot, chatId, text);
 }

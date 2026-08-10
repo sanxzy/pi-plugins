@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   channelConfigFile,
-  lastConnectionFile,
+  channelRuntimeFile,
   privateFileMode,
   readChannelConfig,
-  readLastConnection,
+  readChannelRuntime,
   writeChannelConfig,
-  writeLastConnection,
+  writeChannelRuntime,
 } from "../src/index.ts";
 
 function projectRoot(): string {
@@ -67,16 +67,14 @@ test("fails closed for missing, malformed, and structurally invalid state withou
   writeFileSync(path, original, { mode: 0o600 });
 });
 
-test("last connection distinguishes telegram, tui, and unset states", () => {
+test("channel runtime state persists the update cursor privately and tolerates absence", () => {
   const root = projectRoot();
-  assert.deepEqual(readLastConnection(root), { ok: false, code: "missing", message: "State file does not exist" });
+  assert.deepEqual(readChannelRuntime(root), { ok: false, code: "missing", message: "State file does not exist" });
 
-  assert.equal(writeLastConnection(root, { lastConnection: "telegram", chatRoomId: "12345", updatedAt: "2026-08-09T00:00:00.000Z" }).ok, true);
-  assert.equal(privateFileMode(lastConnectionFile(root)), 0o600);
-  assert.deepEqual(readLastConnection(root), { ok: true, value: { lastConnection: "telegram", chatRoomId: "12345", updatedAt: "2026-08-09T00:00:00.000Z" } });
+  assert.equal(writeChannelRuntime(root, { lastUpdateId: 42 }).ok, true);
+  assert.equal(privateFileMode(channelRuntimeFile(root)), 0o600);
+  assert.deepEqual(readChannelRuntime(root), { ok: true, value: { lastUpdateId: 42 } });
 
-  assert.equal(writeLastConnection(root, { lastConnection: "tui" }).ok, true);
-  assert.deepEqual(readLastConnection(root), { ok: true, value: { lastConnection: "tui" } });
-  assert.equal(writeLastConnection(root, {}).ok, true);
-  assert.deepEqual(readLastConnection(root), { ok: true, value: {} });
+  assert.equal(writeChannelRuntime(root, {}).ok, true);
+  assert.deepEqual(readChannelRuntime(root), { ok: true, value: {} });
 });

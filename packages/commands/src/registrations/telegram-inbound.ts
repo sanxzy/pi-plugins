@@ -11,8 +11,8 @@ import {
   defaultTelegramPairingState,
   formatTelegramSignature,
   readChannelConfig,
-  readLastConnection,
-  writeLastConnection,
+  readChannelRuntime,
+  writeChannelRuntime,
   type ChannelConfig,
   type TelegramInboundListener,
 } from "@xzy-ai/channels";
@@ -48,7 +48,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     if (!channel.ok || !isRootSession(ctx)) return;
 
     const sessionId = ctx.sessionManager.getSessionId();
-    const previousMarker = readLastConnection(projectRoot);
+    const previousRuntime = readChannelRuntime(projectRoot);
     const pairingState = defaultTelegramPairingState(projectRoot);
 
     const listener = createInbound({
@@ -68,19 +68,14 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         // whether the agent is idle, processing, or waiting on a tool call. PI
         // injects the steer before the next LLM call, so Telegram stays
         // interactive while the active session continues.
-        const marker = writeLastConnection(projectRoot, {
-          lastConnection: "telegram",
-          chatRoomId: chatId,
-          lastUpdateId: updateId,
-          updatedAt: new Date().toISOString(),
-        });
-        if (!marker.ok) return;
+        const runtime = writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
+        if (!runtime.ok) return;
         pi.sendUserMessage(`${text}${formatTelegramSignature(chatId)}`, { deliverAs: "steer" });
       },
     });
 
-    if (previousMarker.ok && previousMarker.value.lastUpdateId !== undefined) {
-      listener.setLastUpdateId(previousMarker.value.lastUpdateId);
+    if (previousRuntime.ok && previousRuntime.value.lastUpdateId !== undefined) {
+      listener.setLastUpdateId(previousRuntime.value.lastUpdateId);
     }
 
     // Register the message middleware factory before the shared manager starts

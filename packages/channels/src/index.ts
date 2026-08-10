@@ -3,19 +3,18 @@ export {
   channelLogFile,
   channelLogsDir,
   channelOwnerFile,
-  lastConnectionFile,
+  channelRuntimeFile,
 } from "./shared/paths.ts";
 export {
   privateFileMode,
   readChannelConfig,
-  readLastConnection,
+  readChannelRuntime,
   validateChannelConfig,
   writeChannelConfig,
-  writeLastConnection,
+  writeChannelRuntime,
   writePrivateJson,
   type ChannelConfig,
-  type LastConnection,
-  type LastConnectionState,
+  type ChannelRuntimeState,
   type PairingRequest,
   type StateResult,
 } from "./state.ts";
@@ -80,13 +79,13 @@ export {
   createTelegramInbound,
   defaultTelegramPairingState,
   decodeAcceptedText,
+  extractTelegramChatId,
   formatTelegramSignature,
   type TelegramInboundListener,
   type TelegramInboundOptions,
   type TelegramUpdate,
 } from "./inbound.ts";
 export {
-  canSendTelegram,
   createTelegramOutbound,
   sendTelegramMessage,
   sendTextChunks,

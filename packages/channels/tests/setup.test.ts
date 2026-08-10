@@ -7,7 +7,6 @@ import {
   createChannelManager,
   createTelegramSetupController,
   readChannelConfig,
-  readLastConnection,
   type ChannelConfig,
   type ChannelManager,
   type ChannelPoller,
@@ -35,7 +34,7 @@ function manager(root: string, meta: { started?: number; stopped?: number; fail?
   return createChannelManager({ projectRoot: root, createPoller: () => fakePoller(meta) });
 }
 
-test("submitToken writes config, marks last connection TUI, and starts the poller", async () => {
+test("submitToken writes config and starts the poller", async () => {
   const root = projectRoot();
   const m = manager(root);
   const controller = createTelegramSetupController({ projectRoot: root, manager: m });
@@ -44,9 +43,6 @@ test("submitToken writes config, marks last connection TUI, and starts the polle
   const config = readChannelConfig(root);
   assert.equal(config.ok, true);
   if (config.ok) assert.equal(config.value.token, VALID);
-  const marker = readLastConnection(root);
-  assert.equal(marker.ok, true);
-  if (marker.ok) assert.equal(marker.value.lastConnection, "tui");
   assert.equal(m.owner.isOwner, true);
   await m.stop();
 });

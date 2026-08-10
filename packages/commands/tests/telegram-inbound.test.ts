@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { approvePairingAt, channelConfigFile, createTelegramInbound, formatTelegramSignature, readChannelConfig, readLastConnection, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
+import { approvePairingAt, channelConfigFile, createTelegramInbound, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
 
@@ -75,7 +75,7 @@ function privateText(updateId: number, fromId: string, text: string): unknown {
   };
 }
 
-test("root session start delivers accepted text as a follow-up with the exact signature and marker", async () => {
+test("root session start delivers accepted text as a follow-up with the exact signature and persists the update cursor", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);
   const { pi, handlers, sent, deliveryModes } = registrations();
@@ -93,12 +93,9 @@ test("root session start delivers accepted text as a follow-up with the exact si
 
   assert.equal(sent.length, 1, "one Telegram message is injected");
   assert.equal(sent[0], "hello" + formatTelegramSignature("777"), "exact signature is appended");
-  const marker = readLastConnection(cwd);
-  assert.equal(marker.ok, true);
-  if (marker.ok) {
-    assert.equal(marker.value.lastConnection, "telegram");
-    assert.equal(marker.value.chatRoomId, "777");
-  }
+  const runtime = readChannelRuntime(cwd);
+  assert.equal(runtime.ok, true);
+  if (runtime.ok) assert.equal(runtime.value.lastUpdateId, 1);
   clearTelegramProjectManagers();
 });
 

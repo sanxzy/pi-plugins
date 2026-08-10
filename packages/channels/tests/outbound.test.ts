@@ -33,18 +33,11 @@ test("sendTextChunks sends ordered chunks and reports partial failure", async ()
   assert.deepEqual(result, { ok: false, sent: 1, failed: 1, error: "second chunk failed" });
 });
 
-test("outbound gate uses the latest Telegram marker and chat", async () => {
-  const markers = new Map<string, { lastConnection?: "telegram" | "tui"; chatRoomId?: string }>();
+test("outbound sends to an explicit chat id and reports chunk count", async () => {
   const configs = new Map<string, { token: string }>();
-  markers.set("telegram", { lastConnection: "telegram", chatRoomId: "777" });
-  markers.set("tui", { lastConnection: "tui", chatRoomId: "777" });
   configs.set("telegram", { token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX" });
   const sent: Array<{ chat: string | number; text: string }> = [];
   const outbound = createTelegramOutbound({
-    readMarker: (root) => {
-      const marker = markers.get(root);
-      return marker ? { ok: true, value: marker } : { ok: false, code: "missing", message: "missing" };
-    },
     readConfig: (root) => {
       const config = configs.get(root);
       return config ? { ok: true, value: { ...config, approvedUserIds: [] } } : { ok: false, code: "missing", message: "missing" };
@@ -56,25 +49,19 @@ test("outbound gate uses the latest Telegram marker and chat", async () => {
     }),
   });
 
-  assert.equal(outbound.canSend("telegram"), true);
-  assert.equal(outbound.targetChat("telegram"), "777");
-  assert.equal(outbound.canSend("tui"), false);
-  assert.equal(outbound.targetChat("tui"), undefined);
-  const result = await outbound.send("telegram", "hello");
+  const result = await outbound.send("telegram", "777", "hello");
   assert.deepEqual(result, { ok: true, sent: 1, failed: 0 });
   assert.deepEqual(sent, [{ chat: "777", text: "hello" }]);
 });
 
-test("outbound fails closed for an unset marker", async () => {
+test("outbound fails closed when the channel is not configured", async () => {
   const outbound = createTelegramOutbound({
-    readMarker: () => ({ ok: false, code: "missing", message: "missing" }),
+    readConfig: () => ({ ok: false, code: "missing", message: "missing" }),
   });
-  assert.equal(outbound.canSend("project"), false);
-  assert.equal(outbound.targetChat("project"), undefined);
-  assert.deepEqual(await outbound.send("project", "hello"), {
+  assert.deepEqual(await outbound.send("project", "777", "hello"), {
     ok: false,
     sent: 0,
     failed: 1,
-    error: "connection_not_telegram",
+    error: "Telegram channel not configured",
   });
 });
