@@ -1,5 +1,6 @@
 import type {
   AgentStartEvent,
+  BeforeAgentStartEvent,
   ExtensionAPI,
   ExtensionContext,
   SessionShutdownEvent,
@@ -39,6 +40,10 @@ export interface TelegramInboundDeps {
   dispatchControl?: (command: TelegramCommand, options: TelegramControlDispatchOptions) => Promise<boolean>;
   /** Injectable Telegram reaction boundary for agent-start acknowledgement. */
   reactTelegramMessage?: (projectRoot: string, origin: TelegramMessageOrigin) => Promise<void>;
+  /** Short bounded wait for the reaction API confirmation. */
+  reactionTimeoutMs?: number;
+  /** Injectable reaction-failure logger, so failures never break the agent run. */
+  onReactionError?: (error: unknown) => void;
 }
 
 const listenersByProject = new Map<string, TelegramInboundListener>();
@@ -78,21 +83,54 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   const createInbound = deps.createInbound ?? createTelegramInbound;
   const expandCommand = deps.expandCommand ?? (() => undefined);
   const dispatchControl = deps.dispatchControl ?? ((command, options) => dispatchTelegramControl(command, options));
-  const reactTelegramMessage = deps.reactTelegramMessage ?? ((projectRoot, origin) => {
-    if (origin.messageId === undefined) return Promise.resolve();
-    return createTelegramOutbound().react(projectRoot, origin.chatId, origin.messageId, [{ type: "emoji", emoji: "👍" }]).then(() => undefined);
+  const reactTelegramMessage = deps.reactTelegramMessage ?? (async (projectRoot, origin) => {
+    if (origin.messageId === undefined) return;
+    const result = await createTelegramOutbound().react(projectRoot, origin.chatId, origin.messageId, [{ type: "emoji", emoji: "👍" }]);
+    if (!result.ok) throw new Error(result.error);
   });
+  const reactionTimeoutMs = deps.reactionTimeoutMs ?? 2500;
+  const onReactionError = deps.onReactionError ?? (() => undefined);
   let activeListener: TelegramInboundListener | undefined;
+  // Correlate the Telegram origin of the message that is about to start an
+  // agent run. before_agent_start carries the exact prompt, so the origin is
+  // associated with this run rather than rediscovered from an unstable
+  // latest-branch scan at agent_start.
+  let pendingReactionOrigin: TelegramMessageOrigin | undefined;
+  let acknowledgedRun = false;
 
-  // Acknowledge the latest Telegram-originated user message when the agent loop
-  // begins. Non-blocking: a failed reply reaction must not delay or break the run.
+  pi.on("before_agent_start", (event: BeforeAgentStartEvent) => {
+    pendingReactionOrigin = event.prompt ? extractTelegramMessageOrigin(event.prompt) : undefined;
+    acknowledgedRun = false;
+  });
+
+  async function acknowledgeReaction(projectRoot: string, origin: TelegramMessageOrigin): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        reactTelegramMessage(projectRoot, origin),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("Telegram reaction timed out")), reactionTimeoutMs);
+        }),
+      ]);
+    } catch (error: unknown) {
+      onReactionError(error);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  // Acknowledge exactly once at agent_start. The origin is correlated from
+  // before_agent_start when available; the branch fallback supports hosts that
+  // emit agent_start without the preceding extension event.
   pi.on("agent_start", (_event: AgentStartEvent, ctx: ExtensionContext) => {
+    if (acknowledgedRun) return;
+    acknowledgedRun = true;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     const latestUserMessage = latestUserMessageText(ctx);
-    if (!latestUserMessage) return;
-    const origin = extractTelegramMessageOrigin(latestUserMessage);
+    const origin = pendingReactionOrigin ?? (latestUserMessage ? extractTelegramMessageOrigin(latestUserMessage) : undefined);
+    pendingReactionOrigin = undefined;
     if (!origin) return;
-    void reactTelegramMessage(projectRoot, origin).catch(() => undefined);
+    void acknowledgeReaction(projectRoot, origin);
   });
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {

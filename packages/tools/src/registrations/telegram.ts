@@ -1,7 +1,9 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
+  reactToMessage,
   sendTelegramMessage,
+  validateStandardReaction,
   validateTelegramTarget,
   type OutboundTextResult,
   type TelegramTargetValidation,
@@ -26,11 +28,14 @@ export interface TelegramChatDeps {
    * unsupported destination before any outbound API call.
    */
   validateTarget?: (projectRoot: string, chatId: string) => Promise<TelegramTargetValidation>;
+  /** Injectable reaction seam so tests verify delivery offline. */
+  react?: (projectRoot: string, chatId: string, messageId: number, emoji: string) => Promise<OutboundTextResult>;
 }
 
 /** Register the parent-only unified Telegram communication/reporting tool. */
 export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDeps = {}): void {
   const send = deps.send ?? sendTelegramMessage;
+  const react = deps.react ?? reactToMessage;
   const validateTarget = deps.validateTarget ?? (async (projectRoot: string, chatId: string) =>
     validateTelegramTarget(projectRoot, chatId));
 
@@ -54,6 +59,39 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           chatId: params.chat_id,
           error: target.error,
           category: target.category,
+        });
+      }
+
+      if (params.action === "react") {
+        if (!validateStandardReaction(params.emoji)) {
+          return errorResult("Unsupported reaction", {
+            action: params.action,
+            sent: false,
+            chatId: target.chatId,
+            messageId: params.message_id,
+            emoji: params.emoji,
+            error: "Unsupported reaction",
+            category: "telegram_rejected",
+          });
+        }
+        const reactionResult = await react(ctx.cwd, target.chatId, params.message_id, params.emoji);
+        if (!reactionResult.ok) {
+          return errorResult(`Telegram reaction failed: ${reactionResult.error}`, {
+            action: params.action,
+            sent: false,
+            chatId: target.chatId,
+            messageId: params.message_id,
+            emoji: params.emoji,
+            error: reactionResult.error,
+            category: reactionResult.category,
+          });
+        }
+        return textResult(`Reaction applied to message ${params.message_id}`, {
+          action: params.action,
+          sent: true,
+          chatId: target.chatId,
+          messageId: params.message_id,
+          emoji: params.emoji,
         });
       }
 
@@ -83,7 +121,10 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       });
     },
     renderCall(args: TelegramChatParams, theme) {
-      return new Text(theme.fg("toolTitle", theme.bold("user_telegram_chat ")) + theme.fg("muted", args.text), 0, 0);
+      const summary = args.action === "send_text"
+        ? args.text
+        : `react ${args.emoji} → ${args.chat_id}:${args.message_id}`;
+      return new Text(theme.fg("toolTitle", theme.bold("user_telegram_chat ")) + theme.fg("muted", summary), 0, 0);
     },
     renderResult(result: AgentToolResult<TelegramChatDetails>, _options, theme) {
       const details = result.details;

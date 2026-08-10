@@ -85,10 +85,12 @@ export interface CancelDetails {
 
 /** Details payload for the parent-only Telegram communication tool. */
 export interface TelegramChatDetails {
-  action: "send_text";
+  action: "send_text" | "react";
   sent: boolean;
   chatId: string;
   message?: string;
+  messageId?: number;
+  emoji?: string;
   chunks?: number;
   messageIds?: number[];
   sentChunks?: number;

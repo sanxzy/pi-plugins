@@ -58,7 +58,27 @@ const telegramSendTextAction = Type.Object({
   disable_notification: Type.Optional(Type.Boolean({ description: "Suppress the notification for this message when explicitly requested." })),
 }, { additionalProperties: false });
 
-export const telegramChatParams = Type.Union([telegramSendTextAction]);
+const telegramReactAction = Type.Object({
+  action: Type.Literal("react"),
+  chat_id: telegramChatId,
+  message_id: Type.Integer({ minimum: 1, description: "Explicit Telegram message id to react to." }),
+  emoji: Type.Union([
+    Type.Literal("👍"), Type.Literal("👎"), Type.Literal("❤"), Type.Literal("🔥"), Type.Literal("🥰"),
+    Type.Literal("👏"), Type.Literal("😁"), Type.Literal("🤔"), Type.Literal("🤯"), Type.Literal("😱"),
+    Type.Literal("🤬"), Type.Literal("😢"), Type.Literal("🎉"), Type.Literal("🤩"), Type.Literal("🤮"),
+    Type.Literal("💩"), Type.Literal("🙏"), Type.Literal("👌"), Type.Literal("🥱"), Type.Literal("🥴"),
+    Type.Literal("😍"), Type.Literal("🌚"), Type.Literal("🌭"), Type.Literal("💯"), Type.Literal("🤣"),
+    Type.Literal("⚡"), Type.Literal("🍌"), Type.Literal("🏆"), Type.Literal("💔"), Type.Literal("🤨"),
+    Type.Literal("😐"), Type.Literal("🍓"), Type.Literal("🍾"), Type.Literal("💋"), Type.Literal("😈"),
+    Type.Literal("😴"), Type.Literal("😭"), Type.Literal("🤓"), Type.Literal("👻"), Type.Literal("👀"),
+    Type.Literal("🎃"), Type.Literal("🙈"), Type.Literal("😇"), Type.Literal("😨"), Type.Literal("🤝"),
+    Type.Literal("✍"), Type.Literal("🤗"), Type.Literal("💅"), Type.Literal("🤪"), Type.Literal("🗿"),
+    Type.Literal("🆒"), Type.Literal("💘"), Type.Literal("🙉"), Type.Literal("🦄"), Type.Literal("😘"),
+    Type.Literal("😎"), Type.Literal("👾"), Type.Literal("🤷"), Type.Literal("😡"),
+  ], { description: "A standard Telegram reaction emoji." }),
+}, { additionalProperties: false });
+
+export const telegramChatParams = Type.Union([telegramSendTextAction, telegramReactAction]);
 
 export const goalCreateParams = Type.Object({
   prompt: Type.String({ description: "Exact goal prompt to deliver on each interval." }),

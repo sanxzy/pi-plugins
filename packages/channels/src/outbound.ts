@@ -30,6 +30,21 @@ export interface TelegramSendTextOptions {
 
 const TOKEN_PATTERN = /\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g;
 
+/** Standard Telegram emoji reactions the model may request. */
+export const STANDARD_REACTIONS: ReadonlySet<string> = new Set([
+  "👍", "👎", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬",
+  "😢", "🎉", "🤩", "🤮", "💩", "🙏", "👌", "🥱", "🥴", "😍", "🌚",
+  "🌭", "💯", "🤣", "⚡", "🍌", "🏆", "💔", "🤨", "😐", "🍓", "🍾",
+  "💋", "😈", "😴", "😭", "🤓", "👻", "👀", "🎃", "🙈", "😇", "😨",
+  "🤝", "✍", "🤗", "💅", "🤪", "🗿", "🆒", "💘", "🙉", "🦄", "😘",
+  "😎", "👾", "🤷", "😡",
+]);
+
+/** True only for a standard emoji in the allowlist. */
+export function validateStandardReaction(emoji: string): boolean {
+  return typeof emoji === "string" && emoji.length > 0 && STANDARD_REACTIONS.has(emoji);
+}
+
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Telegram delivery failed";
   return message.replace(TOKEN_PATTERN, "[Redacted]");
@@ -314,4 +329,12 @@ function defaultCreateSendApi(token: string): TelegramSendApi {
 /** Convenience sender used by the model-callable tool. */
 export function sendTelegramMessage(projectRoot: string, chatId: string, text: string, options?: TelegramSendTextOptions): Promise<OutboundTextResult> {
   return createTelegramOutbound().send(projectRoot, chatId, text, options);
+}
+
+/** Convenience reaction helper used by the model-callable tool. */
+export function reactToMessage(projectRoot: string, chatId: string, messageId: number, emoji: string): Promise<OutboundTextResult> {
+  if (!validateStandardReaction(emoji)) {
+    return Promise.resolve({ ok: false, sent: 0, failed: 1, error: "Unsupported reaction", category: "telegram_rejected" });
+  }
+  return createTelegramOutbound().react(projectRoot, chatId, messageId, [{ type: "emoji", emoji }]);
 }
