@@ -10,6 +10,8 @@ import {
 export interface TelegramControlDispatchOptions {
   projectRoot: string;
   chatId: string;
+  /** Telegram message id of the native command, used for post-compact acknowledgement. */
+  messageId?: number;
   context: ExtensionContext;
   /** Public Pi API used by model/thinking controls. */
   pi?: Pick<ExtensionAPI, "setModel" | "getThinkingLevel" | "setThinkingLevel">;
@@ -22,7 +24,16 @@ export interface TelegramControlDispatchOptions {
 }
 
 const compactionByProject = new Set<string>();
+/** Pending Telegram origin of an in-flight native /compact, keyed by project root. */
+const pendingCompactionOriginByProject = new Map<string, { chatId: string; messageId: number }>();
 const THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+
+/** Take the pending post-compaction Telegram origin for a project, if any. */
+export function takeTelegramCompactionOrigin(projectRoot: string): { chatId: string; messageId: number } | undefined {
+  const origin = pendingCompactionOriginByProject.get(projectRoot);
+  pendingCompactionOriginByProject.delete(projectRoot);
+  return origin;
+}
 
 /** True only when the operator explicitly enables development mode. */
 export function isTelegramDevelopmentMode(): boolean {
@@ -97,24 +108,28 @@ export async function dispatchTelegramControl(
       }
 
       compactionByProject.add(options.projectRoot);
+      if (options.messageId !== undefined) {
+        pendingCompactionOriginByProject.set(options.projectRoot, { chatId: options.chatId, messageId: options.messageId });
+      }
       await reply("🗜 Compaction started.");
-      const finish = async (message: string): Promise<void> => {
+      const finish = async (message: string, success: boolean): Promise<void> => {
         compactionByProject.delete(options.projectRoot);
+        if (!success) pendingCompactionOriginByProject.delete(options.projectRoot);
         await reply(message);
       };
       try {
         options.context.compact({
           onComplete: () => {
-            void finish("✅ Compaction completed.");
+            void finish("✅ Compaction completed.", true);
           },
           onError: (error) => {
             const message = error instanceof Error ? error.message : String(error);
-            void finish(`Compaction failed: ${message}`);
+            void finish(`Compaction failed: ${message}`, false);
           },
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await finish(`Compaction failed: ${message}`);
+        await finish(`Compaction failed: ${message}`, false);
       }
       return true;
     }
@@ -220,4 +235,5 @@ export async function dispatchTelegramControl(
 /** Test isolation seam for the process-local compaction guard. */
 export function clearTelegramControlState(): void {
   compactionByProject.clear();
+  pendingCompactionOriginByProject.clear();
 }

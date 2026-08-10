@@ -1,6 +1,7 @@
 import type {
   AgentStartEvent,
   BeforeAgentStartEvent,
+  SessionCompactEvent,
   ExtensionAPI,
   ExtensionContext,
   SessionShutdownEvent,
@@ -26,7 +27,7 @@ import {
   type TelegramInboundListener,
 } from "@xzy-ai/channels";
 import { getTelegramProjectManager } from "./telegram-project.ts";
-import { dispatchTelegramControl, type TelegramControlDispatchOptions } from "./telegram-controls.ts";
+import { dispatchTelegramControl, takeTelegramCompactionOrigin, type TelegramControlDispatchOptions } from "./telegram-controls.ts";
 
 export interface TelegramInboundDeps {
   /** Injectable inbound factory for offline tests. */
@@ -142,6 +143,13 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   // Acknowledge exactly once at agent_start. The origin is correlated from
   // before_agent_start when available; the branch fallback supports hosts that
   // emit agent_start without the preceding extension event.
+  pi.on("session_compact", (event: SessionCompactEvent, ctx: ExtensionContext) => {
+    if (!isRootSession(ctx) || event.reason !== "manual") return;
+    const origin = takeTelegramCompactionOrigin(canonicalProjectRoot(ctx.cwd));
+    if (!origin) return;
+    void acknowledgeReaction(canonicalProjectRoot(ctx.cwd), ctx.sessionManager.getSessionId(), origin);
+  });
+
   pi.on("agent_start", (_event: AgentStartEvent, ctx: ExtensionContext) => {
     if (!isRootSession(ctx)) {
       pendingReactionOrigin = undefined;
@@ -206,6 +214,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
           const handled = await dispatchControl(command, {
             projectRoot,
             chatId,
+            messageId,
             context: ctx,
             pi: {
               setModel: (model) => pi.setModel(model),
