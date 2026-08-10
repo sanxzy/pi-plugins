@@ -5,7 +5,9 @@ import {
   sendTextChunks,
   splitTextChunks,
   MAX_TEXT_LENGTH,
-} from "../src/outbound.ts";
+  validateStandardReaction,
+  reactToMessage,
+} from "../src/index.ts";
 
 const token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWX";
 
@@ -97,6 +99,13 @@ test("outbound reacts to a specific approved Telegram message", async () => {
   const result = await outbound.react("project", "777", 42, [{ type: "emoji", emoji: "👍" }]);
   assert.deepEqual(result, { ok: true, sent: 1, failed: 0, messageIds: [42] });
   assert.deepEqual(reactions, [{ chat: "777", messageId: 42, reaction: [{ type: "emoji", emoji: "👍" }] }]);
+});
+
+test("validateStandardReaction accepts only allowlisted standard emoji", () => {
+  assert.equal(validateStandardReaction("👍"), true);
+  assert.equal(validateStandardReaction("❤"), true);
+  assert.equal(validateStandardReaction("not-an-emoji"), false);
+  assert.equal(validateStandardReaction(""), false);
 });
 
 test("outbound reports a stable not_configured category", async () => {

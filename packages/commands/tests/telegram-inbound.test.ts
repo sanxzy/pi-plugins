@@ -137,6 +137,94 @@ test("agent_start reacts to the latest Telegram user message", async () => {
   clearTelegramProjectManagers();
 });
 
+test("agent_start uses the correlated before_agent_start Telegram origin", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers } = registrations();
+  const reactions: Array<{ chatId: string; messageId?: number }> = [];
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async (_projectRoot, origin) => { reactions.push(origin); },
+  });
+  const beforeContext = context(cwd, "root-a");
+  await handlers.get("before_agent_start")?.({
+    type: "before_agent_start",
+    prompt: "hello" + formatTelegramSignature("777", 55),
+  }, beforeContext);
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: { getSessionId: () => "root-a", getBranch: () => [] },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reactions, [{ chatId: "777", messageId: 55 }]);
+});
+
+test("agent_start acknowledgements are deduplicated for one agent run", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers } = registrations();
+  let reactionCount = 0;
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async () => { reactionCount += 1; },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } }],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reactionCount, 1);
+});
+
+test("agent_start reaction failure is logged and does not block", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers } = registrations();
+  let logged: unknown;
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async () => { throw new Error("Telegram rejected reaction"); },
+    onReactionError: (error) => { logged = error; },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } }],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(logged, "reaction failure is logged");
+});
+
+test("agent_start reaction timeout is logged and does not block", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers } = registrations();
+  let logged: unknown;
+  registerTelegramInbound(pi, {
+    reactionTimeoutMs: 5,
+    reactTelegramMessage: async () => new Promise<void>(() => undefined),
+    onReactionError: (error) => { logged = error; },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } }],
+    },
+  } as unknown as ExtensionContext;
+  const started = Date.now();
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(Date.now() - started < 100, "agent_start does not wait on Telegram");
+  assert.ok(logged, "reaction timeout is logged");
+});
+
 test("agent_start does not react to a TUI-originated latest user message", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);

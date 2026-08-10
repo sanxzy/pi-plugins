@@ -43,6 +43,12 @@ test("schema accepts rich text and delivery override fields", () => {
   assert.equal(Value.Check(telegramChatParams, { ...sendText, format: "xml" }), false);
 });
 
+test("schema accepts explicit standard react action and rejects custom reactions", () => {
+  assert.equal(Value.Check(telegramChatParams, { action: "react", chat_id: "777", message_id: 42, emoji: "👍" }), true);
+  assert.equal(Value.Check(telegramChatParams, { action: "react", chat_id: "777", message_id: 42, emoji: "custom" }), false);
+  assert.equal(Value.Check(telegramChatParams, { action: "react", chat_id: "777", message_id: 0, emoji: "👍" }), false);
+});
+
 test("send_text with an approved chat sends and returns safe metadata", async () => {
   let target: string | undefined;
   const tool = capture({
@@ -56,6 +62,34 @@ test("send_text with an approved chat sends and returns safe metadata", async ()
   assert.equal(target, "777");
   assert.deepEqual(result.details, { action: "send_text", sent: true, chatId: "777", chunks: 2, messageIds: [1, 2] });
   assert.match(result.content[0].text, /2 messages/);
+});
+
+test("react action applies a supported emoji and returns target metadata", async () => {
+  let received: unknown;
+  const tool = capture({
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    react: async (_root: string, chatId: string, messageId: number, emoji: string) => {
+      received = { chatId, messageId, emoji };
+      return { ok: true, sent: 1, failed: 0, messageIds: [messageId] };
+    },
+  });
+  const result = await tool.execute("call", { action: "react", chat_id: "777", message_id: 42, emoji: "👍" }, undefined, undefined, context());
+  assert.deepEqual(received, { chatId: "777", messageId: 42, emoji: "👍" });
+  assert.deepEqual(result.details, { action: "react", sent: true, chatId: "777", messageId: 42, emoji: "👍" });
+});
+
+test("react rejects invalid target or emoji before the reaction API", async () => {
+  let called = false;
+  const tool = capture({
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    react: async () => {
+      called = true;
+      return { ok: true, sent: 1, failed: 0, messageIds: [42] };
+    },
+  });
+  const result = await tool.execute("call", { action: "react", chat_id: "777", message_id: 42, emoji: "custom" }, undefined, undefined, context());
+  assert.equal(called, false);
+  assert.equal(result.details.category, "telegram_rejected");
 });
 
 test("send_text forwards rich format and delivery overrides", async () => {
