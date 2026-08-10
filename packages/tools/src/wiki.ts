@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
@@ -14,7 +14,18 @@ export interface WikiEntry {
 
 export const WIKI_ENTRY_START = "<!-- pi-code-wiki-entry -->";
 export const WIKI_ENTRY_END = "<!-- pi-code-wiki-entry-end -->";
+export const WIKI_PAGE_START = "<!-- pi-code-wiki-page -->";
+export const WIKI_PAGE_END = "<!-- pi-code-wiki-page-end -->";
 export const WIKI_MAX_SLUG_LENGTH = 80;
+export const WIKI_PAGE_SIZE = 256 * 1024;
+
+export interface WikiPageHeader {
+  topic: string;
+  page: number;
+  totalPages: number;
+  previous?: string;
+  next?: string;
+}
 
 export interface WikiEntryInput {
   topic: string;
@@ -24,6 +35,7 @@ export interface WikiEntryInput {
   title: string;
   text: string;
   timestamp?: string;
+  pageSize?: number;
 }
 
 export interface WikiSaveResult {
@@ -96,18 +108,147 @@ export function formatWikiEntry(input: WikiEntryInput): string {
   ].join("\n");
 }
 
-/** Best-effort append of one entry to the topic's base page. Never throws. */
+const writeQueues = new Map<string, Promise<unknown>>();
+
+/** Best-effort append to a topic's growing paginated corpus. Never throws. */
 export async function saveWikiEntry(input: WikiEntryInput & { root?: string }): Promise<WikiSaveResult> {
   const topic = slugify(input.topic);
-  const filename = `${topic}.md`;
   const root = input.root ?? wikiRoot();
+  const key = `${root}\u0000${topic}`;
+  const prior = writeQueues.get(key) ?? Promise.resolve();
+  const operation = prior.catch(() => undefined).then(() => writePaginatedWikiEntry(input, root, topic));
+  const settled = operation.finally(() => {
+    if (writeQueues.get(key) === settled) writeQueues.delete(key);
+  });
+  writeQueues.set(key, settled);
   try {
-    await mkdir(root, { recursive: true });
-    await appendFile(join(root, filename), formatWikiEntry(input), "utf8");
-    return { saved: true, topic, pages: [filename] };
+    return await settled;
   } catch {
     return { saved: false, topic, pages: [], error: WIKI_SAVE_ERROR };
   }
+}
+
+async function writePaginatedWikiEntry(input: WikiEntryInput, root: string, topic: string): Promise<WikiSaveResult> {
+  const pageSize = Math.max(input.pageSize ?? WIKI_PAGE_SIZE, 256);
+  await mkdir(root, { recursive: true });
+  const existingPages = await listTopicPages(root, topic);
+  const bodies: string[] = [];
+  for (const file of existingPages) {
+    const document = await readFile(join(root, file), "utf8");
+    bodies.push(extractPageBody(document));
+  }
+  if (bodies.length === 0) bodies.push("");
+
+  const chunks = splitEntryForPages(input, pageSize);
+  for (const chunk of chunks) {
+    const last = bodies.length - 1;
+    if (bodies[last] && bodies[last].length + chunk.length > pageSize) bodies.push(chunk);
+    else bodies[last] = `${bodies[last]}${chunk}`;
+  }
+
+  const pages = bodies.map((_body, index) => pageFilename(topic, index + 1));
+  for (let index = 0; index < bodies.length; index++) {
+    const previous = index > 0 ? pages[index - 1] : undefined;
+    const next = index + 1 < pages.length ? pages[index + 1] : undefined;
+    const document = formatPage(pages[index]!, topic, index + 1, pages.length, bodies[index]!, previous, next);
+    await atomicWrite(join(root, pages[index]!), document);
+  }
+  return { saved: true, topic, pages };
+}
+
+async function listTopicPages(root: string, topic: string): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(root);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => name === `${topic}.md` || new RegExp(`^${escapeRegExp(topic)}\\.part-\\d{3}\\.md$`).test(name))
+    .sort((left, right) => pageNumber(left) - pageNumber(right));
+}
+
+function pageNumber(file: string): number {
+  const part = /\.part-(\d{3})\.md$/.exec(file);
+  return part ? Number(part[1]) : 1;
+}
+
+function pageFilename(topic: string, page: number): string {
+  return page === 1 ? `${topic}.md` : `${topic}.part-${String(page).padStart(3, "0")}.md`;
+}
+
+export function parsePageHeader(document: string): WikiPageHeader {
+  const end = document.indexOf(WIKI_PAGE_END);
+  const header = end >= 0 ? document.slice(0, end) : "";
+  const fields: Record<string, string> = {};
+  for (const line of header.split("\n")) {
+    const separator = line.indexOf(":");
+    if (separator > 0) fields[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+  }
+  return {
+    topic: fields.topic ?? "",
+    page: Number(fields.page ?? 1),
+    totalPages: Number(fields.totalPages ?? 1),
+    ...(fields.previous ? { previous: fields.previous } : {}),
+    ...(fields.next ? { next: fields.next } : {}),
+  };
+}
+
+function extractPageBody(document: string): string {
+  const end = document.indexOf(WIKI_PAGE_END);
+  return end >= 0 ? document.slice(end + WIKI_PAGE_END.length).replace(/^\n+/, "") : document;
+}
+
+function formatPage(
+  file: string,
+  topic: string,
+  page: number,
+  totalPages: number,
+  body: string,
+  previous?: string,
+  next?: string,
+): string {
+  const lines = [WIKI_PAGE_START, `topic: ${topic}`, `page: ${page}`, `totalPages: ${totalPages}`];
+  if (previous) lines.push(`previous: ${previous}`);
+  if (next) lines.push(`next: ${next}`);
+  lines.push("");
+  if (previous) lines.push(`[Previous](./${previous})`);
+  if (next) lines.push(`[Next](./${next})`);
+  lines.push(WIKI_PAGE_END, "", body);
+  void file;
+  return lines.join("\n");
+}
+
+async function atomicWrite(path: string, content: string): Promise<void> {
+  const temporary = `${path}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  try {
+    await writeFile(temporary, content, "utf8");
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+function splitEntryForPages(input: WikiEntryInput, pageSize: number): string[] {
+  const whole = formatWikiEntry(input);
+  if (whole.length <= pageSize) return [whole];
+  const overhead = formatWikiEntry({ ...input, text: "" }).length;
+  const textBudget = Math.max(pageSize - overhead - 16, 1);
+  const chunks: string[] = [];
+  let remaining = input.text;
+  while (remaining.length > textBudget) {
+    let cut = remaining.lastIndexOf("\n\n", textBudget);
+    if (cut < Math.floor(textBudget / 2)) cut = remaining.lastIndexOf("\n", textBudget);
+    if (cut < Math.floor(textBudget / 2)) cut = remaining.lastIndexOf(" ", textBudget);
+    if (cut <= 0) cut = textBudget;
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut);
+  }
+  chunks.push(remaining);
+  return chunks.map((text, index) =>
+    formatWikiEntry({ ...input, title: index === 0 ? input.title : `${input.title} (continued ${index + 1})`, text }),
+  );
 }
 
 function metadataValue(value: string): string {
