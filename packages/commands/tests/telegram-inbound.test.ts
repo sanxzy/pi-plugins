@@ -22,6 +22,7 @@ function markChild(cwd: string, sessionId: string): void {
   }));
 }
 import { registerTelegramInbound } from "../src/registrations/telegram-inbound.ts";
+import { clearTelegramControlState } from "../src/registrations/telegram-controls.ts";
 import {
   clearTelegramProjectManagers,
   getTelegramMessageHandlerFactory,
@@ -104,6 +105,68 @@ test("root session start delivers accepted text as a follow-up with the exact si
   const runtime = readChannelRuntime(cwd);
   assert.equal(runtime.ok, true);
   if (runtime.ok) assert.equal(runtime.value.lastUpdateId, 1);
+  clearTelegramProjectManagers();
+});
+
+test("session_compact reacts to the pending /compact origin after success", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  clearTelegramControlState();
+  const { pi, handlers } = registrations();
+  const reactions: Array<{ chatId: string; messageId?: number }> = [];
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (options) => (listener = createTelegramInbound(options)),
+    reactTelegramMessage: async (_projectRoot, origin) => { reactions.push(origin); },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    isIdle: () => true,
+    hasPendingMessages: () => false,
+    compact: () => {},
+    sessionManager: { getSessionId: () => "root-a", getBranch: () => [] },
+  } as unknown as ExtensionContext;
+  await handlers.get("session_start")?.({ reason: "startup" }, agentContext);
+  await listener!.handle(privateText(1, "111", "/compact", 42));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await handlers.get("session_compact")?.({ type: "session_compact", reason: "manual", fromExtension: true }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reactions, [{ chatId: "777", messageId: 42 }]);
+  clearTelegramControlState();
+  clearTelegramProjectManagers();
+});
+
+test("session_compact ignores threshold compaction and consumes manual origin once", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  clearTelegramControlState();
+  const { pi, handlers } = registrations();
+  const reactions: Array<{ chatId: string; messageId?: number }> = [];
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (options) => (listener = createTelegramInbound(options)),
+    reactTelegramMessage: async (_projectRoot, origin) => { reactions.push(origin); },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    isIdle: () => true,
+    hasPendingMessages: () => false,
+    compact: () => {},
+    sessionManager: { getSessionId: () => "root-a", getBranch: () => [] },
+  } as unknown as ExtensionContext;
+  await handlers.get("session_start")?.({ reason: "startup" }, agentContext);
+  await listener!.handle(privateText(1, "111", "/compact", 42));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await handlers.get("session_compact")?.({ type: "session_compact", reason: "threshold", fromExtension: false }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reactions, []);
+  await handlers.get("session_compact")?.({ type: "session_compact", reason: "manual", fromExtension: true }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reactions, [{ chatId: "777", messageId: 42 }]);
+  await handlers.get("session_compact")?.({ type: "session_compact", reason: "manual", fromExtension: true }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reactions, [{ chatId: "777", messageId: 42 }]);
+  clearTelegramControlState();
   clearTelegramProjectManagers();
 });
 

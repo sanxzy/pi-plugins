@@ -4,6 +4,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   clearTelegramControlState,
   dispatchTelegramControl,
+  takeTelegramCompactionOrigin,
 } from "../src/registrations/telegram-controls.ts";
 
 function command(name: string, args = ""): { name: string; args: string } {
@@ -40,6 +41,41 @@ test("non-control commands are not owned by the handler", async () => {
   );
   assert.equal(handled, false);
   assert.deepEqual(messages, []);
+});
+
+test("compact preserves its Telegram origin until post-compaction handling", async () => {
+  const { messages, send } = collectReplies();
+  let onComplete: (() => void) | undefined;
+  const ctx = context({ compact: (options) => { onComplete = options?.onComplete; } });
+  await dispatchTelegramControl(command("compact"), {
+    projectRoot: "/tmp/compact-origin",
+    chatId: "555",
+    messageId: 42,
+    context: ctx,
+    sendMessage: send,
+  });
+  assert.deepEqual(takeTelegramCompactionOrigin("/tmp/compact-origin"), { chatId: "555", messageId: 42 });
+  onComplete?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  clearTelegramControlState();
+  assert.deepEqual(messages.filter((message) => message.includes("Compaction started.")), ["🗜 Compaction started."]);
+});
+
+test("failed compact discards its pending Telegram origin", async () => {
+  clearTelegramControlState();
+  let onError: ((error: unknown) => void) | undefined;
+  const ctx = context({ compact: (options) => { onError = options?.onError; } });
+  await dispatchTelegramControl(command("compact"), {
+    projectRoot: "/tmp/compact-failure",
+    chatId: "555",
+    messageId: 42,
+    context: ctx,
+    sendMessage: async () => undefined,
+  });
+  onError?.(new Error("boom"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(takeTelegramCompactionOrigin("/tmp/compact-failure"), undefined);
+  clearTelegramControlState();
 });
 
 test("compact starts a compaction and reports completion", async () => {
