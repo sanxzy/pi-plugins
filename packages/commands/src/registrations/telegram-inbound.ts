@@ -63,11 +63,13 @@ export function refreshTelegramInbound(projectRoot: string, config: ChannelConfi
   listenersByProject.get(canonicalProjectRoot(projectRoot))?.setApprovedUserIds(config.approvedUserIds);
 }
 
-/** True only for the root orchestrator session. */
+/** True only for a host session, never for a registered child job. */
 function isRootSession(ctx: ExtensionContext): boolean {
-  const sessionId = ctx.sessionManager.getSessionId();
-  const pool = getChildPool(ctx.cwd, sessionId);
-  return pool.rootSessionId === sessionId && pool.registry.get(sessionId) === undefined;
+  const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
+  // The shared pool keeps its first rootSessionId across host replacement
+  // (/new, reload, resume). The registry is the stable discriminator: child
+  // sessions are jobs, while every replacement root is not.
+  return pool.registry.get(ctx.sessionManager.getSessionId()) === undefined;
 }
 
 /** Wire the authorized text-only Telegram inbound path into the extension. */
@@ -95,15 +97,23 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
+    if (!isRootSession(ctx)) return;
+
+    // The inbound listener (and therefore the manager's message-handler
+    // factory) must be registered even when no channel config exists yet.
+    // Otherwise first-time setup starts a poller with `onMessage: undefined`
+    // and live DMs never reach this listener, so no pairing request is ever
+    // created. The listener's own readConfig() picks up the config as soon as
+    // setup writes it.
     const channel = readChannelConfig(projectRoot);
-    if (!channel.ok || !isRootSession(ctx)) return;
+    const approvedUserIds = channel.ok ? channel.value.approvedUserIds : [];
 
     const sessionId = ctx.sessionManager.getSessionId();
     const previousRuntime = readChannelRuntime(projectRoot);
     const pairingState = defaultTelegramPairingState(projectRoot);
 
     const listener = createInbound({
-      approvedUserIds: channel.value.approvedUserIds,
+      approvedUserIds,
       ...pairingState,
       onChallenge: async (context, chatId, text) => {
         const api = (context as { api?: { sendMessage?: (target: string, content: string) => Promise<unknown> } }).api;

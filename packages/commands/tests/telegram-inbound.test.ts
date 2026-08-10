@@ -22,7 +22,10 @@ function markChild(cwd: string, sessionId: string): void {
   }));
 }
 import { registerTelegramInbound } from "../src/registrations/telegram-inbound.ts";
-import { clearTelegramProjectManagers } from "../src/registrations/telegram-project.ts";
+import {
+  clearTelegramProjectManagers,
+  getTelegramMessageHandlerFactory,
+} from "../src/registrations/telegram-project.ts";
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
@@ -152,6 +155,35 @@ test("agent_start does not react to a TUI-originated latest user message", async
   await handlers.get("agent_start")!({ type: "agent_start" }, agentContext);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(reactionCount, 0);
+});
+
+test("first-time setup keeps the inbound handler when session starts before channel config exists", async () => {
+  const cwd = projectRoot();
+  const { pi, handlers } = registrations();
+  registerTelegramInbound(pi);
+
+  // This is the setup sequence that previously lost inbound routing: the root
+  // session started before channel.json existed, then setup created the first
+  // Telegram connection through the already-created project manager.
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  mkdirSync(dirname(channelConfigFile(cwd)), { recursive: true });
+  writeFileSync(channelConfigFile(cwd), JSON.stringify({
+    token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX",
+    approvedUserIds: [],
+  }), "utf8");
+
+  const factory = getTelegramMessageHandlerFactory(cwd);
+  assert.equal(typeof factory, "function", "the manager retains an inbound handler factory");
+  const handler = factory?.({ token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX", approvedUserIds: [] });
+  await handler?.(privateText(1, "222", "hello"));
+
+  const config = readChannelConfig(cwd);
+  assert.equal(config.ok, true);
+  if (config.ok) {
+    assert.equal(config.value.pendingPairings?.length, 1);
+    assert.equal(config.value.pendingPairings?.[0]?.userId, "222");
+  }
+  clearTelegramProjectManagers();
 });
 
 test("child sessions never start an inbound listener or inject follow-ups", async () => {

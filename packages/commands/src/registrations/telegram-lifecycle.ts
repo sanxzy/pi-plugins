@@ -4,6 +4,7 @@ import type {
   SessionShutdownEvent,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
+import { getChildPool } from "@xzy-ai/runtime";
 import {
   canonicalProjectRoot,
   createTelegramChannelLifecycle,
@@ -28,6 +29,16 @@ export interface TelegramLifecycleRegistrationDeps {
 
 const lifecyclesByProject = new Map<string, TelegramChannelLifecycle>();
 
+/** True only for a host session, never for a registered child job. */
+function isRootSession(ctx: ExtensionContext): boolean {
+  const sessionId = ctx.sessionManager.getSessionId();
+  const pool = getChildPool(ctx.cwd, sessionId);
+  // The shared pool keeps its first rootSessionId across host replacement
+  // (/new, reload, resume). The registry is the stable discriminator: child
+  // sessions are jobs, while every replacement root is not.
+  return pool.registry.get(sessionId) === undefined;
+}
+
 function lifecycleFor(
   projectRoot: string,
   sessionId: string,
@@ -50,6 +61,7 @@ export function registerTelegramLifecycle(
   deps: TelegramLifecycleRegistrationDeps = {},
 ): void {
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
+    if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     const lifecycle = lifecycleFor(projectRoot, ctx.sessionManager.getSessionId(), deps);
     const started = await lifecycle.start();
@@ -59,6 +71,7 @@ export function registerTelegramLifecycle(
   });
 
   pi.on("session_shutdown", async (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     const lifecycle = lifecyclesByProject.get(projectRoot);
     if (!lifecycle) return;
