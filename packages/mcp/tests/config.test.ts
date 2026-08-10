@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadMcpConfig, type McpServerConfig } from "../src/config.ts";
+import { loadMcpConfig } from "../src/index.ts";
+import type { McpServerConfig } from "../src/index.ts";
 
 function tmpRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-mcp-config-"));
@@ -31,9 +32,11 @@ test("loads JSONC user and project configuration with deep merge and project pre
     `{
       // user-level comments are allowed
       "mcp": {
-        "local-a": { "type": "local", "command": ["node", "server.js"], "cwd": "/u" },
-        "shared": { "type": "local", "command": ["node", "base.js"], "timeout": { "startup": 1000 } },
-        "remote-a": { "type": "remote", "url": "https://user.example", "oauth": false }
+        "servers": {
+          "local-a": { "type": "local", "command": ["node", "server.js"], "cwd": "/u" },
+          "shared": { "type": "local", "command": ["node", "base.js"], "timeout": { "startup": 1000 } },
+          "remote-a": { "type": "remote", "url": "https://user.example", "oauth": false }
+        }
       },
     }`,
   );
@@ -41,7 +44,9 @@ test("loads JSONC user and project configuration with deep merge and project pre
     projectRoot,
     `{
       "mcp": {
-        "shared": { "command": ["node", "project.js"], "timeout": { "request": 2000 } },
+        "servers": {
+          "shared": { "type": "local", "command": ["node", "project.js"], "timeout": { "request": 2000 } },
+        }
       },
     }`,
   );
