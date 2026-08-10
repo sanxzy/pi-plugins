@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   formatWikiEntry,
+  parseWikiEntries,
   saveWikiEntry,
   slugify,
   slugifyQuery,
@@ -13,6 +14,16 @@ import {
   WIKI_ENTRY_END,
   WIKI_ENTRY_START,
 } from "../src/wiki.ts";
+
+function entryDocument(
+  title: string,
+  source: "web_search" | "web_fetch",
+  queryOrUrl: string,
+  text: string,
+  timestamp: string,
+): string {
+  return formatWikiEntry({ topic: slugifyQuery(queryOrUrl), source, queryOrUrl, format: "markdown", title, text, timestamp });
+}
 
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
@@ -135,6 +146,30 @@ test("saveWikiEntry appends repeated research in order without overwriting", asy
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("parseWikiEntries splits marker-delimited entries and ignores marker-like body text", () => {
+  const body = `Some text that claims <!-- pi-code-wiki-entry --> but is not a real boundary.`;
+  const doc =
+    entryDocument("Web Search: alpha", "web_search", "alpha", `introduction ${body}`, "2026-01-01T00:00:00.000Z") +
+    entryDocument("Web Search: beta", "web_search", "beta", "second body", "2026-01-02T00:00:00.000Z");
+  const entries = parseWikiEntries(doc);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0]?.title, "Web Search: alpha");
+  assert.equal(entries[0]?.text.includes(body), true);
+  assert.equal(entries[1]?.title, "Web Search: beta");
+  assert.equal(entries[1]?.text, "second body");
+});
+
+test("parseWikiEntries exposes parsed metadata from the entry block", () => {
+  const doc = entryDocument("Web Search: alpha", "web_search", "alpha", "alpha body", "2026-01-01T00:00:00.000Z");
+  const entries = parseWikiEntries(doc);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0]?.source, "web_search");
+  assert.equal(entries[0]?.queryOrUrl, "alpha");
+  assert.equal(entries[0]?.timestamp, "2026-01-01T00:00:00.000Z");
+  assert.equal(entries[0]?.title, "Web Search: alpha");
+  assert.equal(entries[0]?.text, "alpha body");
 });
 
 test("saveWikiEntry tolerates write failures without throwing", async () => {
