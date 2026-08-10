@@ -74,6 +74,7 @@ export {
   type TelegramBotFactory,
   type TelegramMessageHandler,
   type TelegramRunnerFactory,
+  type TelegramRunnerOptionsLike,
   type TelegramTransportDeps,
 } from "./transport.ts";
 export {
@@ -113,6 +114,16 @@ export {
   type TelegramUpdate,
 } from "./inbound.ts";
 export {
+  clearTelegramChoiceState,
+  consumeTelegramChoice,
+  createTelegramChoice,
+  type TelegramChoice,
+  type TelegramChoiceConsumeInput,
+  type TelegramChoiceConsumed,
+  type TelegramChoiceCreateInput,
+  type TelegramChoiceCreateResult,
+} from "./choices.ts";
+export {
   createTelegramOutbound,
   sendTelegramMessage,
   sendTextChunks,
@@ -130,4 +141,6 @@ export {
   type TelegramTargetValidation,
   type TelegramSendTextOptions,
   type TelegramTextFormat,
+  type TelegramChoiceButton,
+  type OutboundChoiceResult,
 } from "./outbound.ts";

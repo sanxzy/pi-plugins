@@ -17,6 +17,7 @@ export interface TelegramProjectManagerOptions {
   createManager?: (projectRoot: string) => ChannelManager;
   createPoller?: (config: ChannelConfig, projectRoot: string, sessionId: string) => ChannelPoller;
   createMessageHandler?: (config: ChannelConfig) => TelegramMessageHandler;
+  createCallbackQueryHandler?: (config: ChannelConfig) => TelegramMessageHandler;
   /** Read the current Pi command/prompt/skill catalog for menu sync and expansion. */
   getCommands?: () => readonly TelegramMenuCommandSource[];
 }
@@ -25,6 +26,7 @@ interface TelegramProjectManagerEntry {
   manager: ChannelManager;
   sessionId: string;
   messageHandlerFactory?: (config: ChannelConfig) => TelegramMessageHandler;
+  callbackQueryHandlerFactory?: (config: ChannelConfig) => TelegramMessageHandler;
   getCommands?: () => readonly TelegramMenuCommandSource[];
 }
 
@@ -37,6 +39,7 @@ export function getTelegramProjectManager(options: TelegramProjectManagerOptions
   if (existing) {
     existing.sessionId = options.sessionId;
     if (options.createMessageHandler) existing.messageHandlerFactory = options.createMessageHandler;
+    if (options.createCallbackQueryHandler) existing.callbackQueryHandlerFactory = options.createCallbackQueryHandler;
     if (options.getCommands) existing.getCommands = options.getCommands;
     return existing.manager;
   }
@@ -45,6 +48,7 @@ export function getTelegramProjectManager(options: TelegramProjectManagerOptions
     manager: undefined as never,
     sessionId: options.sessionId,
     messageHandlerFactory: options.createMessageHandler,
+    callbackQueryHandlerFactory: options.createCallbackQueryHandler,
     getCommands: options.getCommands,
   };
   entry.manager = options.createManager?.(projectRoot) ?? createChannelManager({
@@ -57,6 +61,8 @@ export function getTelegramProjectManager(options: TelegramProjectManagerOptions
       return createTelegramTransport({
         logger: loggerResult.value,
         onMessage: entry.messageHandlerFactory?.(config),
+        onCallbackQuery: entry.callbackQueryHandlerFactory?.(config),
+        allowedUpdates: ["message", "callback_query"],
         commands: () => buildTelegramBotCommands(entry.getCommands?.() ?? []),
       });
     },
@@ -68,6 +74,11 @@ export function getTelegramProjectManager(options: TelegramProjectManagerOptions
 /** The current inbound message-handler factory for a project, if one was registered. */
 export function getTelegramMessageHandlerFactory(projectRoot: string): ((config: ChannelConfig) => TelegramMessageHandler) | undefined {
   return managersByProject.get(canonicalProjectRoot(projectRoot))?.messageHandlerFactory;
+}
+
+/** The current callback-query handler factory for a project, if registered. */
+export function getTelegramCallbackQueryHandlerFactory(projectRoot: string): ((config: ChannelConfig) => TelegramMessageHandler) | undefined {
+  return managersByProject.get(canonicalProjectRoot(projectRoot))?.callbackQueryHandlerFactory;
 }
 
 /** Test/observability seam: the manager already registered for a project, if any. */

@@ -19,13 +19,15 @@ export interface BotApiLike {
   getMe(): Promise<unknown>;
   sendMessage?(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
   setMyCommands?(commands: readonly TelegramBotCommand[], other?: { scope?: TelegramCommandScope }): Promise<unknown>;
+  answerCallbackQuery?(callbackQueryId: string): Promise<unknown>;
+  editMessageReplyMarkup?(chatId: number | string, messageId: number, other?: Record<string, unknown>): Promise<unknown>;
 }
 
 export type TelegramMessageHandler = (context: unknown) => Promise<unknown> | unknown;
 
 export interface BotLike {
   readonly api: BotApiLike;
-  on?(event: "message", middleware: TelegramMessageHandler): void;
+  on?(event: "message" | "callback_query", middleware: TelegramMessageHandler): void;
   init(signal?: AbortSignal): Promise<void>;
   catch(handler: (error: unknown) => unknown): void;
   stop(): Promise<void>;
@@ -37,8 +39,12 @@ export interface RunnerHandleLike {
   task(): Promise<void> | undefined;
 }
 
+export interface TelegramRunnerOptionsLike {
+  runner?: { silent?: boolean; fetch?: { allowed_updates?: readonly ("message" | "callback_query")[] } };
+}
+
 export type TelegramBotFactory = (token: string) => BotLike;
-export type TelegramRunnerFactory = (bot: BotLike) => RunnerHandleLike;
+export type TelegramRunnerFactory = (bot: BotLike, options: TelegramRunnerOptionsLike) => RunnerHandleLike;
 
 export interface TelegramTransportDeps {
   /** Session-scoped safe logger. Secrets are redacted at the logger boundary. */
@@ -52,6 +58,8 @@ export interface TelegramTransportDeps {
    * Phase 6 uses this to route accepted private text to the root parent.
    */
   onMessage?: TelegramMessageHandler;
+  /** Callback-query middleware for single-use inline choices. */
+  onCallbackQuery?: TelegramMessageHandler;
   /**
    * Optional sanitized bot command menu published via `setMyCommands` before
    * polling starts and refreshed by `/start` or `/help`. A getter keeps the
@@ -59,6 +67,8 @@ export interface TelegramTransportDeps {
    * Best-effort: sync failures are logged but do not stop polling.
    */
   commands?: readonly TelegramBotCommand[] | (() => readonly TelegramBotCommand[]);
+  /** Restricted update stream for the runner; choices use message + callback_query only. */
+  allowedUpdates?: readonly ("message" | "callback_query")[];
 }
 
 /**
@@ -107,7 +117,7 @@ function telegramCommandFromContext(context: unknown): "start" | "help" | undefi
 
 export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPoller {
   const createBot = deps.createBot ?? ((token: string) => new Bot(token) as unknown as BotLike);
-  const runBot = deps.runBot ?? ((bot: BotLike) => run(bot as never, { runner: { silent: true } }) as unknown as RunnerHandleLike);
+  const runBot = deps.runBot ?? ((bot: BotLike, options: TelegramRunnerOptionsLike) => run(bot as never, options as never) as unknown as RunnerHandleLike);
 
   let bot: BotLike | undefined;
   let handle: RunnerHandleLike | undefined;
@@ -162,6 +172,7 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
           if (telegramCommandFromContext(context)) await syncCommands(currentApprovedUserIds);
           return deps.onMessage?.(context);
         });
+        if (deps.onCallbackQuery) candidate.on("callback_query", deps.onCallbackQuery);
       }
 
       try {
@@ -183,7 +194,9 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
       stopped = false;
 
       try {
-        handle = runBot(candidate);
+        handle = runBot(candidate, {
+          runner: { silent: true, fetch: { allowed_updates: deps.allowedUpdates ?? ["message"] } },
+        });
       } catch (error) {
         activeTokenFingerprints.delete(candidateFingerprint);
         bot = undefined;

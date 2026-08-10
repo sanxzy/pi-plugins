@@ -58,6 +58,19 @@ const telegramSendTextAction = Type.Object({
   disable_notification: Type.Optional(Type.Boolean({ description: "Suppress the notification for this message when explicitly requested." })),
 }, { additionalProperties: false });
 
+const telegramChoiceOption = Type.Object({
+  label: Type.String({ minLength: 1, maxLength: 64 }),
+  value: Type.String({ minLength: 1, maxLength: 1000 }),
+}, { additionalProperties: false });
+
+const telegramSendChoicesAction = Type.Object({
+  action: Type.Literal("send_choices"),
+  chat_id: telegramChatId,
+  question: Type.String({ minLength: 1, maxLength: 4000 }),
+  choices: Type.Array(telegramChoiceOption, { minItems: 2, maxItems: 10 }),
+  message_id: Type.Optional(Type.Integer({ minimum: 1 })),
+}, { additionalProperties: false });
+
 const telegramReactAction = Type.Object({
   action: Type.Literal("react"),
   chat_id: telegramChatId,
@@ -78,7 +91,7 @@ const telegramReactAction = Type.Object({
   ], { description: "A standard Telegram reaction emoji." }),
 }, { additionalProperties: false });
 
-export const telegramChatParams = Type.Union([telegramSendTextAction, telegramReactAction]);
+export const telegramChatParams = Type.Union([telegramSendTextAction, telegramReactAction, telegramSendChoicesAction]);
 
 export const goalCreateParams = Type.Object({
   prompt: Type.String({ description: "Exact goal prompt to deliver on each interval." }),

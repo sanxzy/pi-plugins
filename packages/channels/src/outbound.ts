@@ -17,6 +17,15 @@ export const MAX_TEXT_LENGTH = 4000;
 
 export type TelegramTextFormat = "plain" | "html" | "markdown_v2";
 
+export interface TelegramChoiceButton {
+  label: string;
+  callbackData: string;
+}
+
+export type OutboundChoiceResult =
+  | { ok: true; messageId: number; expiresAt: number }
+  | { ok: false; error: string; category: OutboundErrorCategory };
+
 export interface TelegramSendTextOptions {
   /** Explicit presentation format. Plain is the default. */
   format?: TelegramTextFormat;
@@ -126,6 +135,8 @@ export interface TelegramSendApi {
   sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
   setMessageReaction?(chatId: number | string, messageId: number, reaction: unknown, other?: Record<string, unknown>): Promise<unknown>;
   sendChatAction?(chatId: number | string, action: string): Promise<unknown>;
+  answerCallbackQuery?(callbackQueryId: string): Promise<unknown>;
+  editMessageReplyMarkup?(chatId: number | string, messageId: number, other?: Record<string, unknown>): Promise<unknown>;
 }
 
 /**
@@ -181,6 +192,8 @@ export interface TelegramOutbound {
   send(projectRoot: string, chatId: string, text: string, options?: TelegramSendTextOptions): Promise<OutboundTextResult>;
   /** React to a specific Telegram message, or fail closed when not configured. */
   react(projectRoot: string, chatId: string, messageId: number, reaction: unknown): Promise<OutboundTextResult>;
+  /** Send a question with an inline keyboard to an approved chat. */
+  sendChoices(projectRoot: string, chatId: string, question: string, buttons: TelegramChoiceButton[], replyToMessageId?: number): Promise<OutboundChoiceResult>;
 }
 
 /** Create the outbound sender. The reply chat id is supplied by the caller. */
@@ -243,7 +256,28 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
     return result as OutboundTextResult;
   };
 
-  return { send, react };
+  const sendChoices = async (projectRoot: string, chatId: string, question: string, buttons: TelegramChoiceButton[], replyToMessageId?: number): Promise<OutboundChoiceResult> => {
+    const target = validateTelegramTarget(projectRoot, chatId, readConfig);
+    if (!target.ok) return { ok: false, error: target.error, category: target.category };
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+    const result = await withConfig(projectRoot, async (api) => {
+      try {
+        const other: Record<string, unknown> = {
+          reply_markup: { inline_keyboard: [buttons.map((button) => ({ text: button.label, callback_data: button.callbackData }))] },
+        };
+        if (replyToMessageId !== undefined) other.reply_parameters = { message_id: replyToMessageId };
+        const sent = await api.sendMessage(target.chatId, question, other);
+        const messageId = readMessageId(sent);
+        if (messageId === undefined) return { ok: false as const, error: "Telegram did not return a choice message id", category: "telegram_rejected" as const };
+        return { ok: true as const, messageId, expiresAt };
+      } catch (error) {
+        return { ok: false as const, error: safeError(error), category: "telegram_rejected" as const };
+      }
+    });
+    return result as OutboundChoiceResult;
+  };
+
+  return { send, react, sendChoices };
 }
 
 /**

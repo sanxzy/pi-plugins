@@ -11,6 +11,7 @@ import { getChildPool } from "@xzy-ai/runtime";
 import {
   canonicalProjectRoot,
   createChannelLogger,
+  consumeTelegramChoice,
   createTelegramInbound,
   createTelegramOutbound,
   defaultTelegramPairingState,
@@ -247,6 +248,32 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
       projectRoot,
       sessionId,
       createMessageHandler: () => (context) => listener.handle(context),
+      createCallbackQueryHandler: () => async (callbackContext) => {
+        const callback = (callbackContext as { callbackQuery?: { id?: string; data?: string; from?: { id?: number | string }; message?: { chat?: { id?: number | string }; message_id?: number } } }).callbackQuery;
+        if (!callback?.id || typeof callback.data !== "string" || !callback.from) return;
+        const chatId = typeof callback.message?.chat?.id === "number" ? String(callback.message.chat.id) : callback.message?.chat?.id;
+        const messageId = callback.message?.message_id;
+        const senderId = String(callback.from.id);
+        if (!chatId || messageId === undefined) return;
+        const consumed = consumeTelegramChoice(callback.data, {
+          projectRoot,
+          sessionId,
+          chatId,
+          senderId,
+        });
+        void (async () => {
+          try {
+            const api = (callbackContext as { api?: { answerCallbackQuery?: (id: string) => Promise<unknown>; editMessageReplyMarkup?: (chatId: number | string, messageId: number, other?: Record<string, unknown>) => Promise<unknown> } }).api;
+            await api?.answerCallbackQuery?.(callback.id!);
+            await api?.editMessageReplyMarkup?.(chatId, messageId, { reply_markup: { inline_keyboard: [] } });
+          } catch {
+            // Callback API failures must not create an unhandled rejection.
+          }
+        })();
+        if (!consumed) return;
+        const content = `Based on your question: ${consumed.question}\nMy answer: ${consumed.value}${formatTelegramSignature(chatId)}`;
+        pi.sendUserMessage(content, { deliverAs: "steer" });
+      },
     });
     activeListener = listener;
     runningByProject.set(projectRoot, listener);

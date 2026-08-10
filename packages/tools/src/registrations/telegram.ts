@@ -1,11 +1,15 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
+  createTelegramChoice,
+  createTelegramOutbound,
   reactToMessage,
   sendTelegramMessage,
   validateStandardReaction,
   validateTelegramTarget,
+  type OutboundChoiceResult,
   type OutboundTextResult,
+  type TelegramChoice,
   type TelegramTargetValidation,
 } from "@xzy-ai/channels";
 import { telegramChatParams, type TelegramChatParams } from "../tools.ts";
@@ -30,12 +34,32 @@ export interface TelegramChatDeps {
   validateTarget?: (projectRoot: string, chatId: string) => Promise<TelegramTargetValidation>;
   /** Injectable reaction seam so tests verify delivery offline. */
   react?: (projectRoot: string, chatId: string, messageId: number, emoji: string) => Promise<OutboundTextResult>;
+  /** Injectable choice prompt seam so tests verify delivery offline. */
+  sendChoices?: (projectRoot: string, chatId: string, question: string, choices: TelegramChoice[], replyToMessageId?: number, sessionId?: string) => Promise<OutboundChoiceResult>;
 }
 
 /** Register the parent-only unified Telegram communication/reporting tool. */
 export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDeps = {}): void {
   const send = deps.send ?? sendTelegramMessage;
   const react = deps.react ?? reactToMessage;
+  const sendChoices = deps.sendChoices ?? (async (projectRoot: string, chatId: string, question: string, choices: TelegramChoice[], replyToMessageId?: number, sessionId = "root") => {
+    const choiceState = createTelegramChoice({
+      projectRoot,
+      sessionId,
+      chatId,
+      senderId: chatId,
+      question,
+      choices,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+    return createTelegramOutbound().sendChoices(
+      projectRoot,
+      chatId,
+      question,
+      choices.map((choice, index) => ({ label: choice.label, callbackData: choiceState.callbackData[index]! })),
+      replyToMessageId,
+    );
+  });
   const validateTarget = deps.validateTarget ?? (async (projectRoot: string, chatId: string) =>
     validateTelegramTarget(projectRoot, chatId));
 
@@ -59,6 +83,44 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           chatId: params.chat_id,
           error: target.error,
           category: target.category,
+        });
+      }
+
+      if (params.action === "send_choices") {
+        const labels = new Set<string>();
+        const values = new Set<string>();
+        for (const choice of params.choices) {
+          if (labels.has(choice.label) || values.has(choice.value)) {
+            return errorResult("Choice labels and values must be unique", {
+              action: params.action,
+              sent: false,
+              chatId: target.chatId,
+              question: params.question,
+              error: "Choice labels and values must be unique",
+              category: "telegram_rejected",
+            });
+          }
+          labels.add(choice.label);
+          values.add(choice.value);
+        }
+        const choiceResult = await sendChoices(ctx.cwd, target.chatId, params.question, params.choices, params.message_id, ctx.sessionManager.getSessionId());
+        if (!choiceResult.ok) {
+          return errorResult(`Telegram choices failed: ${choiceResult.error}`, {
+            action: params.action,
+            sent: false,
+            chatId: target.chatId,
+            question: params.question,
+            error: choiceResult.error,
+            category: choiceResult.category,
+          });
+        }
+        return textResult(`Telegram choices sent (${params.choices.length} options)`, {
+          action: params.action,
+          sent: true,
+          chatId: target.chatId,
+          question: params.question,
+          messageId: choiceResult.messageId,
+          expiresAt: choiceResult.expiresAt,
         });
       }
 
@@ -123,7 +185,9 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
     renderCall(args: TelegramChatParams, theme) {
       const summary = args.action === "send_text"
         ? args.text
-        : `react ${args.emoji} → ${args.chat_id}:${args.message_id}`;
+        : args.action === "react"
+          ? `react ${args.emoji} → ${args.chat_id}:${args.message_id}`
+          : `choices ${args.question}`;
       return new Text(theme.fg("toolTitle", theme.bold("user_telegram_chat ")) + theme.fg("muted", summary), 0, 0);
     },
     renderResult(result: AgentToolResult<TelegramChatDetails>, _options, theme) {
