@@ -14,7 +14,12 @@ export type { TelegramChatDetails } from "../types.ts";
 
 export interface TelegramChatDeps {
   /** Injectable send seam so tests verify delivery and partial results offline. */
-  send?: (projectRoot: string, chatId: string, message: string) => Promise<OutboundTextResult>;
+  send?: (projectRoot: string, chatId: string, message: string, options?: {
+    format?: "plain" | "html" | "markdown_v2";
+    messageId?: number;
+    linkPreviewOptions?: Record<string, unknown>;
+    disableNotification?: boolean;
+  }) => Promise<OutboundTextResult>;
   /**
    * Injectable explicit-target gate. The default reuses the approved-user
    * allowlist from the channel configuration and rejects any unapproved or
@@ -52,7 +57,12 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         });
       }
 
-      const result = await send(ctx.cwd, target.chatId, params.text);
+      const result = await send(ctx.cwd, target.chatId, params.text, {
+        format: params.format,
+        messageId: params.message_id,
+        linkPreviewOptions: params.link_preview_options,
+        disableNotification: params.disable_notification,
+      });
       if (!result.ok) {
         return errorResult(`Telegram delivery failed: ${result.error}`, {
           action: params.action,

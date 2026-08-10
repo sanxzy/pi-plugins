@@ -125,4 +125,6 @@ export {
   type TelegramOutboundOptions,
   type TelegramSendApi,
   type TelegramTargetValidation,
+  type TelegramSendTextOptions,
+  type TelegramTextFormat,
 } from "./outbound.ts";

@@ -48,6 +48,14 @@ const telegramSendTextAction = Type.Object({
   action: Type.Literal("send_text"),
   chat_id: telegramChatId,
   text: Type.String({ description: "The communication or report text to send to Telegram." }),
+  format: Type.Optional(Type.Union([
+    Type.Literal("plain"),
+    Type.Literal("html"),
+    Type.Literal("markdown_v2"),
+  ], { description: "Presentation format; plain is the default." })),
+  message_id: Type.Optional(Type.Integer({ description: "When supplied, reply to this Telegram message in the approved chat." })),
+  link_preview_options: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Telegram link-preview overrides, passed only when requested." })),
+  disable_notification: Type.Optional(Type.Boolean({ description: "Suppress the notification for this message when explicitly requested." })),
 }, { additionalProperties: false });
 
 export const telegramChatParams = Type.Union([telegramSendTextAction]);

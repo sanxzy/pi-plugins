@@ -15,11 +15,33 @@ import { readChannelConfig } from "./state.ts";
 /** Telegram text chunk limit for outbound delivery. */
 export const MAX_TEXT_LENGTH = 4000;
 
+export type TelegramTextFormat = "plain" | "html" | "markdown_v2";
+
+export interface TelegramSendTextOptions {
+  /** Explicit presentation format. Plain is the default. */
+  format?: TelegramTextFormat;
+  /** When supplied, deliver as a Telegram reply to this message id. */
+  messageId?: number;
+  /** Telegram link-preview overrides, passed only when requested. */
+  linkPreviewOptions?: Record<string, unknown>;
+  /** Suppress the notification for this message when explicitly requested. */
+  disableNotification?: boolean;
+}
+
 const TOKEN_PATTERN = /\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g;
 
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Telegram delivery failed";
   return message.replace(TOKEN_PATTERN, "[Redacted]");
+}
+
+function outboundErrorCategory(error: unknown): OutboundErrorCategory {
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as { error_code?: unknown; code?: unknown };
+    if (candidate.error_code === 429) return "rate_limited";
+    if (candidate.code === "ETIMEDOUT" || candidate.code === "ECONNRESET") return "network_error";
+  }
+  return "partial_delivery";
 }
 
 /**
@@ -88,6 +110,7 @@ export type OutboundTextResult =
 export interface TelegramSendApi {
   sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
   setMessageReaction?(chatId: number | string, messageId: number, reaction: unknown, other?: Record<string, unknown>): Promise<unknown>;
+  sendChatAction?(chatId: number | string, action: string): Promise<unknown>;
 }
 
 /**
@@ -105,6 +128,7 @@ export async function sendTextChunks(
   let sent = 0;
   let failed = 0;
   let firstError: string | undefined;
+  let firstRawError: unknown;
   for (const chunk of chunks) {
     try {
       const messageId = await send(chatId, chunk);
@@ -113,11 +137,18 @@ export async function sendTextChunks(
     } catch (error) {
       failed += 1;
       firstError ??= safeError(error);
+      firstRawError ??= error;
       break;
     }
   }
   if (failed > 0) {
-    return { ok: false, sent, failed, error: firstError ?? "Telegram delivery failed", category: "partial_delivery" };
+    return {
+      ok: false,
+      sent,
+      failed,
+      error: firstError ?? "Telegram delivery failed",
+      category: outboundErrorCategory(firstRawError),
+    };
   }
   return { ok: true, sent, failed: 0, messageIds: sentIds };
 }
@@ -126,11 +157,13 @@ export interface TelegramOutboundOptions {
   /** Injectable send surface, defaulting to a grammY bot API obtained from the config token. */
   createSendApi?(token: string): TelegramSendApi;
   readConfig?: typeof readChannelConfig;
+  /** Injectable delay seam for bounded retry tests. */
+  sleep?(milliseconds: number): Promise<void>;
 }
 
 export interface TelegramOutbound {
   /** Send text to a specific Telegram chat, or fail closed when not configured. */
-  send(projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult>;
+  send(projectRoot: string, chatId: string, text: string, options?: TelegramSendTextOptions): Promise<OutboundTextResult>;
   /** React to a specific Telegram message, or fail closed when not configured. */
   react(projectRoot: string, chatId: string, messageId: number, reaction: unknown): Promise<OutboundTextResult>;
 }
@@ -138,6 +171,7 @@ export interface TelegramOutbound {
 /** Create the outbound sender. The reply chat id is supplied by the caller. */
 export function createTelegramOutbound(options: TelegramOutboundOptions = {}): TelegramOutbound {
   const readConfig = options.readConfig ?? readChannelConfig;
+  const sleep = options.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
 
   const withConfig = async <T>(projectRoot: string, run: (api: TelegramSendApi, token: string) => Promise<T>): Promise<OutboundTextResult | T> => {
     const channel = readConfig(projectRoot);
@@ -149,15 +183,33 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
     return run(api, channel.value.token);
   };
 
-  const send = async (projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult> => {
+  const send = async (projectRoot: string, chatId: string, text: string, options: TelegramSendTextOptions = {}): Promise<OutboundTextResult> => {
     const target = validateTelegramTarget(projectRoot, chatId, readConfig);
     if (!target.ok) return { ok: false, sent: 0, failed: 1, error: target.error, category: target.category };
-    const result = await withConfig(projectRoot, async (api) =>
-      sendTextChunks(target.chatId, text, async (destination, chunk) => {
-        const sentMessage = await api.sendMessage(destination, chunk);
+    const format = options.format ?? "plain";
+    const chunks = containerizeText(text, format);
+    if (chunks === undefined) {
+      return { ok: false, sent: 0, failed: 1, error: "Formatted text cannot be split safely within the message limit", category: "telegram_rejected" };
+    }
+    const result = await withConfig(projectRoot, async (api) => {
+      if (api.sendChatAction) {
+        try {
+          await api.sendChatAction(target.chatId, "typing");
+        } catch {
+          // Best-effort typing status; a failure must not block delivery.
+        }
+      }
+      return sendTextChunks(target.chatId, text, async (destination, chunk) => {
+        const sentMessage = await attemptSend(api, destination, chunk, {
+          format,
+          messageId: options.messageId,
+          linkPreviewOptions: options.linkPreviewOptions,
+          disableNotification: options.disableNotification,
+          sleep,
+        });
         return readMessageId(sentMessage);
-      }),
-    );
+      });
+    });
     return result as OutboundTextResult;
   };
 
@@ -179,6 +231,69 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
   return { send, react };
 }
 
+/**
+ * Bounded, idempotence-safe retry for a single text chunk. Only clear network
+ * timeouts and Telegram 429 flood waits are retried, at most once. Any other
+ * error (including an ambiguous non-idempotent send outcome) is surfaced
+ * immediately so no duplicate message is created.
+ */
+async function attemptSend(
+  api: TelegramSendApi,
+  chatId: number | string,
+  text: string,
+  options: Required<Pick<TelegramSendTextOptions, "format">> &
+    Pick<TelegramSendTextOptions, "messageId" | "linkPreviewOptions" | "disableNotification"> &
+    { sleep: (milliseconds: number) => Promise<void> },
+): Promise<unknown> {
+  const other: Record<string, unknown> = {};
+  if (options.format !== "plain") other.parse_mode = options.format === "html" ? "HTML" : "MarkdownV2";
+  if (options.messageId !== undefined) other.reply_parameters = { message_id: options.messageId };
+  if (options.linkPreviewOptions !== undefined) other.link_preview_options = options.linkPreviewOptions;
+  if (options.disableNotification !== undefined) other.disable_notification = options.disableNotification;
+  try {
+    return await api.sendMessage(chatId, text, other);
+  } catch (error) {
+    const decision = classifyRetry(error);
+    if (decision.kind === "retry") {
+      await options.sleep(decision.delayMs);
+      return api.sendMessage(chatId, text, other);
+    }
+    throw error;
+  }
+}
+
+type RetryDecision =
+  | { kind: "retry"; delayMs: number }
+  | { kind: "abort" };
+
+function classifyRetry(error: unknown): RetryDecision {
+  if (typeof error === "object" && error !== null) {
+    const err = error as { error_code?: unknown; parameters?: { retry_after?: unknown } };
+    if (err.error_code === 429) {
+      const retryAfter = err.parameters?.retry_after;
+      if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) {
+        return { kind: "retry", delayMs: Math.min(1000 * Math.max(0, retryAfter), 5000) };
+      }
+    }
+    const code = (error as { code?: unknown }).code;
+    if (code === "ETIMEDOUT" || code === "ECONNRESET") {
+      return { kind: "retry", delayMs: 0 };
+    }
+  }
+  return { kind: "abort" };
+}
+
+/**
+ * Format-aware chunking. Plain text keeps the existing boundary-aware split.
+ * A formatted message is returned as a single chunk when it fits, and is
+ * rejected (undefined) when it exceeds the limit, because splitting markup
+ * could silently produce invalid entities.
+ */
+function containerizeText(text: string, format: TelegramTextFormat): string[] | undefined {
+  if (format === "plain") return splitTextChunks(text);
+  return text.length <= MAX_TEXT_LENGTH ? [text] : undefined;
+}
+
 /** Extract a Telegram message id from an API response object, if present. */
 function readMessageId(sent: unknown): number | undefined {
   if (typeof sent !== "object" || sent === null) return undefined;
@@ -194,12 +309,13 @@ function defaultCreateSendApi(token: string): TelegramSendApi {
   const bot = new Bot(token);
   return {
     sendMessage: (chatId, text, other) => bot.api.sendMessage(chatId, text, other),
+    sendChatAction: (chatId, action) => bot.api.sendChatAction(chatId, action as never),
     setMessageReaction: (chatId, messageId, reaction, other) =>
       bot.api.setMessageReaction(chatId, messageId, reaction as never, other),
   };
 }
 
 /** Convenience sender used by the model-callable tool. */
-export function sendTelegramMessage(projectRoot: string, chatId: string, text: string): Promise<OutboundTextResult> {
-  return createTelegramOutbound().send(projectRoot, chatId, text);
+export function sendTelegramMessage(projectRoot: string, chatId: string, text: string, options?: TelegramSendTextOptions): Promise<OutboundTextResult> {
+  return createTelegramOutbound().send(projectRoot, chatId, text, options);
 }
