@@ -27,7 +27,7 @@ import {
   type TelegramInboundListener,
 } from "@xzy-ai/channels";
 import { getTelegramProjectManager } from "./telegram-project.ts";
-import { dispatchTelegramControl, takeTelegramCompactionOrigin, type TelegramControlDispatchOptions } from "./telegram-controls.ts";
+import { clearTelegramCompactionOrigin, dispatchTelegramControl, takeTelegramCompactionOrigin, type TelegramControlDispatchOptions } from "./telegram-controls.ts";
 
 export interface TelegramInboundDeps {
   /** Injectable inbound factory for offline tests. */
@@ -145,7 +145,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   // emit agent_start without the preceding extension event.
   pi.on("session_compact", (event: SessionCompactEvent, ctx: ExtensionContext) => {
     if (!isRootSession(ctx) || event.reason !== "manual") return;
-    const origin = takeTelegramCompactionOrigin(canonicalProjectRoot(ctx.cwd));
+    const origin = takeTelegramCompactionOrigin(canonicalProjectRoot(ctx.cwd), ctx.sessionManager.getSessionId());
     if (!origin) return;
     void acknowledgeReaction(canonicalProjectRoot(ctx.cwd), ctx.sessionManager.getSessionId(), origin);
   });
@@ -257,6 +257,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   pi.on("session_shutdown", async (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
     if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
+    clearTelegramCompactionOrigin(projectRoot, ctx.sessionManager.getSessionId());
     const listener = listenersByProject.get(projectRoot);
     runningByProject.delete(projectRoot);
     listenersByProject.delete(projectRoot);

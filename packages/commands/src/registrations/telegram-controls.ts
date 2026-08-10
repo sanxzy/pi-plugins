@@ -24,15 +24,26 @@ export interface TelegramControlDispatchOptions {
 }
 
 const compactionByProject = new Set<string>();
-/** Pending Telegram origin of an in-flight native /compact, keyed by project root. */
+/** Pending Telegram origin of an in-flight native /compact, keyed by project root and originating root session. */
 const pendingCompactionOriginByProject = new Map<string, { chatId: string; messageId: number }>();
+const PENDING_KEY_SEPARATOR = "\u0000";
 const THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
-/** Take the pending post-compaction Telegram origin for a project, if any. */
-export function takeTelegramCompactionOrigin(projectRoot: string): { chatId: string; messageId: number } | undefined {
-  const origin = pendingCompactionOriginByProject.get(projectRoot);
-  pendingCompactionOriginByProject.delete(projectRoot);
+function compactionOriginKey(projectRoot: string, sessionId: string): string {
+  return `${projectRoot}${PENDING_KEY_SEPARATOR}${sessionId}`;
+}
+
+/** Take the pending post-compaction Telegram origin for a project/root session, if any. */
+export function takeTelegramCompactionOrigin(projectRoot: string, sessionId: string): { chatId: string; messageId: number } | undefined {
+  const key = compactionOriginKey(projectRoot, sessionId);
+  const origin = pendingCompactionOriginByProject.get(key);
+  pendingCompactionOriginByProject.delete(key);
   return origin;
+}
+
+/** Discard any pending Telegram origin for a project/root session (e.g. on shutdown/replacement). */
+export function clearTelegramCompactionOrigin(projectRoot: string, sessionId: string): void {
+  pendingCompactionOriginByProject.delete(compactionOriginKey(projectRoot, sessionId));
 }
 
 /** True only when the operator explicitly enables development mode. */
@@ -109,12 +120,16 @@ export async function dispatchTelegramControl(
 
       compactionByProject.add(options.projectRoot);
       if (options.messageId !== undefined) {
-        pendingCompactionOriginByProject.set(options.projectRoot, { chatId: options.chatId, messageId: options.messageId });
+        const sessionId = options.context.sessionManager.getSessionId();
+        pendingCompactionOriginByProject.set(compactionOriginKey(options.projectRoot, sessionId), { chatId: options.chatId, messageId: options.messageId });
       }
       await reply("🗜 Compaction started.");
       const finish = async (message: string, success: boolean): Promise<void> => {
         compactionByProject.delete(options.projectRoot);
-        if (!success) pendingCompactionOriginByProject.delete(options.projectRoot);
+        if (!success) {
+          const sessionId = options.context.sessionManager.getSessionId();
+          pendingCompactionOriginByProject.delete(compactionOriginKey(options.projectRoot, sessionId));
+        }
         await reply(message);
       };
       try {
