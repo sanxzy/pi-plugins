@@ -14,14 +14,23 @@ export const GOAL_WORKFLOW_PROMPT = [
   "If the user supplies text after /goal, treat that exact text as the proposed goal request and decide which goal tool to use. If /goal has no text, propose next steps without directly mutating goal state.",
 ].join("\n");
 
+/**
+ * Build the goal workflow message for a command invocation. Shared by the TUI
+ * `/goal` handler and the Telegram command bridge so both dispatch the exact
+ * same content.
+ */
+export function expandTelegramGoalCommand(args: string): string {
+  const suffix = args.length > 0
+    ? `\n\n${args}`
+    : "\n\nNo goal text was provided. Propose sensible next steps for the user without directly mutating goal state.";
+  return `${GOAL_WORKFLOW_PROMPT}${suffix}`;
+}
+
 export function registerGoalCommand(pi: ExtensionAPI): void {
   pi.registerCommand("goal", {
     description: "Teach the current session the persistent goal workflow.",
     async handler(args: string, _ctx: ExtensionCommandContext): Promise<void> {
-      const suffix = args.length > 0
-        ? `\n\n${args}`
-        : "\n\nNo goal text was provided. Propose sensible next steps for the user without directly mutating goal state.";
-      pi.sendUserMessage(`${GOAL_WORKFLOW_PROMPT}${suffix}`, { deliverAs: "steer" });
+      pi.sendUserMessage(expandTelegramGoalCommand(args), { deliverAs: "steer" });
     },
   });
 }

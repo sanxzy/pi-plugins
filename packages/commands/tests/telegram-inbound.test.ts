@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { approvePairingAt, channelConfigFile, createTelegramInbound, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
+import { approvePairingAt, channelConfigFile, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
 
@@ -194,6 +194,45 @@ test("an unauthorized DM creates a pairing request and is never delivered; appro
   await listener!.handle(privateText(2, "222", "later"));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(sent, ["later" + formatTelegramSignature("777")], "the post-approval DM is delivered");
+  clearTelegramProjectManagers();
+});
+
+test("a recognized slash command is dispatched natively with a compact signature", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers, sent } = registrations();
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => (listener = createTelegramInbound(opts)),
+    expandCommand: (name, args) => (name === "goal" ? `GOAL_WORKFLOW+${args}` : undefined),
+  });
+
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  await listener!.handle(privateText(1, "111", "/goal 10s testing"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], "GOAL_WORKFLOW+10s testing" + formatTelegramCommandSignature("777"), "expanded content plus compact signature, no long footer");
+  assert.doesNotMatch(sent[0], /Be indifferent/);
+  clearTelegramProjectManagers();
+});
+
+test("an unknown slash command stays literal text with the full signature", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers, sent } = registrations();
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => (listener = createTelegramInbound(opts)),
+    expandCommand: () => undefined,
+  });
+
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  await listener!.handle(privateText(1, "111", "/unknown args"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], "/unknown args" + formatTelegramSignature("777"));
   clearTelegramProjectManagers();
 });
 

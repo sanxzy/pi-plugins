@@ -1,6 +1,6 @@
 export { registerSessionEvents } from "./registrations/session-events.ts";
 export { registerLifecycleGates } from "./registrations/lifecycle-gates.ts";
-export { registerGoalCommand, GOAL_WORKFLOW_PROMPT } from "./registrations/goal-command.ts";
+export { registerGoalCommand, expandTelegramGoalCommand, GOAL_WORKFLOW_PROMPT } from "./registrations/goal-command.ts";
 export { registerTelegramSetup, type TelegramSetupRegistrationDeps } from "./registrations/telegram-setup.ts";
 export {
   clearTelegramProjectManager,

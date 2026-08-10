@@ -4,7 +4,9 @@ import {
   createTelegramInbound,
   decodeAcceptedText,
   extractTelegramChatId,
+  formatTelegramCommandSignature,
   formatTelegramSignature,
+  parseTelegramCommand,
   type ChannelConfig,
   type TelegramInboundListener,
 } from "../src/index.ts";
@@ -73,6 +75,23 @@ test("extractTelegramChatId reads the origin chat from a signed message and refu
 test("extractTelegramChatId prefers the trailing signature over an earlier one in the body", () => {
   const text = `looks like a footer [from:telegram:111] in the middle${formatTelegramSignature("777")}`;
   assert.equal(extractTelegramChatId(text), "777");
+});
+
+test("parseTelegramCommand splits name, optional @bot, and args with Bot API validation", () => {
+  assert.deepEqual(parseTelegramCommand("/goal 10s testing"), { name: "goal", args: "10s testing" });
+  assert.deepEqual(parseTelegramCommand("/fix_tests@MyBot  hi  there "), { name: "fix_tests", args: "hi there" });
+  assert.equal(parseTelegramCommand("hello world"), undefined, "ordinary text is not a command");
+  assert.equal(parseTelegramCommand("/UPPER!bad-name"), undefined, "invalid names are rejected");
+  assert.equal(parseTelegramCommand("/setup-channel-telegram"), undefined, "hyphens are not valid bot commands");
+  assert.equal(parseTelegramCommand("/"), undefined, "bare slash is not a command");
+  assert.equal(parseTelegramCommand("a-b/c"), undefined, "slashes only count at the start");
+});
+
+test("formatTelegramCommandSignature stays compact and still carries the origin chat", () => {
+  const signature = formatTelegramCommandSignature("777");
+  assert.match(signature, /\[from:telegram:777\]/);
+  assert.doesNotMatch(signature, /Be indifferent/);
+  assert.equal(extractTelegramChatId(`expanded${signature}`), "777");
 });
 
 function makeListener(approved: string[], onAccepted: (id: number, chat: string, text: string) => Promise<void> = async () => {}): {

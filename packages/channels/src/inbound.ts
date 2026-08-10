@@ -92,6 +92,37 @@ export function formatTelegramSignature(chatId: string): string {
 const TELEGRAM_SIGNATURE_PATTERN = /\[from:telegram:(-?\d+)\]/g;
 
 /**
+ * Compact origin marker for Telegram-dispatched commands. Commands do not
+ * carry the long activity guidance (that text would split the injected
+ * message into two blocks); the compact signature still names the chat so the
+ * outbound gate keeps working.
+ */
+export function formatTelegramCommandSignature(chatId: string): string {
+  return `\n\n---\n[from:telegram:${chatId}]\nUser active on Telegram. Reply through the \`user_telegram_chat\` tool.\n---`;
+}
+
+const TELEGRAM_COMMAND_NAME_PATTERN = /^[a-z0-9_]{1,32}$/;
+
+/** A parsed Telegram slash command. */
+export interface TelegramCommand {
+  name: string;
+  args: string;
+}
+
+/**
+ * Parse a Telegram bot command (`/name args` or `/name@BotName args`), or
+ * undefined for ordinary text. Names are validated with the Bot API pattern.
+ */
+export function parseTelegramCommand(text: string): TelegramCommand | undefined {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) return undefined;
+  const [head, ...tail] = trimmed.split(/\s+/);
+  const name = head.slice(1).split("@")[0]?.toLowerCase();
+  if (!name || !TELEGRAM_COMMAND_NAME_PATTERN.test(name)) return undefined;
+  return { name, args: tail.join(" ").trim() };
+}
+
+/**
  * Extract the origin chat id from a Telegram-signed user message, or undefined
  * when the text carries no signature. The signature is the authoritative
  * connection marker: the outbound gate derives the reply target from the

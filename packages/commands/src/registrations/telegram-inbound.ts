@@ -9,7 +9,9 @@ import {
   canonicalProjectRoot,
   createTelegramInbound,
   defaultTelegramPairingState,
+  formatTelegramCommandSignature,
   formatTelegramSignature,
+  parseTelegramCommand,
   readChannelConfig,
   readChannelRuntime,
   writeChannelRuntime,
@@ -21,6 +23,12 @@ import { getTelegramProjectManager } from "./telegram-project.ts";
 export interface TelegramInboundDeps {
   /** Injectable inbound factory for offline tests. */
   createInbound?: (options: Parameters<typeof createTelegramInbound>[0]) => TelegramInboundListener;
+  /**
+   * Expand a recognized Telegram slash command into native content. Return the
+   * expanded text (command/prompt/skill body) or undefined when the command is
+   * unknown and should be injected as literal text instead.
+   */
+  expandCommand?: (name: string, args: string) => string | undefined;
 }
 
 const listenersByProject = new Map<string, TelegramInboundListener>();
@@ -41,6 +49,7 @@ function isRootSession(ctx: ExtensionContext): boolean {
 export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundDeps = {}): void {
   const runningByProject = new Map<string, TelegramInboundListener>();
   const createInbound = deps.createInbound ?? createTelegramInbound;
+  const expandCommand = deps.expandCommand ?? (() => undefined);
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
@@ -70,7 +79,17 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         // interactive while the active session continues.
         const runtime = writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
         if (!runtime.ok) return;
-        pi.sendUserMessage(`${text}${formatTelegramSignature(chatId)}`, { deliverAs: "steer" });
+
+        // A recognized slash command is dispatched natively: inject only the
+        // expanded command content with a compact signature so the message is
+        // not split by the long guidance footer. Unknown text keeps the full
+        // origin signature.
+        const command = parseTelegramCommand(text);
+        const expanded = command ? expandCommand(command.name, command.args) : undefined;
+        const content = expanded !== undefined
+          ? `${expanded}${formatTelegramCommandSignature(chatId)}`
+          : `${text}${formatTelegramSignature(chatId)}`;
+        pi.sendUserMessage(content, { deliverAs: "steer" });
       },
     });
 

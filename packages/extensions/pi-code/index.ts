@@ -16,6 +16,7 @@ import {
   registerTelegramLifecycle,
   registerTelegramInbound,
   registerGoalCommand,
+  expandTelegramGoalCommand,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -35,7 +36,9 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerTelegramSetup(pi);
   // Inbound registration precedes the connection lifecycle so its message
   // middleware is attached before the shared manager starts polling.
-  registerTelegramInbound(pi);
+  registerTelegramInbound(pi, {
+    expandCommand: (name, args) => (name === "goal" ? expandTelegramGoalCommand(args) : undefined),
+  });
   registerTelegramLifecycle(pi);
   registerQuestionTool(pi);
   registerAgentTool(pi);
