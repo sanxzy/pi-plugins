@@ -1,63 +1,74 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Value } from "typebox/value";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerTelegramChatTool, resolveTelegramChatFromSession } from "../src/registrations/telegram.ts";
+import { registerTelegramChatTool } from "../src/registrations/telegram.ts";
+import { telegramChatParams } from "../src/tools.ts";
 
-function capture(deps: Parameters<typeof registerTelegramChatTool>[1] = {}) {
+function capture(deps: any = {}) {
   let tool: any;
   registerTelegramChatTool({ registerTool(value: any) { tool = value; } } as unknown as ExtensionAPI, deps);
   return tool;
 }
 
-function context(cwd = "/tmp/project", entries: unknown[] = []): ExtensionContext {
-  return { cwd, mode: "tui", hasUI: true, sessionManager: { getSessionId: () => "root", getBranch: () => entries } } as unknown as ExtensionContext;
+function context(cwd = "/tmp/project"): ExtensionContext {
+  return { cwd, mode: "tui", hasUI: true, sessionManager: { getSessionId: () => "root", getBranch: () => [] } } as unknown as ExtensionContext;
 }
 
-test("user_telegram_chat refuses when the latest user message is not Telegram", async () => {
-  const tool = capture();
-  const result = await tool.execute("call", { message: "hello" }, undefined, undefined, context());
-  assert.equal(result.details.error, "connection_not_telegram");
-  assert.match(result.content[0].text, /Error:/);
+const sendText = { action: "send_text", chat_id: "777", text: "hello" };
+
+test("schema rejects legacy, actionless, and incomplete send_text payloads", () => {
+  assert.equal(Value.Check(telegramChatParams, { message: "hello" }), false);
+  assert.equal(Value.Check(telegramChatParams, { chat_id: "777", text: "hello" }), false);
+  assert.equal(Value.Check(telegramChatParams, { action: "send_text", chat_id: "777" }), false);
+  assert.equal(Value.Check(telegramChatParams, sendText), true);
 });
 
-test("user_telegram_chat sends to the Telegram chat resolved from the latest user message", async () => {
+test("send_text with an approved chat sends and returns safe metadata", async () => {
   let target: string | undefined;
   const tool = capture({
-    send: async (_root, chatId) => {
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    send: async (_root: string, chatId: string) => {
       target = chatId;
-      return { ok: true, sent: 2, failed: 0 };
+      return { ok: true, sent: 2, failed: 0, messageIds: [1, 2] };
     },
   });
-  const result = await tool.execute("call", { message: "hello" }, undefined, undefined, context("/tmp/project", [{
-    type: "message",
-    message: { role: "user", content: "hello\n\n---\n[from:telegram:777]\n---" },
-  }]));
+  const result = await tool.execute("call", sendText, undefined, undefined, context());
   assert.equal(target, "777");
-  assert.deepEqual(result.details, { sent: true, message: "hello", chunks: 2 });
+  assert.deepEqual(result.details, { action: "send_text", sent: true, chatId: "777", chunks: 2, messageIds: [1, 2] });
   assert.match(result.content[0].text, /2 messages/);
 });
 
-test("user_telegram_chat reports partial delivery explicitly", async () => {
+test("send_text rejects an unapproved target before any send", async () => {
+  let sent = false;
   const tool = capture({
-    resolveChat: () => "777",
-    send: async () => ({ ok: false, sent: 1, failed: 1, error: "second chunk failed" }),
+    validateTarget: async () => ({ ok: false, category: "target_not_approved", error: "not approved" }),
+    send: async () => {
+      sent = true;
+      return { ok: true, sent: 1, failed: 0, messageIds: [1] };
+    },
   });
-  const result = await tool.execute("call", { message: "hello" }, undefined, undefined, context());
-  assert.deepEqual(result.details, {
-    sent: false,
-    message: "hello",
-    sentChunks: 1,
-    failedChunks: 1,
-    error: "second chunk failed",
-  });
-  assert.match(result.content[0].text, /partial|failed/i);
+  const result = await tool.execute("call", sendText, undefined, undefined, context());
+  assert.equal(sent, false);
+  assert.equal(result.details.category, "target_not_approved");
+  assert.match(result.content[0].text, /Error:/);
 });
 
-test("resolveTelegramChatFromSession uses the latest user message only", () => {
-  const ctx = context("/tmp/project", [
-    { type: "message", message: { role: "user", content: "old\n[from:telegram:111]" } },
-    { type: "message", message: { role: "assistant", content: [] } },
-    { type: "message", message: { role: "user", content: "new TUI prompt" } },
-  ]);
-  assert.equal(resolveTelegramChatFromSession(ctx), undefined);
+test("send_text reports partial delivery explicitly", async () => {
+  const tool = capture({
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    send: async () => ({ ok: false, sent: 1, failed: 1, error: "second chunk failed", category: "partial_delivery" }),
+  });
+  const result = await tool.execute("call", sendText, undefined, undefined, context());
+  assert.equal(result.details.category, "partial_delivery");
+  assert.equal(result.details.failedChunks, 1);
+  assert.match(result.content[0].text, /Error:/);
+});
+
+test("send_text fails closed when the channel is not configured", async () => {
+  const tool = capture({
+    validateTarget: async () => ({ ok: false, category: "not_configured", error: "not configured" }),
+  });
+  const result = await tool.execute("call", sendText, undefined, undefined, context());
+  assert.equal(result.details.category, "not_configured");
 });
