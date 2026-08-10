@@ -266,6 +266,26 @@ test("web_search saves successful research to the query wiki topic", async () =>
   }
 });
 
+test("web_search does not save whitespace-only result text", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  mkdirSync(root, { recursive: true });
+  try {
+    await withFetch(async () => new Response(payload("  \n\t"), { status: 200 }), async () => {
+      const result = await executeWebSearch(
+        { query: "whitespace" },
+        undefined,
+        undefined,
+        { wikiRoot: root },
+      );
+      assert.equal(text(result), "Web Search: whitespace\n\n  \n\t");
+      assert.deepEqual(result.details, { query: "whitespace", provider: "exa" });
+      assert.deepEqual(readdirSync(root), []);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("web_search writes no wiki entry on error and malformed branches", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
   mkdirSync(root, { recursive: true });

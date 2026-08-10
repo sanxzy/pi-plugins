@@ -299,6 +299,26 @@ test("web_fetch returns raster images as a text note plus a base64 image block",
   });
 });
 
+test("web_fetch does not save an empty raster image body", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  mkdirSync(root, { recursive: true });
+  try {
+    await withFetch(async () => new Response(new Uint8Array(), { headers: { "content-type": "image/png" } }), async () => {
+      const result = await executeWebFetch(
+        { url: "https://example.com/empty.png" },
+        undefined,
+        { wikiRoot: root },
+      );
+      assert.equal(result.content.length, 2);
+      assert.equal(text(result), "Image fetched successfully");
+      assert.deepEqual(result.details, {});
+      assert.deepEqual(readdirSync(root), []);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("web_fetch keeps SVG responses as text output", async () => {
   const tool = captureTool();
   await withAgentDir(async () => {
