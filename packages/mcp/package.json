@@ -1,0 +1,20 @@
+{
+  "name": "@xzy-ai/mcp",
+  "version": "0.1.0",
+  "description": "pi-code MCP configuration and runtime foundations",
+  "type": "module",
+  "main": "./src/index.ts",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "node --test --import tsx tests/config.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.2",
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.22.2"
+  }
+}
