@@ -124,6 +124,30 @@ export {
   type TelegramChoiceCreateResult,
 } from "./choices.ts";
 export {
+  MEDIA_DEFAULT_TIMEOUT_MS,
+  MEDIA_DOCUMENT_MAX_BYTES,
+  MEDIA_MAX_REDIRECTS,
+  MEDIA_PHOTO_MAX_BYTES,
+  classifyMediaContentType,
+  clearMediaArtifacts,
+  detectMediaContentType,
+  downloadMediaHttps,
+  registerMediaArtifact,
+  resolveMediaArtifact,
+  resolveMediaSource,
+  sanitizeMediaFilename,
+  validateMediaContentType,
+  type MediaArtifact,
+  type MediaArtifactResult,
+  type MediaContentValidation,
+  type MediaDownloadResult,
+  type MediaFailureCategory,
+  type MediaResolutionResult,
+  type TelegramMediaInput,
+  type TelegramMediaType,
+  type TelegramResolvedMediaSource,
+} from "./media.ts";
+export {
   createTelegramOutbound,
   sendTelegramMessage,
   sendTextChunks,
@@ -143,4 +167,5 @@ export {
   type TelegramTextFormat,
   type TelegramChoiceButton,
   type OutboundChoiceResult,
+  type OutboundMediaResult,
 } from "./outbound.ts";

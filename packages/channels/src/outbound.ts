@@ -9,8 +9,17 @@
  * non-idempotent send.
  */
 
-import { Bot } from "grammy";
+import { Bot, InputFile } from "grammy";
 import { readChannelConfig } from "./state.ts";
+import {
+  MEDIA_DOCUMENT_MAX_BYTES,
+  MEDIA_PHOTO_MAX_BYTES,
+  detectMediaContentType,
+  sanitizeMediaFilename,
+  validateMediaContentType,
+  type TelegramMediaType,
+  type TelegramResolvedMediaSource,
+} from "./media.ts";
 
 /** Telegram text chunk limit for outbound delivery. */
 export const MAX_TEXT_LENGTH = 4000;
@@ -24,6 +33,10 @@ export interface TelegramChoiceButton {
 
 export type OutboundChoiceResult =
   | { ok: true; messageId: number; expiresAt: number }
+  | { ok: false; error: string; category: OutboundErrorCategory };
+
+export type OutboundMediaResult =
+  | { ok: true; messageId: number; mediaType: TelegramMediaType; bytes: number; filename?: string }
   | { ok: false; error: string; category: OutboundErrorCategory };
 
 export interface TelegramSendTextOptions {
@@ -132,9 +145,11 @@ export type OutboundTextResult =
 
 /** Minimal grammY API surface needed to send text (injectable for tests). */
 export interface TelegramSendApi {
-  sendMessage(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
+  sendMessage?(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
   setMessageReaction?(chatId: number | string, messageId: number, reaction: unknown, other?: Record<string, unknown>): Promise<unknown>;
   sendChatAction?(chatId: number | string, action: string): Promise<unknown>;
+  sendPhoto?(chatId: number | string, photo: unknown, other?: Record<string, unknown>): Promise<unknown>;
+  sendDocument?(chatId: number | string, document: unknown, other?: Record<string, unknown>): Promise<unknown>;
   answerCallbackQuery?(callbackQueryId: string): Promise<unknown>;
   editMessageReplyMarkup?(chatId: number | string, messageId: number, other?: Record<string, unknown>): Promise<unknown>;
 }
@@ -194,6 +209,8 @@ export interface TelegramOutbound {
   react(projectRoot: string, chatId: string, messageId: number, reaction: unknown): Promise<OutboundTextResult>;
   /** Send a question with an inline keyboard to an approved chat. */
   sendChoices(projectRoot: string, chatId: string, question: string, buttons: TelegramChoiceButton[], replyToMessageId?: number): Promise<OutboundChoiceResult>;
+  /** Send a photo or document through the channels-owned Telegram API boundary. */
+  sendMedia(projectRoot: string, chatId: string, mediaType: TelegramMediaType, source: TelegramResolvedMediaSource, options?: { caption?: string; filename?: string }): Promise<OutboundMediaResult>;
 }
 
 /** Create the outbound sender. The reply chat id is supplied by the caller. */
@@ -227,6 +244,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
           // Best-effort typing status; a failure must not block delivery.
         }
       }
+      if (!api.sendMessage) return { ok: false as const, sent: 0, failed: 1, error: "Telegram text API is unavailable", category: "telegram_rejected" as const };
       return sendTextChunks(target.chatId, text, async (destination, chunk) => {
         const sentMessage = await attemptSend(api, destination, chunk, {
           format,
@@ -256,6 +274,62 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
     return result as OutboundTextResult;
   };
 
+  const sendMedia = async (
+    projectRoot: string,
+    chatId: string,
+    mediaType: TelegramMediaType,
+    source: TelegramResolvedMediaSource,
+    mediaOptions: { caption?: string; filename?: string } = {},
+  ): Promise<OutboundMediaResult> => {
+    const target = validateTelegramTarget(projectRoot, chatId, readConfig);
+    if (!target.ok) return { ok: false, error: target.error, category: target.category };
+    if (source.kind !== "file_id" && source.kind !== "bytes") return { ok: false, error: "Unsupported media source", category: "telegram_rejected" };
+    if (source.kind === "bytes") {
+      const maximum = mediaType === "photo" ? MEDIA_PHOTO_MAX_BYTES : MEDIA_DOCUMENT_MAX_BYTES;
+      if (source.bytes.byteLength > maximum) return { ok: false, error: "Media source exceeds the allowed size", category: "telegram_rejected" };
+      const detected = detectMediaContentType(source.bytes);
+      const declared = validateMediaContentType(mediaType, source.contentType);
+      const detectedCheck = validateMediaContentType(mediaType, detected);
+      if (!declared.ok) return declared;
+      if (!detectedCheck.ok) return detectedCheck;
+      if (detected !== "application/octet-stream" && detected !== source.contentType.split(";", 1)[0]!.toLowerCase()) {
+        return { ok: false, error: "Declared and detected media types do not match", category: "telegram_rejected" };
+      }
+    }
+    const filename = source.kind === "bytes" ? sanitizeMediaFilename(mediaOptions.filename ?? source.filename) : sanitizeMediaFilename(mediaOptions.filename);
+    const result = await withConfig(projectRoot, async (api) => {
+      const action = mediaType === "photo" ? "upload_photo" : "upload_document";
+      if (api.sendChatAction) {
+        try { await api.sendChatAction(target.chatId, action); } catch { /* best effort */ }
+      }
+      const other: Record<string, unknown> = {};
+      if (mediaOptions.caption !== undefined) other.caption = mediaOptions.caption;
+      if (mediaType === "photo") {
+        if (!api.sendPhoto) return { ok: false as const, error: "Telegram photo API is unavailable", category: "telegram_rejected" as const };
+        const input = source.kind === "file_id" ? source.fileId : new InputFile(source.bytes, filename);
+        try {
+          const sent = await api.sendPhoto(target.chatId, input, other);
+          const messageId = readMessageId(sent);
+          if (messageId === undefined) return { ok: false as const, error: "Telegram did not return a media message id", category: "telegram_rejected" as const };
+          return { ok: true as const, messageId, mediaType, bytes: source.kind === "bytes" ? source.bytes.byteLength : 0, filename: source.kind === "bytes" ? filename : undefined };
+        } catch (error) {
+          return { ok: false as const, error: safeError(error), category: outboundErrorCategory(error) };
+        }
+      }
+      if (!api.sendDocument) return { ok: false as const, error: "Telegram document API is unavailable", category: "telegram_rejected" as const };
+      const input = source.kind === "file_id" ? source.fileId : new InputFile(source.bytes, filename);
+      try {
+        const sent = await api.sendDocument(target.chatId, input, other);
+        const messageId = readMessageId(sent);
+        if (messageId === undefined) return { ok: false as const, error: "Telegram did not return a media message id", category: "telegram_rejected" as const };
+        return { ok: true as const, messageId, mediaType, bytes: source.kind === "bytes" ? source.bytes.byteLength : 0, filename: source.kind === "bytes" ? filename : undefined };
+      } catch (error) {
+        return { ok: false as const, error: safeError(error), category: outboundErrorCategory(error) };
+      }
+    });
+    return result as OutboundMediaResult;
+  };
+
   const sendChoices = async (projectRoot: string, chatId: string, question: string, buttons: TelegramChoiceButton[], replyToMessageId?: number): Promise<OutboundChoiceResult> => {
     const target = validateTelegramTarget(projectRoot, chatId, readConfig);
     if (!target.ok) return { ok: false, error: target.error, category: target.category };
@@ -266,6 +340,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
           reply_markup: { inline_keyboard: [buttons.map((button) => ({ text: button.label, callback_data: button.callbackData }))] },
         };
         if (replyToMessageId !== undefined) other.reply_parameters = { message_id: replyToMessageId };
+        if (!api.sendMessage) return { ok: false as const, error: "Telegram text API is unavailable", category: "telegram_rejected" as const };
         const sent = await api.sendMessage(target.chatId, question, other);
         const messageId = readMessageId(sent);
         if (messageId === undefined) return { ok: false as const, error: "Telegram did not return a choice message id", category: "telegram_rejected" as const };
@@ -277,7 +352,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
     return result as OutboundChoiceResult;
   };
 
-  return { send, react, sendChoices };
+  return { send, react, sendChoices, sendMedia };
 }
 
 /**
@@ -294,18 +369,20 @@ async function attemptSend(
     Pick<TelegramSendTextOptions, "messageId" | "linkPreviewOptions" | "disableNotification"> &
     { sleep: (milliseconds: number) => Promise<void> },
 ): Promise<unknown> {
+  if (!api.sendMessage) throw new Error("Telegram text API is unavailable");
+  const sendMessage = api.sendMessage;
   const other: Record<string, unknown> = {};
   if (options.format !== "plain") other.parse_mode = options.format === "html" ? "HTML" : "MarkdownV2";
   if (options.messageId !== undefined) other.reply_parameters = { message_id: options.messageId };
   if (options.linkPreviewOptions !== undefined) other.link_preview_options = options.linkPreviewOptions;
   if (options.disableNotification !== undefined) other.disable_notification = options.disableNotification;
   try {
-    return await api.sendMessage(chatId, text, other);
+    return await sendMessage(chatId, text, other);
   } catch (error) {
     const decision = classifyRetry(error);
     if (decision.kind === "retry") {
       await options.sleep(decision.delayMs);
-      return api.sendMessage(chatId, text, other);
+      return sendMessage(chatId, text, other);
     }
     throw error;
   }
@@ -357,6 +434,8 @@ function defaultCreateSendApi(token: string): TelegramSendApi {
     sendChatAction: (chatId, action) => bot.api.sendChatAction(chatId, action as never),
     setMessageReaction: (chatId, messageId, reaction, other) =>
       bot.api.setMessageReaction(chatId, messageId, reaction as never, other),
+    sendPhoto: (chatId, photo, other) => bot.api.sendPhoto(chatId, photo as never, other),
+    sendDocument: (chatId, document, other) => bot.api.sendDocument(chatId, document as never, other),
   };
 }
 

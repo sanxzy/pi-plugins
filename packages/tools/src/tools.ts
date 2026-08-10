@@ -63,6 +63,36 @@ const telegramChoiceOption = Type.Object({
   value: Type.String({ minLength: 1, maxLength: 1000 }),
 }, { additionalProperties: false });
 
+const telegramMediaFileIdSource = Type.Object({
+  kind: Type.Literal("file_id"),
+  file_id: Type.String({ minLength: 1, maxLength: 256 }),
+}, { additionalProperties: false });
+
+const telegramMediaArtifactSource = Type.Object({
+  kind: Type.Literal("artifact_id"),
+  artifact_id: Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9_-]*$" }),
+}, { additionalProperties: false });
+
+const telegramMediaHttpsSource = Type.Object({
+  kind: Type.Literal("https"),
+  url: Type.String({ minLength: 1, maxLength: 2048, format: "uri" }),
+}, { additionalProperties: false });
+
+const telegramMediaSource = Type.Union([
+  telegramMediaFileIdSource,
+  telegramMediaArtifactSource,
+  telegramMediaHttpsSource,
+]);
+
+const telegramSendMediaAction = Type.Object({
+  action: Type.Literal("send_media"),
+  chat_id: telegramChatId,
+  media_type: Type.Union([Type.Literal("photo"), Type.Literal("document")]),
+  source: telegramMediaSource,
+  caption: Type.Optional(Type.String({ maxLength: 1024 })),
+  filename: Type.Optional(Type.String({ maxLength: 255 })),
+}, { additionalProperties: false });
+
 const telegramSendChoicesAction = Type.Object({
   action: Type.Literal("send_choices"),
   chat_id: telegramChatId,
@@ -91,7 +121,7 @@ const telegramReactAction = Type.Object({
   ], { description: "A standard Telegram reaction emoji." }),
 }, { additionalProperties: false });
 
-export const telegramChatParams = Type.Union([telegramSendTextAction, telegramReactAction, telegramSendChoicesAction]);
+export const telegramChatParams = Type.Union([telegramSendTextAction, telegramReactAction, telegramSendChoicesAction, telegramSendMediaAction]);
 
 export const goalCreateParams = Type.Object({
   prompt: Type.String({ description: "Exact goal prompt to deliver on each interval." }),

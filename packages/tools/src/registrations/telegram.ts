@@ -3,13 +3,17 @@ import { Text } from "@earendil-works/pi-tui";
 import {
   createTelegramChoice,
   createTelegramOutbound,
+  resolveMediaSource,
   reactToMessage,
   sendTelegramMessage,
   validateStandardReaction,
   validateTelegramTarget,
   type OutboundChoiceResult,
+  type OutboundMediaResult,
   type OutboundTextResult,
   type TelegramChoice,
+  type TelegramMediaInput,
+  type TelegramMediaType,
   type TelegramTargetValidation,
 } from "@xzy-ai/channels";
 import { telegramChatParams, type TelegramChatParams } from "../tools.ts";
@@ -36,6 +40,8 @@ export interface TelegramChatDeps {
   react?: (projectRoot: string, chatId: string, messageId: number, emoji: string) => Promise<OutboundTextResult>;
   /** Injectable choice prompt seam so tests verify delivery offline. */
   sendChoices?: (projectRoot: string, chatId: string, question: string, choices: TelegramChoice[], replyToMessageId?: number, sessionId?: string) => Promise<OutboundChoiceResult>;
+  /** Injectable media source resolution and delivery seam. */
+  sendMedia?: (projectRoot: string, chatId: string, mediaType: TelegramMediaType, source: TelegramMediaInput, options?: { caption?: string; filename?: string }) => Promise<OutboundMediaResult>;
 }
 
 /** Register the parent-only unified Telegram communication/reporting tool. */
@@ -62,6 +68,11 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
   });
   const validateTarget = deps.validateTarget ?? (async (projectRoot: string, chatId: string) =>
     validateTelegramTarget(projectRoot, chatId));
+  const sendMedia = deps.sendMedia ?? (async (projectRoot: string, chatId: string, mediaType: TelegramMediaType, source: TelegramMediaInput, options: { caption?: string; filename?: string } = {}, sessionId = "root") => {
+    const resolved = await resolveMediaSource(source, mediaType, options.filename, { projectRoot, sessionId });
+    if (!resolved.ok) return resolved;
+    return createTelegramOutbound().sendMedia(projectRoot, chatId, mediaType, resolved.source, options);
+  });
 
   pi.registerTool({
     name: "user_telegram_chat",
@@ -121,6 +132,52 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           question: params.question,
           messageId: choiceResult.messageId,
           expiresAt: choiceResult.expiresAt,
+        });
+      }
+
+      if (params.action === "send_media") {
+        if (params.source.kind !== "file_id" && params.source.kind !== "artifact_id" && params.source.kind !== "https") {
+          return errorResult("Unsupported media source", {
+            action: params.action,
+            sent: false,
+            chatId: target.chatId,
+            mediaType: params.media_type,
+            error: "Unsupported media source",
+            category: "telegram_rejected",
+          });
+        }
+        if (params.source.kind === "https" && !params.source.url.toLowerCase().startsWith("https://")) {
+          return errorResult("Media source must be an HTTPS URL", {
+            action: params.action,
+            sent: false,
+            chatId: target.chatId,
+            mediaType: params.media_type,
+            error: "Media source must be an HTTPS URL",
+            category: "telegram_rejected",
+          });
+        }
+        const mediaResult = await sendMedia(ctx.cwd, target.chatId, params.media_type, params.source, {
+          caption: params.caption,
+          filename: params.filename,
+        }, ctx.sessionManager.getSessionId());
+        if (!mediaResult.ok) {
+          return errorResult(`Telegram media failed: ${mediaResult.error}`, {
+            action: params.action,
+            sent: false,
+            chatId: target.chatId,
+            mediaType: params.media_type,
+            error: mediaResult.error,
+            category: mediaResult.category,
+          });
+        }
+        return textResult(`Telegram ${params.media_type} sent`, {
+          action: params.action,
+          sent: true,
+          chatId: target.chatId,
+          messageId: mediaResult.messageId,
+          mediaType: mediaResult.mediaType,
+          bytes: mediaResult.bytes,
+          ...(mediaResult.filename ? { filename: mediaResult.filename } : {}),
         });
       }
 
@@ -187,7 +244,9 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         ? args.text
         : args.action === "react"
           ? `react ${args.emoji} → ${args.chat_id}:${args.message_id}`
-          : `choices ${args.question}`;
+          : args.action === "send_choices"
+            ? `choices ${args.question}`
+            : `media ${args.media_type} → ${args.chat_id}`;
       return new Text(theme.fg("toolTitle", theme.bold("user_telegram_chat ")) + theme.fg("muted", summary), 0, 0);
     },
     renderResult(result: AgentToolResult<TelegramChatDetails>, _options, theme) {
