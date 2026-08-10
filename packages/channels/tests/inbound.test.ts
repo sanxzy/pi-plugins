@@ -55,10 +55,10 @@ test("decodeAcceptedText rejects non-private, edited, non-text, and identity-mis
   assert.equal(decodeAcceptedText(undefined), undefined, "empty context rejected");
 });
 
-test("formatTelegramSignature marks the origin and reminds the agent to use user_telegram_chat", () => {
+test("formatTelegramSignature marks Telegram activity and response guidance", () => {
   assert.equal(
     formatTelegramSignature("123"),
-    "\n\n---\n[from:telegram:123]\nThe user is currently active on Telegram. Use the `user_telegram_chat` tool whenever you want to reply to or communicate directly with the user.\n---",
+    "\n\n---\n[from:telegram:123]\nThe user is currently active on Telegram. Keep your default responses concise: reply with a short summary of what you did or are doing (do/act summary), not conversational or verbose text. For direct conversational replies or communication with the user, explicitly use the `user_telegram_chat` tool.\n---",
   );
 });
 
