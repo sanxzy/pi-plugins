@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerWebFetchTool } from "../src/registrations/web-fetch.ts";
+import { registerWebFetchTool, MAX_RESPONSE_SIZE } from "../src/registrations/web-fetch.ts";
 
 type FetchUrl = string;
 
@@ -173,6 +173,116 @@ test("web_fetch times out stalled requests with a tool error", async () => {
         context,
       );
       assert.equal(text(result), "Error: Request timed out");
+    },
+  );
+});
+
+test("web_fetch rejects a declared content length over 5 MB before reading the body", async () => {
+  const tool = captureTool();
+  let reads = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(1024));
+    },
+  });
+  await withFetch(
+    async () => new Response(stream, { headers: { "content-length": String(MAX_RESPONSE_SIZE + 1) } }),
+    async () => {
+      const result = await tool.execute("call", { url: "https://example.com/declared" }, undefined, undefined, context);
+      assert.equal(text(result), "Error: Response too large (exceeds 5MB limit)");
+      assert.ok(reads <= 1, "body must not be consumed after the declared-length rejection");
+    },
+  );
+});
+
+test("web_fetch cancels the stream when the body crosses 5 MB", async () => {
+  const tool = captureTool();
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(2 * 1024 * 1024));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  await withFetch(async () => new Response(stream, { headers: { "content-type": "text/plain" } }), async () => {
+    const result = await tool.execute("call", { url: "https://example.com/streamed" }, undefined, undefined, context);
+    assert.equal(text(result), "Error: Response too large (exceeds 5MB limit)");
+    assert.equal(cancelled, true);
+  });
+});
+
+test("web_fetch retries a Cloudflare challenge once with the plain user agent", async () => {
+  const tool = captureTool();
+  let calls = 0;
+  const userAgents: string[] = [];
+  await withFetch(
+    async (_input, init) => {
+      calls++;
+      userAgents.push(new Headers(init?.headers).get("user-agent") ?? "");
+      if (calls === 1) {
+        return new Response("challenge", { status: 403, headers: { "cf-mitigated": "challenge" } });
+      }
+      return new Response("ok", { headers: { "content-type": "text/plain" } });
+    },
+    async () => {
+      const result = await tool.execute("call", { url: "https://example.com/ok" }, undefined, undefined, context);
+      assert.equal(text(result), "https://example.com/ok (text/plain)\n\nok");
+      assert.equal(calls, 2);
+      assert.match(userAgents[0] ?? "", /^Mozilla\/5\.0/);
+      assert.equal(userAgents[1], "opencode");
+    },
+  );
+});
+
+test("web_fetch does not retry other 403 responses", async () => {
+  const tool = captureTool();
+  let calls = 0;
+  await withFetch(
+    async () => {
+      calls++;
+      return new Response("denied", { status: 403 });
+    },
+    async () => {
+      const result = await tool.execute("call", { url: "https://example.com/denied" }, undefined, undefined, context);
+      assert.equal(text(result), "Error: HTTP 403: Request failed");
+      assert.equal(calls, 1);
+    },
+  );
+});
+
+test("web_fetch returns raster images as a text note plus a base64 image block", async () => {
+  const tool = captureTool();
+  const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  await withFetch(
+    async () => new Response(bytes, { status: 200, headers: { "content-type": "IMAGE/PNG; charset=binary" } }),
+    async () => {
+      const result = await tool.execute("call", { url: "https://example.com/image.png" }, undefined, undefined, context);
+      assert.equal(result.content.length, 2);
+      assert.equal(result.content[0]?.type, "text");
+      assert.equal(result.content[0]?.text, "Image fetched successfully");
+      assert.equal(result.content[1]?.type, "image");
+      assert.equal(result.content[1]?.mimeType, "image/png");
+      assert.equal(result.content[1]?.data, Buffer.from(bytes).toString("base64"));
+      assert.equal(result.content[1]?.data.startsWith("data:"), false);
+      assert.deepEqual(result.details, {});
+    },
+  );
+});
+
+test("web_fetch keeps SVG responses as text output", async () => {
+  const tool = captureTool();
+  await withFetch(
+    async () => new Response('<svg><text>hello</text></svg>', { headers: { "content-type": "image/svg+xml; charset=UTF-8" } }),
+    async () => {
+      const result = await tool.execute("call", { url: "https://example.com/image.svg" }, undefined, undefined, context);
+      assert.equal(result.content.length, 1);
+      assert.equal(result.content[0]?.type, "text");
+      assert.equal(
+        text(result),
+        "https://example.com/image.svg (image/svg+xml; charset=UTF-8)\n\n<svg><text>hello</text></svg>",
+      );
     },
   );
 });
