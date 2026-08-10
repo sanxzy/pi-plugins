@@ -111,3 +111,112 @@ test("outbound reports a stable not_configured category", async () => {
     category: "not_configured",
   });
 });
+
+test("rich text maps format, reply, link preview, notification, and typing options", async () => {
+  const actions: unknown[] = [];
+  const messages: unknown[] = [];
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendChatAction(chat, action) {
+        actions.push([chat, action]);
+      },
+      async sendMessage(chat, text, other) {
+        messages.push([chat, text, other]);
+        return { message_id: 101 };
+      },
+    }),
+  });
+
+  const result = await outbound.send("project", "777", "<b>hello</b>", {
+    format: "html",
+    messageId: 42,
+    linkPreviewOptions: { is_disabled: true },
+    disableNotification: true,
+  });
+
+  assert.deepEqual(result, { ok: true, sent: 1, failed: 0, messageIds: [101] });
+  assert.deepEqual(actions, [["777", "typing"]]);
+  assert.deepEqual(messages, [["777", "<b>hello</b>", {
+    parse_mode: "HTML",
+    reply_parameters: { message_id: 42 },
+    link_preview_options: { is_disabled: true },
+    disable_notification: true,
+  }]]);
+});
+
+test("typing status failure does not block text delivery", async () => {
+  let sent = false;
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendChatAction() {
+        throw new Error("status unavailable");
+      },
+      async sendMessage() {
+        sent = true;
+        return { message_id: 102 };
+      },
+    }),
+  });
+
+  const result = await outbound.send("project", "777", "hello");
+  assert.equal(sent, true);
+  assert.equal(result.ok, true);
+});
+
+test("formatted text over the chunk limit is rejected without an unsafe split", async () => {
+  let calls = 0;
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendMessage() {
+        calls += 1;
+        return { message_id: 103 };
+      },
+    }),
+  });
+
+  const result = await outbound.send("project", "777", `<b>${"x".repeat(4000)}</b>`, { format: "html" });
+  assert.equal(calls, 0);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.category, "telegram_rejected");
+});
+
+test("clear network timeout is retried once without exposing the error payload", async () => {
+  let calls = 0;
+  const outbound = createTelegramOutbound({
+    sleep: async () => undefined,
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendMessage() {
+        calls += 1;
+        if (calls === 1) throw Object.assign(new Error("socket timeout"), { code: "ETIMEDOUT" });
+        return { message_id: 104 };
+      },
+    }),
+  });
+
+  const result = await outbound.send("project", "777", "hello");
+  assert.equal(calls, 2);
+  assert.deepEqual(result, { ok: true, sent: 1, failed: 0, messageIds: [104] });
+});
+
+test("Telegram 429 retry_after is retried once and categorized when exhausted", async () => {
+  let calls = 0;
+  const outbound = createTelegramOutbound({
+    sleep: async () => undefined,
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendMessage() {
+        calls += 1;
+        throw { error_code: 429, description: "Too Many Requests", parameters: { retry_after: 0 } };
+      },
+    }),
+  });
+
+  const result = await outbound.send("project", "777", "hello");
+  assert.equal(calls, 2);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.category, "rate_limited");
+});

@@ -25,11 +25,22 @@ test("schema rejects legacy, actionless, and incomplete send_text payloads", () 
 });
 
 test("schema rejects mixed-action and unknown fields on send_text", () => {
-  assert.equal(Value.Check(telegramChatParams, { ...sendText, message_id: 5 }), false);
   assert.equal(Value.Check(telegramChatParams, { ...sendText, reaction: "👍" }), false);
   assert.equal(Value.Check(telegramChatParams, { ...sendText, choices: [] }), false);
   assert.equal(Value.Check(telegramChatParams, { ...sendText, message: "bye" }), false);
   assert.equal(Value.Check(telegramChatParams, { ...sendText, foo: "bar" }), false);
+});
+
+test("schema accepts rich text and delivery override fields", () => {
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, format: "plain" }), true);
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, format: "html", message_id: 42 }), true);
+  assert.equal(Value.Check(telegramChatParams, {
+    ...sendText,
+    format: "markdown_v2",
+    link_preview_options: { is_disabled: true },
+    disable_notification: true,
+  }), true);
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, format: "xml" }), false);
 });
 
 test("send_text with an approved chat sends and returns safe metadata", async () => {
@@ -45,6 +56,30 @@ test("send_text with an approved chat sends and returns safe metadata", async ()
   assert.equal(target, "777");
   assert.deepEqual(result.details, { action: "send_text", sent: true, chatId: "777", chunks: 2, messageIds: [1, 2] });
   assert.match(result.content[0].text, /2 messages/);
+});
+
+test("send_text forwards rich format and delivery overrides", async () => {
+  let received: unknown;
+  const tool = capture({
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    send: async (_root: string, _chatId: string, _text: string, options: unknown) => {
+      received = options;
+      return { ok: true, sent: 1, failed: 0, messageIds: [9] };
+    },
+  });
+  await tool.execute("call", {
+    ...sendText,
+    format: "html",
+    message_id: 42,
+    link_preview_options: { is_disabled: true },
+    disable_notification: true,
+  }, undefined, undefined, context());
+  assert.deepEqual(received, {
+    format: "html",
+    messageId: 42,
+    linkPreviewOptions: { is_disabled: true },
+    disableNotification: true,
+  });
 });
 
 test("send_text rejects an unapproved target before any send", async () => {
