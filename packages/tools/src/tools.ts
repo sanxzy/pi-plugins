@@ -39,9 +39,18 @@ export const jobsParams = Type.Object({});
 
 export const agentNoArgsParams = Type.Object({});
 
-export const telegramChatParams = Type.Object({
-  message: Type.String({ description: "The communication or report text to send to Telegram." }),
+const telegramChatId = Type.String({
+  pattern: "^\\d+$",
+  description: "Explicit approved private chat id to target.",
 });
+
+const telegramSendTextAction = Type.Object({
+  action: Type.Literal("send_text"),
+  chat_id: telegramChatId,
+  text: Type.String({ description: "The communication or report text to send to Telegram." }),
+});
+
+export const telegramChatParams = Type.Union([telegramSendTextAction]);
 
 export const goalCreateParams = Type.Object({
   prompt: Type.String({ description: "Exact goal prompt to deliver on each interval." }),

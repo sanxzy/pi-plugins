@@ -118,8 +118,11 @@ export {
   sendTextChunks,
   splitTextChunks,
   MAX_TEXT_LENGTH,
+  validateTelegramTarget,
   type OutboundTextResult,
+  type OutboundErrorCategory,
   type TelegramOutbound,
   type TelegramOutboundOptions,
   type TelegramSendApi,
+  type TelegramTargetValidation,
 } from "./outbound.ts";
