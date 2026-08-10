@@ -265,6 +265,31 @@ test("a choice callback is answered promptly and disables its keyboard", async (
   clearTelegramProjectManagers();
 });
 
+test("session shutdown invalidates pending choice callbacks for that root session", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  clearTelegramChoiceState();
+  const { pi, handlers, sent } = registrations();
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => createTelegramInbound(opts),
+  });
+  const root = { ...context(cwd, "root-a"), sessionManager: { getSessionId: () => "root-a", getBranch: () => [] } } as unknown as ExtensionContext;
+  await handlers.get("session_start")?.({ reason: "startup" }, root);
+  const state = createTelegramChoice({ projectRoot: canonicalProjectRoot(cwd), sessionId: "root-a", chatId: "777", senderId: "111", question: "Proceed?", choices: [{ label: "Yes", value: "approved" }], expiresAt: Date.now() + 60_000 });
+  const callbackFactory = getTelegramCallbackQueryHandlerFactory(cwd);
+  const callback = callbackFactory?.({ token: "x", approvedUserIds: ["111"] });
+  // Simulate a shutdown of the owning root session through the lifecycle hook.
+  await handlers.get("session_shutdown")?.({ reason: "shutdown" }, root);
+  await callback?.({ callbackQuery: {
+    id: "cq1", data: state.callbackData[0]!, from: { id: 111 },
+    message: { chat: { id: 777 }, message_id: 10 },
+  } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(sent.length, 0, "no agent turn is injected after shutdown invalidates the choice");
+  clearTelegramChoiceState();
+  clearTelegramProjectManagers();
+});
+
 test("a valid choice callback is consumed once and injected into the root session", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);

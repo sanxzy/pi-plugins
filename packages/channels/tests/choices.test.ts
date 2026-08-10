@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   clearTelegramChoiceState,
+  clearTelegramChoiceTokens,
+  clearTelegramChoicesForSession,
   consumeTelegramChoice,
   createTelegramChoice,
   type TelegramChoice,
@@ -52,6 +54,19 @@ test("concurrent duplicate callback deliveries consume a token exactly once", as
   }))));
   assert.equal(results.filter((result) => result !== undefined).length, 1);
   assert.equal(results.filter((result) => result?.value === "approved").length, 1);
+});
+
+test("choice state clears failed prompts and session-owned shutdown state", () => {
+  const failed = createTelegramChoice({ projectRoot: "project", sessionId: "root-a", chatId: "777", senderId: "111", question: "Fail?", choices: [{ label: "Yes", value: "y" }], expiresAt: Date.now() + 60_000 });
+  clearTelegramChoiceTokens(failed.callbackData);
+  assert.equal(consumeTelegramChoice(failed.callbackData[0]!, { projectRoot: "project", sessionId: "root-a", chatId: "777", senderId: "111" }), undefined);
+
+  const stale = createTelegramChoice({ projectRoot: "project", sessionId: "root-a", chatId: "777", senderId: "111", question: "Stale?", choices: [{ label: "Yes", value: "y" }], expiresAt: Date.now() + 60_000 });
+  clearTelegramChoicesForSession("project", "root-a");
+  assert.equal(consumeTelegramChoice(stale.callbackData[0]!, { projectRoot: "project", sessionId: "root-a", chatId: "777", senderId: "111" }), undefined);
+
+  const other = createTelegramChoice({ projectRoot: "project", sessionId: "root-b", chatId: "777", senderId: "111", question: "Other?", choices: [{ label: "Yes", value: "y" }], expiresAt: Date.now() + 60_000 });
+  assert.ok(consumeTelegramChoice(other.callbackData[0]!, { projectRoot: "project", sessionId: "root-b", chatId: "777", senderId: "111" }));
 });
 
 test("choice state rejects wrong target and expired callbacks", () => {

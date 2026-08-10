@@ -291,6 +291,42 @@ test("formatted text over the chunk limit is rejected without an unsafe split", 
   if (!result.ok) assert.equal(result.category, "telegram_rejected");
 });
 
+test("Telegram API parse rejection is categorized as telegram_rejected without retry", async () => {
+  let calls = 0;
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendMessage() {
+        calls += 1;
+        throw { error_code: 400, description: "Bad Request: can't parse entities" };
+      },
+    }),
+  });
+  const result = await outbound.send("project", "777", "<b>bad", { format: "html" });
+  assert.equal(calls, 1);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.category, "telegram_rejected");
+});
+
+test("a rejected media upload is categorized as telegram_rejected", async () => {
+  let calls = 0;
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendDocument() {
+        calls += 1;
+        throw { error_code: 400, description: "Bad Request: file is not a document" };
+      },
+    }),
+  });
+  const result = await outbound.sendMedia("project", "777", "document", {
+    kind: "bytes", bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]), contentType: "application/pdf", filename: "x.pdf",
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.category, "telegram_rejected");
+});
+
 test("ambiguous network timeout is attempted once and categorized without blind retry", async () => {
   let calls = 0;
   const outbound = createTelegramOutbound({
