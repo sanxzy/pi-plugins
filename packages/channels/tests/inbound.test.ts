@@ -55,8 +55,11 @@ test("decodeAcceptedText rejects non-private, edited, non-text, and identity-mis
   assert.equal(decodeAcceptedText(undefined), undefined, "empty context rejected");
 });
 
-test("formatTelegramSignature is the exact origin marker", () => {
-  assert.equal(formatTelegramSignature("123"), "\n\n---\n[from:telegram:123]\n---");
+test("formatTelegramSignature marks the origin and reminds the agent to use user_telegram_chat", () => {
+  assert.equal(
+    formatTelegramSignature("123"),
+    "\n\n---\n[from:telegram:123]\n[telegram-user-active]\nThe user is currently active on Telegram. Use the `user_telegram_chat` tool whenever you want to reply to or communicate directly with the user.\n---",
+  );
 });
 
 function makeListener(approved: string[], onAccepted: (id: number, chat: string, text: string) => Promise<void> = async () => {}): {
@@ -85,18 +88,15 @@ test("inbound only delivers authorized private text and dedupes update ids", asy
   await listener.handle(privateText(3, "111", "second"));
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(accepted.length, 1, "only the first authorized item drains while idle");
-  listener.releaseNext();
-  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(
     accepted.map((a) => a.text),
     ["first", "second"],
-    "deduplicated, authorized text is then released",
+    "deduplicated, authorized text drains continuously in arrival order",
   );
   listener.stop();
 });
 
-test("inbound queues FIFO and delivers one at a time while busy", async () => {
+test("inbound drains accepted updates one at a time in FIFO order", async () => {
   let release: (() => void) | undefined;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const { listener, accepted } = makeListener(["111"], async () => { await gate; });
@@ -106,20 +106,19 @@ test("inbound queues FIFO and delivers one at a time while busy", async () => {
   await listener.handle(privateText(2, "111", "two"));
   await listener.handle(privateText(3, "111", "three"));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  // While the first delivery is in flight, only one item is draining.
-  assert.equal(accepted.length, 1, "one follow-up drains while the first is in flight");
+  // While the first delivery is in flight, only one item is draining; the
+  // reminder of the delivery is not interrupted or reordered.
+  assert.equal(accepted.length, 1, "one update drains while the first is in flight");
 
   release!();
   await gate;
   await new Promise((resolve) => setTimeout(resolve, 0));
-  // The next item is not released until the root turn settles.
-  assert.deepEqual(accepted.map((a) => a.text), ["one"], "queued items wait for settlement");
-  listener.releaseNext();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(accepted.map((a) => a.text), ["one", "two"], "one follow-up drains after settlement");
-  listener.releaseNext();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(accepted.map((a) => a.text), ["one", "two", "three"], "the next queued item drains on the next release");
+  assert.deepEqual(
+    accepted.map((a) => a.text),
+    ["one", "two", "three"],
+    "remaining queued updates drain in arrival order after the in-flight one settles",
+  );
   listener.stop();
 });
 
