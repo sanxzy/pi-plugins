@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { approvePairingAt, canonicalProjectRoot, channelConfigFile, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
+import { approvePairingAt, canonicalProjectRoot, channelConfigFile, channelLogFile, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
 
@@ -199,6 +199,49 @@ test("agent_start reaction failure is logged and does not block", async () => {
   await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(logged, "reaction failure is logged");
+});
+
+test("child before_agent_start and agent_start never acknowledge Telegram", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  markChild(cwd, "child-session");
+  const { pi, handlers } = registrations();
+  let reactionCount = 0;
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async () => { reactionCount += 1; },
+  });
+  const childContext = {
+    ...context(cwd, "child-session"),
+    sessionManager: {
+      getSessionId: () => "child-session",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } }],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "hello" + formatTelegramSignature("777", 42) }, childContext);
+  await handlers.get("agent_start")?.({ type: "agent_start" }, childContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reactionCount, 0);
+});
+
+test("default reaction failures are written to the production channel log", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers } = registrations();
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async () => { throw new Error("Telegram rejected reaction"); },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } }],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const log = readFileSync(channelLogFile(cwd, "root-a"), "utf8");
+  assert.match(log, /telegram_reaction_failed/);
+  assert.match(log, /Telegram rejected reaction/);
 });
 
 test("agent_start reaction timeout is logged and does not block", async () => {
