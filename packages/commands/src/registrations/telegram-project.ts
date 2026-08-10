@@ -3,9 +3,11 @@ import {
   createChannelLogger,
   createChannelManager,
   createTelegramTransport,
+  buildTelegramBotCommands,
   type ChannelConfig,
   type ChannelManager,
   type ChannelPoller,
+  type TelegramMenuCommandSource,
   type TelegramMessageHandler,
 } from "@xzy-ai/channels";
 
@@ -15,12 +17,15 @@ export interface TelegramProjectManagerOptions {
   createManager?: (projectRoot: string) => ChannelManager;
   createPoller?: (config: ChannelConfig, projectRoot: string, sessionId: string) => ChannelPoller;
   createMessageHandler?: (config: ChannelConfig) => TelegramMessageHandler;
+  /** Read the current Pi command/prompt/skill catalog for menu sync and expansion. */
+  getCommands?: () => readonly TelegramMenuCommandSource[];
 }
 
 interface TelegramProjectManagerEntry {
   manager: ChannelManager;
   sessionId: string;
   messageHandlerFactory?: (config: ChannelConfig) => TelegramMessageHandler;
+  getCommands?: () => readonly TelegramMenuCommandSource[];
 }
 
 const managersByProject = new Map<string, TelegramProjectManagerEntry>();
@@ -32,6 +37,7 @@ export function getTelegramProjectManager(options: TelegramProjectManagerOptions
   if (existing) {
     existing.sessionId = options.sessionId;
     if (options.createMessageHandler) existing.messageHandlerFactory = options.createMessageHandler;
+    if (options.getCommands) existing.getCommands = options.getCommands;
     return existing.manager;
   }
 
@@ -39,6 +45,7 @@ export function getTelegramProjectManager(options: TelegramProjectManagerOptions
     manager: undefined as never,
     sessionId: options.sessionId,
     messageHandlerFactory: options.createMessageHandler,
+    getCommands: options.getCommands,
   };
   entry.manager = options.createManager?.(projectRoot) ?? createChannelManager({
     projectRoot,
@@ -50,6 +57,7 @@ export function getTelegramProjectManager(options: TelegramProjectManagerOptions
       return createTelegramTransport({
         logger: loggerResult.value,
         onMessage: entry.messageHandlerFactory?.(config),
+        commands: buildTelegramBotCommands(entry.getCommands?.() ?? []),
       });
     },
   });

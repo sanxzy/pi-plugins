@@ -163,6 +163,53 @@ test("wires the supplied message middleware onto the bot before polling", async 
   await transport.stop();
 });
 
+test("publishes the sanitized command menu before polling and fails soft on sync errors", async () => {
+  const { root, logger } = transportDeps();
+  let synced: readonly { command: string; description: string }[] | undefined;
+  const botMeta = { ...fakeBot().meta };
+  const bot: BotLike = {
+    api: {
+      getMe: async () => ({ id: 1 }),
+      setMyCommands: async (commands) => { synced = commands; },
+    },
+    on() {},
+    async init() {},
+    catch() {},
+    async stop() { botMeta.stopCalled = (botMeta.stopCalled ?? 0) + 1; },
+  };
+  const handle: RunnerHandleLike = { async stop() {}, isRunning() { return true; }, task() { return undefined; } };
+  const transport = createTelegramTransport({
+    logger,
+    createBot: () => bot,
+    runBot: () => handle,
+    commands: [{ command: "goal", description: "Goal" }],
+  });
+  const result = await transport.start({ token: TOKEN, approvedUserIds: [] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(synced, [{ command: "goal", description: "Goal" }]);
+  await transport.stop();
+
+  // A failing setMyCommands must not prevent the connection from starting.
+  const failingBot: BotLike = {
+    api: { getMe: async () => ({ id: 1 }), setMyCommands: async () => { throw new Error("BOT_COMMANDS_TOO_MUCH"); } },
+    on() {},
+    async init() {},
+    catch() {},
+    async stop() {},
+  };
+  const second = createTelegramTransport({
+    logger,
+    createBot: () => failingBot,
+    runBot: () => handle,
+    commands: [{ command: "goal", description: "Goal" }],
+  });
+  const secondResult = await second.start({ token: TOKEN, approvedUserIds: [] });
+  assert.equal(secondResult.ok, true, "menu sync failure does not block polling");
+  await second.stop();
+  const raw = readFileSync(channelLogFile(root, "transport-session"), "utf8");
+  assert.equal(raw.includes("telegram_commands_sync_failed"), true);
+});
+
 test("telegramTokenFingerprint is deterministic and never contains the raw token", () => {
   const a = telegramTokenFingerprint(TOKEN);
   const b = telegramTokenFingerprint(TOKEN);

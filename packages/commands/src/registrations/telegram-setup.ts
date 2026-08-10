@@ -5,10 +5,11 @@ import {
   type ChannelConfig,
   type ChannelManager,
   type ChannelPoller,
+  type TelegramMenuCommandSource,
 } from "@xzy-ai/channels";
 import {
-  TelegramChannelSetup,
-  type TelegramChannelSetupTheme,
+  TelegramSetupWizard,
+  type TelegramSetupWizardTheme,
   type TelegramSetupResult,
 } from "@xzy-ai/tui";
 import { getTelegramProjectManager } from "./telegram-project.ts";
@@ -17,9 +18,11 @@ import { refreshTelegramInbound } from "./telegram-inbound.ts";
 export interface TelegramSetupRegistrationDeps {
   createManager?: (projectRoot: string) => ChannelManager;
   createPoller?: (config: ChannelConfig, projectRoot: string, sessionId: string) => ChannelPoller;
+  /** Read the current Pi command/prompt/skill catalog for menu sync during setup. */
+  getCommands?: () => readonly TelegramMenuCommandSource[];
 }
 
-function setupTheme(theme: { fg: (color: ThemeColor, text: string) => string }): TelegramChannelSetupTheme {
+function setupTheme(theme: { fg: (color: ThemeColor, text: string) => string }): TelegramSetupWizardTheme {
   return { fg: (color, text) => theme.fg(color as ThemeColor, text) };
 }
 
@@ -43,6 +46,7 @@ export function registerTelegramSetup(
         sessionId,
         createManager: deps.createManager,
         createPoller: deps.createPoller,
+        getCommands: deps.getCommands,
       });
       const controller = createTelegramSetupController({
         projectRoot,
@@ -50,7 +54,7 @@ export function registerTelegramSetup(
         onConfigChanged: (config) => refreshTelegramInbound(projectRoot, config),
       });
       const result = await ctx.ui.custom<TelegramSetupResult>(
-        (tui, theme, _keybindings, done) => new TelegramChannelSetup({
+        (tui, theme, _keybindings, done) => new TelegramSetupWizard({
           tui,
           theme: setupTheme(theme),
           controller,

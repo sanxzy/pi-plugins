@@ -3,6 +3,7 @@ import { run } from "@grammyjs/runner";
 import type { ChannelLogger } from "./logger.ts";
 import type { ChannelPoller } from "./manager.ts";
 import type { ChannelConfig, StateResult } from "./state.ts";
+import type { TelegramBotCommand } from "./menu.ts";
 
 /**
  * Minimal structural contracts for the grammY polling surface. The real grammY
@@ -12,6 +13,7 @@ import type { ChannelConfig, StateResult } from "./state.ts";
 export interface BotApiLike {
   getMe(): Promise<unknown>;
   sendMessage?(chatId: number | string, text: string, other?: Record<string, unknown>): Promise<unknown>;
+  setMyCommands?(commands: readonly TelegramBotCommand[]): Promise<unknown>;
 }
 
 export type TelegramMessageHandler = (context: unknown) => Promise<unknown> | unknown;
@@ -45,6 +47,12 @@ export interface TelegramTransportDeps {
    * Phase 6 uses this to route accepted private text to the root parent.
    */
   onMessage?: TelegramMessageHandler;
+  /**
+   * Optional sanitized bot command menu published via `setMyCommands` before
+   * polling starts. Best-effort: a menu sync failure logs a warning but does
+   * not prevent the connection from starting.
+   */
+  commands?: readonly TelegramBotCommand[];
 }
 
 /**
@@ -124,6 +132,18 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
         // started and no ownership remains; the manager releases it.
         deps.logger.warn("telegram_startup_failed", { error: safeTransportError(error) });
         return { ok: false, code: "invalid", message: "Telegram connection rejected the configured token" };
+      }
+
+      // Publish the sanitized command menu before polling so the operator sees
+      // commands/prompts/skills in the bot menu. Best-effort: a failed sync
+      // logs a warning and still starts polling.
+      if (candidate.api.setMyCommands && deps.commands && deps.commands.length > 0) {
+        try {
+          await candidate.api.setMyCommands(deps.commands);
+          deps.logger.info("telegram_commands_synced", { count: deps.commands.length });
+        } catch (error) {
+          deps.logger.warn("telegram_commands_sync_failed", { error: safeTransportError(error) });
+        }
       }
 
       bot = candidate;

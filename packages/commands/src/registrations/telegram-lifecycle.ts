@@ -11,6 +11,7 @@ import {
   type ChannelManager,
   type ChannelPoller,
   type TelegramChannelLifecycle,
+  type TelegramMenuCommandSource,
 } from "@xzy-ai/channels";
 import {
   clearTelegramProjectManager,
@@ -21,6 +22,8 @@ import {
 export interface TelegramLifecycleRegistrationDeps {
   createManager?: (projectRoot: string) => ChannelManager;
   createPoller?: (config: ChannelConfig, projectRoot: string, sessionId: string) => ChannelPoller;
+  /** Read the current Pi command/prompt/skill catalog for menu sync on start/restart. */
+  getCommands?: () => readonly TelegramMenuCommandSource[];
 }
 
 const lifecyclesByProject = new Map<string, TelegramChannelLifecycle>();

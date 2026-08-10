@@ -15,12 +15,11 @@ export type {
   AgentLiveSession,
   LiveViewReason,
 } from "./agent-manager-live.ts";
-export { TelegramChannelSetup } from "./telegram-channel-setup.ts";
+export { TelegramSetupWizard } from "./telegram-setup-wizard.ts";
 export type {
-  TelegramChannelSetupOptions,
-  TelegramChannelSetupTheme,
+  TelegramSetupWizardOptions,
+  TelegramSetupWizardTheme,
   TelegramPendingPairing,
   TelegramSetupController,
   TelegramSetupResult,
-  TelegramSetupStatus,
-} from "./telegram-channel-setup.ts";
+} from "./telegram-setup-wizard.ts";

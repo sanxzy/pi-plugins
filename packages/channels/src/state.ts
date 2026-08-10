@@ -168,6 +168,24 @@ export function writeChannelRuntime(projectRoot: string, state: ChannelRuntimeSt
   return writePrivateJson(channelRuntimeFile(projectRoot), validation.value);
 }
 
+/**
+ * Remove the Telegram channel setup entirely: the persisted config (token,
+ * approvals, pairing) and the anti-replay runtime cursor. Missing files are not
+ * an error. Callers should stop the active manager before clearing so no
+ * listener keeps polling against the removed config.
+ */
+export function clearChannelConfig(projectRoot: string): StateResult<void> {
+  const files = [channelConfigFile(projectRoot), channelRuntimeFile(projectRoot)];
+  try {
+    for (const file of files) {
+      if (existsSync(file)) unlinkSync(file);
+    }
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return { ok: false, code: "io", message: `Unable to clear Telegram channel state: ${safeErrorMessage(error)}` };
+  }
+}
+
 /** Exposed for tests and diagnostics without leaking token values. */
 export function privateFileMode(filePath: string): number | undefined {
   try {

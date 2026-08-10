@@ -15,10 +15,11 @@ import {
   registerSessionEvents,
   registerLifecycleGates,
   registerTelegramSetup,
+  registerTelegramClear,
   registerTelegramLifecycle,
   registerTelegramInbound,
   registerGoalCommand,
-  expandTelegramGoalCommand,
+  createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -37,13 +38,21 @@ const extensionName = "pi-code";
 
 /** PI extension entry point. */
 export default function piCodeExtension(pi: ExtensionAPI): void {
-  registerTelegramSetup(pi);
+  // The Telegram bridge dispatches extension commands with explicit expanders
+  // (goal) plus prompt/skill files discovered from the Pi command catalog, and
+  // publishes the same catalog as the Telegram bot menu on every start.
+  const getCommands = () => pi.getCommands();
+  const expander = createDefaultTelegramCommandExpander(getCommands);
+
+  const getMenuCommands = () => expander.menuSources();
+  registerTelegramSetup(pi, { getCommands: getMenuCommands });
+  registerTelegramClear(pi);
   // Inbound registration precedes the connection lifecycle so its message
   // middleware is attached before the shared manager starts polling.
   registerTelegramInbound(pi, {
-    expandCommand: (name, args) => (name === "goal" ? expandTelegramGoalCommand(args) : undefined),
+    expandCommand: (name, args) => expander.expand(name, args),
   });
-  registerTelegramLifecycle(pi);
+  registerTelegramLifecycle(pi, { getCommands: getMenuCommands });
   registerQuestionTool(pi);
   registerAgentTool(pi);
   registerCancelTool(pi);

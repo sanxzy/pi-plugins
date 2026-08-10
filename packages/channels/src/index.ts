@@ -6,6 +6,7 @@ export {
   channelRuntimeFile,
 } from "./shared/paths.ts";
 export {
+  clearChannelConfig,
   privateFileMode,
   readChannelConfig,
   readChannelRuntime,
@@ -75,6 +76,26 @@ export {
   type TelegramRunnerFactory,
   type TelegramTransportDeps,
 } from "./transport.ts";
+export {
+  TELEGRAM_MENU_MAX_COMMANDS,
+  TELEGRAM_MENU_MAX_DESCRIPTION,
+  TELEGRAM_MENU_COMMAND_PATTERN,
+  buildTelegramBotCommands,
+  sanitizeTelegramCommandDescription,
+  sanitizeTelegramCommandName,
+  type TelegramBotCommand,
+  type TelegramMenuCommandSource,
+} from "./menu.ts";
+export {
+  discoverTelegramExpansions,
+  expandTelegramCommand,
+  parseTelegramTemplateArgs,
+  readTelegramExpansionFile,
+  substituteTelegramTemplateArgs,
+  telegramExpansionReservedNames,
+  type TelegramExpandableSource,
+  type TelegramExpansionTarget,
+} from "./expansion.ts";
 export {
   createTelegramInbound,
   defaultTelegramPairingState,
