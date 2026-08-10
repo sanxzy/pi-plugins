@@ -10,7 +10,9 @@ import { registerAgentFooter } from "../src/registrations/footer.ts";
 
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";
-const LEFT = "\x1b[D";
+const ALT_DOWN = "\x1bn";
+const ALT_UP = "\x1bp";
+const ALT_LEFT = "\x1bb";
 const ENTER = "\r";
 const ESC = "\x1b";
 const ALT_X = "\x1bx";
@@ -144,20 +146,21 @@ test("footer management mode consumes navigation keys and passes others through"
     }) as { dispose: () => void };
     assert.ok(terminalInputHandler, "terminal input handler registered on mount");
 
-    // Outside management mode, ordinary input and upward navigation pass through.
+    // Ordinary input and arrows pass through; Alt+Down enters management mode.
     assert.equal(terminalInputHandler!("hello")?.consume, false);
     assert.equal(terminalInputHandler!("hello")?.data, "hello");
     assert.equal(terminalInputHandler!(UP)?.consume, false, "up passes through outside management");
+    assert.equal(terminalInputHandler!(DOWN)?.consume, false, "down passes through outside management");
 
-    // `↓` enters management mode; navigation keys are then consumed and Enter on main exits.
-    assert.equal(terminalInputHandler!(DOWN)?.consume, true);
-    assert.equal(terminalInputHandler!(DOWN)?.consume, true);
-    assert.equal(terminalInputHandler!(UP)?.consume, true);
-    assert.equal(terminalInputHandler!(LEFT)?.consume, true);
+    // Alt+arrow navigation is consumed; Enter on main exits management.
+    assert.equal(terminalInputHandler!(ALT_DOWN)?.consume, true);
+    assert.equal(terminalInputHandler!(ALT_DOWN)?.consume, true);
+    assert.equal(terminalInputHandler!(ALT_UP)?.consume, true);
+    assert.equal(terminalInputHandler!(ALT_LEFT)?.consume, true);
     assert.equal(terminalInputHandler!(ENTER)?.consume, false, "Enter reaches composer after left exits management");
 
     // Re-enter and confirm Enter on the root exits management mode.
-    terminalInputHandler!(DOWN);
+    terminalInputHandler!(ALT_DOWN);
     assert.equal(terminalInputHandler!(ENTER)?.consume, true);
     assert.equal(terminalInputHandler!("x")?.consume, false, "after exit, text passes through");
 
@@ -197,9 +200,9 @@ test("Enter on a running child mounts the live view; cancel aborts, close does n
       getAvailableProviderCount: () => 1,
     }) as { handleInput(data: string): boolean; dispose(): void };
 
-    // Outside management, ↓ enters; ↓ to the child; Enter mounts the live view.
-    assert.equal(footer.handleInput(DOWN), true);
-    assert.equal(footer.handleInput(DOWN), true);
+    // Outside management, Alt+Down enters; Alt+Down to the child; Enter mounts the live view.
+    assert.equal(footer.handleInput(ALT_DOWN), true);
+    assert.equal(footer.handleInput(ALT_DOWN), true);
     assert.equal(footer.handleInput(ENTER), true);
     assert.ok(capturedCustomFactory, "Enter mounts the focused live view overlay");
 
@@ -214,8 +217,8 @@ test("Enter on a running child mounts the live view; cancel aborts, close does n
     assert.equal(aborted, 0, "closing the live view never aborts the child");
 
     // Re-enter and cancel with Alt+x; the confirmation accepts and aborts.
-    terminalInputHandler!(DOWN);
-    terminalInputHandler!(DOWN);
+    terminalInputHandler!(ALT_DOWN);
+    terminalInputHandler!(ALT_DOWN);
     terminalInputHandler!(ENTER);
     const liveView = capturedCustomFactory!({ requestRender: () => {}, terminal: { rows: 24 } }, { fg: (_c: string, t: string) => t }, {}, () => {}) as {
       handleInput(data: string): void;
@@ -257,8 +260,8 @@ test("live transcript events repaint the mounted live view without steering", as
     }) as { handleInput(data: string): boolean; dispose(): void };
 
     // Enter mounts the live view through the host custom surface.
-    footer.handleInput(DOWN);
-    footer.handleInput(DOWN);
+    footer.handleInput(ALT_DOWN);
+    footer.handleInput(ALT_DOWN);
     footer.handleInput(ENTER);
     assert.ok(capturedCustomFactory, "live view mounts through the host custom surface");
 
@@ -308,8 +311,8 @@ test("the live overlay mount does not delegate height truncation to the host", (
       getGitBranch: () => "main",
       getAvailableProviderCount: () => 1,
     }) as { handleInput(data: string): boolean; dispose(): void };
-    footer.handleInput(DOWN);
-    footer.handleInput(DOWN);
+    footer.handleInput(ALT_DOWN);
+    footer.handleInput(ALT_DOWN);
     footer.handleInput(ENTER);
 
     const options = capturedCustomOptions as { overlayOptions?: { maxHeight?: unknown } } | undefined;

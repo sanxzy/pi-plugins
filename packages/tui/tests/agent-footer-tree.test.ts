@@ -66,6 +66,19 @@ test("hideRows shows the agent section only when rows exist", () => {
   assert.equal(lines.length, 2, "no agent section when there are no rows");
 });
 
+test("a lone root anchor row does not keep the agent section alive", () => {
+  const footer = new AgentFooter({
+    tui: fakeTUI(),
+    theme,
+    getInfo: () => info(),
+    getRows: () => [
+      row({ rowId: "main", root: true, status: "active", description: "main", enterable: false }),
+    ],
+  });
+  const lines = renderRows(footer);
+  assert.equal(lines.length, 2, "root anchor alone does not show the agent section");
+});
+
 test("renders a depth-first tree with status glyphs, time, and latest leaf", () => {
   const footer = new AgentFooter({
     tui: fakeTUI(),
@@ -98,6 +111,16 @@ test("terminal rows are filtered out after two minutes by filterFooterRows", () 
   assert.deepEqual(inWindow.map((r) => r.rowId), ["done", "running"]);
   const past = filterFooterRows(rows, new Date("2026-01-01T12:02:01.000Z"));
   assert.deepEqual(past.map((r) => r.rowId), ["running"]);
+});
+
+test("removes the subagent section after the last retained descendant expires", () => {
+  const updatedAt = "2026-01-01T12:00:00.000Z";
+  const rows: FooterTreeRow[] = [
+    row({ rowId: "main", root: true, status: "active", description: "main", enterable: false }),
+    row({ rowId: "done", status: "completed", updatedAt, updatedAtMs: new Date(updatedAt).getTime() }),
+  ];
+  const past = filterFooterRows(rows, new Date("2026-01-01T12:02:01.000Z"));
+  assert.deepEqual(past, []);
 });
 
 test("formatDuration renders compact elapsed time", () => {

@@ -68,8 +68,10 @@ const MAX_VISIBLE_MANAGEMENT_ROWS = 4;
 const SETTLED_RETENTION_MS = 2 * 60 * 1000;
 
 /**
- * Compact native-style footer with an optional descendant tree. The host owns
- * repaint scheduling; callers provide fresh immutable projections on render.
+ * Compact native-style footer with an optional descendant tree. Management
+ * navigation uses Alt+arrow keys so ordinary arrows remain available to the
+ * focused composer or custom dialog. The host owns repaint scheduling; callers
+ * provide fresh immutable projections on render.
  */
 export class AgentFooter implements Component {
   private readonly tui: TUI;
@@ -127,7 +129,7 @@ export class AgentFooter implements Component {
 
   /** Handle raw terminal input; returns true when the input was consumed. */
   handleInput(data: string): boolean {
-    if (matchesKey(data, Key.down)) {
+    if (matchesKey(data, Key.alt(Key.down))) {
       if (!this.management) {
         this.enterManagement();
         return true;
@@ -136,11 +138,11 @@ export class AgentFooter implements Component {
       return true;
     }
     if (this.management) {
-      if (matchesKey(data, Key.up)) {
+      if (matchesKey(data, Key.alt(Key.up))) {
         this.moveSelection(-1);
         return true;
       }
-      if (matchesKey(data, Key.left)) {
+      if (matchesKey(data, Key.alt(Key.left))) {
         this.exitManagement();
         return true;
       }
@@ -216,11 +218,15 @@ export function filterFooterRows(
   now: Date,
 ): FooterTreeRow[] {
   const nowMs = now.getTime();
-  return rows.filter((row) => {
+  const retained = rows.filter((row) => {
     if (!isTerminalFooterStatus(row.status)) return true;
     const settledAt = row.updatedAtMs ?? (row.updatedAt ? Date.parse(row.updatedAt) : Number.NaN);
     return !Number.isFinite(settledAt) || nowMs - settledAt <= SETTLED_RETENTION_MS;
   });
+
+  // The root row is only an anchor for the descendant tree. Do not keep the
+  // whole agent section alive after the last descendant has aged out.
+  return retained.some((row) => !row.root) ? retained : [];
 }
 
 export function formatDuration(durationMs: number): string {
