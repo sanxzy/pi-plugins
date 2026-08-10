@@ -37,7 +37,10 @@ export function registerStatusTool(pi: ExtensionAPI): void {
         });
       }
       const result = statusFor(caller, job, getJob);
-      return textResult(`Agent ${params.job_id} is ${job.status}.`, {
+      const text = job.status === "running"
+        ? `Agent ${job.subagentType} (${job.jobId}) is running. You can wait or continue with other tasks as needed. Do not poll; the agent will send its report as soon as it finishes.`
+        : `Agent ${params.job_id} is ${job.status}.`;
+      return textResult(text, {
         status: job.status,
         job: toJobSummary(job),
         controllable: result.controllable,
