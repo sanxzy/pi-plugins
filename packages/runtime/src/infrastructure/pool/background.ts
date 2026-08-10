@@ -9,8 +9,8 @@ import type { DeliveryCoordinator } from "./delivery.ts";
  * child off the main turn. When the child settles, its result is delivered to
  * the direct parent session through the delivery coordinator, which either
  * sends it right away or defers it until the parent session re-registers.
- * Delivery uses `followUp` semantics at the host boundary (after the current
- * run finishes, so it never interrupts streaming).
+ * Delivery uses `steer` semantics at the host boundary so the parent receives
+ * the result immediately.
  */
 
 /** Reason a background request is invalid in the given extension mode. */

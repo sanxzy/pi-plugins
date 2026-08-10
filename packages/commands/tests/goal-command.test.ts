@@ -15,7 +15,7 @@ function registrations(): { pi: ExtensionAPI; command?: RegisteredCommand; sent:
     registerCommand(name: string, options: Omit<RegisteredCommand, "name">) {
       command = { name, handler: options.handler };
     },
-    sendUserMessage(content: string, options?: { deliverAs: "steer" | "followUp" }) {
+    sendUserMessage(content: string, options?: { deliverAs: "steer" }) {
       sent.push({ content, options });
     },
   } as unknown as ExtensionAPI;
