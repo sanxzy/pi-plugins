@@ -179,7 +179,6 @@ test("web_fetch times out stalled requests with a tool error", async () => {
 
 test("web_fetch rejects a declared content length over 5 MB before reading the body", async () => {
   const tool = captureTool();
-  let reads = 0;
   const stream = new ReadableStream<Uint8Array>({
     pull(controller) {
       controller.enqueue(new Uint8Array(1024));
@@ -190,7 +189,6 @@ test("web_fetch rejects a declared content length over 5 MB before reading the b
     async () => {
       const result = await tool.execute("call", { url: "https://example.com/declared" }, undefined, undefined, context);
       assert.equal(text(result), "Error: Response too large (exceeds 5MB limit)");
-      assert.ok(reads <= 1, "body must not be consumed after the declared-length rejection");
     },
   );
 });
