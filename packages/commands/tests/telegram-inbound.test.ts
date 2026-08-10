@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { approvePairingAt, canonicalProjectRoot, channelConfigFile, channelLogFile, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
+import { approvePairingAt, canonicalProjectRoot, channelConfigFile, channelLogFile, clearTelegramChoiceState, createTelegramChoice, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
 
@@ -25,6 +25,7 @@ import { registerTelegramInbound } from "../src/registrations/telegram-inbound.t
 import { clearTelegramControlState } from "../src/registrations/telegram-controls.ts";
 import {
   clearTelegramProjectManagers,
+  getTelegramCallbackQueryHandlerFactory,
   getTelegramMessageHandlerFactory,
 } from "../src/registrations/telegram-project.ts";
 
@@ -230,6 +231,81 @@ test("unrelated native controls remain reaction-free", async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(reactions, []);
   clearTelegramControlState();
+  clearTelegramProjectManagers();
+});
+
+test("a choice callback is answered promptly and disables its keyboard", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  clearTelegramChoiceState();
+  const { pi, handlers, sent } = registrations();
+  const answered: string[] = [];
+  const edited: unknown[] = [];
+  let callbackHandler: ((context: unknown) => Promise<unknown> | unknown) | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => createTelegramInbound(opts),
+  });
+  const root = { ...context(cwd, "root-a"), sessionManager: { getSessionId: () => "root-a", getBranch: () => [] } } as unknown as ExtensionContext;
+  await handlers.get("session_start")?.({ reason: "startup" }, root);
+  const state = createTelegramChoice({ projectRoot: canonicalProjectRoot(cwd), sessionId: "root-a", chatId: "777", senderId: "111", question: "Proceed?", choices: [{ label: "Yes", value: "approved" }], expiresAt: Date.now() + 60_000 });
+  const callbackFactory = getTelegramCallbackQueryHandlerFactory(cwd);
+  callbackHandler = callbackFactory?.({ token: "x", approvedUserIds: ["111"] });
+  await callbackHandler?.({
+    callbackQuery: { id: "cq1", data: state.callbackData[0]!, from: { id: 111 }, message: { chat: { id: 777 }, message_id: 10 } },
+    api: {
+      answerCallbackQuery: async (id: string) => { answered.push(id); },
+      editMessageReplyMarkup: async (_chat: string, _id: number, other: unknown) => { edited.push(other); },
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(answered, ["cq1"]);
+  assert.deepEqual(edited, [{ reply_markup: { inline_keyboard: [] } }]);
+  assert.equal(sent.length, 1);
+  clearTelegramChoiceState();
+  clearTelegramProjectManagers();
+});
+
+test("a valid choice callback is consumed once and injected into the root session", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  clearTelegramChoiceState();
+  const { pi, handlers, sent } = registrations();
+  let callbackHandler: ((context: unknown) => Promise<unknown> | unknown) | undefined;
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => (listener = createTelegramInbound(opts)),
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: { getSessionId: () => "root-a", getBranch: () => [] },
+  } as unknown as ExtensionContext;
+  await handlers.get("session_start")?.({ reason: "startup" }, agentContext);
+  const state = createTelegramChoice({
+    projectRoot: canonicalProjectRoot(cwd), sessionId: "root-a", chatId: "777", senderId: "111",
+    question: "Proceed?", choices: [{ label: "Yes", value: "approved" }], expiresAt: Date.now() + 60_000,
+  });
+  const factory = getTelegramMessageHandlerFactory(cwd);
+  assert.equal(typeof factory, "function", "message handler factory is registered");
+  const callbackFactory = getTelegramCallbackQueryHandlerFactory(cwd);
+  assert.equal(typeof callbackFactory, "function", "callback handler factory is registered");
+  const callback = callbackFactory?.({ token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX", approvedUserIds: ["111"] });
+  assert.equal(typeof callback, "function", "callback handler is registered");
+  await callback?.({ callbackQuery: {
+    id: "cq1", data: state.callbackData[0]!, from: { id: 111 },
+    message: { chat: { id: 777 }, message_id: 10 },
+  } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(sent.length, 1, "one contextual follow-up is injected");
+  assert.match(sent[0]!, /Proceed\?/);
+  assert.match(sent[0]!, /approved/);
+  // A duplicate tap produces no second turn.
+  await callback?.({ callbackQuery: {
+    id: "cq2", data: state.callbackData[0]!, from: { id: 111 },
+    message: { chat: { id: 777 }, message_id: 10 },
+  } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(sent.length, 1, "duplicate tap does not create a second turn");
+  clearTelegramChoiceState();
   clearTelegramProjectManagers();
 });
 

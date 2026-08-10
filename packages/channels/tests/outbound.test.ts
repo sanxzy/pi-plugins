@@ -44,6 +44,30 @@ test("sendTextChunks sends ordered chunks and reports partial failure", async ()
   });
 });
 
+test("sendChoices sends an inline keyboard and returns the prompt message id", async () => {
+  const sent: unknown[] = [];
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendMessage(chat, text, other) {
+        sent.push([chat, text, other]);
+        return { message_id: 200 };
+      },
+    }),
+  });
+  const result = await outbound.sendChoices("project", "777", "Proceed?", [
+    { label: "Yes", callbackData: "tc_opaque_0" },
+    { label: "No", callbackData: "tc_opaque_1" },
+  ]);
+  assert.deepEqual(result, { ok: true, messageId: 200, expiresAt: result.ok ? result.expiresAt : 0 });
+  assert.deepEqual(sent[0], ["777", "Proceed?", {
+    reply_markup: { inline_keyboard: [[
+      { text: "Yes", callback_data: "tc_opaque_0" },
+      { text: "No", callback_data: "tc_opaque_1" },
+    ]] },
+  }]);
+});
+
 test("outbound sends to an approved explicit chat and captures message ids", async () => {
   const sent: Array<{ chat: string | number; text: string }> = [];
   const outbound = createTelegramOutbound({

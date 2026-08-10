@@ -43,6 +43,20 @@ test("schema accepts rich text and delivery override fields", () => {
   assert.equal(Value.Check(telegramChatParams, { ...sendText, format: "xml" }), false);
 });
 
+test("schema accepts explicit send_choices action and rejects invalid choices", () => {
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_choices", chat_id: "777", question: "Proceed?",
+    choices: [{ label: "Yes", value: "y" }, { label: "No", value: "n" }],
+  }), true);
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_choices", chat_id: "777", question: "Proceed?", choices: [{ label: "Yes" }],
+  }), false, "choices need at least two and each needs a value");
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_choices", chat_id: "777", question: "Proceed?",
+    choices: [{ label: "A", value: "a" }, { label: "A", value: "a" }], message_id: 5,
+  }), true, "reply message_id is allowed");
+});
+
 test("schema accepts explicit standard react action and rejects custom reactions", () => {
   assert.equal(Value.Check(telegramChatParams, { action: "react", chat_id: "777", message_id: 42, emoji: "👍" }), true);
   assert.equal(Value.Check(telegramChatParams, { action: "react", chat_id: "777", message_id: 42, emoji: "custom" }), false);
@@ -90,6 +104,46 @@ test("react rejects invalid target or emoji before the reaction API", async () =
   const result = await tool.execute("call", { action: "react", chat_id: "777", message_id: 42, emoji: "custom" }, undefined, undefined, context());
   assert.equal(called, false);
   assert.equal(result.details.category, "telegram_rejected");
+});
+
+test("send_choices rejects duplicate labels or values before delivery", async () => {
+  let sent = false;
+  const tool = capture({
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    sendChoices: async () => {
+      sent = true;
+      return { ok: true, messageId: 200, expiresAt: 1234 };
+    },
+  });
+  const result = await tool.execute("call", {
+    action: "send_choices", chat_id: "777", question: "Proceed?",
+    choices: [{ label: "Yes", value: "same" }, { label: "No", value: "same" }],
+  }, undefined, undefined, context());
+  assert.equal(sent, false);
+  assert.equal(result.details.category, "telegram_rejected");
+});
+
+test("send_choices forwards choices and returns safe prompt metadata", async () => {
+  let received: unknown;
+  const tool = capture({
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    sendChoices: async (_root: string, chatId: string, question: string, choices: unknown[]) => {
+      received = { chatId, question, choices };
+      return { ok: true, messageId: 200, expiresAt: 1234 };
+    },
+  });
+  const result = await tool.execute("call", {
+    action: "send_choices", chat_id: "777", question: "Proceed?",
+    choices: [{ label: "Yes", value: "y" }, { label: "No", value: "n" }],
+  }, undefined, undefined, context());
+  assert.deepEqual(received, {
+    chatId: "777", question: "Proceed?",
+    choices: [{ label: "Yes", value: "y" }, { label: "No", value: "n" }],
+  });
+  assert.deepEqual(result.details, {
+    action: "send_choices", sent: true, chatId: "777", question: "Proceed?",
+    messageId: 200, expiresAt: 1234,
+  });
 });
 
 test("send_text forwards rich format and delivery overrides", async () => {

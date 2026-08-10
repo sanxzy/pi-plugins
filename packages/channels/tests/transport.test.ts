@@ -10,6 +10,7 @@ import {
   channelLogFile,
   type BotLike,
   type RunnerHandleLike,
+  type TelegramRunnerOptionsLike,
 } from "../src/index.ts";
 
 function projectRoot(): string {
@@ -22,6 +23,7 @@ interface FakeBotMeta {
   initError?: Error;
   catchHandler?: (error: unknown) => unknown;
   messageHandler?: (context: unknown) => unknown;
+  callbackHandler?: (context: unknown) => unknown;
   stopCalled?: number;
 }
 
@@ -40,8 +42,9 @@ function fakeBot(meta: FakeBotMeta = {}): { bot: BotLike; handle: RunnerHandleLi
   };
   const bot: BotLike = {
     api: { getMe: async () => ({ id: 1 }) },
-    on(_event, handler) {
-      meta.messageHandler = handler;
+    on(event, handler) {
+      if (event === "message") meta.messageHandler = handler;
+      else meta.callbackHandler = handler;
     },
     async init() {
       if (meta.initError) throw meta.initError;
@@ -72,6 +75,26 @@ function transportDeps() {
 function makeRunBot(handle: RunnerHandleLike) {
   return (_bot: BotLike) => handle;
 }
+
+test("choice transport installs callback middleware and restricts allowed updates", async () => {
+  const { logger } = transportDeps();
+  const created = configuredBot();
+  let runnerOptions: TelegramRunnerOptionsLike | undefined;
+  const transport = createTelegramTransport({
+    logger,
+    createBot: () => created.bot,
+    onCallbackQuery: async () => undefined,
+    allowedUpdates: ["message", "callback_query"],
+    runBot: (_bot, options) => {
+      runnerOptions = options;
+      return created.handle;
+    },
+  });
+  await transport.start({ token: TOKEN, approvedUserIds: [] });
+  assert.deepEqual(runnerOptions?.runner?.fetch?.allowed_updates, ["message", "callback_query"]);
+  assert.equal(typeof created.meta.callbackHandler, "function");
+  await transport.stop();
+});
 
 test("a valid configured bot reaches ready status without a runner blocking readiness", async () => {
   const { root, logger } = transportDeps();
