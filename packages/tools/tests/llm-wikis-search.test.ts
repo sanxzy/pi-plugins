@@ -48,6 +48,10 @@ test("llm_wikis_search is registered with the local-first fallback description",
   assert.match(tool.description, /local/i);
   assert.match(tool.description, /web_search/);
   assert.match(tool.description, /web_fetch/);
+  assert.match(tool.description, /broad-to-specific/i);
+  assert.match(tool.description, /topic\/page/);
+  assert.match(tool.description, /local cache only/i);
+  assert.match(tool.description, /time-sensitive/i);
 });
 
 test("llm_wikis_search returns an empty structured result for an absent wiki directory", async () => {

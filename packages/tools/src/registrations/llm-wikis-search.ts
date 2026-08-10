@@ -50,7 +50,7 @@ export function registerLlmWikisSearchTool(pi: ExtensionAPI): void {
     name: "llm_wikis_search",
     label: "LLM wiki search",
     description:
-      "Search local LLM wikis first for reusable research. If local information is absent or insufficient, fall back to web_search or web_fetch; successful web results are saved automatically for future use.",
+      "Search the local LLM wiki cache for reusable research. Use a broad-to-specific workflow: first run a broad query without topic/page (for example, query=\"pi\") to discover available topics and page identifiers; then use the returned topic and page values with a narrower query or direct page lookup to retrieve targeted evidence. Use topic to scope results and page to retrieve a specific page; when both are supplied, the page is retrieved directly. If a search is empty, retry with a broader query, relaxed filters, or synonyms. This tool searches the local cache only; when information is absent, insufficient, or time-sensitive, use web_search for discovery and web_fetch for primary-source details. Successful web results are saved automatically for future wiki searches. Treat cached content as potentially stale and verify version-sensitive claims against current web sources.",
     parameters: llmWikisSearchParams,
     async execute(
       _toolCallId: string,
