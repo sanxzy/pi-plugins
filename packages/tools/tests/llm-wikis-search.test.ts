@@ -302,6 +302,8 @@ test("llm_wikis_search retrieves pages written by the paginated writer", async (
 test("registered llm_wikis_search accepts the fixed parameter contract", async () => {
   const tool = captureTool();
   const root = tempRoot();
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = join(root, "agent");
   try {
     const result = await tool.execute(
       "call",
@@ -312,6 +314,8 @@ test("registered llm_wikis_search accepts the fixed parameter contract", async (
     );
     assert.equal(text(result), "No local wiki matches found.");
   } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     rmSync(root, { recursive: true, force: true });
   }
 });

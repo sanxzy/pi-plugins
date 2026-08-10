@@ -164,10 +164,10 @@ test("research tool descriptions direct local-first lookup and automatic fallbac
   assert.match(wiki, /web_search/);
   assert.match(wiki, /web_fetch/);
   assert.match(search, /local.*wiki/i);
-  assert.match(search, /fallback/i);
+  assert.match(search, /fall\s*back/i);
   assert.match(search, /automatically saved/i);
   assert.match(fetch, /local.*wiki/i);
-  assert.match(fetch, /fallback/i);
+  assert.match(fetch, /fall\s*back/i);
   assert.match(fetch, /automatically saved/i);
 });
 

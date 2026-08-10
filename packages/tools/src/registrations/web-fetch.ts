@@ -49,7 +49,7 @@ export function registerWebFetchTool(pi: ExtensionAPI): void {
     name: "web_fetch",
     label: "Web fetch",
     description:
-      "Fetches content from a specified URL and converts HTML to markdown or text. Use this tool to retrieve and analyze web content. Search local LLM wikis first with llm_wikis_search when possible; successful results from this tool are automatically saved to the local wiki for reuse. The URL must be a fully-formed HTTP or HTTPS URL.",
+      "Fetches content from a specified URL and converts HTML to markdown or text. Use this tool to retrieve and analyze web content. Search local LLM wikis first with llm_wikis_search; fall back to this tool when local information is absent or insufficient. Successful results from this tool are automatically saved to the local wiki for reuse. The URL must be a fully-formed HTTP or HTTPS URL.",
     parameters: webFetchParams,
     async execute(
       _toolCallId: string,

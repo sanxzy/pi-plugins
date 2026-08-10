@@ -184,7 +184,7 @@ function parseJsonPayload(payload: string):
 }
 
 function webSearchDescription(): string {
-  return `Search the web using Exa and return current information beyond the knowledge cutoff. Search local LLM wikis first with llm_wikis_search when possible; successful results from this tool are automatically saved to the local wiki for reuse. Supports configurable result counts, live crawling modes ('fallback' or 'preferred'), search types ('auto', 'fast', or 'deep'), and context length. The current year is ${new Date().getFullYear()}; use this year when searching for recent information or current events.`;
+  return `Search the web using Exa and return current information beyond the knowledge cutoff. Search local LLM wikis first with llm_wikis_search; fall back to this tool when local information is absent or insufficient. Successful results from this tool are automatically saved to the local wiki for reuse. Supports configurable result counts, live crawling modes ('fallback' or 'preferred'), search types ('auto', 'fast', or 'deep'), and context length. The current year is ${new Date().getFullYear()}; use this year when searching for recent information or current events.`;
 }
 
 function toErrorMessage(error: unknown): string {
