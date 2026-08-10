@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
   formatWikiEntry,
+  parsePageHeader,
   parseWikiEntries,
   saveWikiEntry,
   slugify,
@@ -13,7 +14,16 @@ import {
   slugifyUrl,
   WIKI_ENTRY_END,
   WIKI_ENTRY_START,
+  WIKI_PAGE_END,
+  WIKI_PAGE_START,
 } from "../src/wiki.ts";
+
+function stripHeader(document: string): string {
+  const start = document.indexOf(WIKI_PAGE_START);
+  const end = document.indexOf(WIKI_PAGE_END);
+  if (start >= 0 && end >= start) return document.slice(end + WIKI_PAGE_END.length).replace(/^\n+/, "");
+  return document;
+}
 
 function entryDocument(
   title: string,
@@ -170,6 +180,112 @@ test("parseWikiEntries exposes parsed metadata from the entry block", () => {
   assert.equal(entries[0]?.timestamp, "2026-01-01T00:00:00.000Z");
   assert.equal(entries[0]?.title, "Web Search: alpha");
   assert.equal(entries[0]?.text, "alpha body");
+});
+
+test("saveWikiEntry paginates oversized entries without truncation and exposes cursors", async () => {
+  const root = tempRoot();
+  const original = `${"first paragraph.\n\n".repeat(100)}END OF OVERSIZED ENTRY`;
+  try {
+    const result = await saveWikiEntry({
+      root,
+      topic: "large-topic",
+      source: "web_search",
+      queryOrUrl: "large topic",
+      format: "markdown",
+      title: "Large topic",
+      text: original,
+      timestamp: "2026-01-01T00:00:00.000Z",
+      pageSize: 512,
+    });
+    assert.ok(result.pages.length > 1);
+    assert.deepEqual(readdirSync(root).sort(), result.pages.slice().sort());
+    const pages = result.pages.map((file) => readFileSync(join(root, file), "utf8"));
+    assert.equal(pages.every((page) => page.length <= 512 + 512), true);
+    assert.equal(pages.map(stripHeader).join("\n").includes("END OF OVERSIZED ENTRY"), true);
+    assert.equal(pages.map(stripHeader).join("\n").includes("first paragraph."), true);
+    const headers = pages.map((page) => parsePageHeader(page));
+    assert.equal(headers[0]?.page, 1);
+    assert.equal(headers[0]?.totalPages, pages.length);
+    assert.equal(headers.at(-1)?.next, undefined);
+    assert.equal(headers[0]?.next, result.pages[1]);
+    assert.equal(headers.at(-1)?.previous, result.pages.at(-2));
+    assert.ok(pages[0]?.includes("Next"));
+    assert.ok(pages.at(-1)?.includes("Previous"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("saveWikiEntry preserves existing single-page entries when pagination is enabled", async () => {
+  const root = tempRoot();
+  try {
+    await saveWikiEntry({
+      root,
+      topic: "legacy",
+      source: "web_search",
+      queryOrUrl: "legacy",
+      format: "markdown",
+      title: "Legacy",
+      text: "legacy content",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    const result = await saveWikiEntry({
+      root,
+      topic: "legacy",
+      source: "web_search",
+      queryOrUrl: "legacy",
+      format: "markdown",
+      title: "Legacy second",
+      text: "second content",
+      timestamp: "2026-01-02T00:00:00.000Z",
+      pageSize: 512,
+    });
+    assert.equal(result.pages[0], "legacy.md");
+    const entries = parseWikiEntries(readFileSync(join(root, "legacy.md"), "utf8"), "legacy.md");
+    assert.equal(entries.some((entry) => entry.text === "legacy content"), true);
+    assert.equal(entries.some((entry) => entry.text === "second content"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("overlapping same-topic saves retain every entry", async () => {
+  const root = tempRoot();
+  try {
+    const saves = await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        saveWikiEntry({
+          root,
+          topic: "concurrent",
+          source: "web_search",
+          queryOrUrl: "concurrent",
+          format: "markdown",
+          title: `Concurrent ${index}`,
+          text: `entry-${index}`,
+          timestamp: `2026-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
+          pageSize: 512,
+        }),
+      ),
+    );
+    assert.equal(saves.every((save) => save.saved), true);
+    const files = readdirSync(root).filter((file) => file.endsWith(".md"));
+    const all = files.map((file) => readFileSync(join(root, file), "utf8")).join("\n");
+    for (let index = 0; index < 12; index++) assert.ok(all.includes(`entry-${index}`));
+    assert.equal(files.some((file) => file.includes(".part-")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("pagination headers expose stable page metadata", () => {
+  const page = `${WIKI_PAGE_START}\ntopic: alpha\npage: 2\ntotalPages: 3\nprevious: alpha.md\nnext: alpha.part-003.md\n${WIKI_PAGE_END}\nbody`;
+  assert.deepEqual(parsePageHeader(page), {
+    topic: "alpha",
+    page: 2,
+    totalPages: 3,
+    previous: "alpha.md",
+    next: "alpha.part-003.md",
+  });
 });
 
 test("saveWikiEntry tolerates write failures without throwing", async () => {
