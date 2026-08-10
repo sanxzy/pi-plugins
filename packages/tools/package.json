@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/question.test.ts tests/question-render.test.ts tests/background-gate.test.ts tests/footer.test.ts tests/registrations-isolation.test.ts tests/telegram.test.ts tests/goal-tools.test.ts tests/web-fetch.test.ts tests/web-search.test.ts"
+    "test": "node --test --import tsx tests/question.test.ts tests/question-render.test.ts tests/background-gate.test.ts tests/footer.test.ts tests/registrations-isolation.test.ts tests/telegram.test.ts tests/goal-tools.test.ts tests/web-fetch.test.ts tests/web-search.test.ts tests/wiki.test.ts"
   },
   "dependencies": {
     "@xzy-ai/channels": "workspace:*",

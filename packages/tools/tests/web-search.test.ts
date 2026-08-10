@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   registerWebSearchTool,
@@ -21,6 +24,18 @@ type Tool = {
 };
 
 const context = {} as ExtensionContext;
+
+/** Redirect the agent directory to a temp tree so saves never touch ~/.pi. */
+function withAgentDir(run: (wikiRoot: string) => Promise<void>): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-agent-"));
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+  return run(join(root, "wikis")).finally(() => {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  });
+}
 
 function captureTool(): Tool {
   let registered: Tool | undefined;
@@ -66,63 +81,71 @@ test("web_search is registered, describes the current year, and sends a JSON-RPC
   const tool = captureTool();
   assert.match(tool.description, new RegExp(String(new Date().getFullYear())));
   const captured: Array<{ input: string; method?: string; headers: Headers; body: unknown }> = [];
-  await withFetch(
-    async (input, init) => {
-      captured.push({
-        input: String(input),
-        method: init?.method,
-        headers: new Headers(init?.headers),
-        body: JSON.parse(String(init?.body)),
-      });
-      return new Response(payload("exa results"), { status: 200, headers: { "content-type": "application/json" } });
-    },
-    async () => {
-      const result = await tool.execute(
-        "call",
-        { query: "effect typescript", numResults: 3, livecrawl: "preferred", type: "fast", contextMaxCharacters: 2500 },
-        undefined,
-        undefined,
-        context,
-      );
-      assert.equal(text(result), "Web Search: effect typescript\n\nexa results");
-      assert.deepEqual(result.details, { query: "effect typescript", provider: "exa" });
-      const req = captured[0];
-      assert.ok(req);
-      assert.equal(req.input, EXA_URL);
-      assert.equal(req.method, "POST");
-      assert.match(req.headers.get("accept") ?? "", /application\/json.*text\/event-stream/);
-      assert.deepEqual(req.body, {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "web_search_exa",
-          arguments: {
-            query: "effect typescript",
-            type: "fast",
-            numResults: 3,
-            livecrawl: "preferred",
-            contextMaxCharacters: 2500,
+  await withAgentDir(async () => {
+    await withFetch(
+      async (input, init) => {
+        captured.push({
+          input: String(input),
+          method: init?.method,
+          headers: new Headers(init?.headers),
+          body: JSON.parse(String(init?.body)),
+        });
+        return new Response(payload("exa results"), { status: 200, headers: { "content-type": "application/json" } });
+      },
+      async () => {
+        const result = await tool.execute(
+          "call",
+          { query: "effect typescript", numResults: 3, livecrawl: "preferred", type: "fast", contextMaxCharacters: 2500 },
+          undefined,
+          undefined,
+          context,
+        );
+        assert.equal(text(result), "Web Search: effect typescript\n\nexa results");
+        assert.deepEqual(result.details, {
+          query: "effect typescript",
+          provider: "exa",
+          wiki: { saved: true, topic: "effect-typescript", pages: ["effect-typescript.md"] },
+        });
+        const req = captured[0];
+        assert.ok(req);
+        assert.equal(req.input, EXA_URL);
+        assert.equal(req.method, "POST");
+        assert.match(req.headers.get("accept") ?? "", /application\/json.*text\/event-stream/);
+        assert.deepEqual(req.body, {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "web_search_exa",
+            arguments: {
+              query: "effect typescript",
+              type: "fast",
+              numResults: 3,
+              livecrawl: "preferred",
+              contextMaxCharacters: 2500,
+            },
           },
-        },
-      });
-    },
-  );
+        });
+      },
+    );
+  });
 });
 
 test("web_search applies Exa defaults and parses SSE frames, ignoring non-JSON frames", async () => {
   const tool = captureTool();
-  await withFetch(
-    async (_input, init) => {
-      const body = JSON.parse(String(init?.body)) as { params: { arguments: Record<string, unknown> } };
-      assert.deepEqual(body.params.arguments, { query: "hello", type: "auto", numResults: 8, livecrawl: "fallback" });
-      return new Response(`data: [DONE]\nevent: message\ndata: ${payload("search results")}\n\n`, { status: 200 });
-    },
-    async () => {
-      const result = await tool.execute("call", { query: "hello" }, undefined, undefined, context);
-      assert.equal(text(result), "Web Search: hello\n\nsearch results");
-    },
-  );
+  await withAgentDir(async () => {
+    await withFetch(
+      async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as { params: { arguments: Record<string, unknown> } };
+        assert.deepEqual(body.params.arguments, { query: "hello", type: "auto", numResults: 8, livecrawl: "fallback" });
+        return new Response(`data: [DONE]\nevent: message\ndata: ${payload("search results")}\n\n`, { status: 200 });
+      },
+      async () => {
+        const result = await tool.execute("call", { query: "hello" }, undefined, undefined, context);
+        assert.equal(text(result), "Web Search: hello\n\nsearch results");
+      },
+    );
+  });
 });
 
 test("web_search surfaces JSON-RPC errors as tool errors", async () => {
@@ -146,13 +169,20 @@ test("web_search reports malformed response bodies as tool errors", async () => 
 
 test("web_search returns the no-results fallback for a valid empty response", async () => {
   const tool = captureTool();
-  await withFetch(
-    async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [] } }), { status: 200 }),
-    async () => {
-      const result = await tool.execute("call", { query: "nothing" }, undefined, undefined, context);
-      assert.equal(text(result), NO_RESULTS);
-    },
-  );
+  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  mkdirSync(root, { recursive: true });
+  try {
+    await withFetch(
+      async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [] } }), { status: 200 }),
+      async () => {
+        const result = await executeWebSearch({ query: "nothing" }, undefined, undefined, { wikiRoot: root });
+        assert.equal(text(result), NO_RESULTS);
+        assert.deepEqual(readdirSync(root), []);
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("web_search reads EXA_API_KEY per invocation and keeps it in the URL only", async () => {
@@ -167,9 +197,11 @@ test("web_search reads EXA_API_KEY per invocation and keeps it in the URL only",
         return new Response(payload("keyed results"), { status: 200 });
       },
       async () => {
-        const result = await tool.execute("call", { query: "keyed" }, undefined, undefined, context);
-        assert.equal(text(result), "Web Search: keyed\n\nkeyed results");
-        assert.equal(JSON.stringify(result).includes("exa secret"), false);
+        await withAgentDir(async () => {
+          const result = await tool.execute("call", { query: "keyed" }, undefined, undefined, context);
+          assert.equal(text(result), "Web Search: keyed\n\nkeyed results");
+          assert.equal(JSON.stringify(result).includes("exa secret"), false);
+        });
       },
     );
   } finally {
@@ -191,8 +223,10 @@ test("web_search uses the base endpoint when no API key is present", async () =>
         return new Response(payload("anon results"), { status: 200 });
       },
       async () => {
-        const result = await tool.execute("call", { query: "anon" }, undefined, undefined, context);
-        assert.equal(text(result), "Web Search: anon\n\nanon results");
+        await withAgentDir(async () => {
+          const result = await tool.execute("call", { query: "anon" }, undefined, undefined, context);
+          assert.equal(text(result), "Web Search: anon\n\nanon results");
+        });
       },
     );
   } finally {
@@ -201,20 +235,70 @@ test("web_search uses the base endpoint when no API key is present", async () =>
   assert.equal(urls[0], EXA_URL);
 });
 
-test("web_search times out a never-settling request", async () => {
-  assert.equal(SEARCH_TIMEOUT_MS, 30_000);
-  await withFetch(
-    (_input, init) =>
-      new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => {
-          reject(new DOMException("The operation was aborted", "TimeoutError"));
-        });
-      }),
-    async () => {
-      const result = await executeWebSearch({ query: "slow" }, undefined, 50);
-      assert.equal(text(result), "Error: Request timed out");
-    },
-  );
+test("web_search saves successful research to the query wiki topic", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  try {
+    await withFetch(async () => new Response(payload("exa results"), { status: 200 }), async () => {
+      const result = await executeWebSearch(
+        { query: "effect typescript" },
+        undefined,
+        undefined,
+        { wikiRoot: root, now: () => new Date("2026-01-01T00:00:00.000Z") },
+      );
+      assert.equal(text(result), "Web Search: effect typescript\n\nexa results");
+      assert.deepEqual(result.details, {
+        query: "effect typescript",
+        provider: "exa",
+        wiki: { saved: true, topic: "effect-typescript", pages: ["effect-typescript.md"] },
+      });
+      const content = readFileSync(join(root, "effect-typescript.md"), "utf8");
+      assert.ok(content.includes("<!-- pi-code-wiki-entry -->"));
+      assert.ok(content.includes("<!-- pi-code-wiki-entry-end -->"));
+      assert.ok(content.includes("## Web Search: effect typescript"));
+      assert.ok(content.includes("timestamp: 2026-01-01T00:00:00.000Z"));
+      assert.ok(content.includes("source: web_search"));
+      assert.ok(content.includes("query: effect typescript"));
+      assert.ok(content.includes("format: markdown"));
+      assert.ok(content.includes("exa results"));
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("web_search writes no wiki entry on error and malformed branches", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  mkdirSync(root, { recursive: true });
+  try {
+    await withFetch(
+      async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "rate limited" } }), { status: 200 }),
+      async () => {
+        const result = await executeWebSearch({ query: "x" }, undefined, undefined, { wikiRoot: root });
+        assert.equal(text(result), "Error: Search request failed: rate limited");
+        assert.deepEqual(readdirSync(root), []);
+      },
+    );
+    await withFetch(async () => new Response("{not json", { status: 200 }), async () => {
+      const result = await executeWebSearch({ query: "x" }, undefined, undefined, { wikiRoot: root });
+      assert.equal(text(result), "Error: Malformed search response body");
+      assert.deepEqual(readdirSync(root), []);
+    });
+    await withFetch(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted", "TimeoutError"));
+          });
+        }),
+      async () => {
+        const result = await executeWebSearch({ query: "slow" }, undefined, 50, { wikiRoot: root });
+        assert.equal(text(result), "Error: Request timed out");
+        assert.deepEqual(readdirSync(root), []);
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("web_search cancels an aborted request", async () => {
