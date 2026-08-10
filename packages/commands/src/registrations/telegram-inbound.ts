@@ -108,14 +108,17 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   // associated with this run rather than rediscovered from an unstable
   // latest-branch scan at agent_start.
   let pendingReactionOrigin: TelegramMessageOrigin | undefined;
+  let observedBeforeStart = false;
   let acknowledgedRun = false;
 
   pi.on("before_agent_start", (event: BeforeAgentStartEvent, ctx: ExtensionContext) => {
     if (!isRootSession(ctx)) {
       pendingReactionOrigin = undefined;
+      observedBeforeStart = false;
       acknowledgedRun = true;
       return;
     }
+    observedBeforeStart = true;
     pendingReactionOrigin = event.prompt ? extractTelegramMessageOrigin(event.prompt) : undefined;
     acknowledgedRun = false;
   });
@@ -142,6 +145,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   pi.on("agent_start", (_event: AgentStartEvent, ctx: ExtensionContext) => {
     if (!isRootSession(ctx)) {
       pendingReactionOrigin = undefined;
+      observedBeforeStart = false;
       acknowledgedRun = true;
       return;
     }
@@ -149,8 +153,11 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     acknowledgedRun = true;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     const latestUserMessage = latestUserMessageText(ctx);
-    const origin = pendingReactionOrigin ?? (latestUserMessage ? extractTelegramMessageOrigin(latestUserMessage) : undefined);
+    const origin = pendingReactionOrigin ?? (!observedBeforeStart && latestUserMessage
+      ? extractTelegramMessageOrigin(latestUserMessage)
+      : undefined);
     pendingReactionOrigin = undefined;
+    observedBeforeStart = false;
     if (!origin) return;
     void acknowledgeReaction(projectRoot, ctx.sessionManager.getSessionId(), origin);
   });
