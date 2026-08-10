@@ -24,6 +24,14 @@ test("schema rejects legacy, actionless, and incomplete send_text payloads", () 
   assert.equal(Value.Check(telegramChatParams, sendText), true);
 });
 
+test("schema rejects mixed-action and unknown fields on send_text", () => {
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, message_id: 5 }), false);
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, reaction: "👍" }), false);
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, choices: [] }), false);
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, message: "bye" }), false);
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, foo: "bar" }), false);
+});
+
 test("send_text with an approved chat sends and returns safe metadata", async () => {
   let target: string | undefined;
   const tool = capture({

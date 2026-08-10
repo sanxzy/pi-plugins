@@ -48,7 +48,7 @@ const telegramSendTextAction = Type.Object({
   action: Type.Literal("send_text"),
   chat_id: telegramChatId,
   text: Type.String({ description: "The communication or report text to send to Telegram." }),
-});
+}, { additionalProperties: false });
 
 export const telegramChatParams = Type.Union([telegramSendTextAction]);
 
