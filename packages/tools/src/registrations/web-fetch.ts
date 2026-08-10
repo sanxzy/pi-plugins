@@ -90,9 +90,9 @@ export async function executeWebFetch(
   const content = decodeBody(body, contentType);
   if (isHtmlContentType(mime)) {
     const output = format === "text" ? extractTextFromHTML(content) : convertHTMLToMarkdown(content);
-    return textResult(output, {});
+    return textResult(`${title}\n\n${output}`, {});
   }
-  return textResult(content, {});
+  return textResult(`${title}\n\n${content}`, {});
 }
 
 function normalizeHttpUrl(value: string): string {

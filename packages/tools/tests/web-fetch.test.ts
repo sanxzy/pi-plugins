@@ -24,6 +24,7 @@ function captureTool(): Tool {
     },
   } as unknown as ExtensionAPI);
   assert.ok(registered);
+  assert.equal(registered.name, "web_fetch");
   return registered;
 }
 
@@ -75,7 +76,7 @@ test("web_fetch trims URLs and sends browser-like format headers", async () => {
       undefined,
       context,
     );
-    assert.equal(text(result), "hello");
+    assert.equal(text(result), "https://example.com/page (text/plain)\n\nhello");
     assert.deepEqual(result.details, {});
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.input, "https://example.com/page");
@@ -92,11 +93,25 @@ test("web_fetch converts HTML to markdown and text without active content", asyn
   const html = "<h1>Hello</h1><script>bad()</script><p>world <strong>wide</strong></p><style>.bad {}</style>";
   await withFetch(async () => new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } }), async () => {
     const markdown = await tool.execute("call", { url: "https://example.com", format: "markdown" }, undefined, undefined, context);
-    assert.equal(text(markdown), "# Hello\n\nworld **wide**");
+    assert.equal(text(markdown), "https://example.com/ (text/html; charset=utf-8)\n\n# Hello\n\nworld **wide**");
 
     const plain = await tool.execute("call", { url: "https://example.com", format: "text" }, undefined, undefined, context);
-    assert.equal(text(plain), "Helloworld wide");
+    assert.equal(text(plain), "https://example.com/ (text/html; charset=utf-8)\n\nHelloworld wide");
   });
+});
+
+test("web_fetch converts XHTML responses like HTML", async () => {
+  const tool = captureTool();
+  await withFetch(
+    async () =>
+      new Response("<html xmlns='http://www.w3.org/1999/xhtml'><body><h1>X</h1><p>y</p></body></html>", {
+        headers: { "content-type": "application/xhtml+xml; charset=utf-8" },
+      }),
+    async () => {
+      const result = await tool.execute("call", { url: "https://example.com/x" }, undefined, undefined, context);
+      assert.equal(text(result), "https://example.com/x (application/xhtml+xml; charset=utf-8)\n\n# X\n\ny");
+    },
+  );
 });
 
 test("web_fetch decodes a declared charset and preserves text-family responses", async () => {
@@ -110,10 +125,10 @@ test("web_fetch decodes a declared charset and preserves text-family responses",
     return new Response(latin1, { headers: { "content-type": "text/plain; charset=windows-1252" } });
   }, async () => {
     const plain = await tool.execute("call", { url: "https://example.com/cafe" }, undefined, undefined, context);
-    assert.equal(text(plain), "café");
+    assert.equal(text(plain), "https://example.com/cafe (text/plain; charset=windows-1252)\n\ncafé");
 
     const svg = await tool.execute("call", { url: "https://example.com/image.svg" }, undefined, undefined, context);
-    assert.equal(text(svg), '<svg><text>hello</text></svg>');
+    assert.equal(text(svg), "https://example.com/image.svg (image/svg+xml)\n\n<svg><text>hello</text></svg>");
   });
 });
 
@@ -138,6 +153,28 @@ test("web_fetch turns HTTP and network failures into tool errors", async () => {
     const network = await tool.execute("call", { url: "https://example.com/network" }, undefined, undefined, context);
     assert.equal(text(network), "Error: socket closed");
   });
+});
+
+test("web_fetch times out stalled requests with a tool error", async () => {
+  const tool = captureTool();
+  await withFetch(
+    (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted", "TimeoutError"));
+        });
+      }),
+    async () => {
+      const result = await tool.execute(
+        "call",
+        { url: "https://example.com/slow", timeout: 1 },
+        undefined,
+        undefined,
+        context,
+      );
+      assert.equal(text(result), "Error: Request timed out");
+    },
+  );
 });
 
 test("web_fetch converts an aborted request into a tool error", async () => {
