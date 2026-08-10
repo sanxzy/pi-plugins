@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createJob, type Job } from "@xzy-ai/core";
-import { getChildPool } from "@xzy-ai/runtime";
+import { createJob, MAX_CONCURRENCY, type Job } from "@xzy-ai/core";
+import { getChildPool, spawnChildSession } from "@xzy-ai/runtime";
 import { registerAgentTool } from "../src/registrations/agent.ts";
 import { registerCancelTool } from "../src/registrations/cancel.ts";
 import { registerJobsTool } from "../src/registrations/jobs.ts";
@@ -27,6 +27,18 @@ function context(cwd: string, sessionId: string): ExtensionContext {
       getSessionFile: () => join(cwd, "sessions", `${sessionId}.jsonl`),
     },
   } as unknown as ExtensionContext;
+}
+
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function register(registerTool: (pi: ExtensionAPI) => void): Tool {
@@ -127,6 +139,98 @@ test("agent rejects an unknown subagent type, including the removed default", as
     assert.deepEqual(result.details, { jobId: undefined, reason: "unknown subagent_type" });
     assert.equal(getChildPool(cwd).registry.all().size, 0);
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("agent resume remains TUI-only because it runs in background", async () => {
+  await withIsolationPool(async (cwd) => {
+    const tool = register(registerAgentTool);
+    const result = await tool.execute(
+      "call",
+      { description: "resume", prompt: "continue", subagent_type: "test-agent", agent_id: "a-completed" },
+      undefined,
+      undefined,
+      { ...context(cwd, "root-a"), mode: "print" } as unknown as ExtensionContext,
+    );
+    assert.equal(result.content[0]?.text, "Error: background agents are available only in TUI mode");
+    assert.deepEqual(result.details, { jobId: "a-completed", reason: "background mode is invalid in print mode" });
+  });
+});
+
+test("agent steer output names the targeted subagent type", async () => {
+  await withIsolationPool(async (cwd) => {
+    const pool = getChildPool(cwd);
+    let steers = 0;
+    pool.liveChildren.set("a-running", {
+      sessionFile: undefined,
+      steer: async () => {
+        steers++;
+      },
+      abort: async () => {},
+    });
+    const tool = register(registerAgentTool);
+    const result = await tool.execute(
+      "call",
+      { description: "redirect", prompt: "new direction", subagent_type: "test-agent", agent_id: "a-running" },
+      undefined,
+      undefined,
+      context(cwd, "root-a"),
+    );
+    assert.equal(result.content[0]?.text, "Steered agent test-agent (a-running).");
+    assert.deepEqual(result.details, { jobId: "a-running", status: "running" });
+    assert.equal(steers, 1);
+  });
+});
+
+test("agent resumes a terminal job in the background using a copied transcript", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-resume-agent-"));
+  const source = join(cwd, "original.jsonl");
+  mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "agents", "test-agent.md"), "---\nname: test-agent\ndescription: Test agent\n---\ntest body", "utf8");
+  writeFileSync(source, '{"type":"session","id":"original"}\n{"type":"message","message":{"role":"user","content":"old"}}\n', "utf8");
+
+  const pool = getChildPool(cwd, "root-a");
+  pool.registry.createJob(createJob({
+    jobId: "original",
+    parentSessionId: "root-a",
+    sessionId: "original",
+    status: "completed",
+    description: "old work",
+    subagentType: "test-agent",
+    sessionFile: source,
+  }));
+  const held = Array.from({ length: MAX_CONCURRENCY }, () => deferred<void>());
+  const holdRuns = held.map((slot) => pool.concurrency.run(() => slot.promise));
+  await flush();
+  const previousFactory = spawnChildSession.__createChild;
+  spawnChildSession.__createChild = async () => {
+    throw new Error("test child should not need to run before assertions");
+  };
+
+  try {
+    const tool = register(registerAgentTool);
+    const result = await tool.execute(
+      "call",
+      { description: "continue work", prompt: "continue", subagent_type: "test-agent", agent_id: "original" },
+      undefined,
+      undefined,
+      context(cwd, "root-a"),
+    );
+    const resumeJobId = result.details.jobId as string;
+    const resumed = pool.registry.get(resumeJobId);
+    assert.match(result.content[0]?.text ?? "", /Accepted background agent test-agent/);
+    assert.notEqual(resumeJobId, "original");
+    assert.equal(resumed?.status, "queued");
+    assert.ok(resumed?.sessionFile);
+    assert.notEqual(resumed?.sessionFile, source);
+    assert.equal(readFileSync(source, "utf8"), '{"type":"session","id":"original"}\n{"type":"message","message":{"role":"user","content":"old"}}\n');
+    assert.match(readFileSync(resumed!.sessionFile!, "utf8"), new RegExp(`\\"id\\":\\"${resumeJobId}\\"`));
+  } finally {
+    for (const slot of held) slot.resolve();
+    await Promise.allSettled(holdRuns);
+    await flush();
+    spawnChildSession.__createChild = previousFactory;
     rmSync(cwd, { recursive: true, force: true });
   }
 });

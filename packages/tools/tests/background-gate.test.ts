@@ -24,17 +24,17 @@ type RegisteredAgent = {
       description: string;
       prompt: string;
       subagent_type: string;
-      background: boolean;
+      background?: boolean;
     },
     signal: AbortSignal | undefined,
     onUpdate: unknown,
     ctx: ExtensionContext,
-  ) => Promise<{ details: { jobId: string; status?: string } }>;
+  ) => Promise<{ content: Array<{ text: string }>; details: { jobId: string; status?: string } }>;
 };
 
-function context(cwd: string): ExtensionContext {
+function context(cwd: string, mode: string = "tui"): ExtensionContext {
   return {
-    mode: "tui",
+    mode,
     hasUI: true,
     cwd,
     model: {} as ExtensionContext["model"],
@@ -61,6 +61,41 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
 function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
+
+test("agent schema removes the redundant background parameter", () => {
+  let registered: { parameters: { properties?: Record<string, unknown> } } | undefined;
+  registerAgentTool({
+    registerTool(tool: typeof registered) {
+      registered = tool;
+    },
+  } as unknown as ExtensionAPI);
+  assert.ok(registered);
+  assert.equal(registered.parameters.properties?.background, undefined);
+});
+
+test("new background spawns remain TUI-only", async () => {
+  let registered: RegisteredAgent | undefined;
+  registerAgentTool({
+    registerTool(tool: RegisteredAgent) {
+      registered = tool;
+    },
+  } as unknown as ExtensionAPI);
+  assert.ok(registered);
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-background-mode-"));
+  try {
+    const result = await registered.execute(
+      "call",
+      { description: "print", prompt: "work", subagent_type: "test-agent" },
+      undefined,
+      undefined,
+      context(cwd, "print"),
+    );
+    assert.equal(result.content[0]?.text, "Error: background agents are available only in TUI mode");
+    assert.deepEqual(result.details, { jobId: undefined, reason: "background mode is invalid in print mode" });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
 
 test("a gated background agent stays queued until running with a live handle", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-background-gate-"));
@@ -134,7 +169,7 @@ test("a gated background agent stays queued until running with a live handle", a
     assert.ok(registered);
     const result = await registered.execute(
       "call-1",
-      { description: "wait for capacity", prompt: "work", subagent_type: "test-agent", background: true },
+      { description: "wait for capacity", prompt: "work", subagent_type: "test-agent" },
       undefined,
       undefined,
       context(cwd),
@@ -143,6 +178,7 @@ test("a gated background agent stays queued until running with a live handle", a
     assert.equal(pool.registry.get(jobId)?.status, "queued");
     assert.equal(pool.liveChildren.has(jobId), false);
     assert.equal(result.details.status, "queued");
+    assert.match(result.content[0]?.text ?? "", /Accepted background agent test-agent/);
 
     // Free one gate slot. The queued background operation is admitted, marks
     // running in spawnWithControl, and publishes its live control.

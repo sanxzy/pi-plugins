@@ -158,7 +158,7 @@ test("runBackgroundJob completes a child and marks it delivered", async () => {
   assert.equal(registry.jobs.get("bg-1")?.status, "completed");
   assert.equal(registry.jobs.get("bg-1")?.sessionFile, "/sessions/1.jsonl");
   assert.equal(registry.jobs.get("bg-1")?.delivered, true);
-  assert.deepEqual(delivered, ["Background agent bg-1 completed:\nthe output"]);
+  assert.deepEqual(delivered, ['Background agent test-agent (bg-1) completed:\nthe output']);
 });
 
 test("runBackgroundJob marks a failed child failed and delivers the failure", async () => {
@@ -184,7 +184,7 @@ test("runBackgroundJob marks a failed child failed and delivers the failure", as
 
   assert.equal(registry.jobs.get("bg-2")?.status, "failed");
   assert.equal(registry.jobs.get("bg-2")?.delivered, true);
-  assert.deepEqual(delivered, ["Background agent bg-2 failed: boom"]);
+  assert.deepEqual(delivered, ['Background agent test-agent (bg-2) failed: boom']);
 });
 
 test("runBackgroundJob marks an aborted child cancelled", async () => {
@@ -232,7 +232,7 @@ test("runBackgroundJob catches an unexpected throw and marks the job failed", as
 
   assert.equal(registry.jobs.get("bg-4")?.status, "failed");
   assert.equal(registry.jobs.get("bg-4")?.delivered, true);
-  assert.deepEqual(delivered, ["Background agent bg-4 failed: unexpected"]);
+  assert.deepEqual(delivered, ['Background agent test-agent (bg-4) failed: unexpected']);
 });
 
 test("a background job beyond the cap is queued and starts when a slot frees", async () => {
@@ -293,13 +293,13 @@ test("backgroundModeError rejects non-TUI modes and allows the TUI", () => {
 });
 
 test("formatBackgroundResult formats each terminal child status", () => {
-  assert.equal(formatBackgroundResult("j1", completedResult("done")), "Background agent j1 completed:\ndone");
+  assert.equal(formatBackgroundResult("reviewer", "j1", completedResult("done")), 'Background agent reviewer (j1) completed:\ndone');
   assert.equal(
-    formatBackgroundResult("j1", { sessionFile: "", output: "", status: "aborted" }),
-    "Background agent j1 was aborted.",
+    formatBackgroundResult("reviewer", "j1", { sessionFile: "", output: "", status: "aborted" }),
+    'Background agent reviewer (j1) was aborted.',
   );
   assert.equal(
-    formatBackgroundResult("j1", { sessionFile: "", output: "nope", status: "failed" }),
-    "Background agent j1 failed: nope",
+    formatBackgroundResult("reviewer", "j1", { sessionFile: "", output: "nope", status: "failed" }),
+    'Background agent reviewer (j1) failed: nope',
   );
 });
