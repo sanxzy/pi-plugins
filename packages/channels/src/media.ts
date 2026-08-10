@@ -133,14 +133,34 @@ export function resolveMediaArtifact(artifactId: string, scope: MediaArtifactSco
   return { ok: true, source: { bytes: new Uint8Array(artifact.bytes), contentType: artifact.contentType, filename: artifact.filename } };
 }
 
+/** True when a numeric IPv4 octet tuple is a private, loopback, or link-local range. */
+function isUnsafePrivateIpv4(parts: number[]): boolean {
+  if (parts.length !== 4) return false;
+  const [a, b] = parts;
+  return a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
 function isUnsafeMediaHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/[\[\]]/g, "");
   if (host === "localhost" || host.endsWith(".localhost") || host === "ip6-localhost" || host.endsWith(".internal")) return true;
   if (host === "::1" || host === "0.0.0.0" || host === "127.0.0.1" || host.startsWith("127.")) return true;
+  // IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1 / ::ffff:7f00:1) resolve to an IPv4 host.
+  if (host.startsWith("::ffff:")) {
+    const tail = host.slice("::ffff:".length);
+    if (tail.includes(":")) {
+      const groups = tail.split(":");
+      if (groups.length === 2 && groups.every((group) => /^[0-9a-f]{1,4}$/.test(group))) {
+        const hex = groups.map((group) => group.padStart(4, "0")).join("");
+        const ip = [0, 2, 4, 6].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
+        return isUnsafePrivateIpv4(ip);
+      }
+    } else if (/^\d+\.\d+\.\d+\.\d+$/.test(tail)) {
+      return isUnsafePrivateIpv4(tail.split(".").map(Number));
+    }
+  }
   const parts = host.split(".").map(Number);
   if (parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
-    const [a, b] = parts;
-    if (a === 10 || a === 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168) return true;
+    return isUnsafePrivateIpv4(parts);
   }
   return false;
 }
