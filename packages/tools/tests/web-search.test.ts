@@ -65,16 +65,15 @@ function text(result: { content: Array<{ type: string; text?: string }> }): stri
 test("web_search is registered, describes the current year, and sends a JSON-RPC tools/call", async () => {
   const tool = captureTool();
   assert.match(tool.description, new RegExp(String(new Date().getFullYear())));
+  const captured: Array<{ input: string; method?: string; headers: Headers; body: unknown }> = [];
   await withFetch(
     async (input, init) => {
-      const requests: Array<{ input: string; method?: string; headers: Headers; body: unknown }> = [];
-      requests.push({
+      captured.push({
         input: String(input),
         method: init?.method,
         headers: new Headers(init?.headers),
         body: JSON.parse(String(init?.body)),
       });
-      globalThis.__testRequests = requests;
       return new Response(payload("exa results"), { status: 200, headers: { "content-type": "application/json" } });
     },
     async () => {
@@ -87,8 +86,7 @@ test("web_search is registered, describes the current year, and sends a JSON-RPC
       );
       assert.equal(text(result), "Web Search: effect typescript\n\nexa results");
       assert.deepEqual(result.details, { query: "effect typescript", provider: "exa" });
-      const req = (globalThis as { __testRequests?: Array<{ input: string; method?: string; headers: Headers; body: unknown }> })
-        .__testRequests?.[0];
+      const req = captured[0];
       assert.ok(req);
       assert.equal(req.input, EXA_URL);
       assert.equal(req.method, "POST");
