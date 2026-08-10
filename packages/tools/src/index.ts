@@ -6,6 +6,11 @@ export { registerJobsTool } from "./registrations/jobs.ts";
 export { registerGoalTools } from "./registrations/goals.ts";
 export { registerWebFetchTool, type WebFetchDetails } from "./registrations/web-fetch.ts";
 export { registerWebSearchTool, type WebSearchDetails } from "./registrations/web-search.ts";
+export {
+  executeLlmWikisSearch,
+  registerLlmWikisSearchTool,
+  type LlmWikisSearchDetails,
+} from "./registrations/llm-wikis-search.ts";
 export { registerAgentFooter } from "./registrations/footer.ts";
 export { registerTelegramChatTool, type TelegramChatDeps } from "./registrations/telegram.ts";
 export { readBoundedResponseBody } from "./http-body.ts";

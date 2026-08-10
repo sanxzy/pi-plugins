@@ -50,7 +50,7 @@ interface ChildSessionServices {
 const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
 
 /** pi-code extension tools appended to every child allowlist. */
-const EXTENSION_TOOLS = ["web_search", "web_fetch"] as const;
+const EXTENSION_TOOLS = ["web_search", "web_fetch", "llm_wikis_search"] as const;
 
 /**
  * Map a resolved agent to its child tool allowlist.
@@ -59,7 +59,7 @@ const EXTENSION_TOOLS = ["web_search", "web_fetch"] as const;
  * capabilities are always removed because goals belong to the main host. A
  * default/inherited agent or an absent/empty list enables the full built-in set
  * so the read-only Pi tools (grep, find, ls) are active by default. The pi-code
- * web tools are appended in every case so they stay available to subagents.
+ * web tools and local wiki search are appended in every case so they stay available to subagents.
  */
 export function resolveChildTools(agent: ResolvedAgent): readonly string[] {
   if (agent.isDefault) return [...ALL_BUILTIN_TOOLS, ...EXTENSION_TOOLS];
