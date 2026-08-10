@@ -86,6 +86,7 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "agent_cancel",
     "agent_status",
     "agent_jobs",
+    "agent_list",
     "goal_create",
     "goal_pause",
     "goal_resume",

@@ -30,7 +30,7 @@ function makeJob(jobId: string, status = "queued", extra: Partial<Job> = {}): Jo
     jobId,
     status: status as Job["status"],
     description: "d",
-    subagentType: "default",
+    subagentType: "test-agent",
     ...extra,
     parentJobId,
     parentSessionId,

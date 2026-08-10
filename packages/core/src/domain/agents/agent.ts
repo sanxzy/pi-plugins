@@ -6,14 +6,6 @@
  * by the registry or the domain model.
  */
 
-/** A named agent recognized by the orchestrator. */
-export interface AgentDefinition {
-  /** Stable name used by the `agent` tool's `subagent_type` parameter. */
-  readonly name: string;
-  /** Literal `true` for the inherited default agent. */
-  readonly isDefault: true;
-}
-
 /**
  * Metadata and prompt body loaded from an agent Markdown file.
  *
@@ -22,8 +14,6 @@ export interface AgentDefinition {
  */
 export interface DiscoveredAgent {
   readonly name: string;
-  /** Literal `false` for a discovered agent. */
-  readonly isDefault: false;
   readonly description: string;
   /** Present only when frontmatter explicitly supplies a non-empty list. */
   readonly tools?: string[];
@@ -35,5 +25,5 @@ export interface DiscoveredAgent {
   readonly filePath: string;
 }
 
-/** A resolved agent, either the default or one loaded from disk. */
-export type ResolvedAgent = AgentDefinition | DiscoveredAgent;
+/** A resolved agent loaded from disk. */
+export type ResolvedAgent = DiscoveredAgent;

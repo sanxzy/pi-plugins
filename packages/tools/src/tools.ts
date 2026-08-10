@@ -37,6 +37,8 @@ export const statusParams = Type.Object({
 
 export const jobsParams = Type.Object({});
 
+export const agentNoArgsParams = Type.Object({});
+
 export const telegramChatParams = Type.Object({
   message: Type.String({ description: "The communication or report text to send to Telegram." }),
 });

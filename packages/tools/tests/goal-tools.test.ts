@@ -148,7 +148,7 @@ test("goal tools refuse invocation from a registered child session", async () =>
       depth: 0,
       status: "running",
       description: "child",
-      subagentType: "default",
+      subagentType: "test-agent",
       sessionId: "child-session",
     }));
     const result = await registered.get("goal_status")!.execute("call", {}, undefined, undefined, context(cwd, "child-session"));

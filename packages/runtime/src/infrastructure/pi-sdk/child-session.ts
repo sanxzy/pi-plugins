@@ -46,7 +46,7 @@ interface ChildSessionServices {
   dispose(): void;
 }
 
-/** All seven Pi built-in tools; the default allowlist for child sessions. */
+/** All seven Pi built-in tools; the allowlist when an agent omits `tools`. */
 const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
 
 /** pi-code extension tools appended to every child allowlist. */
@@ -56,14 +56,12 @@ const EXTENSION_TOOLS = ["web_search", "web_fetch", "llm_wikis_search"] as const
  * Map a resolved agent to its child tool allowlist.
  *
  * An explicit non-empty frontmatter `tools` list wins, except that goal
- * capabilities are always removed because goals belong to the main host. A
- * default/inherited agent or an absent/empty list enables the full built-in set
- * so the read-only Pi tools (grep, find, ls) are active by default. The pi-code
- * web tools and local wiki search are appended in every case so they stay available to subagents.
+ * capabilities are always removed because goals belong to the main host. An
+ * absent/empty list enables the full built-in set so the read-only Pi tools
+ * (grep, find, ls) are active by default. The pi-code web tools and local wiki
+ * search are appended in every case so they stay available to subagents.
  */
 export function resolveChildTools(agent: ResolvedAgent): readonly string[] {
-  if (agent.isDefault) return [...ALL_BUILTIN_TOOLS, ...EXTENSION_TOOLS];
-
   const tools = agent.tools && agent.tools.length > 0 ? agent.tools : ALL_BUILTIN_TOOLS;
   const extensionNames = EXTENSION_TOOLS as readonly string[];
   return [...tools.filter((name) => !name.startsWith("goal_") && !extensionNames.includes(name)), ...EXTENSION_TOOLS];
@@ -130,9 +128,9 @@ async function createIsolatedChild(options: {
 }): Promise<ChildSessionServices> {
   const agentDir = getAgentDir();
   const settingsManager = SettingsManager.create(options.cwd, agentDir);
-  // The discovered agent carries the frontmatter fields and Markdown body; the
-  // inherited default agent carries none of them.
-  const discovered = options.agent.isDefault === false ? options.agent : undefined;
+  // Every resolved agent comes from a valid agent file and carries its
+  // frontmatter fields and Markdown body.
+  const discovered = options.agent;
   // The agent Markdown body is applied through a stable system-prompt override
   // on the child's own loader. `reload()` re-applies the override on every
   // rebuild, so the prompt survives a runtime resource reload (a one-time
@@ -174,9 +172,8 @@ async function createIsolatedChild(options: {
     resourceLoader,
   };
   // Tool mapping: an explicit non-empty `tools` list becomes the child
-  // allowlist; a default/inherited agent or an absent/empty list enables the
-  // full built-in set so the read-only Pi tools (grep, find, ls) are active by
-  // default.
+  // allowlist; an absent/empty list enables the full built-in set so the
+  // read-only Pi tools (grep, find, ls) are active by default.
   sessionOptions.tools = resolveChildTools(options.agent);
 
   const { session } = await (createAgentSession as unknown as (options: Record<string, unknown>) => Promise<{ session: AgentSession }>)(sessionOptions);

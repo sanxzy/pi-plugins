@@ -1,7 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_AGENT } from "@xzy-ai/core";
 import type { DiscoveredAgent } from "@xzy-ai/core";
 import type { AgentDiscovery } from "@xzy-ai/core";
 
@@ -9,7 +8,7 @@ import type { AgentDiscovery } from "@xzy-ai/core";
  * Project agent ecosystems, in precedence order. A project agent in an earlier
  * ecosystem overrides a same-name agent in a later one (and in the user dir).
  */
-const PROJECT_ECOSYSTEMS = [".pi", ".claude", ".opencode"] as const;
+const PROJECT_ECOSYSTEMS = [".pi", ".claude", ".agents"] as const;
 
 /**
  * Parse a single agent Markdown file into a discovered agent.
@@ -47,7 +46,6 @@ function parseAgentFile(filePath: string, source: "user" | "project"): Discovere
   return {
     name,
     description,
-    isDefault: false,
     tools: tools && tools.length > 0 ? tools : undefined,
     model,
     systemPrompt: body,
@@ -99,7 +97,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): DiscoveredA
 /**
  * Find the nearest project root containing any supported agent ecosystem.
  *
- * This accepts projects that use only `.claude/agents` or `.opencode/agents`;
+ * This accepts projects that use only `.claude/agents` or `.agents/agents`;
  * the three directories are then merged by their fixed precedence order.
  */
 function findProjectRoot(cwd: string): string | undefined {
@@ -119,9 +117,9 @@ function findProjectRoot(cwd: string): string | undefined {
  *
  * User agents are scanned under `getAgentDir()/agents` (the PI-resolved user
  * directory — no hardcoded path). Project agents are scanned under the nearest
- * `.pi/agents` up the tree, then `.claude/agents` and `.opencode/agents` within
+ * `.pi/agents` up the tree, then `.claude/agents` and `.agents/agents` within
  * the same project root. Project agents override same-name user agents; within
- * project ecosystems, `.pi` > `.claude` > `.opencode`.
+ * project ecosystems, `.pi` > `.claude` > `.agents`.
  */
 export function createAgentDiscovery(cwd: string): AgentDiscovery {
   const userDir = join(getAgentDir(), "agents");
@@ -135,17 +133,28 @@ export function createAgentDiscovery(cwd: string): AgentDiscovery {
           loadAgentsFromDir(join(projectRoot, ecosystem, "agents"), "project"),
         );
 
-  // Merge with precedence: user agents first, then project agents in reverse
-  // ecosystem order. Later entries overwrite same names, so a project agent
-  // overrides a same-name user agent and `.pi` wins over `.claude`, which wins
-  // over `.opencode`.
+  // Merge with precedence: user agents first, then project agents from lowest
+  // to highest project precedence (`.agents` < `.claude` < `.pi`). Later
+  // entries win when either the frontmatter name or filename collides, so the
+  // highest-precedence definition wins. The filename check prevents
+  // lower-priority definitions from surviving under the same agent file name.
+  const byFilePath = new Map<string, DiscoveredAgent>();
+  for (const agent of [...userAgents, ...[...projectAgents].reverse()]) {
+    const fileName = basename(agent.filePath);
+    for (const [path, existing] of byFilePath) {
+      const existingFileName = basename(existing.filePath);
+      if (existing.name === agent.name || existingFileName === fileName) {
+        byFilePath.delete(path);
+      }
+    }
+    byFilePath.set(agent.filePath, agent);
+  }
+
   const byName = new Map<string, DiscoveredAgent>();
-  for (const agent of userAgents) byName.set(agent.name, agent);
-  for (const agent of [...projectAgents].reverse()) byName.set(agent.name, agent);
+  for (const agent of byFilePath.values()) byName.set(agent.name, agent);
 
   return {
     resolve(name) {
-      if (name === DEFAULT_AGENT.name) return DEFAULT_AGENT;
       return byName.get(name);
     },
     all() {

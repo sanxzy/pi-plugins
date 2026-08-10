@@ -5,6 +5,7 @@ import {
   registerQuestionTool,
   registerStatusTool,
   registerJobsTool,
+  registerAgentListTool,
   registerGoalTools,
   registerWebFetchTool,
   registerWebSearchTool,
@@ -26,6 +27,7 @@ import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
   AgentDetails,
   AgentErrorDetails,
+  AgentListDetails,
   CancelDetails,
   JobSummary,
   JobsDetails,
@@ -60,6 +62,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerCancelTool(pi);
   registerStatusTool(pi);
   registerJobsTool(pi);
+  registerAgentListTool(pi);
   registerGoalTools(pi);
   registerWebFetchTool(pi);
   registerWebSearchTool(pi);
@@ -76,6 +79,7 @@ export { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS };
 export type {
   AgentDetails,
   AgentErrorDetails,
+  AgentListDetails,
   CancelDetails,
   JobSummary,
   JobsDetails,

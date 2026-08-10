@@ -49,7 +49,7 @@ function job(jobId: string, parentSessionId: string, status: Job["status"], pare
     depth: parentJobId === undefined ? 0 : 1,
     status,
     description: `${parentSessionId}:${jobId}`,
-    subagentType: "default",
+    subagentType: "test-agent",
     sessionId: jobId,
     createdAt: "2026-01-01T00:00:00.000Z",
   });
@@ -112,6 +112,25 @@ test("agent_cancel treats another parent session's job id as unknown without abo
   });
 });
 
+test("agent rejects an unknown subagent type, including the removed default", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-unknown-agent-"));
+  try {
+    const tool = register(registerAgentTool);
+    const result = await tool.execute(
+      "call",
+      { description: "unknown", prompt: "do not spawn", subagent_type: "default" },
+      undefined,
+      undefined,
+      context(cwd, "root-a"),
+    );
+    assert.equal(result.content[0]?.text, "Error: unknown subagent_type: default");
+    assert.deepEqual(result.details, { jobId: undefined, reason: "unknown subagent_type" });
+    assert.equal(getChildPool(cwd).registry.all().size, 0);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("agent treats another parent session's agent id as unknown without steering", async () => {
   await withIsolationPool(async (cwd) => {
     const pool = getChildPool(cwd);
@@ -126,7 +145,7 @@ test("agent treats another parent session's agent id as unknown without steering
     const tool = register(registerAgentTool);
     const result = await tool.execute(
       "call",
-      { description: "hidden", prompt: "do not steer", subagent_type: "default", agent_id: "b-running" },
+      { description: "hidden", prompt: "do not steer", subagent_type: "test-agent", agent_id: "b-running" },
       undefined,
       undefined,
       context(cwd, "root-a"),

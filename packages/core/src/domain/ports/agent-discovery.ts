@@ -1,4 +1,4 @@
-import type { AgentDefinition, DiscoveredAgent } from "../agents/agent.ts";
+import type { DiscoveredAgent } from "../agents/agent.ts";
 
 /**
  * Agent-discovery port.
@@ -11,11 +11,11 @@ export interface AgentDiscovery {
   /**
    * Resolve a subagent type by name.
    *
-   * The inherited default agent always resolves. A discovered agent resolves
-   * only when a valid agent file defines it. Invalid files are skipped, so an
-   * unknown name resolves to `undefined` without erroring the orchestrator.
+   * A name resolves only when a valid agent file defines it. Invalid files are
+   * skipped, so an unknown name resolves to `undefined` without erroring the
+   * orchestrator.
    */
-  resolve(name: string): AgentDefinition | DiscoveredAgent | undefined;
+  resolve(name: string): DiscoveredAgent | undefined;
   /** Every discovered agent, project agents overriding same-name user agents. */
   all(): DiscoveredAgent[];
 }

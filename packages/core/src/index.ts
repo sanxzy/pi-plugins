@@ -1,5 +1,4 @@
 export * from "./domain/agents/agent.ts";
-export * from "./domain/agents/default-agent.ts";
 export * from "./domain/goals/events.ts";
 export * from "./domain/goals/record.ts";
 export * from "./domain/goals/validation.ts";

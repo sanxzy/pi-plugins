@@ -42,7 +42,7 @@ function newJob(input: {
     parentJobId: input.parentJobId,
     status: input.status ?? "queued",
     description: input.jobId,
-    subagentType: "default",
+    subagentType: "test-agent",
     createdAt: input.createdAt,
   });
   return input.updatedAt === undefined ? job : { ...job, updatedAt: input.updatedAt };

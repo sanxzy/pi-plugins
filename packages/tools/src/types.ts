@@ -54,6 +54,17 @@ export interface JobsDetails {
   jobs: JobSummary[];
 }
 
+/** Public summary of an available agent definition. */
+export interface AgentListEntry {
+  name: string;
+  description: string;
+}
+
+/** Details payload for the `agent_list` tool. */
+export interface AgentListDetails {
+  agents: AgentListEntry[];
+}
+
 /** Details payload for the `question` tool. */
 export interface QuestionDetails {
   question: string;

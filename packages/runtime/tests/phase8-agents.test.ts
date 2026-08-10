@@ -4,13 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createAgentDiscovery } from "@xzy-ai/runtime";
-import { DEFAULT_AGENT } from "@xzy-ai/core";
-import type { DiscoveredAgent, ResolvedAgent } from "@xzy-ai/core";
+import type { DiscoveredAgent } from "@xzy-ai/core";
 
-/** Assert a resolved name is a discovered agent and narrow its type. */
-function asDiscovered(agent: ResolvedAgent | undefined): DiscoveredAgent {
+/** Assert a resolved name is a discovered agent. */
+function asDiscovered(agent: DiscoveredAgent | undefined): DiscoveredAgent {
   assert.ok(agent);
-  assert.equal(agent.isDefault, false);
   return agent;
 }
 
@@ -60,16 +58,6 @@ function discover(cwd: string, userAgentDir: string): ReturnType<typeof createAg
   }
 }
 
-test("the default agent always resolves", () => {
-  const root = tmpRoot();
-  try {
-    const discovery = discover(root, join(root, "user"));
-    assert.equal(discovery.resolve("default"), DEFAULT_AGENT);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("a valid project agent in .pi/agents is discovered with its metadata and body", () => {
   const root = tmpRoot();
   try {
@@ -82,7 +70,6 @@ test("a valid project agent in .pi/agents is discovered with its metadata and bo
     const discovery = discover(root, join(root, "nouser"));
     const agent = discovery.resolve("code-reviewer");
     assert.ok(agent);
-    assert.equal(agent.isDefault, false);
     assert.equal(agent.name, "code-reviewer");
     assert.equal(agent.description, "Reviews focused code changes");
     assert.deepEqual(agent.tools, ["read", "grep"]);
@@ -95,7 +82,7 @@ test("a valid project agent in .pi/agents is discovered with its metadata and bo
   }
 });
 
-test("project agents are discovered with .pi > .claude > .opencode precedence", () => {
+test("project agents are discovered with .pi > .claude > .agents precedence", () => {
   const root = tmpRoot();
   try {
     writeAgent(
@@ -111,10 +98,10 @@ test("project agents are discovered with .pi > .claude > .opencode precedence", 
       "claude body",
     );
     writeAgent(
-      join(root, ".opencode", "agents"),
+      join(root, ".agents", "agents"),
       "codegen",
-      { name: "codegen", description: "opencode codegen" },
-      "opencode body",
+      { name: "codegen", description: "agents codegen" },
+      "agents body",
     );
 
     const discovery = discover(root, join(root, "nouser"));
@@ -122,7 +109,33 @@ test("project agents are discovered with .pi > .claude > .opencode precedence", 
     assert.equal(reviewer.systemPrompt, "pi body");
     assert.equal(reviewer.description, "pi reviewer");
     const codegen = asDiscovered(discovery.resolve("codegen"));
-    assert.equal(codegen.systemPrompt, "opencode body");
+    assert.equal(codegen.systemPrompt, "agents body");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a higher-priority file wins a filename collision even with a different agent name", () => {
+  const root = tmpRoot();
+  try {
+    writeAgent(
+      join(root, ".agents", "agents"),
+      "shared-file",
+      { name: "low-priority", description: "lower priority" },
+      "low body",
+    );
+    writeAgent(
+      join(root, ".pi", "agents"),
+      "shared-file",
+      { name: "high-priority", description: "higher priority" },
+      "high body",
+    );
+
+    const discovery = discover(root, join(root, "nouser"));
+    assert.equal(discovery.resolve("low-priority"), undefined);
+    const high = asDiscovered(discovery.resolve("high-priority"));
+    assert.equal(high.description, "higher priority");
+    assert.deepEqual(discovery.all().map((agent) => agent.name), ["high-priority"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

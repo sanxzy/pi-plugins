@@ -104,7 +104,7 @@ test("the custom footer is installed for TUI sessions and restored on root shutd
     // Publish a scoped child job so the pool recognizes the child session id;
     // the root-owned footer must ignore the child's own shutdown.
     const pool = getChildPool(cwd, "root-session");
-    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "job-a", subagentType: "default" }));
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "job-a", subagentType: "test-agent" }));
     d.handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "quit" }, ctx(cwd, "job-a"));
     assert.equal(restoredToNative, false, "a child shutdown does not restore the native footer");
 
@@ -190,7 +190,7 @@ test("Enter on a running child mounts the live view; cancel aborts, close does n
         aborted++;
       },
     });
-    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "default" }));
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "test-agent" }));
 
     const context = ctx(cwd);
     const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
@@ -250,7 +250,7 @@ test("live transcript events repaint the mounted live view without steering", as
       steer: async () => {},
       abort: async () => {},
     });
-    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "default" }));
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "test-agent" }));
 
     const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
     const footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, {
@@ -303,7 +303,7 @@ test("the live overlay mount does not delegate height truncation to the host", (
       steer: async () => {},
       abort: async () => {},
     });
-    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "default" }));
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "test-agent" }));
 
     const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
     const footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, {

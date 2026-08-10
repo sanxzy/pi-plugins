@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -64,6 +64,12 @@ function flush(): Promise<void> {
 
 test("a gated background agent stays queued until running with a live handle", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-background-gate-"));
+  mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "agents", "test-agent.md"),
+    "---\nname: test-agent\ndescription: Test agent\n---\ntest body",
+    "utf8",
+  );
   const pool = getChildPool(cwd, "root-session");
   const held = Array.from({ length: MAX_CONCURRENCY }, () => deferred<void>());
   const holdRuns = held.map((slot) => pool.concurrency.run(async () => slot.promise));
@@ -128,7 +134,7 @@ test("a gated background agent stays queued until running with a live handle", a
     assert.ok(registered);
     const result = await registered.execute(
       "call-1",
-      { description: "wait for capacity", prompt: "work", subagent_type: "default", background: true },
+      { description: "wait for capacity", prompt: "work", subagent_type: "test-agent", background: true },
       undefined,
       undefined,
       context(cwd),

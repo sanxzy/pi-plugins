@@ -79,7 +79,9 @@ test("agent_list returns distinct winning agents sorted alphabetically with only
 test("agent_list reports an empty result without a built-in default agent", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-agent-list-empty-"));
   try {
-    const result = await register().execute("call", {}, undefined, undefined, context(cwd));
+    const result = await withUserAgentDir(join(cwd, "nouser"), () =>
+      register().execute("call", {}, undefined, undefined, context(cwd)),
+    );
     assert.deepEqual(result.details, { agents: [] });
     assert.equal(result.content[0]?.text, "No agent definitions are currently available.");
   } finally {

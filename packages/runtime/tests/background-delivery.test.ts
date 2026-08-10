@@ -60,7 +60,7 @@ function createFakeRegistry(): {
 }
 
 function makeJob(jobId: string, status = "queued", description = "d"): Job {
-  return createJob({ jobId, status: status as Job["status"], description, subagentType: "default" });
+  return createJob({ jobId, status: status as Job["status"], description, subagentType: "test-agent" });
 }
 
 function completedResult(output: string): ChildRunResult {

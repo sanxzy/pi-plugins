@@ -14,7 +14,7 @@ function makeJob(jobId: string, status: Job["status"], sessionFile?: string): Jo
     jobId,
     status,
     description: jobId,
-    subagentType: "default",
+    subagentType: "test-agent",
     sessionFile,
   });
 }

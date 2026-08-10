@@ -180,7 +180,7 @@ export type SpawnChildSession = (options: {
   jobId: string;
   /** Working directory inherited from the parent session. */
   cwd: string;
-  /** Resolved agent definition; the default agent or a discovered agent. */
+  /** Resolved agent definition loaded from an agent file. */
   agent: ResolvedAgent;
   /** Instruction to run in the child session. */
   prompt: string;

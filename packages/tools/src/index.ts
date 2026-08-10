@@ -3,6 +3,7 @@ export { registerAgentTool } from "./registrations/agent.ts";
 export { registerCancelTool } from "./registrations/cancel.ts";
 export { registerStatusTool } from "./registrations/status.ts";
 export { registerJobsTool } from "./registrations/jobs.ts";
+export { registerAgentListTool } from "./registrations/agent-list.ts";
 export { registerGoalTools } from "./registrations/goals.ts";
 export { registerWebFetchTool, type WebFetchDetails } from "./registrations/web-fetch.ts";
 export { registerWebSearchTool, type WebSearchDetails } from "./registrations/web-search.ts";

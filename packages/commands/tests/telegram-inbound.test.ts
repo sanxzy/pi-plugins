@@ -18,7 +18,7 @@ function markChild(cwd: string, sessionId: string): void {
     sessionId,
     status: "running",
     description: sessionId,
-    subagentType: "default",
+    subagentType: "test-agent",
   }));
 }
 import { registerTelegramInbound } from "../src/registrations/telegram-inbound.ts";

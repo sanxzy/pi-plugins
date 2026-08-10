@@ -47,7 +47,7 @@ function addRunningJob(cwd: string, parentSessionId: string, jobId: string, pare
     sessionId: jobId,
     status: "running",
     description: jobId,
-    subagentType: "default",
+    subagentType: "test-agent",
   }));
 }
 
