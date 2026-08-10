@@ -23,7 +23,7 @@ export type GoalMutationResult =
 /** A host delivery binding for one cwd's goal scheduler. */
 export interface GoalDeliveryBinding {
   readonly cwd: string;
-  readonly sendUserMessage: (content: string, options?: { readonly deliverAs?: "steer" | "followUp" }) => void;
+  readonly sendUserMessage: (content: string, options?: { readonly deliverAs?: "steer" }) => void;
   readonly hasUI: boolean;
   readonly notify: (message: string, type?: "info" | "warning" | "error") => void;
 }

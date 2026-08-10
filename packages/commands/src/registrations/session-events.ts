@@ -91,9 +91,9 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
       pool.delivery.rebind(event.previousSessionFile, sessionFile);
     }
     pool.delivery.register(sessionFile, (content) => {
-      // `followUp` queues behind the active run instead of interrupting a
-      // streaming response. The SDK host owns the actual parent session.
-      pi.sendUserMessage(content, { deliverAs: "followUp" });
+      // Steer the active parent session immediately. The SDK host owns the
+      // actual parent session.
+      pi.sendUserMessage(content, { deliverAs: "steer" });
     });
 
     // A fresh host binding is established above before delivery resumes. The
