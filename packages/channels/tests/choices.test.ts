@@ -37,6 +37,23 @@ test("choice state creates opaque indexed callback data and consumes once", () =
   clearTelegramChoiceState();
 });
 
+test("concurrent duplicate callback deliveries consume a token exactly once", async () => {
+  const created = createTelegramChoice({
+    projectRoot: "project",
+    sessionId: "root",
+    chatId: "777",
+    senderId: "111",
+    question: "Proceed?",
+    choices: [{ label: "Yes", value: "approved" }],
+    expiresAt: Date.now() + 60_000,
+  });
+  const results = await Promise.all(Array.from({ length: 12 }, () => Promise.resolve().then(() => consumeTelegramChoice(created.callbackData[0]!, {
+    projectRoot: "project", sessionId: "root", chatId: "777", senderId: "111",
+  }))));
+  assert.equal(results.filter((result) => result !== undefined).length, 1);
+  assert.equal(results.filter((result) => result?.value === "approved").length, 1);
+});
+
 test("choice state rejects wrong target and expired callbacks", () => {
   clearTelegramChoiceState();
   const expired = createTelegramChoice({
