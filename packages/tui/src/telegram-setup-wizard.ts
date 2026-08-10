@@ -347,7 +347,7 @@ export class TelegramSetupWizard implements Component {
           this.refresh();
         } else if (choice === "Try again") {
           this.enterTokenStep();
-        } else if (choice === "Selesai") {
+        } else if (choice === "Done") {
           this.finish({ status: "saved", message: this.resultMessage() });
         } else {
           void this.cancel();
@@ -416,7 +416,7 @@ export class TelegramSetupWizard implements Component {
   private resultOptions(): string[] {
     if (this.step.kind === "result") {
       if (this.step.ok) {
-        const options = ["Selesai"];
+        const options = ["Done"];
         const pending = this.pendingPairings();
         if (pending.length > 0) options.push(`Approve pairing (${pending.length})`);
         return options;

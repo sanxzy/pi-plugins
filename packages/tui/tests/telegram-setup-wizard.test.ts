@@ -182,7 +182,7 @@ test("pending pairings open the approval step automatically after saving, and ap
 
   component.handleInput("\r"); // approve the selected request
   assert.deepEqual(approvals, [1], "the selected pairing is approved");
-  component.handleInput("\r"); // Selesai
+  component.handleInput("\r"); // Done
   const result = await promise;
   assert.deepEqual(result, { status: "saved", message: "Approved." }, "approval result settles the wizard as saved");
 });
