@@ -231,7 +231,10 @@ test("agent resumes a terminal job in the background using a copied transcript",
     );
     const resumeJobId = result.details.jobId as string;
     const resumed = pool.registry.get(resumeJobId);
-    assert.match(result.content[0]?.text ?? "", /Accepted background agent test-agent/);
+    assert.equal(
+      result.content[0]?.text,
+      "Agent test-agent (" + resumeJobId + ") is running. You can wait or continue with other tasks as needed. Do not poll; the agent will send its report as soon as it finishes.",
+    );
     assert.notEqual(resumeJobId, "original");
     assert.equal(resumed?.status, "queued");
     assert.ok(resumed?.sessionFile);

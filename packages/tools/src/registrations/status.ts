@@ -7,6 +7,10 @@ import { callerFor } from "../caller.ts";
 import { toJobSummary } from "../job-summary.ts";
 import { errorResult, textResult } from "../results.ts";
 
+export function formatRunningAgentText(subagentType: string, jobId: string): string {
+  return `Agent ${subagentType} (${jobId}) is running. You can wait or continue with other tasks as needed. Do not poll; the agent will send its report as soon as it finishes.`;
+}
+
 export function registerStatusTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "agent_status",
@@ -38,7 +42,7 @@ export function registerStatusTool(pi: ExtensionAPI): void {
       }
       const result = statusFor(caller, job, getJob);
       const text = job.status === "running"
-        ? `Agent ${job.subagentType} (${job.jobId}) is running. You can wait or continue with other tasks as needed. Do not poll; the agent will send its report as soon as it finishes.`
+        ? formatRunningAgentText(job.subagentType, job.jobId)
         : `Agent ${params.job_id} is ${job.status}.`;
       return textResult(text, {
         status: job.status,

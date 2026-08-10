@@ -16,6 +16,7 @@ import { recordNewJob } from "@xzy-ai/runtime";
 import { MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import { agentParams, type AgentParams } from "../tools.ts";
 import type { AgentDetails, AgentErrorDetails } from "../types.ts";
+import { formatRunningAgentText } from "./status.ts";
 import { callerFor } from "../caller.ts";
 import { errorResult, textResult } from "../results.ts";
 
@@ -221,8 +222,8 @@ function startBackgroundAgent(
     },
   );
 
-  return textResult(
-    `Accepted background agent ${params.subagent_type} (${job.jobId}). Its result will be delivered when it finishes.`,
-    { jobId: job.jobId, status: job.status },
-  );
+  return textResult(formatRunningAgentText(job.subagentType, job.jobId), {
+    jobId: job.jobId,
+    status: job.status,
+  });
 }
