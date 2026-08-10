@@ -9,6 +9,7 @@ import type {
 import { getChildPool } from "@xzy-ai/runtime";
 import {
   canonicalProjectRoot,
+  createChannelLogger,
   createTelegramInbound,
   createTelegramOutbound,
   defaultTelegramPairingState,
@@ -43,7 +44,7 @@ export interface TelegramInboundDeps {
   /** Short bounded wait for the reaction API confirmation. */
   reactionTimeoutMs?: number;
   /** Injectable reaction-failure logger, so failures never break the agent run. */
-  onReactionError?: (error: unknown) => void;
+  onReactionError?: (error: unknown, projectRoot?: string, sessionId?: string) => void;
 }
 
 const listenersByProject = new Map<string, TelegramInboundListener>();
@@ -89,7 +90,18 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     if (!result.ok) throw new Error(result.error);
   });
   const reactionTimeoutMs = deps.reactionTimeoutMs ?? 2500;
-  const onReactionError = deps.onReactionError ?? (() => undefined);
+  const onReactionError = deps.onReactionError ?? ((error: unknown, projectRoot?: string, sessionId?: string) => {
+    if (!projectRoot || !sessionId) return;
+    try {
+      const logger = createChannelLogger({ projectRoot, sessionId });
+      if (logger.ok) {
+        logger.value.error("telegram_reaction_failed", { error: error instanceof Error ? error.message : "Telegram reaction failed" });
+        logger.value.close();
+      }
+    } catch {
+      // Logging must never create an unhandled rejection or block the agent.
+    }
+  });
   let activeListener: TelegramInboundListener | undefined;
   // Correlate the Telegram origin of the message that is about to start an
   // agent run. before_agent_start carries the exact prompt, so the origin is
@@ -98,12 +110,17 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   let pendingReactionOrigin: TelegramMessageOrigin | undefined;
   let acknowledgedRun = false;
 
-  pi.on("before_agent_start", (event: BeforeAgentStartEvent) => {
+  pi.on("before_agent_start", (event: BeforeAgentStartEvent, ctx: ExtensionContext) => {
+    if (!isRootSession(ctx)) {
+      pendingReactionOrigin = undefined;
+      acknowledgedRun = true;
+      return;
+    }
     pendingReactionOrigin = event.prompt ? extractTelegramMessageOrigin(event.prompt) : undefined;
     acknowledgedRun = false;
   });
 
-  async function acknowledgeReaction(projectRoot: string, origin: TelegramMessageOrigin): Promise<void> {
+  async function acknowledgeReaction(projectRoot: string, sessionId: string, origin: TelegramMessageOrigin): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
@@ -113,7 +130,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         }),
       ]);
     } catch (error: unknown) {
-      onReactionError(error);
+      onReactionError(error, projectRoot, sessionId);
     } finally {
       if (timer !== undefined) clearTimeout(timer);
     }
@@ -123,6 +140,11 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   // before_agent_start when available; the branch fallback supports hosts that
   // emit agent_start without the preceding extension event.
   pi.on("agent_start", (_event: AgentStartEvent, ctx: ExtensionContext) => {
+    if (!isRootSession(ctx)) {
+      pendingReactionOrigin = undefined;
+      acknowledgedRun = true;
+      return;
+    }
     if (acknowledgedRun) return;
     acknowledgedRun = true;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
@@ -130,7 +152,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     const origin = pendingReactionOrigin ?? (latestUserMessage ? extractTelegramMessageOrigin(latestUserMessage) : undefined);
     pendingReactionOrigin = undefined;
     if (!origin) return;
-    void acknowledgeReaction(projectRoot, origin);
+    void acknowledgeReaction(projectRoot, ctx.sessionManager.getSessionId(), origin);
   });
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
