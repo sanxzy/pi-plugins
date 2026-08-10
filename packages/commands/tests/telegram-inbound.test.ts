@@ -36,11 +36,13 @@ function writeConfig(cwd: string): void {
   writeFileSync(file, JSON.stringify({ token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX", approvedUserIds: ["111"] }), "utf8");
 }
 
-function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler>; sent: string[] } {
+function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler>; sent: string[]; deliveryModes: string[] } {
   const handlers = new Map<string, Handler>();
   const sent: string[] = [];
+  const deliveryModes: string[] = [];
   return {
     sent,
+    deliveryModes,
     handlers,
     pi: {
       on(event: string, handler: Handler) {
@@ -49,6 +51,7 @@ function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler>; se
       sendUserMessage(content: string | { type: string; text: string }[], options?: { deliverAs?: string }) {
         const text = typeof content === "string" ? content : content.map((p) => p.text).join("");
         sent.push(text);
+        if (options?.deliverAs) deliveryModes.push(options.deliverAs);
       },
     } as unknown as ExtensionAPI,
   };
@@ -74,7 +77,7 @@ function privateText(updateId: number, fromId: string, text: string): unknown {
 test("root session start delivers accepted text as a follow-up with the exact signature and marker", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);
-  const { pi, handlers, sent } = registrations();
+  const { pi, handlers, sent, deliveryModes } = registrations();
   let listener: TelegramInboundListener | undefined;
   registerTelegramInbound(pi, {
     createInbound: (opts) => {
@@ -87,7 +90,8 @@ test("root session start delivers accepted text as a follow-up with the exact si
   await listener!.handle(privateText(1, "111", "hello"));
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  assert.equal(sent.length, 1, "one follow-up is injected");
+  assert.equal(sent.length, 1, "one Telegram message is injected");
+  assert.deepEqual(deliveryModes, ["steer"], "Telegram messages use steer delivery");
   assert.equal(sent[0], "hello\n\n---\n[from:telegram:777]\n---", "exact signature is appended");
   const marker = readLastConnection(cwd);
   assert.equal(marker.ok, true);

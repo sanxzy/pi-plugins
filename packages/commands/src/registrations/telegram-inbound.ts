@@ -1,10 +1,10 @@
 import type {
+  AgentEndEvent,
   AgentSettledEvent,
   ExtensionAPI,
   ExtensionContext,
   SessionShutdownEvent,
   SessionStartEvent,
-  TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getChildPool } from "@xzy-ai/runtime";
 import {
@@ -14,6 +14,7 @@ import {
   formatTelegramSignature,
   readChannelConfig,
   readLastConnection,
+  sendTelegramMessage,
   writeLastConnection,
   type ChannelConfig,
   type TelegramInboundListener,
@@ -23,6 +24,8 @@ import { getTelegramProjectManager } from "./telegram-project.ts";
 export interface TelegramInboundDeps {
   /** Injectable inbound factory for offline tests. */
   createInbound?: (options: Parameters<typeof createTelegramInbound>[0]) => TelegramInboundListener;
+  /** Injectable marker-gated outbound sender for offline tests. */
+  sendOutbound?: (projectRoot: string, text: string) => Promise<unknown>;
 }
 
 const listenersByProject = new Map<string, TelegramInboundListener>();
@@ -39,10 +42,83 @@ function isRootSession(ctx: ExtensionContext): boolean {
   return pool.rootSessionId === sessionId && pool.registry.get(sessionId) === undefined;
 }
 
+/** Per-project, per-session Telegram turn bridge state. */
+interface TelegramBridgeState {
+  /** Accepted Telegram messages queued in arrival order, awaiting a turn. */
+  queue: { updateId: number; chatId: string; text: string }[];
+  /** True when a Telegram-originated turn is currently being processed. */
+  hasActiveTurn: boolean;
+  /** Inbound listener whose settlement permit admits the next Telegram update. */
+  listener?: TelegramInboundListener;
+}
+
+function getAgentMessageText(message: unknown): string {
+  const content = (message as { content?: unknown }).content;
+  const blocks = Array.isArray(content) ? content : [];
+  return blocks
+    .filter(
+      (block): block is { type: string; text?: string } =>
+        typeof block === "object" && block !== null && "type" in block,
+    )
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("")
+    .trim();
+}
+
+/**
+ * Text and stop reason of the latest assistant message in an agent-end payload.
+ * Mirrors the reference assistant extraction: scan backward to the newest
+ * assistant message and read its text blocks.
+ */
+function extractLatestAssistant(
+  messages: readonly unknown[],
+): { text?: string; stopReason?: string } | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || (message as { role?: string }).role !== "assistant") continue;
+    const text = getAgentMessageText(message);
+    const rawStopReason = (message as { stopReason?: unknown }).stopReason;
+    return {
+      text: text || undefined,
+      stopReason: typeof rawStopReason === "string" ? rawStopReason : undefined,
+    };
+  }
+  return undefined;
+}
+
 /** Wire the authorized text-only Telegram inbound path into the extension. */
 export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundDeps = {}): void {
-  const runningByProject = new Map<string, TelegramInboundListener>();
+  const runningByProject = new Map<string, TelegramBridgeState>();
   const createInbound = deps.createInbound ?? createTelegramInbound;
+  const sendOutbound = deps.sendOutbound ?? sendTelegramMessage;
+
+  /**
+   * Submit one queued Telegram message as a fresh turn, but only when the agent
+   * is truly idle. While the agent is streaming we must not inject into the
+   * active turn: the agent loop would re-read its own in-flight context and
+   * misroute the message. Completion of the previous turn (agent_settled) is
+   * what releases the next queued message, exactly like the reference queue
+   * dispatch flow.
+   */
+  const dispatchNext = (ctx: ExtensionContext, bridge: TelegramBridgeState): void => {
+    const isIdle = typeof ctx.isIdle === "function" ? ctx.isIdle() : true;
+    if (bridge.hasActiveTurn || bridge.queue.length === 0 || !isIdle) return;
+    const item = bridge.queue.shift()!;
+    bridge.hasActiveTurn = true;
+    const marker = writeLastConnection(canonicalProjectRoot(ctx.cwd), {
+      lastConnection: "telegram",
+      chatRoomId: item.chatId,
+      lastUpdateId: item.updateId,
+      updatedAt: new Date().toISOString(),
+    });
+    if (!marker.ok) {
+      bridge.hasActiveTurn = false;
+      return;
+    }
+    // No deliverAs: the agent is idle, so this starts a fresh turn.
+    pi.sendUserMessage(`${item.text}${formatTelegramSignature(item.chatId)}`);
+  };
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
@@ -52,6 +128,8 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     const sessionId = ctx.sessionManager.getSessionId();
     const previousMarker = readLastConnection(projectRoot);
     const pairingState = defaultTelegramPairingState(projectRoot);
+    const bridge: TelegramBridgeState = { queue: [], hasActiveTurn: false };
+
     const listener = createInbound({
       approvedUserIds: channel.value.approvedUserIds,
       ...pairingState,
@@ -65,16 +143,12 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         // lifecycle status remain the operator's diagnostic surfaces.
       },
       async onAccepted(updateId, chatId, text) {
-        const marker = writeLastConnection(projectRoot, {
-          lastConnection: "telegram",
-          chatRoomId: chatId,
-          lastUpdateId: updateId,
-          updatedAt: new Date().toISOString(),
-        });
-        if (!marker.ok) return;
-        pi.sendUserMessage(`${text}${formatTelegramSignature(chatId)}`, { deliverAs: "followUp" });
+        bridge.queue.push({ updateId, chatId, text });
+        dispatchNext(ctx, bridge);
       },
     });
+
+    bridge.listener = listener;
 
     if (previousMarker.ok && previousMarker.value.lastUpdateId !== undefined) {
       listener.setLastUpdateId(previousMarker.value.lastUpdateId);
@@ -87,27 +161,50 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
       sessionId,
       createMessageHandler: () => (context) => listener.handle(context),
     });
-    runningByProject.set(projectRoot, listener);
+    runningByProject.set(projectRoot, bridge);
     listenersByProject.set(projectRoot, listener);
     listener.setBusy(false);
   });
 
-  pi.on("turn_start", (_event: TurnStartEvent, ctx: ExtensionContext) => {
-    runningByProject.get(canonicalProjectRoot(ctx.cwd))?.setBusy(true);
+  pi.on("agent_end", (event: AgentEndEvent, ctx: ExtensionContext) => {
+    const projectRoot = canonicalProjectRoot(ctx.cwd);
+    const bridge = runningByProject.get(projectRoot);
+    if (!bridge || !bridge.hasActiveTurn) return;
+    // Forward the root parent's final assistant text back to Telegram. This is
+    // the only automatic outbound delivery and it is limited to Telegram-originated
+    // turns; TUI turns, child sessions, tool calls, and status updates never
+    // reach Telegram here. Aborted or failed runs send nothing.
+    const assistant = extractLatestAssistant(event.messages);
+    if (assistant?.text && assistant.stopReason !== "aborted" && assistant.stopReason !== "error") {
+      try {
+        void sendOutbound(projectRoot, assistant.text).catch(() => {
+          // Outbound failures are local-only; the operator's channel logger is
+          // the diagnostic surface.
+        });
+      } catch (error) {
+        // The injectable sender may fail synchronously; keep that local too.
+        void error;
+      }
+    }
+    bridge.hasActiveTurn = false;
+    // The agent loop is still unwinding here; the actual next dispatch happens
+    // once agent_settled confirms the session is idle again.
   });
 
   pi.on("agent_settled", (_event: AgentSettledEvent, ctx: ExtensionContext) => {
-    const listener = runningByProject.get(canonicalProjectRoot(ctx.cwd));
-    if (!listener) return;
-    listener.setBusy(false);
-    listener.releaseNext();
+    const bridge = runningByProject.get(canonicalProjectRoot(ctx.cwd));
+    if (!bridge) return;
+    // Release the transport queue's settlement permit so the next accepted
+    // Telegram update flows through onAccepted, then drain the bridge queue.
+    bridge.listener?.releaseNext();
+    dispatchNext(ctx, bridge);
   });
 
   pi.on("session_shutdown", async (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
-    const listener = runningByProject.get(projectRoot);
-    if (!listener) return;
+    const listener = listenersByProject.get(projectRoot);
     runningByProject.delete(projectRoot);
-    listener.stop();
+    listenersByProject.delete(projectRoot);
+    listener?.stop();
   });
 }
