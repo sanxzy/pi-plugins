@@ -58,7 +58,7 @@ test("decodeAcceptedText rejects non-private, edited, non-text, and identity-mis
 test("formatTelegramSignature marks Telegram activity and response guidance", () => {
   assert.equal(
     formatTelegramSignature("123"),
-    "\n\n---\n[from:telegram:123]\nUser active on Telegram. Reply concisely (do/act summary), not verbose. For direct replies, use the `user_telegram_chat` tool.\n---",
+    "\n\n---\n[from:telegram:123]\nUser active on Telegram. Default responses: concise do/act summary only, not conversational or verbose. Direct conversational replies: use the `user_telegram_chat` tool.\n---",
   );
 });
 
