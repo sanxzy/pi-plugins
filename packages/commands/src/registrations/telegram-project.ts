@@ -57,7 +57,7 @@ export function getTelegramProjectManager(options: TelegramProjectManagerOptions
       return createTelegramTransport({
         logger: loggerResult.value,
         onMessage: entry.messageHandlerFactory?.(config),
-        commands: buildTelegramBotCommands(entry.getCommands?.() ?? []),
+        commands: () => buildTelegramBotCommands(entry.getCommands?.() ?? []),
       });
     },
   });

@@ -49,10 +49,11 @@ export interface TelegramTransportDeps {
   onMessage?: TelegramMessageHandler;
   /**
    * Optional sanitized bot command menu published via `setMyCommands` before
-   * polling starts. Best-effort: a menu sync failure logs a warning but does
-   * not prevent the connection from starting.
+   * polling starts and refreshed by `/start` or `/help`. A getter keeps the
+   * menu current when Pi reloads commands after the transport is created.
+   * Best-effort: sync failures are logged but do not stop polling.
    */
-  commands?: readonly TelegramBotCommand[];
+  commands?: readonly TelegramBotCommand[] | (() => readonly TelegramBotCommand[]);
 }
 
 /**
@@ -87,6 +88,18 @@ const activeTokenFingerprints = new Set<string>();
  * optional `onError` callback rather than becoming unhandled rejections. Stop
  * is idempotent and releases the in-process token fingerprint.
  */
+function telegramCommandFromContext(context: unknown): "start" | "help" | undefined {
+  if (!context || typeof context !== "object") return undefined;
+  const value = context as {
+    message?: { text?: unknown };
+    update?: { message?: { text?: unknown } };
+  };
+  const text = value.message?.text ?? value.update?.message?.text;
+  if (typeof text !== "string") return undefined;
+  const match = text.trim().match(/^\/(start|help)(?:@[^\s]+)?(?:\s|$)/i);
+  return match?.[1]?.toLowerCase() as "start" | "help" | undefined;
+}
+
 export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPoller {
   const createBot = deps.createBot ?? ((token: string) => new Bot(token) as unknown as BotLike);
   const runBot = deps.runBot ?? ((bot: BotLike) => run(bot as never, { runner: { silent: true } }) as unknown as RunnerHandleLike);
@@ -121,8 +134,21 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
         // Middleware errors must never become unhandled host rejections.
         deps.logger.warn("telegram_middleware_error", { error: safeTransportError(error) });
       });
-      if (deps.onMessage && candidate.on) {
-        candidate.on("message", deps.onMessage);
+      const syncCommands = async (): Promise<void> => {
+        if (!candidate.api.setMyCommands || deps.commands === undefined) return;
+        const commands = typeof deps.commands === "function" ? deps.commands() : deps.commands;
+        try {
+          await candidate.api.setMyCommands(commands);
+          deps.logger.info("telegram_commands_synced", { count: commands.length });
+        } catch (error) {
+          deps.logger.warn("telegram_commands_sync_failed", { error: safeTransportError(error) });
+        }
+      };
+      if (candidate.on) {
+        candidate.on("message", async (context) => {
+          if (telegramCommandFromContext(context)) await syncCommands();
+          return deps.onMessage?.(context);
+        });
       }
 
       try {
@@ -134,17 +160,9 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
         return { ok: false, code: "invalid", message: "Telegram connection rejected the configured token" };
       }
 
-      // Publish the sanitized command menu before polling so the operator sees
-      // commands/prompts/skills in the bot menu. Best-effort: a failed sync
-      // logs a warning and still starts polling.
-      if (candidate.api.setMyCommands && deps.commands && deps.commands.length > 0) {
-        try {
-          await candidate.api.setMyCommands(deps.commands);
-          deps.logger.info("telegram_commands_synced", { count: deps.commands.length });
-        } catch (error) {
-          deps.logger.warn("telegram_commands_sync_failed", { error: safeTransportError(error) });
-        }
-      }
+      // Publish the current menu before polling. This also clears stale
+      // Telegram commands when the current catalog is empty.
+      await syncCommands();
 
       bot = candidate;
       fingerprint = candidateFingerprint;

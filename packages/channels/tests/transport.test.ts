@@ -210,6 +210,44 @@ test("publishes the sanitized command menu before polling and fails soft on sync
   assert.equal(raw.includes("telegram_commands_sync_failed"), true);
 });
 
+test("refreshes the command menu when Telegram sends /start or /help", async () => {
+  const { logger } = transportDeps();
+  const created = fakeBot();
+  const menus: { command: string; description: string }[][] = [];
+  let version = 1;
+  const bot: BotLike = {
+    api: {
+      getMe: async () => ({ id: 1 }),
+      setMyCommands: async (commands) => { menus.push([...commands]); }
+    },
+    on(_event, handler) {
+      created.meta.messageHandler = handler;
+    },
+    async init() {},
+    catch() {},
+    async stop() {},
+  };
+  const handle: RunnerHandleLike = { async stop() {}, isRunning() { return true; }, task() { return undefined; } };
+  const transport = createTelegramTransport({
+    logger,
+    createBot: () => bot,
+    runBot: () => handle,
+    commands: () => [{ command: `menu_${version}`, description: "Current menu" }],
+  });
+
+  assert.equal((await transport.start({ token: TOKEN, approvedUserIds: [] })).ok, true);
+  assert.deepEqual(menus, [[{ command: "menu_1", description: "Current menu" }]]);
+  version = 2;
+  await created.meta.messageHandler?.({ update: { message: { text: "/start" } } });
+  await created.meta.messageHandler?.({ message: { text: "/help@pi_test_ext_bot" } });
+  assert.deepEqual(menus, [
+    [{ command: "menu_1", description: "Current menu" }],
+    [{ command: "menu_2", description: "Current menu" }],
+    [{ command: "menu_2", description: "Current menu" }],
+  ]);
+  await transport.stop();
+});
+
 test("telegramTokenFingerprint is deterministic and never contains the raw token", () => {
   const a = telegramTokenFingerprint(TOKEN);
   const b = telegramTokenFingerprint(TOKEN);
