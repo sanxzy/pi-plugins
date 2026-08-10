@@ -5,7 +5,18 @@ import type {
   SessionStartEvent,
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { getChildPool } from "@xzy-ai/runtime";
+import { getChildPool, getGoalPool, type GoalDeliveryBinding } from "@xzy-ai/runtime";
+
+function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext): GoalDeliveryBinding {
+  return {
+    cwd: ctx.cwd,
+    hasUI: ctx.hasUI,
+    sendUserMessage: (content, options) => pi.sendUserMessage(content, options),
+    notify: (message, type) => {
+      if (ctx.hasUI) ctx.ui.notify(message, type);
+    },
+  };
+}
 
 /**
  * Register the per-session lifecycle events.
@@ -23,7 +34,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     getChildPool(ctx.cwd, ctx.sessionManager.getSessionId()).resetParallelAgents();
   });
 
-  pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
+  pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
     // Activate every registered tool so built-ins beyond the default
     // read/bash/edit/write (find, grep) are model-callable too. `ls` stays
     // excluded — the model should list files via `find`/`grep` instead.
@@ -33,6 +44,38 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
         .map((tool) => tool.name)
         .filter((name) => name !== "ls"),
     );
+
+    // Bind the goal pool to the fresh host. On a fresh session the prior host
+    // is gone; delivery may resume only after the user confirms continuation.
+    const goalPool = getGoalPool(ctx.cwd);
+    goalPool.bind(goalBinding(pi, ctx));
+
+    // Goal confirmation must run even for an unpersisted host session, because
+    // the goal record is independent of the child-session delivery registry.
+    // A Continue decision made by session_before_switch belongs to this fresh
+    // host. Consume it before checking startup-like reasons so `/resume` does
+    // not ask the user twice after the switch has already been authorized.
+    if (goalPool.takeReplacementContinuation()) {
+      goalPool.resumeDelivery();
+    } else if (event.reason === "startup" || event.reason === "resume" || event.reason === "reload") {
+      if (ctx.hasUI && goalPool.beginSessionConfirmation()) {
+        const continueGoal = await ctx.ui.confirm(
+          "Persisted goal",
+          "A persisted active goal still exists. Continue it in this session? Choose Cancel to clear it.",
+        );
+        if (continueGoal) {
+          goalPool.resumeDelivery();
+        } else {
+          goalPool.clearActiveGoals();
+        }
+      } else if (!ctx.hasUI) {
+        goalPool.beginSessionConfirmation();
+      } else {
+        goalPool.resumeDelivery();
+      }
+    } else {
+      goalPool.resumeDelivery();
+    }
 
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile) return;
@@ -52,6 +95,9 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
       // streaming response. The SDK host owns the actual parent session.
       pi.sendUserMessage(content, { deliverAs: "followUp" });
     });
+
+    // A fresh host binding is established above before delivery resumes. The
+    // goal pool does not retain the old session/UI handles across replacement.
   });
 
   pi.on("session_shutdown", async (event: SessionShutdownEvent, ctx: ExtensionContext) => {
@@ -72,5 +118,9 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     if (event.reason === "quit" || event.reason === "new") {
       await pool.interruptRunningJobs(rootSessionId);
     }
+    // Every root host teardown must stop goal timers and detach delivery. The
+    // persisted goal remains in the append-only store for the replacement host
+    // to confirm; child-session ownership is already isolated above.
+    getGoalPool(ctx.cwd).shutdown();
   });
 }

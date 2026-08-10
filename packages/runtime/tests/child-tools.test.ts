@@ -27,6 +27,11 @@ test("an explicit non-empty tools list remains the child allowlist", () => {
   assert.deepEqual(resolveChildTools(discoveredAgent(tools)), tools);
 });
 
+test("explicit child tool lists cannot enable goal capabilities", () => {
+  const tools = ["read", "goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"];
+  assert.deepEqual(resolveChildTools(discoveredAgent(tools)), ["read"]);
+});
+
 test("an absent tools list enables all seven built-in tools", () => {
   assert.deepEqual(resolveChildTools(discoveredAgent()), ALL_BUILTIN_TOOLS);
 });

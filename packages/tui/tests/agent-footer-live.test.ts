@@ -8,6 +8,8 @@ import { textTheme } from "./test-theme.ts";
 
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";
+const ALT_DOWN = "\x1bn";
+const ALT_UP = "\x1bp";
 const PAGE_UP = "\x1b[5~";
 const PAGE_DOWN = "\x1b[6~";
 const HOME = "\x1b[H";
@@ -107,8 +109,8 @@ test("Enter on an enterable running child invokes onEnter with the selected row"
       opened = selected;
     },
   });
-  footer.handleInput(DOWN);
-  footer.handleInput(DOWN);
+  footer.handleInput(ALT_DOWN);
+  footer.handleInput(ALT_DOWN);
   footer.handleInput(ENTER);
   assert.equal(opened?.rowId, "job-a", "Enter opens the selected enterable child");
 });
@@ -128,13 +130,13 @@ test("Enter on a non-enterable row shows a non-actionable hint and stays in mana
       opened++;
     },
   });
-  footer.handleInput(DOWN);
-  footer.handleInput(DOWN);
+  footer.handleInput(ALT_DOWN);
+  footer.handleInput(ALT_DOWN);
   footer.handleInput(ENTER);
   assert.equal(opened, 0, "non-actionable rows never invoke onEnter");
   assert.match(render(footer).join("\n"), /not enterable/i, "a clear non-actionable hint is shown");
   assert.match(render(footer).join("\n"), /❯/, "management mode stays active");
-  footer.handleInput(UP);
+  footer.handleInput(ALT_UP);
   assert.doesNotMatch(render(footer).join("\n"), /not enterable/i, "navigation clears the hint");
 });
 

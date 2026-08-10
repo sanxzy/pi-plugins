@@ -73,6 +73,27 @@ test("up/down navigation moves the selection through the options", () => {
   assert.ok(lines.some((l) => l.includes("> 1. Continue")), "selection moved back to first option");
 });
 
+test("numpad navigation moves the selection in arrow and keypad modes", () => {
+  const { dialog } = makeDialog();
+
+  // Application keypad mode (Num Lock off) and numeric keypad mode (Num Lock on).
+  dialog.handleInput("\x1bOr"); // numpad 2 -> option 2
+  let lines = dirtyLines(dialog, 40);
+  assert.ok(lines.some((l) => l.includes("> 2. Cancel")), "application numpad down moved selection");
+
+  dialog.handleInput("8"); // numpad 8 with Num Lock on -> option 1
+  lines = dirtyLines(dialog, 40);
+  assert.ok(lines.some((l) => l.includes("> 1. Continue")), "numeric numpad up moved selection");
+
+  dialog.handleInput("\x1bOx"); // application numpad 8 -> remains at option 1
+  lines = dirtyLines(dialog, 40);
+  assert.ok(lines.some((l) => l.includes("> 1. Continue")), "application numpad up moved selection");
+
+  dialog.handleInput("2"); // numeric numpad 2 -> option 2
+  lines = dirtyLines(dialog, 40);
+  assert.ok(lines.some((l) => l.includes("> 2. Cancel")), "numeric numpad down moved selection");
+});
+
 test("Enter on an option resolves with the label and its display position", async () => {
   const { result, resolve } = collectResult();
   const { dialog } = makeDialog({ done: resolve });

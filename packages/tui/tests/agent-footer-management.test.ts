@@ -5,9 +5,9 @@ import type { TUI } from "@earendil-works/pi-tui";
 import { AgentFooter, type AgentFooterInfo, type FooterTreeRow } from "../src/agent-footer.ts";
 
 // Raw terminal sequences as delivered by the host to onTerminalInput handlers.
-const DOWN = "\x1b[B";
-const UP = "\x1b[A";
-const LEFT = "\x1b[D";
+const ALT_DOWN = "\x1bn";
+const ALT_UP = "\x1bp";
+const ALT_LEFT = "\x1bb";
 const ENTER = "\r";
 
 const theme = { fg: (_color: string, text: string) => text };
@@ -76,41 +76,41 @@ function treeLines(footer: AgentFooter): string[] {
   return cleanLines(footer).slice(3);
 }
 
-test("down enters management mode with main selected and navigation returns to composer", () => {
+test("alt+down enters management mode with main selected and navigation returns to composer", () => {
   const { footer, renders } = makeFooter(() => rows(2));
 
-  assert.equal(footer.handleInput(DOWN), true);
+  assert.equal(footer.handleInput(ALT_DOWN), true);
   assert.match(treeLines(footer)[0]!, /^❯ .*main/);
   assert.equal(renders(), 1);
 
   assert.equal(footer.handleInput("x"), false, "non-navigation input passes through");
   assert.match(treeLines(footer)[0]!, /^❯ .*main/);
 
-  assert.equal(footer.handleInput(DOWN), true);
+  assert.equal(footer.handleInput(ALT_DOWN), true);
   assert.match(treeLines(footer)[1]!, /^❯ .*child-1/);
-  assert.equal(footer.handleInput(UP), true);
+  assert.equal(footer.handleInput(ALT_UP), true);
   assert.match(treeLines(footer)[0]!, /^❯ .*main/);
 
-  assert.equal(footer.handleInput(LEFT), true);
+  assert.equal(footer.handleInput(ALT_LEFT), true);
   assert.equal(treeLines(footer).some((line) => line.startsWith("❯")), false);
   assert.equal(footer.handleInput(ENTER), false, "Enter reaches composer outside management mode");
 });
 
 test("Enter on main exits management mode", () => {
   const { footer } = makeFooter(() => rows(1));
-  footer.handleInput(DOWN);
+  footer.handleInput(ALT_DOWN);
   assert.equal(footer.handleInput(ENTER), true);
   assert.equal(treeLines(footer).some((line) => line.startsWith("❯")), false);
 });
 
 test("management mode shows at most four rows and scrolls with selection", () => {
   const { footer } = makeFooter(() => rows(6));
-  footer.handleInput(DOWN);
+  footer.handleInput(ALT_DOWN);
   assert.equal(treeLines(footer).length, 4);
   assert.match(treeLines(footer)[0]!, /main/);
   assert.match(treeLines(footer)[3]!, /child-3/);
 
-  for (let index = 0; index < 5; index++) footer.handleInput(DOWN);
+  for (let index = 0; index < 5; index++) footer.handleInput(ALT_DOWN);
   const visible = treeLines(footer);
   assert.equal(visible.length, 4);
   assert.match(visible[3]!, /^❯ .*child-5/);

@@ -11,7 +11,7 @@ import piCodeExtension, { extensionName, type QuestionDetails } from "../index.t
  * registration stays main-agent-only (nothing is registered for child
  * sessions), and the extension re-exports `QuestionDetails`.
  */
-test("pi-code extension registers the question tool and setup command", () => {
+test("pi-code extension registers Telegram setup and goal workflow alongside existing tools", () => {
   const names: string[] = [];
   const commands: string[] = [];
   const events: string[] = [];
@@ -37,16 +37,19 @@ test("pi-code extension registers the question tool and setup command", () => {
   assert.ok(names.includes("agent"), "agent tool registered");
   assert.ok(names.includes("agent_status"), "agent_status tool registered");
   assert.ok(names.includes("user_telegram_chat"), "user_telegram_chat tool registered");
+  assert.deepEqual(
+    names.filter((name) => name.startsWith("goal_")),
+    ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"],
+  );
   assert.equal(
     commands.filter((name) => name === "setup-channel-telegram").length,
     1,
     "setup command registered exactly once",
   );
-  // The raw event stream also carries session_start/session_shutdown handlers
-  // from the other registrars (registerSessionEvents, registerLifecycleGates);
-  // the Telegram lifecycle handler is present and wired once by construction.
+  assert.equal(commands.filter((name) => name === "goal").length, 1, "goal command registered exactly once");
   assert.ok(events.includes("session_start"), "session_start lifecycle handler registered");
   assert.ok(events.includes("session_shutdown"), "session_shutdown lifecycle handler registered");
+  assert.ok(events.includes("session_before_switch"), "goal replacement gate is registered");
 });
 
 test("question registration is main-agent-only (no child tool registrations)", () => {
@@ -68,7 +71,19 @@ test("question registration is main-agent-only (no child tool registrations)", (
   // Child sessions receive only the built-in allowlist; the extension never
   // registers anything scoped to child sessions, so the question tool (like the
   // other pi-code tools) is structurally main-agent-only.
-  assert.deepEqual(names, ["question", "agent", "agent_cancel", "agent_status", "agent_jobs", "user_telegram_chat"]);
+  assert.deepEqual(names, [
+    "question",
+    "agent",
+    "agent_cancel",
+    "agent_status",
+    "agent_jobs",
+    "goal_create",
+    "goal_pause",
+    "goal_resume",
+    "goal_status",
+    "goal_clear",
+    "user_telegram_chat",
+  ]);
 });
 
 test("extension re-exports QuestionDetails", () => {

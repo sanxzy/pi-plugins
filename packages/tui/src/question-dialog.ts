@@ -39,6 +39,21 @@ export interface QuestionDialogOptions {
 type DisplayOption = QuestionOption & { isOther?: boolean };
 
 /**
+ * Keypad navigation is emitted in several forms depending on Num Lock and
+ * terminal keypad mode. The SS3 forms are the legacy application-keypad
+ * equivalents; Kitty keypad sequences are recognized through `matchesKey`.
+ * With Num Lock enabled, terminals send numpad 8/2 as the indistinguishable
+ * raw digits `8`/`2`, so those are intentionally accepted too. This dialog
+ * has no number-entry mode, making that ambiguity harmless here.
+ */
+const matchesKittyKeypad = (data: string, key: "2" | "8"): boolean =>
+  data.startsWith("\x1b[") && matchesKey(data, key);
+const matchesNumpadUp = (data: string): boolean =>
+  data === "8" || data === "\x1bOx" || matchesKittyKeypad(data, "8");
+const matchesNumpadDown = (data: string): boolean =>
+  data === "2" || data === "\x1bOr" || matchesKittyKeypad(data, "2");
+
+/**
  * Theme surface the dialog needs: the coding-agent `Theme` (`fg`) plus the
  * `EditorTheme` pieces passed through to the embedded Editor.
  */
@@ -195,12 +210,12 @@ export class QuestionDialog implements Component {
       return;
     }
 
-    if (matchesKey(data, Key.up)) {
+    if (matchesKey(data, Key.up) || matchesNumpadUp(data)) {
       this.optionIndex = Math.max(0, this.optionIndex - 1);
       this.refresh();
       return;
     }
-    if (matchesKey(data, Key.down)) {
+    if (matchesKey(data, Key.down) || matchesNumpadDown(data)) {
       this.optionIndex = Math.min(this.options.length - 1, this.optionIndex + 1);
       this.refresh();
       return;

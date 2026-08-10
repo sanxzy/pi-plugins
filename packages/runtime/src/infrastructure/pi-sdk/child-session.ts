@@ -52,13 +52,16 @@ const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"
 /**
  * Map a resolved agent to its child tool allowlist.
  *
- * An explicit non-empty frontmatter `tools` list wins; a default/inherited
- * agent or an absent/empty list enables the full built-in set so the read-only
- * Pi tools (grep, find, ls) are active by default.
+ * An explicit non-empty frontmatter `tools` list wins, except that goal
+ * capabilities are always removed because goals belong to the main host. A
+ * default/inherited agent or an absent/empty list enables the full built-in set
+ * so the read-only Pi tools (grep, find, ls) are active by default.
  */
 export function resolveChildTools(agent: ResolvedAgent): readonly string[] {
   if (agent.isDefault) return ALL_BUILTIN_TOOLS;
-  return agent.tools && agent.tools.length > 0 ? agent.tools : ALL_BUILTIN_TOOLS;
+
+  const tools = agent.tools && agent.tools.length > 0 ? agent.tools : ALL_BUILTIN_TOOLS;
+  return tools.filter((name) => !name.startsWith("goal_"));
 }
 
 /** Convert an unknown thrown value into a stable message string. */
