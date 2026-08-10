@@ -7,6 +7,7 @@ import {
   MAX_TEXT_LENGTH,
   validateStandardReaction,
   reactToMessage,
+  MEDIA_DOCUMENT_MAX_BYTES,
 } from "../src/index.ts";
 
 const token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWX";
@@ -106,6 +107,80 @@ test("outbound rejects an unapproved explicit chat before the API call", async (
     error: "Telegram target is not an approved private chat",
     category: "target_not_approved",
   });
+});
+
+test("sendMedia uploads a photo with caption and upload status", async () => {
+  const actions: unknown[] = [];
+  const uploads: unknown[] = [];
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendMessage() { return { message_id: 1 }; },
+      async sendChatAction(chat: string | number, action: string) { actions.push([chat, action]); },
+      async sendPhoto(chat: string | number, photo: unknown, other: unknown) { uploads.push([chat, photo, other]); return { message_id: 55, photo: [] }; },
+    }),
+  });
+  const result = await outbound.sendMedia("project", "777", "photo", {
+    kind: "bytes", bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xdb]), contentType: "image/jpeg", filename: "pic.jpg",
+  }, { caption: "Look" });
+  assert.deepEqual(result, { ok: true, messageId: 55, mediaType: "photo", bytes: 4, filename: "pic.jpg" });
+  assert.deepEqual(actions, [["777", "upload_photo"]]);
+  assert.equal(uploads.length, 1);
+  const photoUpload = uploads[0] as unknown[];
+  assert.equal(photoUpload[0], "777");
+  assert.deepEqual(photoUpload[2], { caption: "Look" });
+});
+
+test("sendMedia uploads a document with filename and reports safe metadata", async () => {
+  const uploads: unknown[] = [];
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendDocument(chat: string | number, document: unknown, other: unknown) { uploads.push([chat, document, other]); return { message_id: 56, document: {} }; },
+    }),
+  });
+  const result = await outbound.sendMedia("project", "777", "document", {
+    kind: "bytes", bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]), contentType: "application/pdf", filename: "../../report.pdf",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result, { ok: true, messageId: 56, mediaType: "document", bytes: 4, filename: "report.pdf" });
+  assert.equal(uploads.length, 1);
+});
+
+test("sendMedia rejects oversized and mismatched media before upload", async () => {
+  let calls = 0;
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendPhoto(_chat: string | number, _photo: unknown, _other?: Record<string, unknown>) { calls += 1; return { message_id: 1 }; },
+      async sendDocument(_chat: string | number, _document: unknown, _other?: Record<string, unknown>) { calls += 1; return { message_id: 2 }; },
+    }),
+  });
+  const oversized = await outbound.sendMedia("project", "777", "document", {
+    kind: "bytes", bytes: new Uint8Array(MEDIA_DOCUMENT_MAX_BYTES + 1), contentType: "application/pdf", filename: "big.pdf",
+  });
+  assert.equal(oversized.ok, false);
+  const mismatch = await outbound.sendMedia("project", "777", "photo", {
+    kind: "bytes", bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]), contentType: "application/pdf", filename: "wrong.pdf",
+  });
+  assert.equal(mismatch.ok, false);
+  assert.equal(calls, 0);
+});
+
+test("sendMedia does not retry ambiguous upload failures", async () => {
+  let calls = 0;
+  const outbound = createTelegramOutbound({
+    readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
+    createSendApi: () => ({
+      async sendDocument(_chat: string | number, _document: unknown, _other?: Record<string, unknown>) { calls += 1; throw Object.assign(new Error("socket timeout"), { code: "ETIMEDOUT" }); },
+    }),
+  });
+  const result = await outbound.sendMedia("project", "777", "document", {
+    kind: "bytes", bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]), contentType: "application/pdf", filename: "x.pdf",
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.category, "network_error");
 });
 
 test("outbound reacts to a specific approved Telegram message", async () => {

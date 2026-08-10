@@ -57,6 +57,33 @@ test("schema accepts explicit send_choices action and rejects invalid choices", 
   }), true, "reply message_id is allowed");
 });
 
+test("schema accepts explicit send_media photo/document sources and rejects unsafe forms", () => {
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_media", chat_id: "777", media_type: "photo",
+    source: { kind: "file_id", file_id: "AgAD_file" }, caption: "hi",
+  }), true);
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_media", chat_id: "777", media_type: "document",
+    source: { kind: "artifact_id", artifact_id: "artifact-1" }, filename: "report.pdf",
+  }), true);
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_media", chat_id: "777", media_type: "document",
+    source: { kind: "https", url: "https://example.com/report.pdf" },
+  }), true);
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_media", chat_id: "777", media_type: "video",
+    source: { kind: "file_id", file_id: "AgAD_file" },
+  }), false);
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_media", chat_id: "777", media_type: "photo",
+    source: { kind: "path", path: "/tmp/photo.jpg" },
+  }), false);
+  assert.equal(Value.Check(telegramChatParams, {
+    action: "send_media", chat_id: "777", media_type: "photo",
+    source: { kind: "https", url: "http://example.com/photo.jpg" },
+  }), true, "URL syntax is schema-valid; HTTPS policy is enforced before upload");
+});
+
 test("schema accepts explicit standard react action and rejects custom reactions", () => {
   assert.equal(Value.Check(telegramChatParams, { action: "react", chat_id: "777", message_id: 42, emoji: "👍" }), true);
   assert.equal(Value.Check(telegramChatParams, { action: "react", chat_id: "777", message_id: 42, emoji: "custom" }), false);
@@ -102,6 +129,39 @@ test("react rejects invalid target or emoji before the reaction API", async () =
     },
   });
   const result = await tool.execute("call", { action: "react", chat_id: "777", message_id: 42, emoji: "custom" }, undefined, undefined, context());
+  assert.equal(called, false);
+  assert.equal(result.details.category, "telegram_rejected");
+});
+
+test("send_media forwards a file_id and returns safe metadata", async () => {
+  let received: unknown;
+  const tool = capture({
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    sendMedia: async (_root: string, chatId: string, mediaType: string, source: unknown, options: unknown) => {
+      received = { chatId, mediaType, source, options };
+      return { ok: true, messageId: 301, bytes: 123, mediaType: "photo", filename: undefined };
+    },
+  });
+  const result = await tool.execute("call", {
+    action: "send_media", chat_id: "777", media_type: "photo",
+    source: { kind: "file_id", file_id: "AgAD_file" }, caption: "hello",
+  }, undefined, undefined, context());
+  assert.deepEqual(received, {
+    chatId: "777", mediaType: "photo", source: { kind: "file_id", file_id: "AgAD_file" }, options: { caption: "hello", filename: undefined },
+  });
+  assert.deepEqual(result.details, { action: "send_media", sent: true, chatId: "777", messageId: 301, mediaType: "photo", bytes: 123 });
+});
+
+test("send_media rejects an unsafe source before delivery", async () => {
+  let called = false;
+  const tool = capture({
+    validateTarget: async () => ({ ok: true, chatId: "777" }),
+    sendMedia: async () => { called = true; return { ok: true, messageId: 1, bytes: 1, mediaType: "photo" }; },
+  });
+  const result = await tool.execute("call", {
+    action: "send_media", chat_id: "777", media_type: "photo",
+    source: { kind: "path", path: "/etc/passwd" },
+  }, undefined, undefined, context());
   assert.equal(called, false);
   assert.equal(result.details.category, "telegram_rejected");
 });
