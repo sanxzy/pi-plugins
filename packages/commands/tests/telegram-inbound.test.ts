@@ -268,6 +268,34 @@ test("agent_start reaction timeout is logged and does not block", async () => {
   assert.ok(logged, "reaction timeout is logged");
 });
 
+test("a TUI prompt after a prior Telegram message does not react to the stale origin", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers } = registrations();
+  let reactionCount = 0;
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async () => { reactionCount += 1; },
+  });
+  // before_agent_start observes a plain/TUI prompt (no Telegram signature), but
+  // the branch still contains an older Telegram-signed user message.
+  await handlers.get("before_agent_start")?.(
+    { type: "before_agent_start", prompt: "local prompt" },
+    context(cwd, "root-a"),
+  );
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [
+        { type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } },
+      ],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reactionCount, 0);
+});
+
 test("agent_start does not react to a TUI-originated latest user message", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);
