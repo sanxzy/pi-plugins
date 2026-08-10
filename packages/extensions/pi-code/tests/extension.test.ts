@@ -141,6 +141,36 @@ test("parent startup activates the registered tools including web_search and web
   assert.equal(activeTools.includes("ls"), false, "ls stays excluded");
 });
 
+test("research tool descriptions direct local-first lookup and automatic fallback saving", () => {
+  const descriptions = new Map<string, string>();
+  const pi = {
+    registerTool(tool: { name: string; description: string }) {
+      descriptions.set(tool.name, tool.description);
+    },
+    registerShortcut() {},
+    registerCommand() {},
+    on() {},
+    setActiveTools() {},
+    getAllTools() {
+      return [];
+    },
+    sendUserMessage() {},
+  } as unknown as ExtensionAPI;
+  piCodeExtension(pi);
+  const wiki = descriptions.get("llm_wikis_search") ?? "";
+  const search = descriptions.get("web_search") ?? "";
+  const fetch = descriptions.get("web_fetch") ?? "";
+  assert.match(wiki, /local/i);
+  assert.match(wiki, /web_search/);
+  assert.match(wiki, /web_fetch/);
+  assert.match(search, /local.*wiki/i);
+  assert.match(search, /fallback/i);
+  assert.match(search, /automatically saved/i);
+  assert.match(fetch, /local.*wiki/i);
+  assert.match(fetch, /fallback/i);
+  assert.match(fetch, /automatically saved/i);
+});
+
 test("extension re-exports the web and wiki search details types", () => {
   const searchDetails: WebSearchDetails = { query: "typescript", provider: "exa" };
   const fetchDetails: WebFetchDetails = {};
