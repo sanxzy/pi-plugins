@@ -183,23 +183,22 @@ test("formatted text over the chunk limit is rejected without an unsafe split", 
   if (!result.ok) assert.equal(result.category, "telegram_rejected");
 });
 
-test("clear network timeout is retried once without exposing the error payload", async () => {
+test("ambiguous network timeout is attempted once and categorized without blind retry", async () => {
   let calls = 0;
   const outbound = createTelegramOutbound({
-    sleep: async () => undefined,
     readConfig: () => ({ ok: true, value: { token, approvedUserIds: ["777"] } }),
     createSendApi: () => ({
       async sendMessage() {
         calls += 1;
-        if (calls === 1) throw Object.assign(new Error("socket timeout"), { code: "ETIMEDOUT" });
-        return { message_id: 104 };
+        throw Object.assign(new Error("socket timeout"), { code: "ETIMEDOUT" });
       },
     }),
   });
 
   const result = await outbound.send("project", "777", "hello");
-  assert.equal(calls, 2);
-  assert.deepEqual(result, { ok: true, sent: 1, failed: 0, messageIds: [104] });
+  assert.equal(calls, 1);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.category, "network_error");
 });
 
 test("Telegram 429 retry_after is retried once and categorized when exhausted", async () => {
