@@ -57,11 +57,12 @@ function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler>; se
   };
 }
 
-function context(cwd: string, sessionId: string): ExtensionContext {
+function context(cwd: string, sessionId: string, idle = true): ExtensionContext {
   return {
     mode: "tui",
     hasUI: true,
     cwd,
+    isIdle: () => idle,
     sessionManager: { getSessionId: () => sessionId },
   } as unknown as ExtensionContext;
 }
@@ -91,7 +92,6 @@ test("root session start delivers accepted text as a follow-up with the exact si
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(sent.length, 1, "one Telegram message is injected");
-  assert.deepEqual(deliveryModes, ["steer"], "Telegram messages use steer delivery");
   assert.equal(sent[0], "hello\n\n---\n[from:telegram:777]\n---", "exact signature is appended");
   const marker = readLastConnection(cwd);
   assert.equal(marker.ok, true);
@@ -122,26 +122,47 @@ test("child sessions never start an inbound listener or inject follow-ups", asyn
   clearTelegramProjectManagers();
 });
 
-test("turn_start marks busy and agent_settled releases one queued follow-up", async () => {
+test("a busy agent is steered immediately with deliverAs steer, preserving FIFO", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);
-  const { pi, handlers, sent } = registrations();
+  const { pi, handlers, sent, deliveryModes } = registrations();
   let listener: TelegramInboundListener | undefined;
   registerTelegramInbound(pi, {
     createInbound: (opts) => (listener = createTelegramInbound(opts)),
   });
 
   await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
-  await handlers.get("turn_start")!({}, context(cwd, "root-a"));
+  // The agent is busy; accepted Telegram messages must steer it right away.
+  const busyCtx = context(cwd, "root-a", false);
   await listener!.handle(privateText(1, "111", "one"));
   await listener!.handle(privateText(2, "111", "two"));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(sent.length, 0, "accepted messages queue while the turn is busy");
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
-  await handlers.get("agent_settled")!({}, context(cwd, "root-a"));
+  assert.deepEqual(sent, [
+    "one\n\n---\n[from:telegram:777]\n---",
+    "two\n\n---\n[from:telegram:777]\n---",
+  ], "each busy message is steered in arrival order");
+  assert.deepEqual(deliveryModes, ["steer", "steer"], "busy messages use steer delivery");
+  clearTelegramProjectManagers();
+});
+
+test("an idle agent also receives the message as a steer", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const { pi, handlers, sent, deliveryModes } = registrations();
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (opts) => (listener = createTelegramInbound(opts)),
+  });
+
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
+  await listener!.handle(privateText(1, "111", "hello"));
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(sent, ["one\n\n---\n[from:telegram:777]\n---"], "one follow-up is released after settlement");
+
+  assert.equal(sent.length, 1, "one idle message is delivered");
+  assert.deepEqual(deliveryModes, ["steer"], "an idle message is also delivered as a steer");
   clearTelegramProjectManagers();
 });
 
