@@ -19,6 +19,7 @@ function context(overrides: Partial<ExtensionContext> = {}): ExtensionContext {
     isIdle: () => true,
     hasPendingMessages: () => false,
     compact: () => {},
+    sessionManager: { getSessionId: () => "root-old" },
     ...overrides,
   } as unknown as ExtensionContext;
 }
@@ -54,11 +55,26 @@ test("compact preserves its Telegram origin until post-compaction handling", asy
     context: ctx,
     sendMessage: send,
   });
-  assert.deepEqual(takeTelegramCompactionOrigin("/tmp/compact-origin"), { chatId: "555", messageId: 42 });
+  assert.deepEqual(takeTelegramCompactionOrigin("/tmp/compact-origin", "root-old"), { chatId: "555", messageId: 42 });
   onComplete?.();
   await new Promise((resolve) => setTimeout(resolve, 0));
   clearTelegramControlState();
   assert.deepEqual(messages.filter((message) => message.includes("Compaction started.")), ["🗜 Compaction started."]);
+});
+
+test("compact origin is bound to its originating root session", async () => {
+  clearTelegramControlState();
+  const oldContext = context({ sessionManager: { getSessionId: () => "root-old" } as ExtensionContext["sessionManager"] });
+  await dispatchTelegramControl(command("compact"), {
+    projectRoot: "/tmp/stale-root",
+    chatId: "555",
+    messageId: 42,
+    context: oldContext,
+    sendMessage: async () => undefined,
+  });
+  assert.equal(takeTelegramCompactionOrigin("/tmp/stale-root", "root-new"), undefined);
+  assert.deepEqual(takeTelegramCompactionOrigin("/tmp/stale-root", "root-old"), { chatId: "555", messageId: 42 });
+  clearTelegramControlState();
 });
 
 test("failed compact discards its pending Telegram origin", async () => {
@@ -74,7 +90,7 @@ test("failed compact discards its pending Telegram origin", async () => {
   });
   onError?.(new Error("boom"));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(takeTelegramCompactionOrigin("/tmp/compact-failure"), undefined);
+  assert.equal(takeTelegramCompactionOrigin("/tmp/compact-failure", "root-old"), undefined);
   clearTelegramControlState();
 });
 

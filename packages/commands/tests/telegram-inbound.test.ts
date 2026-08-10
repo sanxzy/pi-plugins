@@ -170,6 +170,69 @@ test("session_compact ignores threshold compaction and consumes manual origin on
   clearTelegramProjectManagers();
 });
 
+test("replacement root cannot consume an old root's pending compact origin", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  clearTelegramControlState();
+  const { pi, handlers } = registrations();
+  const reactions: Array<{ chatId: string; messageId?: number }> = [];
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (options) => (listener = createTelegramInbound(options)),
+    reactTelegramMessage: async (_projectRoot, origin) => { reactions.push(origin); },
+  });
+  const oldRoot = {
+    ...context(cwd, "root-old"),
+    isIdle: () => true,
+    hasPendingMessages: () => false,
+    compact: () => {},
+    sessionManager: { getSessionId: () => "root-old", getBranch: () => [] },
+  } as unknown as ExtensionContext;
+  await handlers.get("session_start")?.({ reason: "startup" }, oldRoot);
+  await listener!.handle(privateText(1, "111", "/compact", 42));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const replacementRoot = {
+    ...oldRoot,
+    sessionManager: { getSessionId: () => "root-new", getBranch: () => [] },
+  } as unknown as ExtensionContext;
+  await handlers.get("session_compact")?.({ type: "session_compact", reason: "manual", fromExtension: true }, replacementRoot);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reactions, []);
+  await handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "new" }, oldRoot);
+  clearTelegramControlState();
+  clearTelegramProjectManagers();
+});
+
+test("unrelated native controls remain reaction-free", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  clearTelegramControlState();
+  const { pi, handlers } = registrations();
+  const reactions: Array<{ chatId: string; messageId?: number }> = [];
+  let listener: TelegramInboundListener | undefined;
+  registerTelegramInbound(pi, {
+    createInbound: (options) => (listener = createTelegramInbound(options)),
+    reactTelegramMessage: async (_projectRoot, origin) => { reactions.push(origin); },
+  });
+  const root = {
+    ...context(cwd, "root-a"),
+    isIdle: () => true,
+    hasPendingMessages: () => false,
+    compact: () => {},
+    sessionManager: { getSessionId: () => "root-a", getBranch: () => [] },
+  } as unknown as ExtensionContext;
+  await handlers.get("session_start")?.({ reason: "startup" }, root);
+  for (const name of ["/abort", "/stop", "/model", "/thinking"]) {
+    await listener!.handle(privateText(Math.random() * 10000, "111", name, 50));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  await handlers.get("session_compact")?.({ type: "session_compact", reason: "manual", fromExtension: true }, root);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(reactions, []);
+  clearTelegramControlState();
+  clearTelegramProjectManagers();
+});
+
 test("agent_start reacts to the latest Telegram user message", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);
