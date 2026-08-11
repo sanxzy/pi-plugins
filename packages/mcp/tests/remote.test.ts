@@ -275,7 +275,7 @@ test("manager disconnect closes an active remote transport before logout", async
   const fixture = await startFixture("streamable", ["disconnect_tool"]);
   const agentDir = tempAgent("pi-code-mcp-manager-disconnect-agent-");
   const projectRoot = tempAgent("pi-code-mcp-manager-disconnect-project-");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     fixture: { type: "remote", url: fixture.url, oauth: false },
   } } }));
@@ -355,7 +355,7 @@ test("manager start() connects configured remote servers with the effective conf
   const fixture = await startFixture("streamable", ["manager_tool"]);
   const agentDir = tempAgent("pi-code-mcp-mgr-remote-agent-");
   const projectRoot = tempAgent("pi-code-mcp-mgr-remote-project-");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({

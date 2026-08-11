@@ -20,8 +20,8 @@ function tmpRoot(): string {
 }
 
 function writeUser(agentDir: string, content: string): string {
-  const file = join(agentDir, "mcp.json");
-  mkdirSync(agentDir, { recursive: true });
+  const file = join(agentDir, "pi-code", "mcp.json");
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(file, content);
   return file;
 }
@@ -38,7 +38,7 @@ test("loads permissions with project precedence and preserves rule order", () =>
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
   mkdirSync(join(projectRoot, ".pi"), { recursive: true });
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { permissions: {
     tools: [{ effect: "allow", server: "demo", name: "read" }],
   } } }));
@@ -178,7 +178,7 @@ test("environment references expand in values without leaking secrets", () => {
 test("path helpers resolve through the Pi user-agent directory contract", () => {
   const agentDir = join(tmpRoot(), "agent");
   assert.equal(userAgentDir(agentDir), agentDir);
-  assert.ok(userConfigPath(agentDir).endsWith(join(agentDir, "mcp.json")));
+  assert.ok(userConfigPath(agentDir).endsWith(join(agentDir, "pi-code", "mcp.json")));
 });
 
 test("project config path lives under the project .pi directory", () => {

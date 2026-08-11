@@ -15,7 +15,7 @@ function tempRoot(prefix: string): string {
 test("start() auto-connects configured local servers from the effective configuration", async () => {
   const agentDir = join(tempRoot("pi-code-mcp-local-agent3-"), "agent");
   const projectRoot = tempRoot("pi-code-mcp-local-project3-");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({
@@ -89,7 +89,7 @@ test("a disabled local server does not spawn and a failed server is isolated", a
 test("full-catalog discovery follows cursors and preserves valid results when another server fails", async () => {
   const agentDir = join(tempRoot("pi-code-mcp-local-agentf-"), "agent");
   const projectRoot = tempRoot("pi-code-mcp-local-projectf-");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({
@@ -170,7 +170,7 @@ test("startup timeout kills a hanging server and cancellation is aborted into fa
 test("global timeout config applies as fallback for startup", async () => {
   const agentDir = join(tempRoot("pi-code-mcp-local-agentg-"), "agent");
   const projectRoot = tempRoot("pi-code-mcp-local-projectg-");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({

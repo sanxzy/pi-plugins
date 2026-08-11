@@ -17,7 +17,7 @@ test("list-change notification refreshes the live manager catalog and removes st
   const projectRoot = join(root, "project");
   const stateFile = join(root, "state.json");
   const notifyFile = join(root, "notify");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   mkdirSync(projectRoot, { recursive: true });
   writeFileSync(stateFile, JSON.stringify({ prompts: ["old_prompt"], resources: ["file:///old"] }));
   writeFileSync(notifyFile, "0");
@@ -56,7 +56,7 @@ test("manager prompt and resource calls preserve an already-aborted signal", asy
   const projectRoot = join(root, "project");
   const stateFile = join(root, "state.json");
   const notifyFile = join(root, "notify");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   mkdirSync(projectRoot, { recursive: true });
   writeFileSync(stateFile, JSON.stringify({ prompts: ["p"], resources: ["file:///r"] }));
   writeFileSync(notifyFile, "0");

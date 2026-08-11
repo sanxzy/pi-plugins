@@ -53,7 +53,7 @@ test("simultaneous sessions expose isolated MCP managers and shared tool binding
   const first = join(root, "first");
   const second = join(root, "second");
   const agentDir = join(root, "agent");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   mkdirSync(join(first, ".pi"), { recursive: true });
   mkdirSync(join(second, ".pi"), { recursive: true });
   writeFileSync(projectConfigPath(first), JSON.stringify({ mcp: { servers: { first: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_LABEL: "first", MCP_FIXTURE_MODE: "policy" } } } } }));
@@ -145,7 +145,7 @@ test("repeated session start does not create a second manager for the same sessi
 test("registerMcpLifecycle exposes an /mcp command that reports status and handles logout", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-cmd-"));
   const agentDir = join(root, "agent");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({
@@ -216,7 +216,7 @@ test("/mcp logout closes the active transport before clearing credentials", asyn
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     remote: { type: "remote", url, oauth: false },
   } } }));
@@ -247,7 +247,7 @@ test("/mcp logout closes the active transport before clearing credentials", asyn
 test("/mcp control-plane subcommands operate without adding tools and use bounded errors", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-cmd-plane-"));
   const agentDir = join(root, "agent");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     remote: { type: "remote", url: "http://127.0.0.1:9/mcp", oauth: false },
   } } }));
@@ -290,7 +290,7 @@ test("timer reconnect reactivates recovered MCP tools in the lifecycle", async (
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-lifecycle-reconnect-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   const exitOnce = join(root, "exit-once");
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     reconnect: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: {
@@ -335,7 +335,7 @@ test("lifecycle enforces allow/deny/ask policy for tools, prompts, and resources
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-policy-lifecycle-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     policy: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_MODE: "policy" } },
   } } }));

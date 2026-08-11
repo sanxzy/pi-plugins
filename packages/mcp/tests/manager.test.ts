@@ -39,7 +39,7 @@ test("explicit reload reconciliation keeps active server status and removes remo
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-reconcile-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const fixtureCwd = dirname(fixture);
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
@@ -106,7 +106,7 @@ test("default filesystem watcher reconciles edits in user and project config fil
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
   const projectConfigDir = join(projectRoot, ".pi");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   mkdirSync(projectConfigDir, { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const fixtureCwd = dirname(fixture);
@@ -141,7 +141,7 @@ test("watched configuration changes debounce and reconcile only affected servers
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-watch-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const fixtureCwd = dirname(fixture);
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
@@ -184,7 +184,7 @@ test("transport errors mark the affected server failed and recover independently
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-transport-error-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const malformed = join(root, "malformed-once");
   const statuses: string[] = [];
@@ -210,7 +210,7 @@ test("connection close marks a server failed and reconnects with bounded backoff
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-reconnect-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const exitOnce = join(root, "exit-once");
   const statuses: string[] = [];
@@ -252,7 +252,7 @@ test("remote session expiration reinitializes once and retries the request", asy
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-session-recovery-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   const fixture = await startRecoveryFixture();
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     recovery: { type: "remote", url: fixture.url, oauth: false },
@@ -275,7 +275,7 @@ test("close performs full watcher and reconnect cleanup", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-close-cleanup-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     disabled: { type: "local", command: [process.execPath, "unused"], disabled: true },
   } } }));
@@ -294,7 +294,7 @@ test("repeated remote session expiration stays an explicit failed result", async
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-session-fail-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
   let callCount = 0;
   let sessionCount = 0;
   const server = createServer(async (req, res) => {
