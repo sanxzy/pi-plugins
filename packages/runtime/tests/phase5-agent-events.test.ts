@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,12 +9,14 @@ import {
   homeAgentEventsFile,
   homeAgentManifestFile,
   homeProjectDir,
+  homeSessionManifestFile,
   encodeProjectId,
   startRootSession,
   getChildPool,
   childSessionPaths,
 } from "@xzy-ai/runtime";
 import { makeJobId } from "@xzy-ai/tools";
+import { registerSessionEvents } from "../../commands/src/registrations/session-events.ts";
 
 function project(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-phase5-project-"));
@@ -157,6 +159,98 @@ test("root-versus-child detection uses the root session manifest boundary", () =
   assert.equal(pool.isRootSession("child-session"), false);
   const missing = getChildPool(project(), "unpersisted-root");
   assert.equal(missing.isRootSession("unpersisted-root"), false);
+});
+
+test("replacement root session is bootstrapped through the real session_start path", async () => {
+  setupHome();
+  const root = project();
+  // The pool is a project-root singleton; a prior host already created it with
+  // the old root id, so `getChildPool` returns the same object with the old
+  // rootSessionId captured at construction. A replacement root must still be
+  // bootstrapped as a root on its real session_start.
+  const oldPool = getChildPool(root, "old-root");
+  assert.equal(oldPool.shouldBootstrapRootSession("new-root"), false, "old-root pool must not bootstrap new-root by construction id");
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  registerSessionEvents({
+    on(event: string, handler: (event: unknown, ctx: unknown) => unknown) { handlers.set(event, handler); },
+    setActiveTools() {},
+    getAllTools() { return []; },
+  } as never);
+  await handlers.get("session_start")!({ reason: "new" }, {
+    mode: "tui",
+    hasUI: true,
+    cwd: root,
+    isIdle: () => true,
+    sessionManager: {
+      getSessionId: () => "new-root",
+      getSessionFile: () => join(root, "sessions", "new-root.jsonl"),
+    },
+    ui: { confirm: async () => false, notify() {} },
+  });
+  assert.equal(existsSync(homeSessionManifestFile(encodeProjectId(root), "new-root")), true);
+});
+
+test("malformed parent lineage values are skipped by fresh readers", () => {
+  setupHome();
+  const root = project();
+  createAgentEventRegistry(root, "root-session");
+  // A corrupted / injected event log that discovery would find, carrying a
+  // non-string parentAgentIds element. It must be skipped rather than crashing
+  // the fresh reader during createAgentManifestStore canonicalization.
+  const projectId = encodeProjectId(root);
+  const events = homeAgentEventsFile(projectId, "root-session", "bad");
+  mkdirSync(join(events, ".."), { recursive: true });
+  writeFileSync(events, `${JSON.stringify({
+    type: "agent_created",
+    at: "2026-01-01T00:00:00.000Z",
+    jobId: "bad",
+    agentId: "bad",
+    piSessionId: "bad",
+    rootSessionId: "root-session",
+    parentAgentIds: [{}],
+    rootAgentId: "bad",
+    depth: 1,
+    status: "created",
+    description: "bad",
+    subagentType: "test-agent",
+  })}\n`, "utf8");
+  assert.doesNotThrow(() => createAgentEventRegistry(root, "root-session"));
+});
+
+test("nested resume copies the transcript into the resolved nested agent directory", async () => {
+  setupHome();
+  const root = project();
+  const source = join(root, "source.jsonl");
+  writeFileSync(source, '{"type":"session","id":"source"}\n', "utf8");
+  const { copySessionFile, homeAgentTranscriptFile } = await import("@xzy-ai/runtime");
+  const copied = copySessionFile(source, "grandchild-2", root, "grandchild", "root-session", ["parent", "grandchild"]);
+  assert.equal(copied, homeAgentTranscriptFile(encodeProjectId(root), "root-session", "grandchild-2", ["parent", "grandchild"]));
+});
+
+test("prefixed job ids are canonicalized at event-registry admission", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(job({ id: "job-prefixed", parentSessionId: "root-session" }));
+  assert.equal(registry.get("job-prefixed")?.jobId, "prefixed");
+  assert.equal(registry.get("prefixed")?.jobId, "prefixed");
+});
+
+test("stale snapshot delivery and transcript fields are rebuilt from events", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(job({ id: "snapshot-stale", parentSessionId: "root-session", status: "running" }));
+  const projectId = encodeProjectId(root);
+  const manifestPath = homeAgentManifestFile(projectId, "root-session", "snapshot-stale");
+  const current = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  writeFileSync(manifestPath, JSON.stringify({ ...current, delivered: true, sessionFile: "/stale.jsonl" }), "utf8");
+  const fresh = createAgentEventRegistry(root, "root-session");
+  assert.equal(fresh.get("snapshot-stale")?.delivered, false);
+  assert.equal(fresh.get("snapshot-stale")?.sessionFile, undefined);
+  const repaired = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  assert.equal(repaired.delivered, false);
+  assert.equal(repaired.sessionFile, undefined);
 });
 
 test("new canonical job IDs are unprefixed", () => {
