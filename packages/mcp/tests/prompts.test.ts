@@ -68,14 +68,14 @@ test("resource normalization omits oversized images and bounds aggregate text", 
   assert.equal(result.omitted?.includes("file:///large.png"), true);
 });
 
-test("prompt commands are server-scoped, parse JSON arguments, and send normal user output", async () => {
+test("prompt commands are server-scoped, parse JSON arguments, pass abort signals, and send normal user output", async () => {
   const pi = fakePi();
-  const calls: Array<{ server: string; prompt: string; args: Record<string, string> }> = [];
+  const calls: Array<{ server: string; prompt: string; args: Record<string, string>; signal?: AbortSignal }> = [];
   const exposer = new McpPromptsResourcesExposer(pi as never);
   exposer.register(
     manager,
-    async (server, prompt, args) => {
-      calls.push({ server, prompt, args });
+    async (server, prompt, args, signal) => {
+      calls.push({ server, prompt, args, signal });
       return normalizePromptResult(server, prompt, { messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }] });
     },
     async (_server, uri) => normalizeResourceResult("demo", uri, { contents: [{ uri, text: "resource" }] }),
@@ -83,8 +83,10 @@ test("prompt commands are server-scoped, parse JSON arguments, and send normal u
   );
   const command = [...pi.commands.entries()].find(([name]) => name.startsWith("mcp_prompt_demo_greet"));
   assert.ok(command);
-  await command[1].handler('{"who":"Pi"}', { hasUI: true, ui: { notify() {} }, cwd: "/tmp", sessionManager: { getSessionId: () => "s" } });
-  assert.deepEqual(calls, [{ server: "demo", prompt: "greet", args: { who: "Pi" } }]);
+  const controller = new AbortController();
+  await command[1].handler('{"who":"Pi"}', { hasUI: true, ui: { notify() {} }, cwd: "/tmp", signal: controller.signal, sessionManager: { getSessionId: () => "s" } });
+  assert.equal(calls[0]?.signal, controller.signal);
+  assert.deepEqual(calls.map(({ server, prompt, args }) => ({ server, prompt, args })), [{ server: "demo", prompt: "greet", args: { who: "Pi" } }]);
   assert.match(pi.sent[0] ?? "", /user: hello/);
 });
 
@@ -107,6 +109,41 @@ test("resource list/read tools use current accessors and authorization", async (
   const result = await read.execute("id", { server: "demo", uri: "file:///ok" }, undefined, undefined, {});
   assert.deepEqual(reads, ["demo:file:///ok"]);
   assert.equal(result.content[0].text, "ok");
+});
+
+test("resource read tool emits one bounded text stream including omission messages", async () => {
+  const pi = fakePi();
+  const exposer = new McpPromptsResourcesExposer(pi as never);
+  exposer.register(manager, async () => normalizePromptResult("demo", "greet", { messages: [] }), async (_server, uri) => normalizeResourceResult("demo", uri, {
+    contents: [
+      { uri: "file:///a", text: "a".repeat(40_000) },
+      { uri: "file:///b", text: "b".repeat(40_000) },
+      { uri: "file:///blob", mimeType: "application/octet-stream", blob: "aGVsbG8=" },
+    ],
+  }), () => []);
+  const result = await pi.tools.get("mcp_resources_read")!.execute("id", { server: "demo", uri: "file:///a" }, undefined, undefined, {});
+  assert.ok(result.content[0].text.length <= 50_050);
+  assert.match(result.content[0].text, /binary resource omitted|output truncated/);
+  assert.equal(result.content.length, 1);
+});
+
+test("prompt identity command names remain stable when catalog order changes", async () => {
+  const pi = fakePi();
+  const calls: string[] = [];
+  const first = { serverNames: () => ["demo"], promptsFor: () => [{ name: "a-b" }, { name: "a b" }] };
+  const second = { serverNames: () => ["demo"], promptsFor: () => [{ name: "a b" }, { name: "a-b" }] };
+  const exposer = new McpPromptsResourcesExposer(pi as never);
+  const readPrompt = async (_server: string, prompt: string) => {
+    calls.push(prompt);
+    return normalizePromptResult("demo", prompt, { messages: [{ role: "user", content: [{ type: "text", text: prompt }] }] });
+  };
+  exposer.register(first, readPrompt, async () => normalizeResourceResult("demo", "x", { contents: [] }), () => []);
+  const names = [...pi.commands.keys()];
+  exposer.syncPrompts(second, readPrompt);
+  for (const name of names) {
+    await pi.commands.get(name)!.handler("", { hasUI: false, ui: {}, cwd: "/tmp", signal: undefined, sessionManager: { getSessionId: () => "s" } });
+  }
+  assert.deepEqual(calls.sort(), ["a b", "a-b"].sort());
 });
 
 test("disconnected prompt and resource access produce explicit unavailable results", async () => {
