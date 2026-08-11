@@ -11,6 +11,7 @@ import {
   logoutRemote,
   startRemoteAuth,
   teardownRemoteAuth,
+  isCallbackServerRunning,
   type ConnectRemoteOptions,
 } from "../src/index.ts";
 
@@ -60,6 +61,11 @@ function startAuthServer(): Promise<AuthServer> {
           const grant = params.get("grant_type");
           const isRefresh = grant === "refresh_token" && Boolean(params.get("refresh_token"));
           const hasCode = grant === "authorization_code" && Boolean(params.get("code")) && Boolean(params.get("code_verifier"));
+          if (params.get("code") === "REVOKED-CODE") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "invalid_grant", error_description: "authorization code revoked" }));
+            return;
+          }
           if (!(isRefresh || hasCode)) {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "invalid_grant" }));
@@ -178,6 +184,50 @@ test("logoutRemote clears credentials and cancels pending callbacks", async () =
   } finally {
     await teardownRemoteAuth();
     await auth.close();
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("failed finishRemoteAuth rejects and drops the pending flow", async () => {
+  const auth = await startAuthServer();
+  const agentDir = tempAgent("pi-code-mcp-authflow-finishfail-");
+  const options: ConnectRemoteOptions = {
+    url: `${auth.origin}/mcp`,
+    agentDir,
+    oauth: { client_id: "test-client-id", redirect_uri: "http://127.0.0.1:0/callback", callback_port: 0 },
+    onRedirect: () => Promise.resolve(),
+  };
+  try {
+    const first = await startRemoteAuth(options);
+    await assert.rejects(finishRemoteAuth(options, "REVOKED-CODE"), /invalid_grant|revoked/i);
+    // A dead flow must not be reused: a fresh start produces a new URL.
+    const second = await startRemoteAuth(options);
+    assert.notEqual(second.authorizationUrl, first.authorizationUrl);
+  } finally {
+    await teardownRemoteAuth();
+    await auth.close();
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("failed startRemoteAuth stops the callback server when nothing is pending", async () => {
+  const agentDir = tempAgent("pi-code-mcp-authflow-startfail-");
+  // No discovery endpoints: the SDK cannot proceed, so authorization fails.
+  const quiet = createServer((_req, res) => {
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) => quiet.listen(0, "127.0.0.1", resolve));
+  const quietUrl = `http://127.0.0.1:${(quiet.address() as { port: number }).port}/mcp`;
+  try {
+    await assert.rejects(
+      startRemoteAuth({ url: quietUrl, agentDir, onRedirect: () => {} }),
+      /404|invalid|error|failed/i,
+    );
+    assert.equal(isCallbackServerRunning(), false, "no orphaned callback listener after a failed start");
+  } finally {
+    await new Promise<void>((resolve) => quiet.close(() => resolve()));
+    await teardownRemoteAuth();
     rmSync(agentDir, { recursive: true, force: true });
   }
 });

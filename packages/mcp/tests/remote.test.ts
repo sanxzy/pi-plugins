@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { connectRemote, createMcpManager, userConfigPath } from "../src/index.ts";
+import type { IncomingHttpHeaders } from "node:http";
 
 function tempAgent(prefix: string): string {
   return join(mkdtempSync(join(tmpdir(), prefix)), "agent");
@@ -14,6 +15,10 @@ interface McpHttpServer {
   server: Server;
   url: string;
   close: () => Promise<void>;
+}
+
+interface HeaderCapture {
+  headers?: IncomingHttpHeaders;
 }
 
 type RpcRequest = { jsonrpc: "2.0"; id: number | string; method: string; params?: Record<string, unknown> };
@@ -39,7 +44,7 @@ function parseBody(req: IncomingMessage): Promise<RpcRequest> {
   });
 }
 
-function startFixture(mode: FixtureMode, tools: string[]): Promise<McpHttpServer> {
+function startFixture(mode: FixtureMode, tools: string[], capture?: HeaderCapture): Promise<McpHttpServer> {
   return new Promise((resolve, reject) => {
     const sessions = new Set<string>();
     let nextSession = 1;
@@ -102,6 +107,7 @@ function startFixture(mode: FixtureMode, tools: string[]): Promise<McpHttpServer
         const sessionHeader = String(req.headers["mcp-session-id"] ?? "");
         let session = sessionHeader;
         if (body.method === "initialize") {
+          if (capture) capture.headers = req.headers;
           session = `http-${nextSession++}`;
           sessions.add(session);
         }
@@ -174,6 +180,82 @@ test("connectRemote connects over Streamable HTTP and discovers tools", async ()
   }
 });
 
+test("connectRemote delivers configured headers to the transport", async () => {
+  const capture: HeaderCapture = {};
+  const fixture = await startFixture("streamable", ["header_tool"], capture);
+  const agentDir = tempAgent("pi-code-mcp-remote-headers-");
+  const result = await connectRemote({
+    url: fixture.url,
+    agentDir,
+    oauth: false,
+    headers: { Authorization: "Bearer resolved-secret", "X-Test-Header": "present" },
+    onRedirect: () => {},
+  });
+  try {
+    assert.equal(result.status.status, "connected");
+    assert.equal(capture.headers?.authorization, "Bearer resolved-secret");
+    assert.equal(capture.headers?.["x-test-header"], "present");
+  } finally {
+    await result.client?.close();
+    await fixture.close();
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("connectRemote enforces a bounded startup timeout", async () => {
+  const server = createServer((_req, _res) => {
+    // Leave the request pending; the transport startup deadline must settle.
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const agentDir = tempAgent("pi-code-mcp-remote-start-timeout-");
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+  try {
+    const started = Date.now();
+    const result = await connectRemote({ url, agentDir, oauth: false, timeout: { startup: 100, request: 100 }, onRedirect: () => {} });
+    assert.equal(result.status.status, "failed");
+    assert.match(result.status.error, /timed out|timeout|failed/i);
+    assert.ok(Date.now() - started < 2_000, "startup timeout settles promptly");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("connectRemote enforces the request timeout during catalog discovery", async () => {
+  const server = createServer(async (req, res) => {
+    if (req.method !== "POST") {
+      res.writeHead(405);
+      res.end();
+      return;
+    }
+    const body = await parseBody(req);
+    if (body.method === "initialize") {
+      res.writeHead(200, { "Content-Type": "application/json", "Mcp-Session-Id": "request-timeout" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {
+        protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "timeout-fixture", version: "1" },
+      } }));
+      return;
+    }
+    // Deliberately leave tools/list pending so the SDK request timeout fires.
+    if (body.method === "tools/list") return;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const agentDir = tempAgent("pi-code-mcp-remote-request-timeout-");
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+  try {
+    const started = Date.now();
+    const result = await connectRemote({ url, agentDir, oauth: false, timeout: { startup: 500, request: 100 }, onRedirect: () => {} });
+    assert.equal(result.status.status, "failed");
+    assert.match(result.status.error, /timed out|timeout|request/i);
+    assert.ok(Date.now() - started < 2_000, "request timeout settles promptly");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("connectRemote falls back to SSE when Streamable HTTP is unavailable", async () => {
   const fixture = await startFixture("sse", ["sse_tool"]);
   const agentDir = tempAgent("pi-code-mcp-sse-agent-");
@@ -186,6 +268,28 @@ test("connectRemote falls back to SSE when Streamable HTTP is unavailable", asyn
     await result.client?.close();
     await fixture.close();
     rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("manager disconnect closes an active remote transport before logout", async () => {
+  const fixture = await startFixture("streamable", ["disconnect_tool"]);
+  const agentDir = tempAgent("pi-code-mcp-manager-disconnect-agent-");
+  const projectRoot = tempAgent("pi-code-mcp-manager-disconnect-project-");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    fixture: { type: "remote", url: fixture.url, oauth: false },
+  } } }));
+  const manager = createMcpManager({ agentDir, projectRoot });
+  try {
+    await manager.start();
+    assert.equal(manager.status("fixture")?.status, "connected");
+    await manager.disconnect("fixture");
+    assert.notEqual(manager.status("fixture")?.status, "connected");
+  } finally {
+    await manager.close();
+    await fixture.close();
+    rmSync(agentDir, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
   }
 });
 
@@ -236,12 +340,11 @@ test("connectRemote aborts a hanging SSE startup when the signal fires or startu
       connecting.catch((error) => ({ aborted: true, error: String(error) })),
       new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4000)),
     ]);
-    const resolved = result as { aborted?: boolean; timedOut?: boolean; status?: { status: string } };
-    assert.ok(
-      resolved.aborted !== true || resolved.timedOut !== true,
-      "abort must settle the connect rather than hang",
-    );
-    assert.ok(resolved.status === undefined || resolved.status.status === "failed" || resolved.status.status === "needs_auth", "abort yields a bounded terminal status");
+    const resolved = result as { aborted?: boolean; timedOut?: boolean; error?: string; status?: { status: string; error?: string } };
+    assert.equal(resolved.timedOut, undefined, "abort must settle the connect rather than hang");
+    assert.equal(resolved.aborted, undefined, "connectRemote resolves a bounded status instead of hanging");
+    assert.equal(resolved.status?.status, "failed");
+    assert.match(resolved.status?.error ?? "", /aborted/i, "the failure names the abort");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     rmSync(agentDir, { recursive: true, force: true });

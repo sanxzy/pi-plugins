@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -132,6 +133,64 @@ test("registerMcpLifecycle exposes an /mcp command that reports status and handl
 
   await shutdown({ reason: "quit" }, noUiCtx);
   rmSync(root, { recursive: true, force: true });
+});
+
+test("/mcp logout closes the active transport before clearing credentials", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-cmd-logout-"));
+  const agentDir = join(root, "agent");
+  let sessions = 0;
+  // A minimal streamable fixture that counts initialize sessions.
+  const server = createServer(async (req, res) => {
+    if (req.method !== "POST") {
+      res.writeHead(405);
+      res.end();
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: number; method: string };
+    res.writeHead(200, { "Content-Type": "application/json", "Mcp-Session-Id": `s${sessions}` });
+    if (body.method === "initialize") {
+      sessions += 1;
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {
+        protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "cmd-fixture", version: "1" },
+      } }));
+      return;
+    }
+    if (body.method === "tools/list") {
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "cmd_tool", inputSchema: { type: "object" } }] } }));
+      return;
+    }
+    res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    remote: { type: "remote", url, oauth: false },
+  } } }));
+  const pi = fakePi();
+  const sent: string[] = [];
+  const realPi = { ...pi, sendUserMessage: (content: string) => { sent.push(content); } };
+  registerMcpLifecycle(realPi as never, { agentDir });
+  const startup = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  const cmdHandler = pi.commands.get("mcp")?.handler;
+  assert.ok(cmdHandler);
+  const noUiCtx = { ...context(join(root, "project"), "cls"), hasUI: false, ui: {} };
+  try {
+    await startup({ reason: "startup" }, noUiCtx);
+    await cmdHandler("status", noUiCtx);
+    assert.ok(sent.some((line) => line.includes("remote") && line.includes("connected")), "connected before logout");
+    await cmdHandler("logout remote", noUiCtx);
+    assert.ok(sent.some((line) => line.toLowerCase().includes("logged out")), "logout reports completion");
+    await cmdHandler("status", noUiCtx);
+    assert.ok(sent.some((line) => line.includes("remote") && !line.includes("connected")), "transport closed after logout");
+  } finally {
+    await shutdown({ reason: "quit" }, noUiCtx);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("logout removes committed credentials for a remote server", async () => {

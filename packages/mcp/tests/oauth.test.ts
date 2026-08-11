@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -51,6 +52,18 @@ test("pending tokens commit only after success and never replace working credent
   rmSync(agentDir, { recursive: true, force: true });
 });
 
+test("invalidate all preserves committed tokens during failed reauthentication", async () => {
+  const agentDir = tempAgent("pi-code-mcp-oauth-invalidate-");
+  const url = "https://one.example/mcp";
+  const store = createDefaultAuthStore(agentDir);
+  store.update(url, () => ({ tokens: { accessToken: "working-token", refreshToken: "working-refresh" } }));
+  const provider = providerFor(agentDir, url);
+  await provider.invalidateCredentials("all");
+  assert.equal((await provider.tokens())?.access_token, "working-token");
+  assert.equal(createDefaultAuthStore(agentDir).getForUrl(url)?.tokens?.refreshToken, "working-refresh");
+  rmSync(agentDir, { recursive: true, force: true });
+});
+
 test("auth store is only written for the exact server URL", async () => {
   const agentDir = tempAgent("pi-code-mcp-oauth-url-");
   const provider = providerFor(agentDir, "https://one.example/mcp");
@@ -87,6 +100,24 @@ test("callback server binds loopback, validates state, and resolves matching flo
 
   await stopCallbackServer();
   assert.equal(isCallbackServerRunning(), false);
+});
+
+test("occupied callback ports fail instead of returning an unmanaged endpoint", async () => {
+  const occupied = createServer((_req, res) => {
+    res.writeHead(200);
+    res.end("occupied");
+  });
+  await new Promise<void>((resolve) => occupied.listen(0, "127.0.0.1", resolve));
+  const port = (occupied.address() as { port: number }).port;
+  try {
+    await assert.rejects(
+      ensureCallbackServer(`http://127.0.0.1:${port}/mcp/oauth/callback`),
+      /occupied|already in use|EADDRINUSE/i,
+    );
+  } finally {
+    await new Promise<void>((resolve) => occupied.close(() => resolve()));
+    await stopCallbackServer();
+  }
 });
 
 test("stopping the callback server rejects still-pending flows", async () => {
