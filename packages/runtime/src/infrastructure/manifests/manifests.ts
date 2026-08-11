@@ -44,6 +44,9 @@ export function writeProjectManifest(projectRoot: string, now = new Date().toISO
   const projectId = encodeProjectId(canonicalRoot);
   const path = homeProjectManifestFile(projectId);
   const existing = existsSync(path) ? readProjectManifestFromPath(path) : undefined;
+  if (existing && existing.canonicalRoot !== canonicalRoot) {
+    throw new Error(`Project manifest root mismatch: ${path}`);
+  }
   const manifest: ProjectManifest = {
     canonicalRoot,
     createdAt: existing?.createdAt ?? now,
@@ -55,12 +58,63 @@ export function writeProjectManifest(projectRoot: string, now = new Date().toISO
 
 /** Read the project manifest for a project root, failing closed on corruption. */
 export function readProjectManifest(projectRoot: string): ProjectManifest {
-  const path = homeProjectManifestFile(encodeProjectId(projectRoot));
-  return readProjectManifestFromPath(path);
+  const canonicalRoot = canonicalProjectRoot(projectRoot);
+  const path = homeProjectManifestFile(encodeProjectId(canonicalRoot));
+  const manifest = readProjectManifestFromPath(path);
+  if (manifest.canonicalRoot !== canonicalRoot) {
+    throw new Error(`Project manifest root mismatch: ${path}`);
+  }
+  return manifest;
 }
 
 function readProjectManifestFromPath(path: string): ProjectManifest {
-  return readPrivateJson<ProjectManifest>(path);
+  return validateProjectManifest(readPrivateJson<Partial<ProjectManifest>>(path), path);
+}
+
+/** Validate a project manifest, failing closed on structural or root mismatch. */
+function validateProjectManifest(raw: Partial<ProjectManifest>, path: string): ProjectManifest {
+  if (
+    typeof raw.canonicalRoot !== "string" ||
+    typeof raw.createdAt !== "string" ||
+    typeof raw.updatedAt !== "string"
+  ) {
+    throw new Error(`Invalid project manifest: ${path}`);
+  }
+  return raw as ProjectManifest;
+}
+
+/** Validate a session manifest, failing closed on structural corruption. */
+function validateSessionManifest(raw: Partial<SessionManifest>, path: string): SessionManifest {
+  if (
+    typeof raw.sessionId !== "string" ||
+    typeof raw.active !== "boolean" ||
+    typeof raw.canonicalRoot !== "string" ||
+    typeof raw.startedAt !== "string" ||
+    typeof raw.lastSeenAt !== "string"
+  ) {
+    throw new Error(`Invalid session manifest: ${path}`);
+  }
+  return raw as SessionManifest;
+}
+
+/** Validate an agent manifest, failing closed on structural corruption. */
+function validateAgentManifest(raw: Partial<AgentManifest>, path: string): AgentManifest {
+  if (
+    typeof raw.agentId !== "string" ||
+    typeof raw.piSessionId !== "string" ||
+    typeof raw.rootSessionId !== "string" ||
+    typeof raw.depth !== "number" ||
+    typeof raw.description !== "string" ||
+    typeof raw.subagentType !== "string" ||
+    typeof raw.status !== "string" ||
+    typeof raw.delivered !== "boolean" ||
+    typeof raw.createdAt !== "string" ||
+    typeof raw.updatedAt !== "string" ||
+    !Array.isArray(raw.parentAgentIds)
+  ) {
+    throw new Error(`Invalid agent manifest: ${path}`);
+  }
+  return raw as AgentManifest;
 }
 
 /**
@@ -107,7 +161,12 @@ export function startRootSession(input: StartRootSessionInput): StartRootSession
   const now = input.now ?? new Date().toISOString();
   const sessionId = input.sessionId;
   const sessionPath = homeSessionManifestFile(encodeProjectId(projectRoot), sessionId);
-  const existing = existsSync(sessionPath) ? readPrivateJson<SessionManifest>(sessionPath) : undefined;
+  const existing = existsSync(sessionPath)
+    ? validateSessionManifest(readPrivateJson<Partial<SessionManifest>>(sessionPath), sessionPath)
+    : undefined;
+  if (existing && existing.canonicalRoot !== projectRoot) {
+    throw new Error(`Session manifest root mismatch: ${sessionPath}`);
+  }
   const manifest: SessionManifest = {
     sessionId,
     sessionFile: input.sessionFile ?? existing?.sessionFile,
@@ -153,7 +212,14 @@ export function finishRootSession(input: FinishRootSessionInput): FinishRootSess
 /** Read the root-session manifest, failing closed on corruption. */
 export function readSessionManifest(projectRoot: string, sessionId: string): SessionManifest {
   const path = homeSessionManifestFile(encodeProjectId(projectRoot), sessionId);
-  return readPrivateJson<SessionManifest>(path);
+  const manifest = validateSessionManifest(readPrivateJson<Partial<SessionManifest>>(path), path);
+  if (manifest.canonicalRoot !== canonicalProjectRoot(projectRoot)) {
+    throw new Error(`Session manifest root mismatch: ${path}`);
+  }
+  if (manifest.sessionId !== sessionId) {
+    throw new Error(`Session manifest id mismatch: ${path}`);
+  }
+  return manifest;
 }
 
 /** A single append-only agent lifecycle event. */
@@ -319,6 +385,12 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
     eventsPath,
     projectId,
     create({ description, subagentType }): void {
+      if (existsSync(manifestPath)) {
+        const existingManifest = validateAgentManifest(readPrivateJson<Partial<AgentManifest>>(manifestPath), manifestPath);
+        if (existingManifest.agentId !== agentId || existingManifest.rootSessionId !== rootSessionId) {
+          throw new Error(`Agent manifest identity mismatch: ${manifestPath}`);
+        }
+      }
       const existing = foldAgentEvents(eventsPath);
       if (existing) {
         if (!existsSync(manifestPath)) writePrivateJson(manifestPath, existing);
@@ -368,5 +440,9 @@ export function readAgentManifest(projectRoot: string, rootSessionId: string, jo
   const projectId = encodeProjectId(projectRoot);
   const agentId = canonicalAgentIdFromJobId(jobId);
   const path = homeAgentManifestFile(projectId, rootSessionId, agentId, (parentAgentIds ?? []).map(canonicalAgentIdFromJobId));
-  return readPrivateJson<AgentManifest>(path);
+  const manifest = validateAgentManifest(readPrivateJson<Partial<AgentManifest>>(path), path);
+  if (manifest.agentId !== agentId || manifest.rootSessionId !== rootSessionId) {
+    throw new Error(`Agent manifest identity mismatch: ${path}`);
+  }
+  return manifest;
 }

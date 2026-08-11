@@ -207,7 +207,6 @@ function startBackgroundAgent(
     projectRoot: ctx.cwd,
     rootSessionId: pool.rootSessionId ?? parentSessionId,
     jobId,
-    piSessionId: jobId,
     parentAgentIds: allParentAgentIds,
     rootAgentId: parent?.rootJobId,
     depth: job.depth,
