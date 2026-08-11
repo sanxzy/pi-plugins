@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
@@ -33,10 +33,15 @@ export interface ReferenceCatalogReadResult {
 
 export type AtomicReferenceWrite = (filePath: string, content: string) => Promise<void>;
 
+export interface ReferenceFileSystem {
+  readonly rename?: (source: string, destination: string) => Promise<void>;
+}
+
 export interface ReferenceCatalogOptions {
   readonly agentDir?: string;
   readonly homeDir?: string;
   readonly atomicWrite?: AtomicReferenceWrite;
+  readonly fileSystem?: ReferenceFileSystem;
 }
 
 export interface ReferenceCatalog {
@@ -59,7 +64,8 @@ export function createReferenceCatalog(options: ReferenceCatalogOptions = {}): R
   const agentDir = options.agentDir ?? getAgentDir();
   const homeDir = options.homeDir ?? homedir();
   const filePath = referenceConfigFile(agentDir);
-  const atomicWrite = options.atomicWrite ?? writeReferenceJson;
+  const atomicWrite = options.atomicWrite ?? ((path: string, content: string) =>
+    writeReferenceJson(path, content, options.fileSystem));
 
   return {
     filePath,
@@ -104,12 +110,14 @@ async function readReferenceCatalog(filePath: string, homeDir: string): Promise<
       diagnostics.push("A references entry has an invalid alias");
       continue;
     }
-    const source = validateReferenceEntry(name, document.references[name]);
-    if (!source.ok) {
+    const rawEntry = document.references[name];
+    const source = validateReferenceEntry(name, rawEntry);
+    const fallback = source.ok ? undefined : rejectedRelativeLocalSource(rawEntry);
+    if (!source.ok && fallback === undefined) {
       diagnostics.push(`Reference '${name}' is invalid`);
       continue;
     }
-    const resolved = await resolveCatalogEntry(name, source.value, homeDir);
+    const resolved = await resolveCatalogEntry(name, source.ok ? source.value : fallback!, homeDir);
     entries.push(resolved.entry);
     if (resolved.diagnostic) diagnostics.push(resolved.diagnostic);
   }
@@ -133,16 +141,27 @@ async function resolveCatalogEntry(
     };
   }
 
-  const configuredPath = source.path.startsWith("~/") ? join(homeDir, source.path.slice(2)) : source.path;
+  const isHomeRelative = source.path.startsWith("~/");
+  const configuredPath = isHomeRelative ? join(homeDir, source.path.slice(2)) : source.path;
   const absolutePath = isAbsolute(configuredPath) ? configuredPath : undefined;
   if (!absolutePath) {
     return {
-      entry: { ...metadata, path: configuredPath, status: "unavailable", diagnostic: "Local path is not absolute" },
+      entry: { ...metadata, path: source.path, status: "unavailable", diagnostic: "Local path is not absolute" },
+      diagnostic: `Reference '${name}' has an unavailable local path`,
+    };
+  }
+  if (isHomeRelative && !isWithin(homeDir, absolutePath)) {
+    return {
+      entry: { ...metadata, status: "unavailable", diagnostic: "Home-relative path escapes the configured home" },
       diagnostic: `Reference '${name}' has an unavailable local path`,
     };
   }
   try {
-    const canonicalPath = await realpath(absolutePath);
+    let canonicalPath = await realpath(absolutePath);
+    if (isHomeRelative) {
+      const canonicalHome = await realpath(homeDir);
+      if (!isWithin(canonicalHome, canonicalPath)) throw new Error("path escapes home");
+    }
     const information = await stat(canonicalPath);
     if (!information.isDirectory()) throw new Error("not a directory");
     return { entry: { ...metadata, path: canonicalPath, status: "available" } };
@@ -154,15 +173,42 @@ async function resolveCatalogEntry(
   }
 }
 
-async function writeReferenceJson(filePath: string, content: string): Promise<void> {
+function isWithin(parent: string, child: string): boolean {
+  const parentPath = resolve(parent);
+  const childPath = resolve(child);
+  const remainder = relative(parentPath, childPath);
+  return remainder === "" || (remainder !== ".." && !remainder.startsWith(`..${requirePathSeparator()}`) && !isAbsolute(remainder));
+}
+
+function requirePathSeparator(): string {
+  return process.platform === "win32" ? "\\\\" : "/";
+}
+
+function rejectedRelativeLocalSource(rawEntry: unknown): ReferenceSource | undefined {
+  if (typeof rawEntry === "string") {
+    return rawEntry.startsWith(".") ? { type: "local", path: rawEntry } : undefined;
+  }
+  if (!isRecord(rawEntry) || typeof rawEntry.path !== "string" || Object.prototype.hasOwnProperty.call(rawEntry, "repository")) {
+    return undefined;
+  }
+  if (rawEntry.description !== undefined && typeof rawEntry.description !== "string") return undefined;
+  if (rawEntry.hidden !== undefined && typeof rawEntry.hidden !== "boolean") return undefined;
+  return {
+    type: "local",
+    path: rawEntry.path,
+    ...(rawEntry.description === undefined ? {} : { description: rawEntry.description }),
+    ...(rawEntry.hidden === undefined ? {} : { hidden: rawEntry.hidden }),
+  };
+}
+
+async function writeReferenceJson(filePath: string, content: string, fileSystem?: ReferenceFileSystem): Promise<void> {
   const directory = dirname(filePath);
   const temporaryPath = join(directory, `.${REFERENCES_FILE_NAME}.tmp-${process.pid}-${randomUUID()}`);
   try {
     await mkdir(directory, { recursive: true });
     await writeFile(temporaryPath, content, { encoding: "utf8", mode: REFERENCES_FILE_MODE, flag: "wx" });
     await chmod(temporaryPath, REFERENCES_FILE_MODE);
-    await rename(temporaryPath, filePath);
-    await chmod(filePath, REFERENCES_FILE_MODE);
+    await (fileSystem?.rename ?? rename)(temporaryPath, filePath);
   } catch (error) {
     await rm(temporaryPath, { force: true }).catch(() => undefined);
     throw error;
