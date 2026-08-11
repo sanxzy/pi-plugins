@@ -1,4 +1,5 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
+import { redactDiagnostic } from "./diagnostics.ts";
 
 const DEFAULT_MAX_TEXT = 50_000;
 const DEFAULT_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -97,9 +98,10 @@ export function normalizeCallToolResult(raw: unknown, context: NormalizeContext)
     };
   }
   if (context.transportError) {
+    const safe = boundedText(redactDiagnostic(context.transportError));
     return {
-      content: [{ type: "text", text: `Error: ${boundedText(context.transportError)}` }],
-      details: { ...nativeIdentity, nativeIdentity, isError: true, failure: "transport_error", transportError: boundedText(context.transportError) },
+      content: [{ type: "text", text: `Error: ${safe}` }],
+      details: { ...nativeIdentity, nativeIdentity, isError: true, failure: "transport_error", transportError: safe },
     };
   }
 

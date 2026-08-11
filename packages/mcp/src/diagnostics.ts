@@ -12,7 +12,9 @@ function redactValue(value: string): string {
 export function redactDiagnostic(value: unknown, maxLength = 1_000): string {
   let text = value instanceof Error ? value.message : String(value);
   text = text
-    .replace(/\bAuthorization\s*:\s*(?:Bearer|Basic|Token|token)?\s*\S+/gi, "Authorization=[REDACTED]")
+    .replace(/\bAuthorization\s*[:=]\s*(?:Digest|AWS4-HMAC-SHA256)\s+[^\r\n|;]+/gi, "Authorization=[REDACTED]")
+    .replace(/\bAuthorization\s*[:=]\s*(?:Bearer|Basic|Token|token)\s+\S+/gi, "Authorization=[REDACTED]")
+    .replace(/\bAuthorization\s*[:=]\s*\S+/gi, "Authorization=[REDACTED]")
     .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
     .replace(/(https?:\/\/)([^\s/@:]+)(?::[^\s/@]*)?@/gi, "$1[REDACTED]@")
     .replace(/\bBasic\s+[A-Za-z0-9+/=]+/gi, "Basic [REDACTED]");

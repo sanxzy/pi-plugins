@@ -188,7 +188,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
               agentDir,
               oauth: server.oauth,
               onRedirect: async (url) => {
-                notify(ctx, `MCP auth \"${name}\": open ${url.toString()}`);
+                notify(ctx, `MCP auth \"${name}\": open ${redactDiagnostic(url.toString())}`);
               },
             });
             // When the user completes the browser flow, the loopback callback
