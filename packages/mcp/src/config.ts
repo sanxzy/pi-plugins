@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parse, type ParseError } from "jsonc-parser";
 import { printParseErrorCode } from "jsonc-parser";
@@ -42,30 +41,25 @@ export interface McpRemoteServerConfig {
 export type McpServerConfig = McpLocalServerConfig | McpRemoteServerConfig;
 
 export interface McpConfig {
-  /** Global default timeouts when a server does not specify them. */
   timeout?: McpTimeoutConfig;
   servers: Record<string, McpServerConfig>;
 }
 
 export interface McpConfigLoadOptions {
-  /**
-   * Environment used to expand `${VAR}` references in configuration string
-   * values and to seed the local process environment. Defaults to
-   * `process.env` when omitted.
-   */
+  /** Environment used for `${VAR}` expansion. Defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
-  /**
-   * Working directory used to resolve relative local server `cwd` values and
-   * as the base for the project configuration path. Defaults to
-   * `process.cwd()` when omitted.
-   */
+  /** Base directory for relative local-server cwd values. */
   cwd?: string;
-  /** Optional absolute agent directory override for tests. */
-  agentDir?: string;
+}
+
+export interface McpConfigIssue {
+  source: "user" | "project";
+  message: string;
+  server?: string;
 }
 
 export type McpConfigResult =
-  | { ok: true; value: McpConfig }
+  | { ok: true; value: McpConfig; issues: McpConfigIssue[] }
   | { ok: false; code: "missing" | "invalid" | "io"; message: string };
 
 const TOKEN_PATTERN = /[A-Za-z0-9._~+/=-]{12,}/g;
@@ -79,32 +73,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Resolve the user agent directory, honoring an explicit override. */
+/** Resolve the user agent directory through the Pi SDK environment contract. */
 export function userAgentDir(override?: string): string {
-  if (override) return override;
-  return getAgentDir();
+  return override ?? getAgentDir();
 }
 
-/** Absolute path of the user-level MCP configuration file. */
 export function userConfigPath(agentDir: string): string {
   return join(agentDir, USER_CONFIG_NAME);
 }
 
-/** Absolute path of the project-level MCP configuration file. */
 export function projectConfigPath(projectRoot: string): string {
   return join(projectRoot, PROJECT_CONFIG_RELATIVE);
 }
 
-/**
- * Replace `${VAR}` references in a string using the supplied environment.
- * Unknown references expand to the empty string so missing values degrade
- * safely without throwing.
- */
+/** Expand `${VAR}` references; unknown variables become empty strings. */
 export function expandEnv(value: string, env: NodeJS.ProcessEnv): string {
   return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => env[name] ?? "");
 }
 
-/** Recursively expand environment references inside a parsed JSONC document. */
 function expandNode(node: unknown, env: NodeJS.ProcessEnv): unknown {
   if (typeof node === "string") return expandEnv(node, env);
   if (Array.isArray(node)) return node.map((item) => expandNode(item, env));
@@ -116,7 +102,6 @@ function expandNode(node: unknown, env: NodeJS.ProcessEnv): unknown {
   return node;
 }
 
-/** Parse JSONC with comments and trailing commas into a plain value. */
 export function parseJsonc(content: string): { value: unknown } | { error: string } {
   const errors: ParseError[] = [];
   const value = parse(content, errors, { allowTrailingComma: true, disallowComments: false });
@@ -127,7 +112,6 @@ export function parseJsonc(content: string): { value: unknown } | { error: strin
   return { value };
 }
 
-/** Read and parse a JSONC file, returning a structured result. */
 export function readJsoncFile(
   filePath: string,
 ): { ok: false; code: "missing" | "invalid" | "io"; message: string } | { ok: true; value: unknown } {
@@ -154,11 +138,14 @@ function mergeTimeouts(left?: McpTimeoutConfig, right?: McpTimeoutConfig): McpTi
   };
 }
 
-/**
- * Deep-merge two server configurations, treating the right (`project`) entry
- * as authoritative for scalar fields while preserving disjoint fields and
- * nested timeout values from the left (`user`) entry.
- */
+function mergeRecordMap(
+  left?: Record<string, string>,
+  right?: Record<string, string>,
+): Record<string, string> | undefined {
+  if (!left && !right) return undefined;
+  return { ...(left ?? {}), ...(right ?? {}) };
+}
+
 function mergeServer(left: McpServerConfig, right: McpServerConfig): McpServerConfig {
   if (left.type !== right.type) return right;
   if (left.type === "local" && right.type === "local") {
@@ -166,7 +153,7 @@ function mergeServer(left: McpServerConfig, right: McpServerConfig): McpServerCo
       type: "local",
       command: right.command,
       cwd: right.cwd ?? left.cwd,
-      environment: right.environment ?? left.environment,
+      environment: mergeRecordMap(left.environment, right.environment),
       disabled: right.disabled ?? left.disabled,
       timeout: mergeTimeouts(left.timeout, right.timeout),
     };
@@ -175,13 +162,32 @@ function mergeServer(left: McpServerConfig, right: McpServerConfig): McpServerCo
     return {
       type: "remote",
       url: right.url,
-      headers: right.headers ?? left.headers,
+      headers: mergeRecordMap(left.headers, right.headers),
       oauth: right.oauth ?? left.oauth,
       disabled: right.disabled ?? left.disabled,
       timeout: mergeTimeouts(left.timeout, right.timeout),
     };
   }
   return right;
+}
+
+function parseTimeout(value: unknown): { value: McpTimeoutConfig | undefined } | { error: string } {
+  if (value === undefined) return { value: undefined };
+  if (!isRecord(value)) return { error: "MCP timeout must be an object with optional startup/request numbers" };
+  const result: McpTimeoutConfig = {};
+  if (value.startup !== undefined) {
+    if (typeof value.startup !== "number" || !Number.isFinite(value.startup)) {
+      return { error: "MCP timeout.startup must be a finite number" };
+    }
+    result.startup = value.startup;
+  }
+  if (value.request !== undefined) {
+    if (typeof value.request !== "number" || !Number.isFinite(value.request)) {
+      return { error: "MCP timeout.request must be a finite number" };
+    }
+    result.request = value.request;
+  }
+  return { value: result };
 }
 
 function parseServer(name: string, value: unknown): McpServerConfig | { error: string } {
@@ -211,9 +217,8 @@ function parseServer(name: string, value: unknown): McpServerConfig | { error: s
     if (isRecord(value.headers)) {
       result.headers = Object.fromEntries(Object.entries(value.headers).map(([key, item]) => [key, String(item)]));
     }
-    if (value.oauth === false) {
-      result.oauth = false;
-    } else if (isRecord(value.oauth)) {
+    if (value.oauth === false) result.oauth = false;
+    else if (isRecord(value.oauth)) {
       const oauth: McpOAuthConfig = {};
       if (typeof value.oauth.client_id === "string") oauth.client_id = value.oauth.client_id;
       if (typeof value.oauth.client_secret === "string") oauth.client_secret = value.oauth.client_secret;
@@ -231,96 +236,81 @@ function parseServer(name: string, value: unknown): McpServerConfig | { error: s
   return { error: `MCP server "${name}" has unsupported type` };
 }
 
-function parseTimeout(value: unknown): { value: McpTimeoutConfig | undefined } | { error: string } {
-  if (value === undefined) return { value: undefined };
-  if (!isRecord(value)) return { error: "MCP timeout must be an object with optional startup/request numbers" };
-  const result: McpTimeoutConfig = {};
-  if (value.startup !== undefined) {
-    if (typeof value.startup !== "number" || !Number.isFinite(value.startup)) {
-      return { error: "MCP timeout.startup must be a finite number" };
-    }
-    result.startup = value.startup;
-  }
-  if (value.request !== undefined) {
-    if (typeof value.request !== "number" || !Number.isFinite(value.request)) {
-      return { error: "MCP timeout.request must be a finite number" };
-    }
-    result.request = value.request;
-  }
-  return { value: result };
+interface ParsedDocument {
+  config: McpConfig;
+  issues: Array<{ message: string; server?: string }>;
 }
 
-function parseConfigDocument(document: unknown): McpConfig | { error: string; server?: string } {
+function parseConfigDocument(document: unknown): ParsedDocument | { error: string } {
   if (!isRecord(document)) return { error: "MCP configuration must be an object" };
   const root = document as Record<string, unknown>;
   const config: McpConfig = { servers: {} };
+  const issues: Array<{ message: string; server?: string }> = [];
+  const mcp = root.mcp;
 
-  // Global timeout defaults may live at the top of the document.
-  if (root.timeout !== undefined) {
-    const timeout = parseTimeout(root.timeout);
-    if ("error" in timeout) return { error: timeout.error };
-    config.timeout = timeout.value;
-  }
+  if (mcp === undefined) return { config, issues };
+  if (!isRecord(mcp)) return { error: "MCP configuration \"mcp\" must be an object" };
 
-  if (root.mcp === undefined) return config;
-  if (!isRecord(root.mcp)) return { error: "MCP configuration \"mcp\" must be an object" };
-  const mcp = root.mcp as Record<string, unknown>;
+  const timeout = parseTimeout(mcp.timeout);
+  if ("error" in timeout) return { error: timeout.error };
+  if (timeout.value) config.timeout = timeout.value;
 
-  if (mcp.servers === undefined) return config;
+  if (mcp.servers === undefined) return { config, issues };
   if (!isRecord(mcp.servers)) return { error: "MCP configuration \"mcp.servers\" must be an object of servers" };
   for (const [name, entry] of Object.entries(mcp.servers)) {
     const parsed = parseServer(name, entry);
-    if ("error" in parsed) return { error: parsed.error, server: name };
-    config.servers[name] = parsed;
+    if ("error" in parsed) issues.push({ server: name, message: parsed.error });
+    else config.servers[name] = parsed;
   }
-  return config;
+  return { config, issues };
 }
 
-/**
- * Load, parse, expand, validate, and deep-merge the user-level and project-level
- * MCP configuration sources. Missing sources are harmless. Invalid files or
- * individual invalid entries fail closed with a structured result that never
- * exposes resolved secret values.
- */
+/** Resolve local-process environment and configured overrides for a server. */
+export function resolveLocalEnvironment(
+  server: McpLocalServerConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const inherited = Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
+  return { ...inherited, ...(server.environment ?? {}) };
+}
+
+/** Resolve a local server cwd relative to the current session cwd. */
+export function resolveLocalCwd(server: McpLocalServerConfig, cwd: string): string {
+  return resolve(cwd, server.cwd ?? ".");
+}
+
+/** Load both config sources, retaining valid entries and structured diagnostics. */
 export function loadMcpConfig(
   agentDir: string,
   projectRoot: string,
   options: McpConfigLoadOptions = {},
 ): McpConfigResult {
   const env = options.env ?? process.env;
-  const cwd = options.cwd ?? process.cwd();
-  const userPath = userConfigPath(agentDir);
-  const projectPath = projectConfigPath(projectRoot);
-
-  const userRead = readJsoncFile(userPath);
-  let userConfig: McpConfig | undefined;
-  if (userRead.ok === true) {
-    const parsed = parseConfigDocument(userRead.value);
-    if ("error" in parsed) {
-      return { ok: false, code: "invalid", message: `Invalid user MCP configuration: ${parsed.error}` };
+  const issues: McpConfigIssue[] = [];
+  const readSource = (source: "user" | "project", filePath: string): McpConfig | undefined => {
+    const read = readJsoncFile(filePath);
+    if (read.ok === false) {
+      if (read.code !== "missing") issues.push({ source, message: read.message });
+      return undefined;
     }
-    userConfig = parsed;
-  } else if (userRead.code !== "missing") {
-    return { ok: false, code: userRead.code, message: userRead.message };
-  }
-
-  const projectRead = readJsoncFile(projectPath);
-  let projectConfig: McpConfig | undefined;
-  if (projectRead.ok === true) {
-    const parsed = parseConfigDocument(projectRead.value);
+    const parsed = parseConfigDocument(read.value);
     if ("error" in parsed) {
-      // A broken project file must not silently disable valid user servers.
-      return { ok: false, code: "invalid", message: `Invalid project MCP configuration: ${parsed.error}` };
+      issues.push({ source, message: parsed.error });
+      return undefined;
     }
-    projectConfig = parsed;
-  } else if (projectRead.code !== "missing") {
-    return { ok: false, code: projectRead.code, message: projectRead.message };
-  }
+    issues.push(...parsed.issues.map((issue) => ({ source, ...issue })));
+    return parsed.config;
+  };
 
-  // Merge remaining into single config.
-  const merged: McpConfig = { servers: {} };
-  if (userConfig?.timeout) merged.timeout = userConfig.timeout;
-  if (projectConfig?.timeout) merged.timeout = mergeTimeouts(merged.timeout, projectConfig.timeout);
+  const userConfig = readSource("user", userConfigPath(agentDir));
+  const projectConfig = readSource("project", projectConfigPath(projectRoot));
+  const merged: McpConfig = {
+    timeout: mergeTimeouts(userConfig?.timeout, projectConfig?.timeout),
+    servers: {},
+  };
+  if (!merged.timeout) delete merged.timeout;
 
   const userServers = userConfig?.servers ?? {};
   const projectServers = projectConfig?.servers ?? {};
@@ -329,10 +319,5 @@ export function loadMcpConfig(
     merged.servers[name] = userServers[name] ? mergeServer(userServers[name], entry) : entry;
   }
 
-  // Expand environment references in string fields (after validation to keep
-  // errors stable), and make the environment available for callers.
-  const expandedValue = expandNode(merged, env);
-
-  void cwd;
-  return { ok: true, value: expandedValue as McpConfig };
+  return { ok: true, value: expandNode(merged, env) as McpConfig, issues };
 }

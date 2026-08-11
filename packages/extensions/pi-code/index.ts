@@ -24,6 +24,7 @@ import {
   createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
+import { registerMcpLifecycle } from "@xzy-ai/mcp";
 import type {
   AgentDetails,
   AgentErrorDetails,
@@ -57,6 +58,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
     expandCommand: (name, args) => expander.expand(name, args),
   });
   registerTelegramLifecycle(pi, { getCommands: getMenuCommands });
+  registerMcpLifecycle(pi);
   registerQuestionTool(pi);
   registerAgentTool(pi);
   registerCancelTool(pi);

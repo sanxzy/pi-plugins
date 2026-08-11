@@ -25,6 +25,8 @@
       "@xzy-ai/tui/*": ["./packages/tui/src/*", "./packages/tui/src/*.ts"],
       "@xzy-ai/channels": ["./packages/channels/src/index.ts"],
       "@xzy-ai/channels/*": ["./packages/channels/src/*", "./packages/channels/src/*.ts"],
+      "@xzy-ai/mcp": ["./packages/mcp/src/index.ts"],
+      "@xzy-ai/mcp/*": ["./packages/mcp/src/*", "./packages/mcp/src/*.ts"],
       "@xzy-ai/pi-code": ["./packages/extensions/pi-code/index.ts"]
     }
   }

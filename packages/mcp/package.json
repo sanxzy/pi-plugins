@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/config.test.ts"
+    "test": "node --test --import tsx tests/config.test.ts tests/manager.test.ts tests/lifecycle.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.2",

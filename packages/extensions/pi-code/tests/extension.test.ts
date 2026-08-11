@@ -58,6 +58,7 @@ test("pi-code extension registers Telegram setup and goal workflow alongside exi
   assert.equal(commands.filter((name) => name === "goal").length, 1, "goal command registered exactly once");
   assert.ok(events.includes("session_start"), "session_start lifecycle handler registered");
   assert.ok(events.includes("session_shutdown"), "session_shutdown lifecycle handler registered");
+  assert.ok(events.filter((event) => event === "session_start").length >= 2, "MCP lifecycle registers session_start");
   assert.ok(events.includes("session_before_switch"), "goal replacement gate is registered");
 });
 
