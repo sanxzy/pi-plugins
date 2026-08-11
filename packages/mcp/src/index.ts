@@ -39,6 +39,17 @@ export {
   type McpResourceResult,
 } from "./prompts-resources.ts";
 export {
+  evaluatePolicy,
+  globToRegExp,
+  mergeMcpPolicies,
+  policyFromConfig,
+  type McpPolicy,
+  type PolicyDecision,
+  type PolicyEffect,
+  type PolicyRule,
+  type PolicyTarget,
+} from "./policy.ts";
+export {
   McpPromptsResourcesExposer,
   type McpAuthorize,
   type McpManagerLike,

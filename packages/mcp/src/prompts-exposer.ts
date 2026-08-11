@@ -4,7 +4,12 @@ import { NameRegistry } from "./naming.ts";
 import { promptResultToText, resourceResultToText, type McpPromptResult, type McpResourceResult } from "./prompts-resources.ts";
 
 /** Authorization hook shared with policy (Phase 6 wires the real rules). */
-export type McpAuthorize = (kind: "prompt" | "resource", serverName: string, name: string) => Promise<boolean> | boolean;
+export type McpAuthorize = (
+  kind: "tool" | "prompt" | "resource",
+  serverName: string,
+  name: string,
+  ctx?: ExtensionContext,
+) => Promise<boolean> | boolean;
 
 export interface McpReadPrompt {
   (serverName: string, nativeName: string, args: Record<string, string>, signal: AbortSignal | undefined): Promise<McpPromptResult>;
@@ -91,7 +96,7 @@ export class McpPromptsResourcesExposer {
       return;
     }
     const [serverName, nativeName] = splitIdentity(identity);
-    const allowed = this.options.authorize ? await this.options.authorize("prompt", serverName, nativeName) : true;
+    const allowed = this.options.authorize ? await this.options.authorize("prompt", serverName, nativeName, ctx) : true;
     if (!allowed) {
       this.output(ctx, "Error: MCP prompt denied by policy.");
       return;
@@ -106,9 +111,9 @@ export class McpPromptsResourcesExposer {
       label: "MCP resources list",
       description: "List MCP resources from a configured server. Use mcp_resources_read to read a URI.",
       parameters: { type: "object", properties: { server: { type: "string" } }, required: ["server"] } as never,
-      execute: async (_id, params: { server: string }, _signal, _onUpdate, _ctx) => {
+      execute: async (_id, params: { server: string }, _signal, _onUpdate, ctx) => {
         const server = String(params?.server ?? "");
-        if (this.options.authorize && !(await this.options.authorize("resource", server, ""))) {
+        if (this.options.authorize && !(await this.options.authorize("resource", server, "", ctx))) {
           return { content: [{ type: "text", text: "Error: MCP resource listing denied by policy" }], details: { server, denied: true } };
         }
         const resources = listResources(server);
@@ -127,10 +132,10 @@ export class McpPromptsResourcesExposer {
         properties: { server: { type: "string" }, uri: { type: "string" } },
         required: ["server", "uri"],
       } as never,
-      execute: async (_id, params: { server: string; uri: string }, signal, _onUpdate, _ctx) => {
+      execute: async (_id, params: { server: string; uri: string }, signal, _onUpdate, ctx) => {
         const server = String(params?.server ?? "");
         const uri = String(params?.uri ?? "");
-        if (this.options.authorize && !(await this.options.authorize("resource", server, uri))) {
+        if (this.options.authorize && !(await this.options.authorize("resource", server, uri, ctx))) {
           return { content: [{ type: "text", text: "Error: MCP resource read denied by policy" }], details: { server, uri, denied: true } };
         }
         const result = await readResource(server, uri, signal);

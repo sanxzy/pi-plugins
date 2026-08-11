@@ -40,8 +40,16 @@ export interface McpRemoteServerConfig {
 
 export type McpServerConfig = McpLocalServerConfig | McpRemoteServerConfig;
 
+export interface McpConfigPermissions {
+  /** Rule ordering matters; first match wins. */
+  tools?: unknown[];
+  prompts?: unknown[];
+  resources?: unknown[];
+}
+
 export interface McpConfig {
   timeout?: McpTimeoutConfig;
+  permissions?: McpConfigPermissions;
   servers: Record<string, McpServerConfig>;
 }
 
@@ -255,6 +263,13 @@ function parseConfigDocument(document: unknown): ParsedDocument | { error: strin
   if ("error" in timeout) return { error: timeout.error };
   if (timeout.value) config.timeout = timeout.value;
 
+  if (isRecord(mcp.permissions)) {
+    config.permissions = {};
+    if (Array.isArray(mcp.permissions.tools)) config.permissions.tools = mcp.permissions.tools;
+    if (Array.isArray(mcp.permissions.prompts)) config.permissions.prompts = mcp.permissions.prompts;
+    if (Array.isArray(mcp.permissions.resources)) config.permissions.resources = mcp.permissions.resources;
+  }
+
   if (mcp.servers === undefined) return { config, issues };
   if (!isRecord(mcp.servers)) return { error: "MCP configuration \"mcp.servers\" must be an object of servers" };
   for (const [name, entry] of Object.entries(mcp.servers)) {
@@ -311,6 +326,15 @@ export function loadMcpConfig(
     servers: {},
   };
   if (!merged.timeout) delete merged.timeout;
+  if (userConfig?.permissions || projectConfig?.permissions) {
+    merged.permissions = {
+      // Project rules precede user rules because policy evaluation is
+      // first-match-wins and project configuration has precedence.
+      tools: [...(projectConfig?.permissions?.tools ?? []), ...(userConfig?.permissions?.tools ?? [])],
+      prompts: [...(projectConfig?.permissions?.prompts ?? []), ...(userConfig?.permissions?.prompts ?? [])],
+      resources: [...(projectConfig?.permissions?.resources ?? []), ...(userConfig?.permissions?.resources ?? [])],
+    };
+  }
 
   const userServers = userConfig?.servers ?? {};
   const projectServers = projectConfig?.servers ?? {};
