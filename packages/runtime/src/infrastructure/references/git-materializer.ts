@@ -128,7 +128,7 @@ export function createGitMaterializer(options: GitMaterializerOptions = {}): Git
         },
       );
     } catch (error) {
-      throw new Error(sanitizeError(error), { cause: error });
+      throw new Error(sanitizeError(error), { cause: sanitizeCause(error) });
     }
   }
 
@@ -242,6 +242,13 @@ async function currentBranch(localPath: string, run: GitCommandRunner, timeoutMs
 }
 
 async function removeCheckout(localPath: string, signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted) {
+    // Cleanup must still remove partial checkout data even when the originating
+    // Git operation was cancelled; do not gate removal on the cancelled signal.
+    await rm(localPath, { recursive: true, force: true });
+    throwIfAborted(signal);
+    return;
+  }
   throwIfAborted(signal);
   await rm(localPath, { recursive: true, force: true });
   throwIfAborted(signal);
@@ -400,6 +407,10 @@ function sanitizeOutput(value: string): string {
 
 function sanitizeError(error: unknown): string {
   return sanitizeOutput(error instanceof Error ? error.message : String(error));
+}
+
+function sanitizeCause(error: unknown): Error | undefined {
+  return new Error(sanitizeError(error));
 }
 
 function stripGitCredentials(remote: string): string {
