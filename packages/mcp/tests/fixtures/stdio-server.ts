@@ -46,6 +46,10 @@ const server = new Server(
   },
 );
 
+server.setRequestHandler(CallToolRequestSchema, async (request) => ({
+  content: [{ type: "text", text: request.params.name === "current_directory" ? `${process.env.MCP_FIXTURE_LABEL ?? process.cwd()}` : `tool:${request.params.name}` }],
+}));
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   if (mode === "fail-discovery") throw new Error("fixture discovery failed");
   return {

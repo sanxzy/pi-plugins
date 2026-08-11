@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { registerMcpLifecycle } from "../src/index.ts";
-import { userConfigPath, createDefaultAuthStore } from "../src/index.ts";
+import { userConfigPath, projectConfigPath, createDefaultAuthStore } from "../src/index.ts";
 import { dirname } from "node:path";
 
 const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
@@ -47,6 +47,39 @@ function context(cwd: string, sessionId: string) {
     sessionManager: { getSessionId: () => sessionId },
   };
 }
+
+test("simultaneous sessions expose isolated MCP managers and shared tool bindings", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-phase8-isolation-"));
+  const first = join(root, "first");
+  const second = join(root, "second");
+  const agentDir = join(root, "agent");
+  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(first, ".pi"), { recursive: true });
+  mkdirSync(join(second, ".pi"), { recursive: true });
+  writeFileSync(projectConfigPath(first), JSON.stringify({ mcp: { servers: { first: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_LABEL: "first" } } } } }));
+  writeFileSync(projectConfigPath(second), JSON.stringify({ mcp: { servers: { second: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_LABEL: "second" } } } } }));
+  const pi = fakePi();
+  const realPi = { ...pi, sendUserMessage() {}, getAllTools() { return [...pi.tools.values()].map((tool) => ({ name: tool.name })); }, getActiveTools() { return []; }, setActiveTools() {} };
+  registerMcpLifecycle(realPi as never, { agentDir });
+  const start = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  const firstCtx = { ...context(first, "first-session"), hasUI: false, ui: {} };
+  const secondCtx = { ...context(second, "second-session"), hasUI: false, ui: {} };
+  try {
+    await start({ reason: "startup" }, firstCtx);
+    await start({ reason: "startup" }, secondCtx);
+    assert.ok(pi.tools.has("first_current_directory"));
+    assert.ok(pi.tools.has("second_current_directory"));
+    const firstResult = await pi.tools.get("first_current_directory")!.execute("first", {}, undefined, undefined, firstCtx) as { content: Array<{ text: string }> };
+    const secondResult = await pi.tools.get("second_current_directory")!.execute("second", {}, undefined, undefined, secondCtx) as { content: Array<{ text: string }> };
+    assert.match(firstResult.content[0]?.text ?? "", /first/);
+    assert.match(secondResult.content[0]?.text ?? "", /second/);
+  } finally {
+    await shutdown({ reason: "quit" }, firstCtx);
+    await shutdown({ reason: "quit" }, secondCtx);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("registerMcpLifecycle starts isolated managers for each session and stops them", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-lifecycle-"));
