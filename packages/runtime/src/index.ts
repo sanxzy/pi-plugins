@@ -1,7 +1,6 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
 export {
   createReferenceCatalog,
-  type AtomicReferenceWrite,
   type ReferenceAvailability,
   type ReferenceMaterializationStatus,
   type ReferenceCatalog,
