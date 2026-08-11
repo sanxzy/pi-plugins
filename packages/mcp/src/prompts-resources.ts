@@ -62,15 +62,15 @@ export function normalizePromptResult(
   if (context.transportError) {
     return { server, prompt, messages: [], isError: true, failure: "transport_error" };
   }
-  const result = (raw && typeof raw === "object" ? raw : {}) as { messages?: Array<{ role?: string; content?: unknown }> };
+  const result = (raw && typeof raw === "object" ? raw : {}) as {
+    messages?: Array<{ role?: string; content?: unknown }>
+  };
   const messages = (result.messages ?? []).map((message) => {
-    const texts: string[] = [];
-    for (const block of Array.isArray(message.content) ? message.content : []) {
-      if (block && typeof block === "object" && (block as { type?: string }).type === "text") {
-        texts.push(bounded((block as { text?: string }).text));
-      }
-    }
-    return { role: message.role ?? "user", text: texts.join("\n") };
+    const block = message.content;
+    const text = block && typeof block === "object" && (block as { type?: string }).type === "text"
+      ? bounded((block as { text?: string }).text)
+      : "";
+    return { role: message.role ?? "user", text };
   });
   return { server, prompt, messages, isError: false };
 }
@@ -118,9 +118,8 @@ export function normalizeResourceResult(
           push(`[image omitted: attachment exceeds ${MAX_IMAGE_BYTES} bytes]`);
           omitted.push(content.uri ? String(content.uri) : uri);
         } else {
-          parts.push(`[image: ${mime} ${content.uri ?? uri}]`);
+          push(`[image: ${mime} ${content.uri ?? uri}]`);
           contentBlocks.push({ type: "image", data: content.blob, mimeType: mime });
-          total += 64;
         }
       } else {
         push(`[binary resource omitted: ${content.uri ?? uri}]`);
@@ -154,7 +153,8 @@ export function promptResultToText(result: McpPromptResult): string {
               : "MCP prompt error";
     return `Error: ${reason}`;
   }
-  return result.messages.map((m) => `${m.role}: ${m.text}`).join("\n") || "(no prompt output)";
+  const joined = result.messages.map((m) => `${m.role}: ${m.text}`).join("\n");
+  return joined ? limit(joined, MAX_TEXT) : "(no prompt output)";
 }
 
 export function resourceResultToText(result: McpResourceResult): string {
