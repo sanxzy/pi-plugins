@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import type { JobStatus } from "@xzy-ai/core";
 import {
   AGENT_MANIFEST_FILE_NAME,
@@ -107,14 +107,15 @@ export function startRootSession(input: StartRootSessionInput): StartRootSession
   const now = input.now ?? new Date().toISOString();
   const sessionId = input.sessionId;
   const sessionPath = homeSessionManifestFile(encodeProjectId(projectRoot), sessionId);
+  const existing = existsSync(sessionPath) ? readPrivateJson<SessionManifest>(sessionPath) : undefined;
   const manifest: SessionManifest = {
     sessionId,
-    sessionFile: input.sessionFile,
+    sessionFile: input.sessionFile ?? existing?.sessionFile,
     active: true,
     canonicalRoot: projectRoot,
-    pid: input.pid,
-    processStartTime: input.processStartTime,
-    startedAt: now,
+    pid: input.pid ?? existing?.pid,
+    processStartTime: input.processStartTime ?? existing?.processStartTime,
+    startedAt: existing?.startedAt ?? now,
     lastSeenAt: now,
   };
   writePrivateJson(sessionPath, manifest);
@@ -292,7 +293,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
   const parentAgentIds = (input.parentAgentIds ?? []).map(canonicalAgentIdFromJobId);
   const rootAgentId = input.rootAgentId ? canonicalAgentIdFromJobId(input.rootAgentId) : agentId;
   const depth = input.depth ?? (parentAgentIds.length === 0 ? 0 : parentAgentIds.length + 1);
-  const piSessionId = input.piSessionId ?? input.jobId;
+  const piSessionId = input.piSessionId ?? canonicalAgentId(input.jobId);
   const eventsPath = homeAgentEventsFile(projectId, rootSessionId, agentId, parentAgentIds);
   const manifestPath = homeAgentManifestFile(projectId, rootSessionId, agentId, parentAgentIds);
   const agentDir = homeAgentDir(projectId, rootSessionId, agentId, parentAgentIds);
@@ -308,6 +309,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
     // JSONL is append-only. Existing files are already private; the append
     // mode keeps the file owner-only and repairs a reopened permissive file.
     appendFileSync(eventsPath, serialized, { encoding: "utf8", mode: 0o600 });
+    chmodSync(eventsPath, 0o600);
   };
 
   const store: AgentManifestStore = {
@@ -317,6 +319,11 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
     eventsPath,
     projectId,
     create({ description, subagentType }): void {
+      const existing = foldAgentEvents(eventsPath);
+      if (existing) {
+        if (!existsSync(manifestPath)) writePrivateJson(manifestPath, existing);
+        return;
+      }
       const created: AgentLifecycleEvent = {
         type: "agent_created",
         at: input.now ?? new Date().toISOString(),

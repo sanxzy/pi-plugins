@@ -1,6 +1,7 @@
 import type { Job, JobUpdate } from "@xzy-ai/core";
 import type { ChildRunResult } from "@xzy-ai/core";
 import type { DeliveryCoordinator } from "./delivery.ts";
+import type { AgentManifestStore } from "../manifests/manifests.ts";
 
 /**
  * Background agent execution.
@@ -35,6 +36,7 @@ interface BackgroundJobDeps {
     updateJob(jobId: string, update: JobUpdate): void;
   };
   delivery: DeliveryCoordinator;
+  manifest?: AgentManifestStore;
 }
 
 interface RunBackgroundJobOptions {
@@ -58,33 +60,39 @@ export async function runBackgroundJob(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.registry.updateJob(job.jobId, { status: "failed" });
+    deps.manifest?.update({ status: "failed", endedAt: new Date().toISOString() });
     deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
       sessionFile: "",
       output: message,
       status: "failed",
     }));
     deps.registry.updateJob(job.jobId, { delivered: true });
+    deps.manifest?.update({ status: "failed", delivered: true });
     return;
   }
 
   if (!result) {
     deps.registry.updateJob(job.jobId, { status: "failed" });
+    deps.manifest?.update({ status: "failed", endedAt: new Date().toISOString() });
     deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
       sessionFile: "",
       output: "could not spawn child",
       status: "failed",
     }));
     deps.registry.updateJob(job.jobId, { delivered: true });
+    deps.manifest?.update({ status: "failed", delivered: true });
     return;
   }
 
   // Mark the job terminal and persist the child's transcript. If the job was
-  // already cancelled by `agent_cancel` mid-run, the status update is a legal
-  // no-op, so persist the session file in a separate update.
-  deps.registry.updateJob(job.jobId, {
-    status: result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed",
-  });
+  // already cancelled by `agent_cancel` mid-run, the registry update is a
+  // legal no-op, so persist the session file separately.
+  const terminalStatus = result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed";
+  const endedAt = new Date().toISOString();
+  deps.registry.updateJob(job.jobId, { status: terminalStatus });
+  deps.manifest?.update({ status: terminalStatus, endedAt, sessionFile: result.sessionFile });
   deps.registry.updateJob(job.jobId, { sessionFile: result.sessionFile });
   deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, result));
   deps.registry.updateJob(job.jobId, { delivered: true });
+  deps.manifest?.update({ status: terminalStatus, delivered: true });
 }

@@ -2,7 +2,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { Job } from "@xzy-ai/core";
 import { sessionMcpNames, type ChildRunResult } from "@xzy-ai/core";
-import type { ChildPool } from "@xzy-ai/runtime";
+import type { AgentManifestStore, ChildPool } from "@xzy-ai/runtime";
 import { spawnChildSession } from "@xzy-ai/runtime";
 import type { AgentParams } from "./tools.ts";
 
@@ -20,7 +20,7 @@ export async function spawnWithControl(
   ctx: ExtensionContext,
   job: Job,
   agent: ResolvedAgent,
-  options: { parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; signal?: AbortSignal },
+  options: { parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; signal?: AbortSignal; manifest?: AgentManifestStore },
 ): Promise<ChildRunResult | undefined> {
   try {
     return await spawnChildSession({
@@ -41,6 +41,7 @@ export async function spawnWithControl(
       run: (operation) =>
         pool.concurrency.run(() => {
           pool.registry.updateJob(job.jobId, { status: "running" });
+          options.manifest?.update({ status: "running", startedAt: new Date().toISOString() });
           return operation();
         }),
     });

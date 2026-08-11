@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -7,7 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot } from "@xzy-ai/channels";
-import { getChildPool, getGoalPool, type GoalDeliveryBinding } from "@xzy-ai/runtime";
+import { currentProcessIdentity, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
 type SessionReloadMarkers = Map<string, boolean>;
@@ -69,10 +70,20 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     const rootPool = getChildPool(ctx.cwd, sessionId);
     const isRootSession = rootPool.registry.get(sessionId) === undefined;
-    if (isRootSession && takeSessionReload(projectRoot)) {
-      // This handler runs in the fresh runtime after reload; unlike the old
-      // command frame, this pi API is valid and can steer the model safely.
-      pi.sendUserMessage("Your session was reloaded.", { deliverAs: "steer" });
+    if (isRootSession) {
+      const identity = currentProcessIdentity();
+      startRootSession({
+        projectRoot,
+        sessionId,
+        sessionFile: ctx.sessionManager.getSessionFile(),
+        pid: identity.pid,
+        processStartTime: identity.processStartTime,
+      });
+      if (takeSessionReload(projectRoot)) {
+        // This handler runs in the fresh runtime after reload; unlike the old
+        // command frame, this pi API is valid and can steer the model safely.
+        pi.sendUserMessage("Your session was reloaded.", { deliverAs: "steer" });
+      }
     }
 
     // Activate every registered tool so built-ins beyond the default
@@ -159,6 +170,17 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // session's background work. Reload/resume/fork preserve live children.
     if (event.reason === "quit" || event.reason === "new") {
       await pool.interruptRunningJobs(rootSessionId);
+    }
+    // Only sessions that were actually started as a root session carry a home
+    // session manifest. Tests and legacy callers that fire `session_shutdown`
+    // without a matching `session_start` must not fail closed here.
+    const rootSessionFile = homeSessionManifestFile(encodeProjectId(canonicalProjectRoot(ctx.cwd)), rootSessionId);
+    if (existsSync(rootSessionFile)) {
+      finishRootSession({
+        projectRoot: canonicalProjectRoot(ctx.cwd),
+        sessionId: rootSessionId,
+        reason: event.reason,
+      });
     }
     // Every root host teardown must stop goal timers and detach delivery. The
     // persisted goal remains in the append-only store for the replacement host

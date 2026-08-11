@@ -10,6 +10,7 @@ import {
 import { isInSessionScope, resumeDisposition } from "@xzy-ai/core";
 import { createAgentDiscovery } from "@xzy-ai/runtime";
 import { backgroundModeError, runBackgroundJob } from "@xzy-ai/runtime";
+import { createAgentManifestStore } from "@xzy-ai/runtime";
 import { getChildPool } from "@xzy-ai/runtime";
 import { copySessionFile } from "@xzy-ai/runtime";
 import { recordNewJob } from "@xzy-ai/runtime";
@@ -176,6 +177,8 @@ function startBackgroundAgent(
 
   const parent = resume.parentJobId ? pool.registry.get(resume.parentJobId) : undefined;
   const parentSessionId = ctx.sessionManager.getSessionId();
+  const parentAgentIds = resume.parentAgentIds;
+  const allParentAgentIds = parent ? [...(parentAgentIds ?? []), parent.jobId] : parentAgentIds ?? [];
   let jobId = makeJobId();
   let sessionFile = resume.sessionFile;
   if (resume.sourceSessionFile) {
@@ -200,6 +203,17 @@ function startBackgroundAgent(
     sessionId: jobId,
     parentSessionId,
   });
+  const manifest = createAgentManifestStore({
+    projectRoot: ctx.cwd,
+    rootSessionId: pool.rootSessionId ?? parentSessionId,
+    jobId,
+    piSessionId: jobId,
+    parentAgentIds: allParentAgentIds,
+    rootAgentId: parent?.rootJobId,
+    depth: job.depth,
+  });
+  manifest.create({ description: job.description, subagentType: job.subagentType });
+  manifest.update({ status: "queued" });
 
   // The direct-parent session file keys result delivery and the parent session
   // id scopes the job's storage folder. The child lifecycle runs under the
@@ -209,7 +223,7 @@ function startBackgroundAgent(
   // quitting the PI process interrupts it.
   const parentSessionFile = ctx.sessionManager.getSessionFile() ?? "";
   void runBackgroundJob(
-    pool,
+    { registry: pool.registry, delivery: pool.delivery, manifest },
     job,
     {
       parentSessionFile,
@@ -217,9 +231,10 @@ function startBackgroundAgent(
         spawnWithControl(pool, params, ctx, job, agent, {
           parentSessionId,
           rootSessionId: pool.rootSessionId,
-          parentAgentIds: resume.parentAgentIds,
+          parentAgentIds: allParentAgentIds,
           sessionFile,
           signal: undefined,
+          manifest,
         }),
     },
   );
