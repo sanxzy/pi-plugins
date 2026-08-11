@@ -206,9 +206,6 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         // whether the agent is idle, processing, or waiting on a tool call. PI
         // injects the steer before the next LLM call, so Telegram stays
         // interactive while the active session continues.
-        const runtime = writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
-        if (!runtime.ok) return;
-
         const command = parseTelegramCommand(text);
         // Telegram-native controls are handled directly (e.g. /compact) and
         // never enter the model prompt stream.
@@ -225,7 +222,10 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
             },
             clearQueue: () => activeListener?.clearQueue(),
           });
-          if (handled) return;
+          if (handled) {
+            writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
+            return;
+          }
         }
         // A recognized slash command is dispatched natively: inject only the
         // expanded command content with a compact signature so the message is
@@ -236,6 +236,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
           ? `${expanded}${formatTelegramCommandSignature(chatId, messageId)}`
           : `${text}${formatTelegramSignature(chatId, messageId)}`;
         pi.sendUserMessage(content, { deliverAs: "steer" });
+        writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
       },
     });
 

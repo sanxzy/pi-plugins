@@ -7,7 +7,7 @@ import type {
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
-import { canonicalProjectRoot } from "@xzy-ai/channels";
+import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
 import { currentProcessIdentity, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
@@ -82,6 +82,13 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
         sessionFile: ctx.sessionManager.getSessionFile(),
         pid: identity.pid,
         processStartTime: identity.processStartTime,
+      });
+      // Reconcile crashed roots and retain at most 200 inactive sessions before
+      // this host begins channel/goal delivery. Project channel state is not in
+      // the removable session subtree.
+      cleanupRootSessions(projectRoot, {
+        currentPid: identity.pid,
+        currentProcessStartTime: identity.processStartTime,
       });
       if (takeSessionReload(projectRoot)) {
         // This handler runs in the fresh runtime after reload; unlike the old

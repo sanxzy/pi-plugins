@@ -50,6 +50,12 @@ export {
   type ChannelLogResult,
 } from "./logger.ts";
 export {
+  cleanupRootSessions,
+  MAX_ROOT_SESSIONS,
+  type CleanupRootSessionsOptions,
+  type CleanupRootSessionsResult,
+} from "./cleanup.ts";
+export {
   canonicalProjectRoot,
   createChannelManager,
   type ChannelConnectionState,

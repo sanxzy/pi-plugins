@@ -214,6 +214,7 @@ export interface TelegramInboundListener {
 export function createTelegramInbound(options: TelegramInboundOptions): TelegramInboundListener {
   const queue: QueuedUpdate[] = [];
   const seen = new Set<number>();
+  const failed = new Set<number>();
   let approvedUserIds = new Set(options.approvedUserIds);
   let lastUpdateId = -1;
   let busy = false;
@@ -255,9 +256,19 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     }
   };
 
-  const deliverySettled = (): void => {
+  const deliverySettled = (item: QueuedUpdate, delivered: boolean): void => {
     delivering = false;
-    attemptDrain();
+    if (delivered) {
+      failed.delete(item.updateId);
+      lastUpdateId = Math.max(lastUpdateId, item.updateId);
+      attemptDrain();
+      return;
+    }
+    // Keep a failed update retryable without busy-looping. The next arrival of
+    // the same update id (or an explicit release) will drain this item again.
+    failed.add(item.updateId);
+    seen.delete(item.updateId);
+    queue.unshift(item);
   };
 
   const attemptDrain = (): void => {
@@ -266,9 +277,9 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     delivering = true;
     Promise.resolve()
       .then(() => options.onAccepted(item.updateId, item.chatId, item.text, item.messageId))
-      .then(deliverySettled)
+      .then(() => deliverySettled(item, true))
       .catch((error: unknown) => {
-        deliverySettled();
+        deliverySettled(item, false);
         options.onError?.(error);
       });
   };
@@ -282,9 +293,19 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
         await handleUnauthorized(context, update, config);
         return;
       }
-      if (update.updateId <= lastUpdateId || seen.has(update.updateId)) return;
+      // An update at or below the last durably persisted id is a replay. A
+      // failed delivery never advances the durable cursor, so re-arrivals of
+      // the same id remain eligible for retry rather than being treated as a
+      // delivered replay.
+      if (update.updateId < lastUpdateId || (update.updateId === lastUpdateId && !failed.has(update.updateId))) return;
+      if (failed.has(update.updateId)) {
+        // The failed item is already at the head of the queue; a re-arrival
+        // retries it without enqueueing a duplicate payload.
+        attemptDrain();
+        return;
+      }
+      if (seen.has(update.updateId)) return;
       seen.add(update.updateId);
-      lastUpdateId = Math.max(lastUpdateId, update.updateId);
       queue.push({ updateId: update.updateId, chatId: update.chatId, text: update.text, messageId: update.messageId });
       attemptDrain();
     },
