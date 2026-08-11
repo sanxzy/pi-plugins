@@ -56,6 +56,15 @@ test("MCP tool errors remain distinguishable from transport failures", () => {
   assert.equal(transport.content[0]?.type === "text" ? transport.content[0].text : undefined, "Error: connection lost");
 });
 
+test("transport errors are credential-redacted at the model boundary", () => {
+  const result = normalizeCallToolResult(undefined, { server: "demo", tool: "x", transportError: 'failed: Authorization: Token secret-token at https://u:p@example.test?code=abc' });
+  const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+  assert.equal(text.includes("secret-token"), false);
+  assert.equal(text.includes(":p@"), false);
+  assert.equal(text.includes("abc"), false);
+  assert.equal(result.details.transportError?.includes("secret-token"), false);
+});
+
 test("cancellation and policy denial have explicit bounded result status", () => {
   const cancelled = normalizeCallToolResult(undefined, { server: "demo", tool: "x", cancelled: true });
   assert.equal(cancelled.details.failure, "cancelled");

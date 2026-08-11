@@ -35,6 +35,13 @@ test("diagnostics redact every common authorization scheme and OAuth query crede
   }
 });
 
+test("structured Authorization payloads are fully redacted", () => {
+  const value = redactDiagnostic('Authorization: Digest username="alice", response="digest-secret", nonce="nonce-secret" Signature=signature-secret Credential=credential-secret');
+  for (const secret of ["digest-secret", "nonce-secret", "signature-secret", "credential-secret"]) {
+    assert.equal(value.includes(secret), false, `leaked ${secret}`);
+  }
+});
+
 test("diagnostic categories are stable and do not expose raw errors", () => {
   assert.equal(diagnosticCategory(new Error("request timed out")), "timeout");
   assert.equal(diagnosticCategory(new Error("401 unauthorized access_token=secret")), "authentication");
