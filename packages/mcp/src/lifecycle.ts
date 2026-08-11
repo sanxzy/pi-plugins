@@ -1,6 +1,12 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { userAgentDir } from "./config.ts";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
+import {
+  startRemoteAuth,
+  finishRemoteAuth,
+  logoutRemote,
+  cancelRemoteAuth,
+} from "./remote.ts";
 
 export interface McpLifecycleRegistrationOptions extends Omit<McpManagerOptions, "projectRoot"> {
   agentDir?: string;
@@ -19,6 +25,10 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
   const managers = new Map<string, McpManager>();
 
   const managerKey = (ctx: ExtensionContext): string => `${ctx.cwd}\u0000${ctx.sessionManager.getSessionId()}`;
+  const notify = (ctx: ExtensionContext, message: string): void => {
+    if (ctx.hasUI) ctx.ui.notify(message, "info");
+    else pi.sendUserMessage(message, { deliverAs: "steer" });
+  };
 
   pi.on("session_start", async (_event, ctx) => {
     const key = managerKey(ctx);
@@ -39,5 +49,63 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     if (!manager) return;
     managers.delete(key);
     await manager.stop();
+  });
+
+  // Control-plane commands operate on the manager for the invoking session.
+  pi.registerCommand("mcp", {
+    description: "Manage MCP servers: auth, logout, status, reload, connect, disconnect.",
+    async handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const sub = parts[0] ?? "status";
+      const name = parts[1];
+      const manager = managers.get(managerKey(ctx));
+      if (!manager) {
+        notify(ctx, "MCP: no manager is active for this session.");
+        return;
+      }
+      const server = name ? manager.state().config?.servers[name] : undefined;
+      switch (sub) {
+        case "auth": {
+          if (!server || server.type !== "remote" || server.oauth === false) {
+            notify(ctx, name ? `MCP: \"${name}\" is not a remote OAuth server.` : "MCP auth usage: /mcp auth <server>");
+            return;
+          }
+          const agentDir = userAgentDir(options.agentDir);
+          const started = await startRemoteAuth({ url: server.url, agentDir, onRedirect: async (url) => {
+            notify(ctx, `MCP auth \"${name}\": open ${url.toString()}`);
+          } });
+          // When the user completes the browser flow, the loopback callback
+          // resolves the authorization code and finishRemoteAuth commits it.
+          void started.callback.then(
+            async (code) => {
+              if (!code) return;
+              await finishRemoteAuth({ url: server.url, agentDir, onRedirect: async () => {} }, code);
+              notify(ctx, `MCP auth \"${name}\": authorized.`);
+            },
+            async () => {
+              notify(ctx, `MCP auth \"${name}\": cancelled or expired.`);
+            },
+          );
+          return;
+        }
+        case "logout": {
+          if (!server || server.type !== "remote") {
+            notify(ctx, name ? `MCP: \"${name}\" is not a remote server.` : "MCP logout usage: /mcp logout <server>");
+            return;
+          }
+          logoutRemote({ url: server.url, agentDir: userAgentDir(options.agentDir), onRedirect: () => {} });
+          cancelRemoteAuth(server.url);
+          notify(ctx, `MCP: logged out \"${name}\".`);
+          return;
+        }
+        case "status": {
+          const rows = Object.entries(manager.state().servers).map(([s, status]) => `${s}: ${status.status}`);
+          notify(ctx, rows.length ? `MCP status:\n${rows.join("\n")}` : "MCP: no servers configured.");
+          return;
+        }
+        default:
+          notify(ctx, `MCP: unknown subcommand \"${sub}\".`);
+      }
+    },
   });
 }

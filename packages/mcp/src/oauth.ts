@@ -133,12 +133,24 @@ export class PiOAuthProvider implements OAuthClientProvider {
   }
 
   async invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): Promise<void> {
-    const entries = this.serverUrl;
-    if (scope === "all") this.authStore.remove(entries);
-    else this.authStore.update(entries, (entry) => {
+    if (scope === "tokens") {
+      // Clear only the pending slot; a failed reauth must never delete
+      // previously working committed tokens.
+      this.pendingTokens = undefined;
+      return;
+    }
+    if (scope === "all") {
+      this.pendingTokens = undefined;
+      this.pendingClientInfo = undefined;
+      this.authStore.remove(this.serverUrl);
+      return;
+    }
+    this.authStore.update(this.serverUrl, (entry) => {
       const next = { ...entry };
-      if (scope === "client") delete next.clientInfo;
-      if (scope === "tokens") delete next.tokens;
+      if (scope === "client") {
+        this.pendingClientInfo = undefined;
+        delete next.clientInfo;
+      }
       if (scope === "verifier") delete next.codeVerifier;
       return next;
     });
@@ -212,12 +224,14 @@ interface PendingAuth {
 }
 
 let callbackServer: ReturnType<typeof createServer> | undefined;
+let closingServer: Promise<void> | undefined;
 let callbackPort = OAUTH_CALLBACK_PORT;
 let callbackPath = OAUTH_CALLBACK_PATH;
 const pendingAuths = new Map<string, PendingAuth>();
 const stateToUrl = new Map<string, string>();
 
 async function isPortInUse(port: number): Promise<boolean> {
+  if (port === 0) return false;
   return new Promise((resolve) => {
     void import("node:net").then(({ createConnection }) => {
       const socket = createConnection(port, CALLBACK_HOST);
@@ -241,8 +255,9 @@ function cleanupStateIndex(state: string): void {
 
 function stopIfIdle(): void {
   if (pendingAuths.size > 0 || !callbackServer) return;
-  void callbackServer.close();
+  const server = callbackServer;
   callbackServer = undefined;
+  closingServer = new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
 function ok(server: typeof callbackServer, res: ServerResponse, body: string): void {
@@ -306,6 +321,13 @@ export async function ensureCallbackServer(redirectUri?: string): Promise<{ port
   if (callbackServer && (callbackPort !== port || callbackPath !== path)) {
     await stopCallbackServer();
   }
+  // Wait for an idle-triggered close to finish before probing the port, so a
+  // flow started while the previous server is draining gets a live listener.
+  if (closingServer) {
+    const closing = closingServer;
+    closingServer = undefined;
+    await closing;
+  }
   if (callbackServer) return { port: callbackPort, path: callbackPath };
   if (await isPortInUse(port)) return { port, path };
   callbackPort = port;
@@ -353,6 +375,11 @@ export function cancelOAuthCallback(url: string): void {
 
 /** Stop the callback server and reject any still-pending callbacks. */
 export async function stopCallbackServer(): Promise<void> {
+  if (closingServer) {
+    const closing = closingServer;
+    closingServer = undefined;
+    await closing;
+  }
   if (callbackServer) {
     await new Promise<void>((resolve) => callbackServer!.close(() => resolve()));
     callbackServer = undefined;

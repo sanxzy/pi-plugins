@@ -2,7 +2,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnauthorizedError, auth as runOAuth } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { discoverCatalog, type ServerCatalog } from "./catalog.ts";
 import { createDefaultAuthStore } from "./auth-store.ts";
 import { PiOAuthProvider, ensureCallbackServer, waitForOAuthCallback, cancelOAuthCallback, stopCallbackServer, type OAuthProviderOptions } from "./oauth.ts";
@@ -42,6 +41,7 @@ type RemoteTransport = StreamableHTTPClientTransport | SSEClientTransport;
 interface PendingRemoteAuth {
   provider: PiOAuthProvider;
   state: string;
+  authorizationUrl: string;
   callback: Promise<string>;
 }
 
@@ -99,13 +99,42 @@ async function connectTransport(
   signal: AbortSignal | undefined,
 ): Promise<{ client: Client; catalog: ServerCatalog }> {
   const client = createClient(projectRoot);
-  await client.connect(transport, {
+  const started = client.connect(transport, {
     timeout,
     resetTimeoutOnProgress: true,
     ...(signal ? { signal } : {}),
   });
-  const catalog = await discoverCatalog(client, requestTimeout, signal);
-  return { client, catalog };
+  let abortReject: ((error: Error) => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    abortReject = reject;
+  });
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      void transport.close().catch(() => undefined);
+      reject(new Error(`MCP remote startup timed out after ${timeout}ms`));
+    }, timeout);
+    timer.unref();
+  });
+  const onAbort = (): void => {
+    void transport.close().catch(() => undefined);
+    abortReject?.(new Error("MCP remote connection aborted"));
+  };
+  if (signal) {
+    if (signal.aborted) {
+      void transport.close().catch(() => undefined);
+      throw new Error("MCP remote connection aborted");
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+  try {
+    await Promise.race([started, deadline, aborted]);
+    const catalog = await discoverCatalog(client, requestTimeout, signal);
+    return { client, catalog };
+  } finally {
+    if (timer) clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
 }
 
 /**
@@ -143,6 +172,9 @@ export async function connectRemote(options: ConnectRemoteOptions): Promise<Remo
         getTimeout(options.timeout, "request"),
         options.signal,
       );
+      // Automatic OAuth during connect: persist any tokens the SDK exchanged
+      // via saveTokens so they survive the next connection.
+      if (provider) await provider.commit().catch(() => undefined);
       return {
         status: { status: "connected" },
         catalog: connected.catalog,
@@ -153,6 +185,11 @@ export async function connectRemote(options: ConnectRemoteOptions): Promise<Remo
       lastError = messageOf(error);
       await candidate.transport.close().catch(() => undefined);
       if (isAuthenticationError(error)) {
+        if (provider) {
+          // Automatic OAuth during connect: persist any tokens the SDK
+          // exchanged via saveTokens so they survive the next connection.
+          await provider.commit().catch(() => undefined);
+        }
         return authRegistrationError(error)
           ? { status: { status: "needs_client_registration", error: "Provide a pre-registered OAuth client ID" }, catalog: emptyCatalog() }
           : { status: { status: "needs_auth" }, catalog: emptyCatalog() };
@@ -165,10 +202,27 @@ export async function connectRemote(options: ConnectRemoteOptions): Promise<Remo
 /** Begin OAuth discovery and capture the authorization URL for a remote server. */
 export async function startRemoteAuth(
   options: ConnectRemoteOptions,
-): Promise<{ authorizationUrl: string; provider: PiOAuthProvider; state: string }> {
+): Promise<{ authorizationUrl: string; provider: PiOAuthProvider; state: string; callback: Promise<string> }> {
   const provider = makeProvider(options);
   if (!provider) throw new Error("OAuth is disabled for this remote server");
-  await ensureCallbackServer(provider.redirectUrl);
+  const existing = pendingRemoteAuth.get(options.url);
+  if (existing) {
+    // A flow is already in flight for this server; reuse it rather than
+    // orphaning the earlier callback until its 5-minute timeout.
+    return {
+      authorizationUrl: existing.authorizationUrl,
+      provider: existing.provider,
+      state: existing.state,
+      callback: existing.callback,
+    };
+  }
+  const callbackBinding = await ensureCallbackServer(provider.redirectUrl);
+  let effectiveRedirectUri = provider.redirectUrl;
+  const effectiveUrl = new URL(effectiveRedirectUri);
+  if (effectiveUrl.port === "0") {
+    effectiveUrl.port = String(callbackBinding.port);
+    effectiveRedirectUri = effectiveUrl.toString();
+  }
   let redirect: URL | undefined;
   const redirecting = new PiOAuthProvider({
     serverUrl: options.url,
@@ -177,8 +231,8 @@ export async function startRemoteAuth(
     clientId: typeof options.oauth === "object" ? options.oauth.client_id : undefined,
     clientSecret: typeof options.oauth === "object" ? options.oauth.client_secret : undefined,
     scope: typeof options.oauth === "object" ? options.oauth.scope : undefined,
-    callbackPort: typeof options.oauth === "object" ? options.oauth.callback_port : undefined,
-    redirectUri: typeof options.oauth === "object" ? options.oauth.redirect_uri : undefined,
+    callbackPort: callbackBinding.port,
+    redirectUri: effectiveRedirectUri,
     onRedirect: async (url) => {
       redirect = url;
       await options.onRedirect(url);
@@ -196,8 +250,13 @@ export async function startRemoteAuth(
   // Pre-attach a handler so a cancelled callback cannot surface an unhandled
   // rejection; finishRemoteAuth still observes the settled value.
   callback.catch(() => undefined);
-  pendingRemoteAuth.set(options.url, { provider: redirecting, state, callback });
-  return { authorizationUrl: redirect.toString(), provider: redirecting, state };
+  pendingRemoteAuth.set(options.url, {
+    provider: redirecting,
+    state,
+    authorizationUrl: redirect.toString(),
+    callback,
+  });
+  return { authorizationUrl: redirect.toString(), provider: redirecting, state, callback };
 }
 
 /** Finish a pending OAuth flow and commit credentials only after success. */
