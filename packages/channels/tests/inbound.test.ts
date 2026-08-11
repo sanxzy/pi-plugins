@@ -62,7 +62,7 @@ test("decodeAcceptedText rejects non-private, edited, non-text, and identity-mis
 test("formatTelegramSignature marks Telegram activity and response guidance", () => {
   assert.equal(
     formatTelegramSignature("123"),
-    "\n\n---\n[from:telegram:123]\nUser active on Telegram. Be indifferent toward the default TUI window: keep thinking and reasoning normally, but write only a minimal concise do/act summary there — no conversational text, no attempt to communicate. To communicate directly with the user, use the `telegram_chat` tool.\n---",
+    "\n\n---\n[from:telegram:123]\nInfo: I am currently active through Telegram. To communicate directly with me, use the telegram_chat tool.\n---",
   );
 });
 
