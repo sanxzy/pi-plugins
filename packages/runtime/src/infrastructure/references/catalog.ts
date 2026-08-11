@@ -68,7 +68,7 @@ export function createReferenceCatalog(options: ReferenceCatalogOptions = {}): R
       const validated = validateReferenceCatalog(document);
       if (!validated.ok) return { ok: false, error: "Invalid references configuration" };
       try {
-        await atomicWrite(filePath, `${JSON.stringify(document, null, 2)}\n`);
+        await atomicWrite(filePath, serializeReferenceDocument(document));
         return { ok: true };
       } catch {
         return { ok: false, error: "Unable to save references configuration" };
@@ -121,12 +121,7 @@ async function resolveCatalogEntry(
   source: ReferenceSource,
   homeDir: string,
 ): Promise<{ readonly entry: ReferenceCatalogEntry; readonly diagnostic?: string }> {
-  const metadata = {
-    name,
-    source,
-    ...(source.description === undefined ? {} : { description: source.description }),
-    ...(source.hidden === undefined ? {} : { hidden: source.hidden }),
-  };
+  const metadata = referenceEntryMetadata(name, source);
   if (source.type === "git") {
     return {
       entry: {
@@ -172,6 +167,24 @@ async function writeReferenceJson(filePath: string, content: string): Promise<vo
     await rm(temporaryPath, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+function referenceEntryMetadata(name: string, source: ReferenceSource): {
+  readonly name: string;
+  readonly source: ReferenceSource;
+  readonly description?: string;
+  readonly hidden?: boolean;
+} {
+  return {
+    name,
+    source,
+    ...(source.description === undefined ? {} : { description: source.description }),
+    ...(source.hidden === undefined ? {} : { hidden: source.hidden }),
+  };
+}
+
+function serializeReferenceDocument(document: unknown): string {
+  return `${JSON.stringify(document, null, 2)}\n`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
