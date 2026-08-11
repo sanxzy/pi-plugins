@@ -290,6 +290,47 @@ test("close performs full watcher and reconnect cleanup", async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test("repeated remote session expiration stays an explicit failed result", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-session-fail-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(agentDir, { recursive: true });
+  let callCount = 0;
+  let sessionCount = 0;
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: number; method: string };
+    const session = String(req.headers["mcp-session-id"] ?? `failrec-${++sessionCount}`);
+    const send = (payload: unknown, status = 200): void => {
+      res.writeHead(status, { "Content-Type": "application/json", "Mcp-Session-Id": session });
+      res.end(JSON.stringify(payload));
+    };
+    if (body.method === "initialize") {
+      send({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "failrec", version: "1" } } });
+    } else if (body.method === "tools/list") {
+      send({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "doomed", inputSchema: { type: "object" } }] } });
+    } else {
+      callCount += 1;
+      send({ jsonrpc: "2.0", id: body.id, error: { code: -32001, message: "session expired" } });
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: { failrec: { type: "remote", url, oauth: false } } } }));
+  const manager = createMcpManager({ agentDir, projectRoot });
+  try {
+    await manager.start();
+    await assert.rejects(manager.callTool("failrec", "doomed", {}), /session expired/i);
+    assert.ok(callCount >= 2, "recovery retried once before surfacing the failure");
+    assert.equal(manager.status("failrec")?.status, "failed");
+  } finally {
+    await manager.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("manager reload updates state and invokes the reload callback", async () => {
   const agentDir = join(mkdtempSync(join(tmpdir(), "pi-code-mcp-mgr2-agent-")), "agent");
   const projectRoot = join(mkdtempSync(join(tmpdir(), "pi-code-mcp-mgr2-")), "project");

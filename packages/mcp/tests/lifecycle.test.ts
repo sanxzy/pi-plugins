@@ -246,6 +246,51 @@ test("/mcp control-plane subcommands operate without adding tools and use bounde
   }
 });
 
+test("timer reconnect reactivates recovered MCP tools in the lifecycle", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-lifecycle-reconnect-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(agentDir, { recursive: true });
+  const exitOnce = join(root, "exit-once");
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    reconnect: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: {
+      MCP_FIXTURE_EXIT_ONCE_FILE: exitOnce,
+      MCP_FIXTURE_EXIT_AFTER_MS: "100",
+    } },
+  } } }));
+  const pi = fakePi();
+  const activeSnapshots: string[][] = [];
+  const realPi = {
+    ...pi,
+    setActiveTools(names: string[]) { activeSnapshots.push([...names]); },
+    getActiveTools() { return activeSnapshots.at(-1) ?? []; },
+    getAllTools() { return [...pi.tools.values()].map((tool) => ({ name: tool.name })); },
+    sendUserMessage() {},
+  };
+  registerMcpLifecycle(realPi as never, { agentDir });
+  const ctx = { ...context(projectRoot, "reconnect-session"), hasUI: false, ui: {} };
+  const start = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  try {
+    await start({ reason: "startup" }, ctx);
+    const toolName = "reconnect_current_directory";
+    assert.ok(activeSnapshots.some((names) => names.includes(toolName)));
+    const failedDeadline = Date.now() + 3_000;
+    while (Date.now() < failedDeadline && !activeSnapshots.some((names) => !names.includes(toolName))) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    assert.ok(activeSnapshots.some((names) => !names.includes(toolName)), "failed server deactivates its tool");
+    const recoveredDeadline = Date.now() + 3_000;
+    while (Date.now() < recoveredDeadline && activeSnapshots.at(-1)?.includes(toolName) !== true) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    assert.equal(activeSnapshots.at(-1)?.includes(toolName), true, "reconnect reactivates recovered tool");
+  } finally {
+    await shutdown({ reason: "quit" }, ctx);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("lifecycle enforces allow/deny/ask policy for tools, prompts, and resources", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-policy-lifecycle-"));
   const agentDir = join(root, "agent");
