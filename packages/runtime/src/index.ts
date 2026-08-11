@@ -1,4 +1,25 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
+export {
+  canonicalAgentId,
+  createAgentManifestStore,
+  finishRootSession,
+  foldAgentEvents,
+  readAgentManifest,
+  readProjectManifest,
+  readSessionManifest,
+  startRootSession,
+  writeProjectManifest,
+  type AgentLifecycleEvent,
+  type AgentManifest,
+  type AgentManifestStore,
+  type CreateAgentManifestStoreInput,
+  type FinishRootSessionInput,
+  type FinishRootSessionResult,
+  type ProjectManifest,
+  type SessionManifest,
+  type StartRootSessionInput,
+  type StartRootSessionResult,
+} from "./infrastructure/manifests/manifests.ts";
 export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
 export { createChildSessionManager, resolveChildTools, spawnChildSession, copySessionFile } from "./infrastructure/pi-sdk/child-session.ts";
@@ -48,6 +69,13 @@ export {
   readPrivateJson,
   writePrivateJson,
   writePrivateText,
+  AGENT_MANIFEST_FILE_NAME,
+  EVENTS_FILE_NAME,
+  ERRORS_FILE_NAME,
+  GOALS_FILE_NAME,
+  PROJECT_MANIFEST_FILE_NAME,
+  SESSION_MANIFEST_FILE_NAME,
+  TRANSCRIPT_FILE_NAME,
   childSessionDir,
   childTranscriptDir,
   childTranscriptFile,
