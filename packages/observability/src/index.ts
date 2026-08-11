@@ -8,7 +8,7 @@ const PRIVATE_DIR = 0o700;
 const PRIVATE_FILE = 0o600;
 const TOKEN_PATTERN = /\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g;
 const SECRET_KEY_PATTERN = /(?:token|password|credential|api[-_]?key|api[-_]?secret|secret|authorization|bearer|cookie|private[-_]?key)/i;
-const SECRET_VALUE_PATTERN = /(?:bearer\s+|api[-_]?key\s*[=:]\s*|api[-_]?secret\s*[=:]\s*|authorization\s*[=:]\s*|credential\s*[=:]\s*|private[-_]?key\s*[=:]\s*|secret\s*[=:]\s*|token\s*[=:]\s*|password\s*[=:]\s*)[^\s,;}+]+/gi;
+const SECRET_VALUE_PATTERN = /(?:\bbearer\s*[=:]\s*(?:bearer\s+)?|\bbearer\s+|\b(?:api[-_]?key|api[-_]?secret|authorization|credential|private[-_]?key|secret|token|password)\s*[=:]\s*(?:bearer\s+)?)[^\s,;}]+/gi;
 const TELEGRAM_UPDATE_KEYS = new Set([
   "message", "edited_message", "channel_post", "edited_channel_post", "inline_query",
   "chosen_inline_result", "callback_query", "shipping_query", "pre_checkout_query", "poll",
@@ -122,32 +122,46 @@ function emergencyLine(record: Record<string, unknown>): string {
 export function createSessionLogger(options: SessionLoggerOptions): SessionLogger {
   const fallback = options.fallback ?? ((line: string) => process.stderr.write(`${line}\n`));
   const write = options.write ?? appendPrivate;
-  // Keep pino as the package's low-level logging dependency. JSONL persistence
-  // is performed after our masking boundary so every destination is safe.
-  const pinoLogger = pino({ level: "silent", base: undefined });
-  void pinoLogger;
+  // Pino is the scoped logger backing the persistence boundary. Its destination
+  // delegates the already-masked JSON line to the active scope file, allowing
+  // before/after and error records to route without exposing raw values.
+  let activePath: string | undefined;
+  const destination = {
+    write(chunk: string): boolean {
+      if (!activePath) throw new Error("observability destination is not active");
+      write(activePath, chunk);
+      return true;
+    },
+  };
+  const pinoLogger = pino({ level: "info", base: undefined, timestamp: false }, destination);
 
-  const create = (bindings: Record<string, unknown>): SessionLogger => ({
-    projectId: options.projectId,
-    rootSessionId: options.rootSessionId,
-    agentId: options.agentId,
-    eventsPath: options.eventsPath,
-    errorsPath: options.errorsPath,
-    child(childBindings) {
-      const safe = mask(childBindings);
-      return create({ ...bindings, ...(isRecord(safe) ? safe : {}) });
-    },
-    write(record) {
-      const safeRecord = mask({ ...record, ...bindings }) as Record<string, unknown>;
-      const path = safeRecord.phase === "error" ? options.errorsPath : options.eventsPath;
-      try {
-        write(path, `${JSON.stringify(safeRecord)}\n`);
-      } catch (error) {
-        persistenceState.failures += 1;
-        try { fallback(emergencyLine({ ...safeRecord, errorCategory: error instanceof Error ? error.name : "io" })); } catch { /* best effort */ }
-      }
-    },
-  });
+  const create = (bindings: Record<string, unknown>): SessionLogger => {
+    const scopedPino = Object.keys(bindings).length > 0 ? pinoLogger.child(bindings) : pinoLogger;
+    return {
+      projectId: options.projectId,
+      rootSessionId: options.rootSessionId,
+      agentId: options.agentId,
+      eventsPath: options.eventsPath,
+      errorsPath: options.errorsPath,
+      child(childBindings) {
+        const safe = mask(childBindings);
+        return create({ ...bindings, ...(isRecord(safe) ? safe : {}) });
+      },
+      write(record) {
+        const safeRecord = mask({ ...record, ...bindings }) as Record<string, unknown>;
+        const path = safeRecord.phase === "error" ? options.errorsPath : options.eventsPath;
+        try {
+          activePath = path;
+          scopedPino.info(safeRecord);
+        } catch (error) {
+          persistenceState.failures += 1;
+          try { fallback(emergencyLine({ ...safeRecord, errorCategory: error instanceof Error ? error.name : "io" })); } catch { /* best effort */ }
+        } finally {
+          activePath = undefined;
+        }
+      },
+    };
+  };
 
   const logger = create({});
   defaultLogger = logger;
