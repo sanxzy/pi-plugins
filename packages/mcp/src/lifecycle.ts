@@ -32,6 +32,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
   const managers = new Map<string, McpManager>();
   const exposers = new Map<string, McpToolExposer>();
   const reconciles = new Map<string, () => void>();
+  const disposed = new Set<string>();
 
   const managerKey = (ctx: ExtensionContext): string => `${ctx.cwd}\u0000${ctx.sessionManager.getSessionId()}`;
   const notify = (ctx: ExtensionContext, message: string): void => {
@@ -43,15 +44,21 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     const key = managerKey(ctx);
     const existing = managers.get(key);
     if (existing) return;
+    disposed.delete(key);
     let reconcile: (() => void) | undefined;
     const manager = createMcpManager({
       ...options,
       projectRoot: ctx.cwd,
       agentDir: userAgentDir(options.agentDir),
       onCatalogChanged: (serverName) => {
+        if (disposed.has(key) || managers.get(key) !== manager) return;
         void manager.refreshCatalog(serverName).then(
-          () => reconcile?.(),
-          () => reconcile?.(),
+          () => {
+            if (!disposed.has(key) && managers.get(key) === manager) reconcile?.();
+          },
+          () => {
+            if (!disposed.has(key) && managers.get(key) === manager) reconcile?.();
+          },
         );
       },
     });
@@ -120,14 +127,15 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       }
     };
     await manager.start();
-    promptResourceExposer.register(manager, readPrompt, readResource, (serverName) =>
-      (manager.resourcesFor(serverName) ?? []).map((resource) => ({
+    promptResourceExposer.register(manager, readPrompt, readResource, (serverName) => {
+      if (!manager.state().servers[serverName]) return undefined;
+      return (manager.resourcesFor(serverName) ?? []).map((resource) => ({
         uri: resource.uri,
         name: resource.name,
         description: resource.description,
         mimeType: resource.mimeType,
-      })),
-    );
+      }));
+    });
     let revision = 1;
     reconcile = () => {
       const snapshot: McpToolSnapshotEntry[] = [];
@@ -147,6 +155,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     const key = managerKey(ctx);
     const manager = managers.get(key);
     if (!manager) return;
+    disposed.add(key);
     managers.delete(key);
     exposers.delete(key);
     reconciles.delete(key);
@@ -194,10 +203,10 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
                 notify(ctx, `MCP auth \"${name}\": cancelled or expired.`);
               },
             ).catch((error: unknown) => {
-              notify(ctx, `MCP auth \"${name}\": ${error instanceof Error ? error.message : String(error)}`);
+              notify(ctx, `MCP auth \"${name}\": ${redactDiagnostic(error)}`);
             });
           } catch (error) {
-            notify(ctx, `MCP auth \"${name}\": ${error instanceof Error ? error.message : String(error)}`);
+            notify(ctx, `MCP auth \"${name}\": ${redactDiagnostic(error)}`);
           }
           return;
         }
@@ -257,6 +266,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
         }
         case "reload": {
           manager.reload();
+          await manager.reconcile();
           reconciles.get(managerKey(ctx))?.();
           notify(ctx, "MCP: configuration reloaded.");
           return;

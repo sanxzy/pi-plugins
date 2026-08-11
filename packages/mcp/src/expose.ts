@@ -35,6 +35,8 @@ export const DEFAULT_RESERVED_TOOL_NAMES = new Set([
   "goal_resume",
   "goal_clear",
   "telegram_chat",
+  "mcp_resources_list",
+  "mcp_resources_read",
 ]);
 
 export interface McpToolSnapshotEntry {

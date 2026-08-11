@@ -20,7 +20,7 @@ export interface McpResourceAccess {
 }
 
 export interface McpResourceLister {
-  (serverName: string): Array<{ uri: string; name: string; description?: string; mimeType?: string }>;
+  (serverName: string): Array<{ uri: string; name: string; description?: string; mimeType?: string }> | undefined;
 }
 
 export interface McpPromptsResourcesOptions {
@@ -116,7 +116,11 @@ export class McpPromptsResourcesExposer {
         if (this.options.authorize && !(await this.options.authorize("resource", server, "", ctx))) {
           return { content: [{ type: "text", text: "Error: MCP resource listing denied by policy" }], details: { server, denied: true } };
         }
-        const resources = listResources(server);
+        const available = listResources(server);
+        if (available === undefined) {
+          return { content: [{ type: "text", text: `Error: unknown MCP server "${server}"` }], details: { server, denied: false, unknown: true } };
+        }
+        const resources = available;
         const text = resources.length
           ? resources.map((r) => `${r.uri}\t${r.name}${r.description ? `\t${r.description.slice(0, 1_000)}` : ""}`).join("\n")
           : "(no resources)";

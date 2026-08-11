@@ -84,6 +84,7 @@ export interface McpManager {
   state(): McpManagerState;
   status(name: string): McpServerStatus | undefined;
   reload(): McpConfigResult;
+  reconcile(): Promise<McpManagerState>;
   start(): Promise<McpManagerState>;
   connectLocal(name: string, server: McpLocalServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
   connectRemote(name: string, server: McpRemoteServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
@@ -438,6 +439,21 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const refreshCatalog = (name: string, signal?: AbortSignal): Promise<ServerCatalog | undefined> =>
     serialize(() => refreshCatalogInternal(name, signal));
 
+  const reconcileInternal = async (): Promise<McpManagerState> => {
+    const configured = state.config?.servers ?? {};
+    for (const name of [...connections.keys()]) {
+      const server = configured[name];
+      if (!server || server.disabled === true) await disconnectInternal(name);
+    }
+    for (const [name, server] of Object.entries(configured)) {
+      if (server.type === "local") await connectLocalInternal(name, server);
+      else if (server.type === "remote") await connectRemoteInternal(name, server);
+    }
+    return state;
+  };
+
+  const reconcile = (): Promise<McpManagerState> => serialize(reconcileInternal);
+
   const start = (): Promise<McpManagerState> =>
     serialize(async () => {
       reload();
@@ -447,11 +463,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
           reload();
         });
       }
-      for (const [name, server] of Object.entries(state.config?.servers ?? {})) {
-        if (server.type === "local") await connectLocalInternal(name, server);
-        else if (server.type === "remote") await connectRemoteInternal(name, server);
-      }
-      return state;
+      return reconcileInternal();
     });
 
   const stop = (): Promise<void> =>
@@ -469,6 +481,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     state: () => state,
     status: (name) => state.servers[name],
     reload,
+    reconcile,
     start,
     connectLocal,
     connectRemote,
