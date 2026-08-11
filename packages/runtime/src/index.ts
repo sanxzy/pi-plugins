@@ -1,13 +1,6 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
-export { createGitMaterializer, type GitCommandRunner, type GitMaterializeResult, type GitMaterializer, type GitMaterializerOptions, type GitMaterializeStatus } from "./infrastructure/references/git-materializer.ts";
 export {
   createReferenceCatalog,
-  referenceConfigFile,
-  referenceReposDir,
-  REFERENCES_DIRECTORY,
-  REFERENCES_FILE_MODE,
-  REFERENCES_FILE_NAME,
-  REFERENCES_REPOS_DIRECTORY,
   type AtomicReferenceWrite,
   type ReferenceAvailability,
   type ReferenceMaterializationStatus,

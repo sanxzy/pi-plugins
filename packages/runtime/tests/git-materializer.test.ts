@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { cachePath, parseRepository } from "@xzy-ai/core";
-import { createGitMaterializer } from "@xzy-ai/runtime";
+import { createGitMaterializer } from "../src/infrastructure/references/git-materializer.ts";
 
 function root(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-git-materializer-"));

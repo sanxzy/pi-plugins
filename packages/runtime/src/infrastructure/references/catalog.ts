@@ -45,18 +45,21 @@ export interface ReferenceFileSystem {
   readonly rename?: (source: string, destination: string) => Promise<void>;
 }
 
+/** Public catalog options; infrastructure seams remain internal to runtime. */
 export interface ReferenceCatalogOptions {
   readonly agentDir?: string;
   readonly homeDir?: string;
+  readonly refresh?: boolean;
+}
+
+interface ReferenceCatalogInfrastructureOptions extends ReferenceCatalogOptions {
   readonly atomicWrite?: AtomicReferenceWrite;
   readonly fileSystem?: ReferenceFileSystem;
   readonly materializer?: GitMaterializer;
-  readonly refresh?: boolean;
 }
 
 export interface ReferenceCatalog {
   readonly filePath: string;
-  readonly reposDir: string;
   readonly read: () => Promise<ReferenceCatalogReadResult>;
   readonly preflight: (document: unknown) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
   readonly save: (document: unknown) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
@@ -78,6 +81,13 @@ export function referenceReposDir(agentDir = getAgentDir()): string {
  * the current global document without a restart.
  */
 export function createReferenceCatalog(options: ReferenceCatalogOptions = {}): ReferenceCatalog {
+  return createReferenceCatalogWithInfrastructure(options);
+}
+
+/** Internal constructor used by runtime tests and composition seams. */
+export function createReferenceCatalogWithInfrastructure(
+  options: ReferenceCatalogInfrastructureOptions = {},
+): ReferenceCatalog {
   const agentDir = options.agentDir ?? getAgentDir();
   const homeDir = options.homeDir ?? homedir();
   const filePath = referenceConfigFile(agentDir);
@@ -101,7 +111,6 @@ export function createReferenceCatalog(options: ReferenceCatalogOptions = {}): R
 
   return {
     filePath,
-    reposDir,
     read: () => readReferenceCatalog(filePath, homeDir, reposDir, options.refresh, materializer),
     preflight,
     save: async (document) => {

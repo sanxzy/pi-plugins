@@ -12,15 +12,13 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import {
-  createGitMaterializer,
-  createReferenceCatalog,
-  referenceConfigFile,
-} from "@xzy-ai/runtime";
+import { createReferenceCatalogWithInfrastructure } from "../src/infrastructure/references/catalog.ts";
+import { referenceConfigFile } from "../src/infrastructure/references/catalog.ts";
+import { createGitMaterializer as createInternalGitMaterializer } from "../src/infrastructure/references/git-materializer.ts";
 
 /** Materializer that never reaches the network; Git entries stay unavailable. */
 function offlineMaterializer() {
-  return createGitMaterializer({
+  return createInternalGitMaterializer({
     run: async (args) => {
       if (args[1] === "ls-remote") return { stdout: "hash refs/heads/main\n", stderr: "" };
       throw new Error("offline test materializer");
@@ -52,7 +50,7 @@ test("derives the global references file below the active Pi agent directory", (
 
 test("missing configuration is an empty catalog and reads are on demand", async () => {
   const root = tempRoot();
-  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: join(root, "home") });
+  const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: join(root, "home") });
   assert.deepEqual(await catalog.read(), { entries: [], diagnostics: [] });
 
   mkdirSync(dirname(catalog.filePath), { recursive: true });
@@ -68,7 +66,7 @@ test("rejects home-relative traversal as unavailable", async () => {
   const outside = join(root, "outside");
   mkdirSync(join(home, "docs"), { recursive: true });
   mkdirSync(outside, { recursive: true });
-  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: home });
+  const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: home });
   await catalog.save({ references: { traversal: "~/../outside" } });
   const result = await catalog.read();
   const traversal = result.entries.find((item) => item.name === "traversal");
@@ -81,7 +79,7 @@ test("retains rejected relative local paths as unavailable entries", async () =>
   const root = tempRoot();
   const docs = join(root, "docs");
   mkdirSync(docs, { recursive: true });
-  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: root });
+  const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: root });
   mkdirSync(dirname(catalog.filePath), { recursive: true });
   writeFileSync(catalog.filePath, JSON.stringify({ references: { relative: "./docs", good: docs } }), "utf8");
   const result = await catalog.read();
@@ -97,7 +95,7 @@ test("reports permission-blocked local roots as unavailable", async () => {
   const previousMode = statSync(blocked).mode & 0o777;
   chmodSync(blocked, 0o000);
   try {
-    const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: root });
+    const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: root });
     await catalog.save({ references: { blocked: join(blocked, "child") } });
     const result = await catalog.read();
     assert.equal(result.entries.find((item) => item.name === "blocked")?.status, "unavailable");
@@ -115,7 +113,7 @@ test("resolves local paths and reports unavailable roots without throwing", asyn
   mkdirSync(homeDocs, { recursive: true });
   mkdirSync(absoluteDocs, { recursive: true });
   writeFileSync(fileRoot, "file", "utf8");
-  const catalog = createReferenceCatalog({
+  const catalog = createReferenceCatalogWithInfrastructure({
     agentDir: join(root, "agent"),
     homeDir: home,
     materializer: offlineMaterializer(),
@@ -146,7 +144,7 @@ test("keeps valid entries when strict JSON contains malformed entries", async ()
   const root = tempRoot();
   const docs = join(root, "docs");
   mkdirSync(docs, { recursive: true });
-  const catalog = createReferenceCatalog({
+  const catalog = createReferenceCatalogWithInfrastructure({
     agentDir: join(root, "agent"),
     homeDir: root,
     materializer: offlineMaterializer(),
@@ -174,7 +172,7 @@ test("keeps valid entries when strict JSON contains malformed entries", async ()
 
 test("rejects malformed JSON without exposing content", async () => {
   const root = tempRoot();
-  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: root });
+  const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: root });
   mkdirSync(dirname(catalog.filePath), { recursive: true });
   writeFileSync(catalog.filePath, "{ not strict json and secret-token }", "utf8");
   const result = await catalog.read();
@@ -185,13 +183,13 @@ test("rejects malformed JSON without exposing content", async () => {
 
 test("saves validated JSON atomically with mode 0644 and preserves the prior file on writer failure", async () => {
   const root = tempRoot();
-  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: root });
+  const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: root });
   const first = { references: { docs: "/tmp/docs" } };
   assert.deepEqual(await catalog.save(first), { ok: true });
   assert.equal(statSync(catalog.filePath).mode & 0o777, 0o644);
   assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), first);
 
-  const failing = createReferenceCatalog({
+  const failing = createReferenceCatalogWithInfrastructure({
     agentDir: join(root, "agent"),
     homeDir: root,
     atomicWrite: async () => {
@@ -203,7 +201,7 @@ test("saves validated JSON atomically with mode 0644 and preserves the prior fil
   assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), first);
   assert.deepEqual(readdirSync(dirname(catalog.filePath)).filter((name) => name.includes(".tmp-")), []);
 
-  const renameFailing = createReferenceCatalog({
+  const renameFailing = createReferenceCatalogWithInfrastructure({
     agentDir: join(root, "agent"),
     homeDir: root,
     fileSystem: {
@@ -220,10 +218,10 @@ test("saves validated JSON atomically with mode 0644 and preserves the prior fil
 
 test("preflight rejects unavailable Git sources before persistence", async () => {
   const root = tempRoot();
-  const catalog = createReferenceCatalog({
+  const catalog = createReferenceCatalogWithInfrastructure({
     agentDir: join(root, "agent"),
     homeDir: root,
-    materializer: createGitMaterializer({
+    materializer: createInternalGitMaterializer({
       run: async (args) => {
         if (args[1] === "ls-remote") return { stdout: "", stderr: "" };
         throw new Error("should not materialize during preflight rejection");
@@ -238,7 +236,7 @@ test("preflight rejects unavailable Git sources before persistence", async () =>
 
 test("publishes Git materialization status through the public catalog", async () => {
   const root = tempRoot();
-  const catalog = createReferenceCatalog({
+  const catalog = createReferenceCatalogWithInfrastructure({
     agentDir: join(root, "agent"),
     homeDir: root,
     materializer: {
@@ -261,7 +259,7 @@ test("publishes Git materialization status through the public catalog", async ()
 
 test("save rejects invalid documents before touching the existing file", async () => {
   const root = tempRoot();
-  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: root });
+  const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: root });
   await catalog.save({ references: { docs: "/tmp/docs" } });
   const result = await catalog.save({ references: { relative: "./docs" } });
   assert.equal(result.ok, false);
