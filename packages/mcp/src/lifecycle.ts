@@ -4,6 +4,7 @@ import { normalizeCallToolResult, type NormalizedDetails } from "./results.ts";
 import { McpPromptsResourcesExposer, type McpAuthorize } from "./prompts-exposer.ts";
 import { normalizePromptResult, normalizeResourceResult } from "./prompts-resources.ts";
 import { evaluatePolicy, policyFromConfig, type PolicyTarget } from "./policy.ts";
+import { redactDiagnostic } from "./diagnostics.ts";
 import { userAgentDir } from "./config.ts";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
 import {
@@ -56,13 +57,19 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     });
     managers.set(key, manager);
     const authorize: McpAuthorize = async (kind, serverName, itemName, authorizationCtx) => {
-      if (options.authorize) return options.authorize(kind, serverName, itemName, authorizationCtx);
-      const policy = policyFromConfig(manager.state().config?.permissions);
-      const decision = evaluatePolicy(policy, kind as PolicyTarget, serverName, itemName);
-      if (decision.effect === "allow") return true;
-      if (decision.effect === "deny") return false;
-      if (!authorizationCtx?.hasUI) return false;
-      return authorizationCtx.ui.confirm("MCP permission", `Allow ${kind} ${serverName}/${itemName}?`);
+      try {
+        if (options.authorize) return Boolean(await options.authorize(kind, serverName, itemName, authorizationCtx));
+        const policy = policyFromConfig(manager.state().config?.permissions);
+        const decision = evaluatePolicy(policy, kind as PolicyTarget, serverName, itemName);
+        if (decision.effect === "allow") return true;
+        if (decision.effect === "deny") return false;
+        if (!authorizationCtx?.hasUI || typeof authorizationCtx.ui?.confirm !== "function") return false;
+        return Boolean(await authorizationCtx.ui.confirm("MCP permission", `Allow ${kind} ${serverName}/${itemName}?`));
+      } catch {
+        // Permission prompts are a security boundary: unavailable or broken UI
+        // and broken custom authorizers fail closed without escaping the call.
+        return false;
+      }
     };
     const exposer = new McpToolExposer(pi);
     exposer.setInvokeHandler(async (mapping, args, signal, invokeCtx): Promise<AgentToolResult<NormalizedDetails>> => {
@@ -213,7 +220,11 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
             const tools = manager.toolsFor(serverName)?.length ?? 0;
             const prompts = manager.promptsFor(serverName)?.length ?? 0;
             const resources = manager.resourcesFor(serverName)?.length ?? 0;
-            return `${serverName}: ${status.status} tools=${tools} prompts=${prompts} resources=${resources}`;
+            const mappings = (exposers.get(managerKey(ctx))?.mappingsSnapshot() ?? [])
+              .filter((mapping) => mapping.serverName === serverName)
+              .map((mapping) => `${mapping.piName}->${mapping.nativeName}`)
+              .join(",") || "-";
+            return `${serverName}: ${status.status} errorCategory=${status.errorCategory} tools=${tools} prompts=${prompts} resources=${resources} mappings=${mappings}`;
           });
           notify(ctx, rows.length ? `MCP ${sub}:\n${rows.join("\n")}` : "MCP: no servers configured.");
           return;
@@ -235,6 +246,10 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
             notify(ctx, "MCP disconnect usage: /mcp disconnect <server>");
             return;
           }
+          if (!manager.state().servers[name]) {
+            notify(ctx, `MCP: unknown server "${name}".`);
+            return;
+          }
           await manager.disconnect(name);
           reconciles.get(managerKey(ctx))?.();
           notify(ctx, `MCP: disconnected ${name}.`);
@@ -248,8 +263,9 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
         }
         case "debug": {
           const rows = Object.entries(manager.state().servers).map(([serverName, status]) => {
-            const safeError = status.status === "failed" || status.status === "needs_client_registration" ? ` error=${safeDiagnostic(status.error)}` : "";
-            return `${serverName}: ${status.status}${safeError}`;
+            const category = status.errorCategory === "none" ? "" : ` errorCategory=${status.errorCategory}`;
+            const detail = status.status === "failed" || status.status === "needs_client_registration" ? ` error=${redactDiagnostic(status.error)}` : "";
+            return `${serverName}: ${status.status}${category}${detail}`;
           });
           notify(ctx, `MCP debug:\n${rows.join("\n") || "no servers"}`);
           return;
@@ -259,11 +275,4 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       }
     },
   });
-}
-
-function safeDiagnostic(value: string): string {
-  return value
-    .replace(/Bearer\s+[^\s,]+/gi, "Bearer [REDACTED]")
-    .replace(/([?&](?:token|access_token|refresh_token|client_secret|code_verifier)=)[^&\s]+/gi, "$1[REDACTED]")
-    .slice(0, 1_000);
 }

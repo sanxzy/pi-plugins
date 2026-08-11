@@ -30,13 +30,25 @@ import { connectRemote as connectRemoteTransport, teardownRemoteAuth, type Remot
 const DEFAULT_STARTUP_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 30_000;
 
+export type McpErrorCategory =
+  | "none"
+  | "configuration"
+  | "startup"
+  | "discovery"
+  | "transport"
+  | "authentication"
+  | "client_registration"
+  | "timeout"
+  | "cancelled"
+  | "unknown";
+
 export type McpServerStatus =
-  | { status: "configured" }
-  | { status: "disabled" }
-  | { status: "connected"; toolCount: number }
-  | { status: "failed"; error: string }
-  | { status: "needs_auth" }
-  | { status: "needs_client_registration"; error: string };
+  | { status: "configured"; errorCategory: "none" }
+  | { status: "disabled"; errorCategory: "none" }
+  | { status: "connected"; toolCount: number; errorCategory: "none" }
+  | { status: "failed"; error: string; errorCategory: Exclude<McpErrorCategory, "none"> }
+  | { status: "needs_auth"; errorCategory: "authentication" }
+  | { status: "needs_client_registration"; error: string; errorCategory: "client_registration" };
 
 export interface McpConnectionResult {
   status: McpServerStatus;
@@ -97,7 +109,9 @@ function stateFor(result: McpConfigResult, running: boolean): McpManagerState {
   const servers = Object.fromEntries(
     Object.entries(result.value.servers).map(([name, server]) => [
       name,
-      server.disabled === true ? ({ status: "disabled" } as const) : ({ status: "configured" } as const),
+      server.disabled === true
+        ? ({ status: "disabled", errorCategory: "none" as const } as const)
+        : ({ status: "configured", errorCategory: "none" as const } as const),
     ]),
   );
   return { config: result.value, issues: result.issues, servers, running };
@@ -105,6 +119,17 @@ function stateFor(result: McpConfigResult, running: boolean): McpManagerState {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function errorCategory(error: unknown): Exclude<McpErrorCategory, "none"> {
+  const message = errorMessage(error).toLowerCase();
+  if (message.includes("timed out") || message.includes("timeout")) return "timeout";
+  if (message.includes("abort") || message.includes("cancel")) return "cancelled";
+  if (message.includes("auth") || message.includes("unauthorized") || message.includes("forbidden")) return "authentication";
+  if (message.includes("registration")) return "client_registration";
+  if (message.includes("discover") || message.includes("list")) return "discovery";
+  if (message.includes("connect") || message.includes("transport") || message.includes("session")) return "transport";
+  return "startup";
 }
 
 function withTimeout<T>(operation: Promise<T>, timeoutMs: number, onTimeout: () => Promise<void>): Promise<T> {
@@ -184,7 +209,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       await closeConnection(old);
     }
     if (server.disabled === true) {
-      const disabled = { status: "disabled" } as const;
+      const disabled = { status: "disabled", errorCategory: "none" } as const;
       setStatus(name, disabled);
       return { status: disabled, tools: [], catalog: { tools: [], prompts: [], resources: [], resourceTemplates: [] } };
     }
@@ -214,7 +239,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         options.onCatalogChanged?.(name);
       });
       connections.set(name, candidate);
-      const connected = { status: "connected", toolCount: candidate.catalog.tools.length } as const;
+      const connected = { status: "connected", toolCount: candidate.catalog.tools.length, errorCategory: "none" } as const;
       setStatus(name, connected);
       return {
         status: connected,
@@ -223,7 +248,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       };
     } catch (error) {
       await closeConnection(candidate);
-      const failed = { status: "failed", error: errorMessage(error) } as const;
+      const failed = { status: "failed", error: errorMessage(error), errorCategory: errorCategory(error) } as const;
       setStatus(name, failed);
       return { status: failed, tools: [], catalog: emptyCatalog() };
     }
@@ -246,7 +271,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       await closeConnection(old);
     }
     if (server.disabled === true) {
-      const disabled = { status: "disabled" } as const;
+      const disabled = { status: "disabled", errorCategory: "none" } as const;
       setStatus(name, disabled);
       return { status: disabled, tools: [], catalog: emptyCatalog() };
     }
@@ -267,7 +292,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         options.onCatalogChanged?.(name);
       });
       connections.set(name, { client: result.client, catalog: result.catalog });
-      const connected = { status: "connected", toolCount: result.catalog.tools.length } as const;
+      const connected = { status: "connected", toolCount: result.catalog.tools.length, errorCategory: "none" } as const;
       setStatus(name, connected);
       return { status: connected, tools: result.catalog.tools, catalog: result.catalog };
     }
@@ -286,7 +311,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     await Promise.all(active.map(([, connection]) => closeConnection(connection)));
     await teardownRemoteAuth();
     for (const name of state.config ? Object.keys(state.config.servers) : Object.keys(state.servers)) {
-      setStatus(name, { status: "disabled" });
+      setStatus(name, { status: "disabled", errorCategory: "none" });
     }
   };
 
@@ -295,7 +320,12 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     connections.delete(name);
     if (connection) await closeConnection(connection);
     if (state.servers[name]) {
-      setStatus(name, state.config?.servers[name]?.disabled === true ? { status: "disabled" } : { status: "configured" });
+      setStatus(
+        name,
+        state.config?.servers[name]?.disabled === true
+          ? { status: "disabled", errorCategory: "none" }
+          : { status: "configured", errorCategory: "none" },
+      );
     }
   };
 
@@ -401,7 +431,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     const catalog = await discoverCatalog(connection.client, requestTimeout, signal);
     connection.catalog = catalog;
     wireListChangedHandlers(connection.client, catalog, () => options.onCatalogChanged?.(name));
-    setStatus(name, { status: "connected", toolCount: catalog.tools.length });
+    setStatus(name, { status: "connected", toolCount: catalog.tools.length, errorCategory: "none" });
     return catalog;
   };
 
@@ -463,12 +493,12 @@ function emptyCatalog(): ServerCatalog {
 function mapRemoteStatus(status: RemoteStatus): McpServerStatus {
   switch (status.status) {
     case "connected":
-      return { status: "connected", toolCount: 0 };
+      return { status: "connected", toolCount: 0, errorCategory: "none" };
     case "failed":
-      return { status: "failed", error: status.error };
+      return { status: "failed", error: status.error, errorCategory: errorCategory(status.error) };
     case "needs_auth":
-      return { status: "needs_auth" };
+      return { status: "needs_auth", errorCategory: "authentication" };
     case "needs_client_registration":
-      return { status: "needs_client_registration", error: status.error };
+      return { status: "needs_client_registration", error: status.error, errorCategory: "client_registration" };
   }
 }

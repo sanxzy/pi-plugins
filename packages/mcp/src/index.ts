@@ -24,6 +24,7 @@ export {
   type McpManagerOptions,
   type McpManagerState,
   type McpServerStatus,
+  type McpErrorCategory,
 } from "./manager.ts";
 export { registerMcpLifecycle, type McpLifecycleRegistrationOptions } from "./lifecycle.ts";
 export { NameRegistry, collisionSuffix, resolvePiName, serverToolPiName, slugify } from "./naming.ts";
@@ -49,6 +50,7 @@ export {
   type PolicyRule,
   type PolicyTarget,
 } from "./policy.ts";
+export { diagnosticCategory, redactDiagnostic } from "./diagnostics.ts";
 export {
   McpPromptsResourcesExposer,
   type McpAuthorize,
