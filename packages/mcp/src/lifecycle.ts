@@ -1,4 +1,6 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { McpToolExposer, type McpToolSnapshotEntry } from "./expose.ts";
+import { normalizeCallToolResult, type NormalizedDetails } from "./results.ts";
 import { userAgentDir } from "./config.ts";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
 import {
@@ -22,6 +24,7 @@ export interface McpLifecycleRegistrationOptions extends Omit<McpManagerOptions,
  */
 export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegistrationOptions = {}): void {
   const managers = new Map<string, McpManager>();
+  const exposers = new Map<string, McpToolExposer>();
 
   const managerKey = (ctx: ExtensionContext): string => `${ctx.cwd}\u0000${ctx.sessionManager.getSessionId()}`;
   const notify = (ctx: ExtensionContext, message: string): void => {
@@ -39,7 +42,34 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       agentDir: userAgentDir(options.agentDir),
     });
     managers.set(key, manager);
+    const exposer = new McpToolExposer(pi);
+    exposer.setInvokeHandler(async (mapping, args, signal, invokeCtx): Promise<AgentToolResult<NormalizedDetails>> => {
+      try {
+        const raw = await manager.callTool(mapping.serverName, mapping.nativeName, args, signal);
+        return normalizeCallToolResult(raw, { server: mapping.serverName, tool: mapping.nativeName });
+      } catch (error) {
+        return normalizeCallToolResult(undefined, {
+          server: mapping.serverName,
+          tool: mapping.nativeName,
+          cancelled: signal?.aborted,
+          transportError: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+    exposers.set(key, exposer);
     await manager.start();
+    const snapshot: McpToolSnapshotEntry[] = [];
+    for (const serverName of manager.serverNames()) {
+      for (const tool of manager.toolsFor(serverName) ?? []) {
+        snapshot.push({
+          serverName,
+          nativeName: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+        });
+      }
+    }
+    exposer.sync(snapshot, 1);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
@@ -47,6 +77,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     const manager = managers.get(key);
     if (!manager) return;
     managers.delete(key);
+    exposers.delete(key);
     await manager.stop();
   });
 

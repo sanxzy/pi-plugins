@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ListRootsRequestSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import { ListRootsRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { discoverCatalog, wireListChangedHandlers, type ServerCatalog } from "./catalog.ts";
 import {
   loadMcpConfig,
@@ -19,7 +19,6 @@ import {
 } from "./config.ts";
 import { ProcessStdioTransport } from "./stdio.ts";
 import { connectRemote as connectRemoteTransport, teardownRemoteAuth, type RemoteStatus } from "./remote.ts";
-
 const DEFAULT_STARTUP_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 30_000;
 
@@ -67,6 +66,12 @@ export interface McpManager {
   connectLocal(name: string, server: McpLocalServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
   connectRemote(name: string, server: McpRemoteServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
   disconnect(name: string): Promise<void>;
+  /** Active connected server names. */
+  serverNames(): string[];
+  /** The connected catalog for a server, or undefined when not connected. */
+  toolsFor(name: string): Tool[] | undefined;
+  /** Invoke a native tool on a connected server, routing the original name. */
+  callTool(name: string, nativeName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult>;
   close(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -277,6 +282,44 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const disconnect = (name: string): Promise<void> => serialize(() => disconnectInternal(name));
   const close = (): Promise<void> => serialize(closeInternal);
 
+  const callToolInternal = async (
+    name: string,
+    nativeName: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<CallToolResult> => {
+    const connection = connections.get(name);
+    if (!connection) {
+      throw new Error(`MCP server "${name}" is not connected`);
+    }
+    const requestTimeout = resolveTimeout(
+      state.config?.servers[name]?.type === "local"
+        ? (state.config.servers[name] as McpLocalServerConfig).timeout
+        : state.config?.servers[name]?.type === "remote"
+          ? (state.config.servers[name] as McpRemoteServerConfig).timeout
+          : undefined,
+      state.config?.timeout,
+      "request",
+    );
+    return connection.client.callTool(
+      { name: nativeName, arguments: args },
+      undefined,
+      {
+        timeout: requestTimeout,
+        resetTimeoutOnProgress: true,
+        onprogress: () => undefined,
+        ...(signal ? { signal } : {}),
+      },
+    ) as Promise<CallToolResult>;
+  };
+
+  const callTool = (
+    name: string,
+    nativeName: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<CallToolResult> => serialize(() => callToolInternal(name, nativeName, args, signal));
+
   const start = (): Promise<McpManagerState> =>
     serialize(async () => {
       reload();
@@ -312,6 +355,9 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     connectLocal,
     connectRemote,
     disconnect,
+    serverNames: () => [...connections.keys()],
+    toolsFor: (name) => connections.get(name)?.catalog.tools,
+    callTool,
     close,
     stop,
   };
