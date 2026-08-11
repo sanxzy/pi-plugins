@@ -5,7 +5,7 @@ import { UnauthorizedError, auth as runOAuth } from "@modelcontextprotocol/sdk/c
 import type { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { discoverCatalog, type ServerCatalog } from "./catalog.ts";
 import { createDefaultAuthStore } from "./auth-store.ts";
-import { PiOAuthProvider, ensureCallbackServer, waitForOAuthCallback, type OAuthProviderOptions } from "./oauth.ts";
+import { PiOAuthProvider, ensureCallbackServer, waitForOAuthCallback, cancelOAuthCallback, stopCallbackServer, type OAuthProviderOptions } from "./oauth.ts";
 import type { McpRemoteServerConfig, McpTimeoutConfig } from "./config.ts";
 import { pathToFileURL } from "node:url";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -37,14 +37,15 @@ export interface ConnectRemoteOptions {
   store?: ReturnType<typeof createDefaultAuthStore>;
 }
 
-interface ActiveRemote {
-  result: RemoteConnectionResult;
-  provider?: PiOAuthProvider;
+type RemoteTransport = StreamableHTTPClientTransport | SSEClientTransport;
+
+interface PendingRemoteAuth {
+  provider: PiOAuthProvider;
+  state: string;
+  callback: Promise<string>;
 }
 
-const pendingRemoteAuth = new Map<string, { provider: PiOAuthProvider; transport?: RemoteTransport }>();
-
-type RemoteTransport = StreamableHTTPClientTransport | SSEClientTransport;
+const pendingRemoteAuth = new Map<string, PendingRemoteAuth>();
 
 function getTimeout(timeout: McpTimeoutConfig | undefined, type: "startup" | "request"): number {
   return timeout?.[type] ?? DEFAULT_TIMEOUT;
@@ -55,7 +56,10 @@ function messageOf(error: unknown): string {
 }
 
 function isAuthenticationError(error: unknown): boolean {
-  return error instanceof UnauthorizedError || /unauthorized|oauth|authentication|authorization/i.test(messageOf(error));
+  return (
+    error instanceof UnauthorizedError ||
+    /unauthorized|access.denied|authentication.required|client registration|oauth/i.test(messageOf(error))
+  );
 }
 
 function authRegistrationError(error: unknown): boolean {
@@ -95,7 +99,11 @@ async function connectTransport(
   signal: AbortSignal | undefined,
 ): Promise<{ client: Client; catalog: ServerCatalog }> {
   const client = createClient(projectRoot);
-  await client.connect(transport, { timeout, ...(signal ? { signal } : {}) });
+  await client.connect(transport, {
+    timeout,
+    resetTimeoutOnProgress: true,
+    ...(signal ? { signal } : {}),
+  });
   const catalog = await discoverCatalog(client, requestTimeout, signal);
   return { client, catalog };
 }
@@ -145,9 +153,6 @@ export async function connectRemote(options: ConnectRemoteOptions): Promise<Remo
       lastError = messageOf(error);
       await candidate.transport.close().catch(() => undefined);
       if (isAuthenticationError(error)) {
-        if (provider) {
-          pendingRemoteAuth.set(options.url, { provider, transport: candidate.transport });
-        }
         return authRegistrationError(error)
           ? { status: { status: "needs_client_registration", error: "Provide a pre-registered OAuth client ID" }, catalog: emptyCatalog() }
           : { status: { status: "needs_auth" }, catalog: emptyCatalog() };
@@ -158,7 +163,9 @@ export async function connectRemote(options: ConnectRemoteOptions): Promise<Remo
 }
 
 /** Begin OAuth discovery and capture the authorization URL for a remote server. */
-export async function startRemoteAuth(options: ConnectRemoteOptions): Promise<{ authorizationUrl: string; provider: PiOAuthProvider }> {
+export async function startRemoteAuth(
+  options: ConnectRemoteOptions,
+): Promise<{ authorizationUrl: string; provider: PiOAuthProvider; state: string }> {
   const provider = makeProvider(options);
   if (!provider) throw new Error("OAuth is disabled for this remote server");
   await ensureCallbackServer(provider.redirectUrl);
@@ -180,16 +187,31 @@ export async function startRemoteAuth(options: ConnectRemoteOptions): Promise<{ 
   const result = await runOAuth(redirecting, { serverUrl: options.url });
   if (result === "AUTHORIZED") await redirecting.commit();
   if (!redirect) throw new Error("OAuth provider did not return an authorization URL");
-  pendingRemoteAuth.set(options.url, { provider: redirecting });
-  return { authorizationUrl: redirect.toString(), provider: redirecting };
+  const state = redirect.searchParams.get("state");
+  if (!state) throw new Error("OAuth authorization URL did not include a state parameter");
+  // Register the loopback callback so the browser redirect resolves the
+  // authorization code for finishRemoteAuth. Swallow cancellation so a logout
+  // or shutdown never surfaces an unhandled rejection.
+  const callback = waitForOAuthCallback(state, options.url);
+  // Pre-attach a handler so a cancelled callback cannot surface an unhandled
+  // rejection; finishRemoteAuth still observes the settled value.
+  callback.catch(() => undefined);
+  pendingRemoteAuth.set(options.url, { provider: redirecting, state, callback });
+  return { authorizationUrl: redirect.toString(), provider: redirecting, state };
 }
 
 /** Finish a pending OAuth flow and commit credentials only after success. */
-export async function finishRemoteAuth(options: ConnectRemoteOptions, authorizationCode: string): Promise<void> {
+export async function finishRemoteAuth(
+  options: ConnectRemoteOptions,
+  authorizationCode?: string,
+): Promise<void> {
   const pending = pendingRemoteAuth.get(options.url);
   const provider = pending?.provider ?? makeProvider(options);
   if (!provider) throw new Error("OAuth is disabled for this remote server");
-  const result = await runOAuth(provider, { serverUrl: options.url, authorizationCode });
+  const code = authorizationCode ?? (pending ? await pending.callback : undefined);
+  if (!code) throw new Error("No OAuth authorization code is pending");
+  if (pending) cancelOAuthCallback(options.url);
+  const result = await runOAuth(provider, { serverUrl: options.url, authorizationCode: code });
   if (result !== "AUTHORIZED") throw new Error("OAuth authorization did not complete");
   await provider.commit();
   pendingRemoteAuth.delete(options.url);
@@ -199,7 +221,29 @@ export async function finishRemoteAuth(options: ConnectRemoteOptions, authorizat
 export function logoutRemote(options: ConnectRemoteOptions): void {
   const provider = makeProvider(options);
   provider?.clear();
-  pendingRemoteAuth.delete(options.url);
+  cancelPendingAuth(options.url);
+}
+
+/** Cancel a pending callback for a single remote URL without global teardown. */
+export function cancelRemoteAuth(url: string): void {
+  cancelPendingAuth(url);
+}
+
+/** Stop the callback server and clear all pending auth, used on session shutdown. */
+export async function teardownRemoteAuth(): Promise<void> {
+  for (const [, pending] of pendingRemoteAuth) {
+    cancelOAuthCallback(pending.provider.serverUrl);
+  }
+  pendingRemoteAuth.clear();
+  await stopCallbackServer();
+}
+
+function cancelPendingAuth(url: string): void {
+  const pending = pendingRemoteAuth.get(url);
+  if (pending) {
+    cancelOAuthCallback(url);
+    pendingRemoteAuth.delete(url);
+  }
 }
 
 function emptyCatalog(): ServerCatalog {

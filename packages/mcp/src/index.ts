@@ -28,10 +28,12 @@ export {
 export { registerMcpLifecycle, type McpLifecycleRegistrationOptions } from "./lifecycle.ts";
 export { ProcessStdioTransport, terminateProcessTree } from "./stdio.ts";
 export {
+  cancelRemoteAuth,
   connectRemote,
   finishRemoteAuth,
   logoutRemote,
   startRemoteAuth,
+  teardownRemoteAuth,
   type ConnectRemoteOptions,
   type RemoteConnectionResult,
   type RemoteStatus,

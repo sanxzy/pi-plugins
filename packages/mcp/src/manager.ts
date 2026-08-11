@@ -18,7 +18,7 @@ import {
   type McpTimeoutConfig,
 } from "./config.ts";
 import { ProcessStdioTransport } from "./stdio.ts";
-import { connectRemote as connectRemoteTransport, type RemoteStatus } from "./remote.ts";
+import { connectRemote as connectRemoteTransport, teardownRemoteAuth, type RemoteStatus } from "./remote.ts";
 
 const DEFAULT_STARTUP_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 30_000;
@@ -258,6 +258,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     const active = [...connections.entries()];
     connections.clear();
     await Promise.all(active.map(([, connection]) => closeConnection(connection)));
+    await teardownRemoteAuth();
     for (const name of state.config ? Object.keys(state.config.servers) : Object.keys(state.servers)) {
       setStatus(name, { status: "disabled" });
     }

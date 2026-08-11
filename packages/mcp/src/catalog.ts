@@ -55,7 +55,11 @@ export function paginateTools(
 
 /** Discover the catalogs a server advertises, gated on its capabilities. */
 export async function discoverCatalog(client: Client, timeout: number, signal?: AbortSignal): Promise<ServerCatalog> {
-  const requestOptions: RequestOptions = { timeout, ...(signal ? { signal } : {}) };
+  const requestOptions: RequestOptions = {
+    timeout,
+    resetTimeoutOnProgress: true,
+    ...(signal ? { signal } : {}),
+  };
   const capabilities = client.getServerCapabilities();
   const catalog: ServerCatalog = { ...EMPTY_CATALOG };
 

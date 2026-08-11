@@ -53,7 +53,7 @@ export interface OAuthStatus {
  */
 export class PiOAuthProvider implements OAuthClientProvider {
   private readonly authStore: AuthStore;
-  private readonly serverUrl: string;
+  readonly serverUrl: string;
   readonly redirectUrl: string;
   private pendingClientInfo?: OAuthClientInformationFull;
   private pendingTokens?: OAuthTokens;
