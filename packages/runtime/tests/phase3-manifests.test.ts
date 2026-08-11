@@ -102,16 +102,18 @@ test("agent lifecycle events fold into the materialized private snapshot", () =>
   store.update({ status: "running", at: "2026-08-11T12:00:02.000Z", startedAt: "2026-08-11T12:00:02.000Z" });
   store.update({ status: "completed", at: "2026-08-11T12:00:03.000Z", endedAt: "2026-08-11T12:00:03.000Z", delivered: true });
 
-  const snapshot = store.read();
   const folded = foldAgentEvents(store.eventsPath);
-  assert.ok(snapshot);
   assert.ok(folded);
-  assert.deepEqual(snapshot, folded);
-  assert.equal(snapshot.agentId, "child-1");
-  assert.equal(snapshot.piSessionId, "pi-session-1");
-  assert.equal(snapshot.parentAgentIds[0], "parent-1");
-  assert.equal(snapshot.status, "completed");
-  assert.equal(snapshot.delivered, true);
+  assert.equal(folded.agentId, "child-1");
+  assert.equal(folded.piSessionId, "pi-session-1");
+  assert.equal(folded.rootSessionId, "root-session");
+  assert.deepEqual(folded.parentAgentIds, ["parent-1"]);
+  assert.equal(folded.rootAgentId, "child-1");
+  assert.equal(folded.depth, 2);
+  assert.equal(folded.status, "completed");
+  assert.equal(folded.description, "inspect files");
+  assert.equal(folded.subagentType, "scout");
+  assert.equal(folded.delivered, true);
   assert.equal(store.manifestPath, homeAgentManifestFile(encodeProjectId(root), "root-session", "child-1", ["parent-1"]));
   assert.equal(store.eventsPath, homeAgentEventsFile(encodeProjectId(root), "root-session", "child-1", ["parent-1"]));
   assert.equal(mode(store.agentDir), PRIVATE_DIR);
@@ -132,6 +134,18 @@ test("agent creation is idempotent and default Pi session IDs are canonical", ()
   assert.equal(lines.filter((line) => line.type === "agent_created").length, 1);
   assert.equal(store.read()?.description, "first");
   assert.equal(store.read()?.piSessionId, "agent");
+});
+
+test("corrupt agent event lines are skipped without losing valid lifecycle state", () => {
+  setupHome();
+  const root = project();
+  const store = createAgentManifestStore({ projectRoot: root, rootSessionId: "root-session", jobId: "job-agent", now: "2026-08-11T13:00:00.000Z" });
+  store.create({ status: "created", description: "safe", subagentType: "scout" });
+  const original = readFileSync(store.eventsPath, "utf8");
+  writeFileSync(store.eventsPath, `${original}{malformed\\n`);
+  const folded = foldAgentEvents(store.eventsPath);
+  assert.equal(folded?.status, "created");
+  assert.equal(folded?.description, "safe");
 });
 
 test("corrupt project, session, and agent manifests fail closed", () => {
