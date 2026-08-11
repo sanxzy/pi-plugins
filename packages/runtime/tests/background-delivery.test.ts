@@ -265,7 +265,7 @@ test("runBackgroundJob persists a real agent lifecycle in the event read model",
 
   const folded = eventRegistry.get("job-live");
   assert.ok(folded);
-  assert.equal(folded.jobId, "job-live");
+  assert.equal(folded.jobId, "live");
   assert.equal(folded.status, "completed");
   assert.equal(folded.delivered, true);
   assert.equal(folded.sessionFile, "transcript.jsonl");

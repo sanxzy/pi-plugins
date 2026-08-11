@@ -124,6 +124,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
         }
         return startBackgroundAgent(params, ctx, {
           parentJobId: job.jobId,
+          parentAgentIds: [...(job.parentAgentIds ?? []), job.jobId],
           sourceSessionFile: job.sessionFile,
         });
       }
@@ -184,7 +185,7 @@ function startBackgroundAgent(
   let sessionFile = resume.sessionFile;
   if (resume.sourceSessionFile) {
     jobId = makeJobId();
-    sessionFile = copySessionFile(resume.sourceSessionFile, jobId, ctx.cwd, parentSessionId, pool.rootSessionId, resume.parentAgentIds);
+    sessionFile = copySessionFile(resume.sourceSessionFile, jobId, ctx.cwd, parentSessionId, pool.rootSessionId, allParentAgentIds);
     if (!sessionFile) {
       return errorResult(`could not copy the transcript for agent ${resume.parentJobId ?? jobId}`, {
         jobId: resume.parentJobId,

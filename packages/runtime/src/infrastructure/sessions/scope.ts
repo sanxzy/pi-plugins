@@ -116,6 +116,13 @@ function sessionIdOf(job: Job, getJob: (jobId: string) => Job | undefined): stri
   return job.sessionId ?? getJob(job.jobId)?.sessionId ?? job.jobId;
 }
 
+function liveChildFor(
+  liveChildren: ReadonlyMap<string, ChildSessionControl>,
+  jobId: string,
+): ChildSessionControl | undefined {
+  return liveChildren.get(jobId) ?? liveChildren.get(jobId.replace(/^job-/, "")) ?? [...liveChildren.entries()].find(([id]) => id.replace(/^job-/, "") === jobId.replace(/^job-/, ""))?.[1];
+}
+
 function toRow(
   job: Job,
   depth: number,
@@ -125,7 +132,7 @@ function toRow(
   const start = new Date(job.createdAt).getTime();
   const endTime = isTerminal(job.status) ? new Date(job.updatedAt).getTime() : now.getTime();
   const durationMs = Math.max(0, endTime - start);
-  const enterable = job.status === "running" && liveChildren.has(job.jobId);
+  const enterable = job.status === "running" && liveChildFor(liveChildren, job.jobId) !== undefined;
   return {
     jobId: job.jobId,
     sessionId: job.sessionId ?? job.jobId,

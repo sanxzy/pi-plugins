@@ -143,11 +143,18 @@ function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>
       depth: row.depth + 1,
       description: row.description,
       durationMs: row.durationMs,
-      leaf: latestLeaf(pool.liveChildren.get(row.jobId)),
+      leaf: latestLeaf(liveChildFor(pool, row.jobId)),
       enterable: row.enterable,
       updatedAtMs: isTerminal(row.status) ? settledMs(pool.registry.get(row.jobId)) : undefined,
     })),
   ];
+}
+
+function liveChildFor(
+  pool: ReturnType<typeof getChildPool>,
+  jobId: string,
+): ReturnType<typeof pool.liveChildren.get> {
+  return pool.liveChildren.get(jobId) ?? pool.liveChildren.get(jobId.replace(/^job-/, "")) ?? [...pool.liveChildren.entries()].find(([id]) => id.replace(/^job-/, "") === jobId.replace(/^job-/, ""))?.[1];
 }
 
 function latestLeaf(
@@ -179,7 +186,7 @@ function openChildLiveView(
   row: FooterTreeRow | undefined,
 ): void {
   if (!row || row.root || !row.enterable || row.status !== "running") return;
-  const control = pool.liveChildren.get(row.rowId);
+  const control = liveChildFor(pool, row.rowId);
   if (!control?.live) {
     footer.setHint("This session is no longer available.");
     return;

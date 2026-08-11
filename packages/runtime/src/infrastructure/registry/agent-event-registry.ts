@@ -183,7 +183,14 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       else this.updateJob(event.jobId, event.update);
     },
     createJob(job): void {
-      const normalized = { ...job, jobId: job.jobId, sessionId: job.sessionId, parentJobId: job.parentJobId, rootJobId: job.rootJobId };
+      const cc = (id: string): string => canonicalAgentId(id);
+      const normalized = {
+        ...job,
+        jobId: cc(job.jobId),
+        parentJobId: job.parentJobId ? cc(job.parentJobId) : undefined,
+        rootJobId: job.rootJobId ? cc(job.rootJobId) : job.jobId,
+        parentAgentIds: (job.parentAgentIds ?? []).map(cc),
+      };
       const store = storeFor(normalized);
       store.create({ description: normalized.description, subagentType: normalized.subagentType });
       const initialTransitions: Job["status"][] = normalized.status === "created"

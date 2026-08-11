@@ -24,7 +24,7 @@ export interface ChildPool {
   readonly scopedRegistry: AgentEventRegistry;
   // Root/child detection is based on the persisted session boundary.
   readonly isRootSession: (sessionId: string) => boolean;
-  /** Explicit startup bootstrap check before a root manifest exists. */
+  /** Explicit startup/replacement bootstrap check before a root manifest exists. */
   readonly shouldBootstrapRootSession: (sessionId: string) => boolean;
   /** Live root session id registered by the current host session, if known. */
   readonly rootSessionId?: string;
@@ -84,7 +84,13 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
         return false;
       }
     },
-    shouldBootstrapRootSession: (sessionId: string) => registry.getBySessionId(sessionId) === undefined && sessionId === rootSessionId,
+    shouldBootstrapRootSession: (sessionId: string) => {
+      // Any session that is not represented by an agent event is a candidate
+      // root at the lifecycle boundary. The session-start adapter is the only
+      // caller that may use this pre-manifest predicate; ordinary callers use
+      // isRootSession(), which remains manifest-backed and fail-closed.
+      return registry.getBySessionId(sessionId) === undefined;
+    },
     concurrency: createConcurrencyGate(MAX_CONCURRENCY),
     delivery: createDeliveryCoordinator(),
     liveChildren,

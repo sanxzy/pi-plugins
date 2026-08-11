@@ -281,10 +281,22 @@ export interface AgentManifest {
 
 const JOB_STATUSES = new Set<JobStatus>(["created", "queued", "running", "completed", "failed", "cancelled", "interrupted"]);
 
+function optionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
+}
+
+function optionalBoolean(value: unknown): value is boolean | undefined {
+  return value === undefined || typeof value === "boolean";
+}
+
+function optionalSequence(value: unknown): value is number | undefined {
+  return value === undefined || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+}
+
 function parseAgentEvent(line: string): AgentLifecycleEvent | null {
   if (!line) return null;
   try {
-    const parsed = JSON.parse(line) as AgentLifecycleEvent;
+    const parsed = JSON.parse(line) as Record<string, unknown>;
     if (!parsed || typeof parsed.type !== "string") return null;
     if (parsed.type === "agent_created") {
       if (
@@ -294,19 +306,35 @@ function parseAgentEvent(line: string): AgentLifecycleEvent | null {
         typeof parsed.piSessionId !== "string" ||
         typeof parsed.rootSessionId !== "string" ||
         !Array.isArray(parsed.parentAgentIds) ||
+        !parsed.parentAgentIds.every((id): id is string => typeof id === "string") ||
+        !optionalString(parsed.parentJobId) ||
+        !optionalString(parsed.parentSessionId) ||
+        !optionalString(parsed.sessionFile) ||
+        !optionalSequence(parsed.sequence) ||
         typeof parsed.rootAgentId !== "string" ||
         typeof parsed.depth !== "number" ||
-        (parsed.status !== "created") ||
+        !Number.isSafeInteger(parsed.depth) ||
+        parsed.depth < 0 ||
+        parsed.status !== "created" ||
         typeof parsed.description !== "string" ||
         typeof parsed.subagentType !== "string"
       ) {
         return null;
       }
-      return parsed as AgentLifecycleEvent;
+      return parsed as unknown as AgentLifecycleEvent;
     }
     if (parsed.type === "agent_updated") {
-      if (typeof parsed.at !== "string" || typeof parsed.agentId !== "string" || typeof parsed.status !== "string" || !JOB_STATUSES.has(parsed.status as JobStatus)) return null;
-      return parsed as AgentLifecycleEvent;
+      if (
+        typeof parsed.at !== "string" ||
+        typeof parsed.agentId !== "string" ||
+        typeof parsed.status !== "string" ||
+        !JOB_STATUSES.has(parsed.status as JobStatus) ||
+        !optionalString(parsed.startedAt) ||
+        !optionalString(parsed.endedAt) ||
+        !optionalString(parsed.sessionFile) ||
+        !optionalBoolean(parsed.delivered)
+      ) return null;
+      return parsed as unknown as AgentLifecycleEvent;
     }
     return null;
   } catch {
@@ -369,6 +397,32 @@ function canonicalAgentIdFromJobId(jobId: string): string {
   return canonicalAgentId(jobId);
 }
 
+/** Compare two agent snapshots for equality across all materialized fields. */
+function agentSnapshotsEqual(a: AgentManifest, b: AgentManifest): boolean {
+  return (
+    a.jobId === b.jobId &&
+    a.agentId === b.agentId &&
+    a.piSessionId === b.piSessionId &&
+    a.rootSessionId === b.rootSessionId &&
+    a.parentJobId === b.parentJobId &&
+    a.parentSessionId === b.parentSessionId &&
+    a.rootAgentId === b.rootAgentId &&
+    a.depth === b.depth &&
+    a.status === b.status &&
+    a.description === b.description &&
+    a.subagentType === b.subagentType &&
+    a.delivered === b.delivered &&
+    a.createdAt === b.createdAt &&
+    a.updatedAt === b.updatedAt &&
+    a.startedAt === b.startedAt &&
+    a.endedAt === b.endedAt &&
+    a.sessionFile === b.sessionFile &&
+    a.sequence === b.sequence &&
+    a.parentAgentIds.length === b.parentAgentIds.length &&
+    a.parentAgentIds.every((id, index) => id === b.parentAgentIds[index])
+  );
+}
+
 export interface CreateAgentManifestStoreInput {
   projectRoot: string;
   rootSessionId: string;
@@ -401,9 +455,9 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
   const projectRoot = canonicalProjectRoot(input.projectRoot);
   const projectId = encodeProjectId(projectRoot);
   const agentId = canonicalAgentIdFromJobId(input.jobId);
-  const jobId = input.jobId;
+  const jobId = canonicalAgentIdFromJobId(input.jobId);
   const rootSessionId = input.rootSessionId;
-  const piSessionId = input.piSessionId ?? canonicalAgentId(input.jobId);
+  const piSessionId = input.piSessionId ?? agentId;
   const parentAgentIds = (input.parentAgentIds ?? []).map(canonicalAgentIdFromJobId);
   const rootAgentId = input.rootAgentId ? canonicalAgentIdFromJobId(input.rootAgentId) : agentId;
   const depth = input.depth ?? (parentAgentIds.length === 0 ? 0 : parentAgentIds.length + 1);
@@ -503,12 +557,7 @@ function readAgentSnapshotValid(manifestPath: string, folded: AgentManifest): bo
   if (!existsSync(manifestPath)) return false;
   try {
     const snapshot = validateAgentManifest(readPrivateJson<Partial<AgentManifest>>(manifestPath), manifestPath);
-    return (
-      snapshot.agentId === folded.agentId &&
-      snapshot.rootSessionId === folded.rootSessionId &&
-      snapshot.status === folded.status &&
-      snapshot.updatedAt === folded.updatedAt
-    );
+    return agentSnapshotsEqual(snapshot, folded);
   } catch {
     return false;
   }

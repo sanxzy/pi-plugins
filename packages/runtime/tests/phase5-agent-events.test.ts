@@ -14,6 +14,7 @@ import {
   startRootSession,
   getChildPool,
   childSessionPaths,
+  finishRootSession,
 } from "@xzy-ai/runtime";
 import { makeJobId } from "@xzy-ai/tools";
 import { registerSessionEvents } from "../../commands/src/registrations/session-events.ts";
@@ -164,12 +165,9 @@ test("root-versus-child detection uses the root session manifest boundary", () =
 test("replacement root session is bootstrapped through the real session_start path", async () => {
   setupHome();
   const root = project();
-  // The pool is a project-root singleton; a prior host already created it with
-  // the old root id, so `getChildPool` returns the same object with the old
-  // rootSessionId captured at construction. A replacement root must still be
-  // bootstrapped as a root on its real session_start.
-  const oldPool = getChildPool(root, "old-root");
-  assert.equal(oldPool.shouldBootstrapRootSession("new-root"), false, "old-root pool must not bootstrap new-root by construction id");
+  // The pool is a project singleton. It was first constructed for old-root,
+  // then the host starts a replacement root with a new session id.
+  getChildPool(root, "old-root");
   const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
   registerSessionEvents({
     on(event: string, handler: (event: unknown, ctx: unknown) => unknown) { handlers.set(event, handler); },

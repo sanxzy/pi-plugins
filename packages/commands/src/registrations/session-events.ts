@@ -69,7 +69,11 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     const sessionId = ctx.sessionManager.getSessionId();
     const rootPool = getChildPool(ctx.cwd, sessionId);
-    const isRootSession = rootPool.isRootSession(sessionId) || rootPool.shouldBootstrapRootSession(sessionId);
+    // A root host has no agent event. The bootstrap predicate applies only to
+    // this real lifecycle boundary; ordinary callers use manifest-backed
+    // isRootSession. This covers a first host and every replacement root
+    // (/new, reload, resume) that has not yet created its session manifest.
+    const isRootSession = rootPool.shouldBootstrapRootSession(sessionId) || rootPool.isRootSession(sessionId);
     if (isRootSession) {
       const identity = currentProcessIdentity();
       startRootSession({
