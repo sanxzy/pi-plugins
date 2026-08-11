@@ -9,6 +9,7 @@ import {
   validateReferenceAlias,
   validateReferenceCatalog,
   validateReferenceEntry,
+  type ReferenceCatalogDocument,
   type ReferenceSource,
 } from "@xzy-ai/core";
 
@@ -39,6 +40,27 @@ export interface ReferenceCatalogReadResult {
   readonly diagnostics: readonly string[];
 }
 
+export interface ReferenceCatalogOperationResult {
+  readonly ok: true;
+  readonly entry: ReferenceCatalogEntry;
+}
+
+export interface ReferenceCatalogOperationError {
+  readonly ok: false;
+  readonly error: string;
+}
+
+export type ReferenceCatalogOperation = ReferenceCatalogOperationResult | ReferenceCatalogOperationError;
+
+export interface ReferenceCatalogOperationOptions {
+  readonly signal?: AbortSignal;
+}
+
+export interface ReferenceGitOperationInput {
+  readonly repository: string;
+  readonly branch?: string;
+}
+
 export type AtomicReferenceWrite = (filePath: string, content: string) => Promise<void>;
 
 export interface ReferenceFileSystem {
@@ -61,8 +83,11 @@ interface ReferenceCatalogInfrastructureOptions extends ReferenceCatalogOptions 
 export interface ReferenceCatalog {
   readonly filePath: string;
   readonly read: () => Promise<ReferenceCatalogReadResult>;
-  readonly preflight: (document: unknown) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
-  readonly save: (document: unknown) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+  readonly readDocument: () => Promise<ReferenceCatalogDocument>;
+  readonly preflight: (document: unknown, options?: ReferenceCatalogOperationOptions) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+  readonly save: (document: unknown, options?: ReferenceCatalogOperationOptions) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+  readonly testReference: (input: ReferenceGitOperationInput, options?: ReferenceCatalogOperationOptions) => Promise<ReferenceCatalogOperation>;
+  readonly refreshReference: (input: ReferenceGitOperationInput, options?: ReferenceCatalogOperationOptions) => Promise<ReferenceCatalogOperation>;
 }
 
 /** Derive the global references configuration from the active Pi agent directory. */
@@ -96,15 +121,33 @@ export function createReferenceCatalogWithInfrastructure(
     writeReferenceJson(path, content, options.fileSystem));
   const materializer = options.materializer ?? createGitMaterializer();
 
-  const preflight = async (document: unknown): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> => {
+  const preflight = async (
+    document: unknown,
+    operationOptions: ReferenceCatalogOperationOptions = {},
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> => {
+    if (operationOptions.signal?.aborted) return { ok: false, error: "Git materialization aborted" };
     const validated = validateReferenceCatalog(document);
     if (!validated.ok) return { ok: false, error: "Invalid references configuration" };
     for (const source of Object.values(validated.value.references)) {
-      if (source.type !== "git") continue;
+      if (operationOptions.signal?.aborted) return { ok: false, error: "Git materialization aborted" };
+      if (source.type === "local") {
+        if (!(await resolveLocalSource(source, homeDir))) return { ok: false, error: "Local reference preflight failed" };
+        continue;
+      }
       const repository = parseRepository(source.repository);
       if (!repository) return { ok: false, error: "Invalid Git reference" };
-      const result = await materializer.preflight({ reference: repository, branch: source.branch });
-      if (!result.ok) return { ok: false, error: "Git reference preflight failed" };
+      try {
+          const result = await materializer.preflight({
+          reference: repository,
+          branch: source.branch,
+          signal: operationOptions.signal,
+        });
+        if (!result.ok || (source.branch === undefined && result.defaultBranch === undefined)) {
+          return { ok: false, error: "Git reference preflight failed" };
+        }
+      } catch {
+        return { ok: false, error: operationOptions.signal?.aborted ? "Git materialization aborted" : "Git reference preflight failed" };
+      }
     }
     return { ok: true };
   };
@@ -112,10 +155,12 @@ export function createReferenceCatalogWithInfrastructure(
   return {
     filePath,
     read: () => readReferenceCatalog(filePath, homeDir, reposDir, options.refresh, materializer),
+    readDocument: () => readReferenceDocument(filePath),
     preflight,
-    save: async (document) => {
-      const preflightResult = await preflight(document);
+    save: async (document, operationOptions = {}) => {
+      const preflightResult = await preflight(document, operationOptions);
       if (!preflightResult.ok) return preflightResult;
+      if (operationOptions.signal?.aborted) return { ok: false, error: "Git materialization aborted" };
       try {
         await atomicWrite(filePath, serializeReferenceDocument(document));
         return { ok: true };
@@ -123,7 +168,70 @@ export function createReferenceCatalogWithInfrastructure(
         return { ok: false, error: "Unable to save references configuration" };
       }
     },
+    testReference: (input, operationOptions = {}) => materializeReference(input, false, operationOptions, reposDir, materializer),
+    refreshReference: (input, operationOptions = {}) => materializeReference(input, true, operationOptions, reposDir, materializer),
   };
+}
+
+async function readReferenceDocument(filePath: string): Promise<ReferenceCatalogDocument> {
+  try {
+    const raw = await readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.references) || Array.isArray(parsed.references)) {
+      return { references: {} };
+    }
+    return parsed as ReferenceCatalogDocument;
+  } catch {
+    return { references: {} };
+  }
+}
+
+async function resolveLocalSource(source: Extract<ReferenceSource, { type: "local" }>, homeDir: string): Promise<boolean> {
+  const configuredPath = source.path.startsWith("~/") ? join(homeDir, source.path.slice(2)) : source.path;
+  if (!isAbsolute(configuredPath)) return false;
+  if (source.path.startsWith("~/") && !isWithin(homeDir, configuredPath)) return false;
+  try {
+    const canonicalPath = await realpath(configuredPath);
+    if (source.path.startsWith("~/") && !isWithin(await realpath(homeDir), canonicalPath)) return false;
+    return (await stat(canonicalPath)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function materializeReference(
+  input: ReferenceGitOperationInput,
+  refresh: boolean,
+  operationOptions: ReferenceCatalogOperationOptions,
+  reposDir: string,
+  materializer: GitMaterializer,
+): Promise<ReferenceCatalogOperation> {
+  if (operationOptions.signal?.aborted) return { ok: false, error: "Git materialization aborted" };
+  const repository = parseRepository(input.repository);
+  if (!repository) return { ok: false, error: "Invalid Git reference" };
+  try {
+    const result = await materializer.ensure({
+      reference: repository,
+      branch: input.branch,
+      refresh,
+      cacheRoot: reposDir,
+      signal: operationOptions.signal,
+    });
+    return {
+      ok: true,
+      entry: {
+        name: repository.label,
+        source: { type: "git", repository: input.repository, ...(input.branch === undefined ? {} : { branch: input.branch }) },
+        path: result.localPath,
+        status: "available",
+        materialization: result.status,
+        ...(result.head === undefined ? {} : { head: result.head }),
+        ...(result.branch === undefined ? {} : { branch: result.branch }),
+      },
+    };
+  } catch {
+    return { ok: false, error: operationOptions.signal?.aborted ? "Git materialization aborted" : "Git reference is unavailable" };
+  }
 }
 
 async function readReferenceCatalog(

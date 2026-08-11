@@ -1,6 +1,11 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
 export {
   createReferenceCatalog,
+  type ReferenceCatalogOperation,
+  type ReferenceCatalogOperationError,
+  type ReferenceCatalogOperationOptions,
+  type ReferenceCatalogOperationResult,
+  type ReferenceGitOperationInput,
   type ReferenceAvailability,
   type ReferenceMaterializationStatus,
   type ReferenceCatalog,

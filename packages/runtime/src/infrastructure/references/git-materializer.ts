@@ -39,6 +39,11 @@ export interface GitMaterializerOptions {
   readonly run?: GitCommandRunner;
 }
 
+export interface GitPreflightResult {
+  readonly ok: true;
+  readonly defaultBranch?: string;
+}
+
 export interface GitMaterializer {
   readonly ensure: (input: {
     readonly reference: RepositoryReference;
@@ -51,7 +56,7 @@ export interface GitMaterializer {
     readonly reference: RepositoryReference;
     readonly branch?: string;
     readonly signal?: AbortSignal;
-  }) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
+  }) => Promise<GitPreflightResult | { readonly ok: false; readonly error: string }>;
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -136,22 +141,26 @@ export function createGitMaterializer(options: GitMaterializerOptions = {}): Git
     readonly reference: RepositoryReference;
     readonly branch?: string;
     readonly signal?: AbortSignal;
-  }): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
+  }): Promise<GitPreflightResult | { readonly ok: false; readonly error: string }> {
     if (input.branch !== undefined) {
       const branchOk = validateBranch(input.branch);
       if (!branchOk.ok) return { ok: false, error: branchOk.error };
     }
     try {
       throwIfAborted(input.signal);
-      const args = ["git", "ls-remote", input.reference.remote];
-      if (input.branch) args.push(`refs/heads/${input.branch}`);
+      const args = input.branch
+        ? ["git", "ls-remote", input.reference.remote, `refs/heads/${input.branch}`]
+        : ["git", "ls-remote", "--symref", input.reference.remote, "HEAD"];
       const result = await run(args, process.cwd(), { timeoutMs, signal: input.signal });
       if (input.branch) {
         const expected = `refs/heads/${input.branch}`;
         const found = result.stdout.split(/\r?\n/u).some((line) => line.trim().split(/\s+/u)[1] === expected);
         if (!found) return { ok: false, error: "Repository branch is not available" };
+        return { ok: true };
       }
-      return { ok: true };
+      const defaultBranch = result.stdout.match(/ref:\s+refs\/heads\/([^\s]+)\s+HEAD/u)?.[1];
+      if (!defaultBranch) return { ok: false, error: "Repository default branch is not available" };
+      return { ok: true, defaultBranch };
     } catch {
       return { ok: false, error: "Repository is unavailable" };
     }

@@ -67,7 +67,8 @@ test("rejects home-relative traversal as unavailable", async () => {
   mkdirSync(join(home, "docs"), { recursive: true });
   mkdirSync(outside, { recursive: true });
   const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: home });
-  await catalog.save({ references: { traversal: "~/../outside" } });
+  mkdirSync(dirname(catalog.filePath), { recursive: true });
+  writeFileSync(catalog.filePath, JSON.stringify({ references: { traversal: "~/../outside" } }), "utf8");
   const result = await catalog.read();
   const traversal = result.entries.find((item) => item.name === "traversal");
   assert.equal(traversal?.status, "unavailable");
@@ -96,7 +97,8 @@ test("reports permission-blocked local roots as unavailable", async () => {
   chmodSync(blocked, 0o000);
   try {
     const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: root });
-    await catalog.save({ references: { blocked: join(blocked, "child") } });
+    mkdirSync(dirname(catalog.filePath), { recursive: true });
+    writeFileSync(catalog.filePath, JSON.stringify({ references: { blocked: join(blocked, "child") } }), "utf8");
     const result = await catalog.read();
     assert.equal(result.entries.find((item) => item.name === "blocked")?.status, "unavailable");
   } finally {
@@ -118,7 +120,8 @@ test("resolves local paths and reports unavailable roots without throwing", asyn
     homeDir: home,
     materializer: offlineMaterializer(),
   });
-  await catalog.save({
+  mkdirSync(dirname(catalog.filePath), { recursive: true });
+  writeFileSync(catalog.filePath, JSON.stringify({
     references: {
       home: "~/docs",
       absolute: absoluteDocs,
@@ -126,7 +129,7 @@ test("resolves local paths and reports unavailable roots without throwing", asyn
       file: fileRoot,
       sdk: { repository: "owner/repo", branch: "main" },
     },
-  });
+  }), "utf8");
 
   const result = await catalog.read();
   assert.deepEqual(result.entries.map(({ name }) => name), ["absolute", "file", "home", "missing", "sdk"]);
@@ -184,7 +187,9 @@ test("rejects malformed JSON without exposing content", async () => {
 test("saves validated JSON atomically with mode 0644 and preserves the prior file on writer failure", async () => {
   const root = tempRoot();
   const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: root });
-  const first = { references: { docs: "/tmp/docs" } };
+  const docs = join(root, "docs");
+  mkdirSync(docs, { recursive: true });
+  const first = { references: { docs } };
   assert.deepEqual(await catalog.save(first), { ok: true });
   assert.equal(statSync(catalog.filePath).mode & 0o777, 0o644);
   assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), first);
@@ -196,7 +201,9 @@ test("saves validated JSON atomically with mode 0644 and preserves the prior fil
       throw new Error("simulated writer failure");
     },
   });
-  const failed = await failing.save({ references: { changed: "/tmp/changed" } });
+  const changed = join(root, "changed");
+  mkdirSync(changed, { recursive: true });
+  const failed = await failing.save({ references: { changed } });
   assert.deepEqual(failed, { ok: false, error: "Unable to save references configuration" });
   assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), first);
   assert.deepEqual(readdirSync(dirname(catalog.filePath)).filter((name) => name.includes(".tmp-")), []);
@@ -210,7 +217,9 @@ test("saves validated JSON atomically with mode 0644 and preserves the prior fil
       },
     },
   });
-  const renameFailed = await renameFailing.save({ references: { renamed: "/tmp/renamed" } });
+  const renamed = join(root, "renamed");
+  mkdirSync(renamed, { recursive: true });
+  const renameFailed = await renameFailing.save({ references: { renamed } });
   assert.deepEqual(renameFailed, { ok: false, error: "Unable to save references configuration" });
   assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), first);
   assert.deepEqual(readdirSync(dirname(catalog.filePath)).filter((name) => name.includes(".tmp-")), []);
@@ -228,10 +237,12 @@ test("preflight rejects unavailable Git sources before persistence", async () =>
       },
     }),
   });
-  await catalog.save({ references: { docs: "/tmp/docs" } });
-  const result = await catalog.save({ references: { remote: { repository: "owner/repo", branch: "main" } } });
+  const docs = join(root, "docs");
+  mkdirSync(docs, { recursive: true });
+  await catalog.save({ references: { docs } });
+  const result = await catalog.save({ references: { docs, remote: { repository: "owner/repo", branch: "main" } } });
   assert.deepEqual(result, { ok: false, error: "Git reference preflight failed" });
-  assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), { references: { docs: "/tmp/docs" } });
+  assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), { references: { docs } });
 });
 
 test("publishes Git materialization status through the public catalog", async () => {
@@ -260,8 +271,10 @@ test("publishes Git materialization status through the public catalog", async ()
 test("save rejects invalid documents before touching the existing file", async () => {
   const root = tempRoot();
   const catalog = createReferenceCatalogWithInfrastructure({ agentDir: join(root, "agent"), homeDir: root });
-  await catalog.save({ references: { docs: "/tmp/docs" } });
+  const docs = join(root, "docs");
+  mkdirSync(docs, { recursive: true });
+  await catalog.save({ references: { docs } });
   const result = await catalog.save({ references: { relative: "./docs" } });
   assert.equal(result.ok, false);
-  assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), { references: { docs: "/tmp/docs" } });
+  assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), { references: { docs } });
 });
