@@ -26,3 +26,4 @@ export {
   type McpServerStatus,
 } from "./manager.ts";
 export { registerMcpLifecycle, type McpLifecycleRegistrationOptions } from "./lifecycle.ts";
+export { ProcessStdioTransport, terminateProcessTree } from "./stdio.ts";

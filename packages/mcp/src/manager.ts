@@ -1,8 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ListRootsRequestSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
-import { listClientTools } from "./catalog.ts";
+import { discoverCatalog, wireListChangedHandlers, type ServerCatalog } from "./catalog.ts";
 import {
   loadMcpConfig,
   projectConfigPath,
@@ -15,7 +14,9 @@ import {
   type McpConfigLoadOptions,
   type McpConfigResult,
   type McpLocalServerConfig,
+  type McpTimeoutConfig,
 } from "./config.ts";
+import { ProcessStdioTransport } from "./stdio.ts";
 
 const DEFAULT_STARTUP_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 30_000;
@@ -29,12 +30,13 @@ export type McpServerStatus =
 export interface McpConnectionResult {
   status: McpServerStatus;
   tools: Tool[];
+  catalog: ServerCatalog;
 }
 
 interface ActiveConnection {
   client: Client;
-  transport: StdioClientTransport;
-  tools: Tool[];
+  transport: ProcessStdioTransport;
+  catalog: ServerCatalog;
 }
 
 export interface McpManagerState {
@@ -58,7 +60,7 @@ export interface McpManager {
   status(name: string): McpServerStatus | undefined;
   reload(): McpConfigResult;
   start(): Promise<McpManagerState>;
-  connectLocal(name: string, server: McpLocalServerConfig): Promise<McpConnectionResult>;
+  connectLocal(name: string, server: McpLocalServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
   close(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -80,19 +82,38 @@ function errorMessage(error: unknown): string {
 
 function withTimeout<T>(operation: Promise<T>, timeoutMs: number, onTimeout: () => Promise<void>): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
+  let settled = false;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      void onTimeout().finally(() => reject(new Error(`MCP operation timed out after ${timeoutMs}ms`)));
+      if (settled) return;
+      settled = true;
+      void onTimeout();
+      reject(new Error(`MCP operation timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     timer.unref();
   });
-  return Promise.race([operation, timeout]).finally(() => {
+  return Promise.race([
+    operation.finally(() => {
+      settled = true;
+    }),
+    timeout,
+  ]).finally(() => {
     if (timer) clearTimeout(timer);
   });
 }
 
 async function closeConnection(connection: ActiveConnection): Promise<void> {
   await Promise.allSettled([connection.client.close(), connection.transport.close()]);
+}
+
+/** Resolve a timeout from server, then global config, then default. */
+function resolveTimeout(
+  serverTimeout: McpTimeoutConfig | undefined,
+  globalTimeout: McpTimeoutConfig | undefined,
+  which: "startup" | "request",
+): number {
+  const value = serverTimeout?.[which] ?? globalTimeout?.[which];
+  return value ?? (which === "startup" ? DEFAULT_STARTUP_TIMEOUT : DEFAULT_REQUEST_TIMEOUT);
 }
 
 /** Create the session-scoped MCP manager and its Phase 2 local connection boundary. */
@@ -122,54 +143,65 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     return result;
   };
 
-  const connectLocalInternal = async (name: string, server: McpLocalServerConfig): Promise<McpConnectionResult> => {
-      const old = connections.get(name);
-      if (old) {
-        connections.delete(name);
-        await closeConnection(old);
-      }
-      if (server.disabled === true) {
-        const disabled = { status: "disabled" } as const;
-        setStatus(name, disabled);
-        return { status: disabled, tools: [] };
-      }
+  const connectLocalInternal = async (
+    name: string,
+    server: McpLocalServerConfig,
+    signal?: AbortSignal,
+  ): Promise<McpConnectionResult> => {
+    const old = connections.get(name);
+    if (old) {
+      connections.delete(name);
+      await closeConnection(old);
+    }
+    if (server.disabled === true) {
+      const disabled = { status: "disabled" } as const;
+      setStatus(name, disabled);
+      return { status: disabled, tools: [], catalog: { tools: [], prompts: [], resources: [], resourceTemplates: [] } };
+    }
 
-      const [command, ...args] = server.command;
-      const transport = new StdioClientTransport({
-        command,
-        args,
-        cwd: resolveLocalCwd(server, projectRoot),
-        env: resolveLocalEnvironment(server, options.env),
-        stderr: "pipe",
-      });
-      const client = new Client(
-        { name: "pi-code-mcp", version: "0.1.0" },
-        { capabilities: { roots: {} } },
+    const [command, ...args] = server.command;
+    const transport = new ProcessStdioTransport({
+      command,
+      args,
+      cwd: resolveLocalCwd(server, projectRoot),
+      env: resolveLocalEnvironment(server, options.env),
+      stderr: "pipe",
+    });
+    const client = new Client(
+      { name: "pi-code-mcp", version: "0.1.0" },
+      { capabilities: { roots: {} } },
+    );
+    client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: [{ uri: pathToFileURL(projectRoot).href }] }));
+    const candidate: ActiveConnection = { client, transport, catalog: emptyCatalog() };
+    const startupTimeout = resolveTimeout(server.timeout, state.config?.timeout, "startup");
+    const requestTimeout = resolveTimeout(server.timeout, state.config?.timeout, "request");
+    try {
+      await withTimeout(client.connect(transport, signal ? { signal } : undefined), startupTimeout, () =>
+        closeConnection(candidate),
       );
-      client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: [{ uri: pathToFileURL(projectRoot).href }] }));
-      const candidate: ActiveConnection = { client, transport, tools: [] };
-      const timeout = server.timeout?.startup ?? DEFAULT_STARTUP_TIMEOUT;
-      try {
-        await withTimeout(client.connect(transport), timeout, () => closeConnection(candidate));
-        let tools: Tool[] = [];
-        if (client.getServerCapabilities()?.tools) {
-          tools = await listClientTools(client, server.timeout?.request ?? DEFAULT_REQUEST_TIMEOUT);
-        }
-        candidate.tools = tools;
-        connections.set(name, candidate);
-        const connected = { status: "connected", toolCount: tools.length } as const;
-        setStatus(name, connected);
-        return { status: connected, tools };
-      } catch (error) {
-        await closeConnection(candidate);
-        const failed = { status: "failed", error: errorMessage(error) } as const;
-        setStatus(name, failed);
-        return { status: failed, tools: [] };
-      }
-    };
+      candidate.catalog = await discoverCatalog(client, requestTimeout, signal);
+      wireListChangedHandlers(client, candidate.catalog);
+      connections.set(name, candidate);
+      const connected = { status: "connected", toolCount: candidate.catalog.tools.length } as const;
+      setStatus(name, connected);
+      return {
+        status: connected,
+        tools: candidate.catalog.tools,
+        catalog: candidate.catalog,
+      };
+    } catch (error) {
+      await closeConnection(candidate);
+      const failed = { status: "failed", error: errorMessage(error) } as const;
+      setStatus(name, failed);
+      return { status: failed, tools: [], catalog: emptyCatalog() };
+    }
+  };
 
-  const connectLocal = (name: string, server: McpLocalServerConfig): Promise<McpConnectionResult> =>
-    serialize(() => connectLocalInternal(name, server));
+  const connectLocal = (
+    name: string,
+    server: McpLocalServerConfig,
+    signal?: AbortSignal,
+  ): Promise<McpConnectionResult> => serialize(() => connectLocalInternal(name, server, signal));
 
   const closeInternal = async (): Promise<void> => {
     const active = [...connections.entries()];
@@ -217,4 +249,8 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     close,
     stop,
   };
+}
+
+function emptyCatalog(): ServerCatalog {
+  return { tools: [], prompts: [], resources: [], resourceTemplates: [] };
 }
