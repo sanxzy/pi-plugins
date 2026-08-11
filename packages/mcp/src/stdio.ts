@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { spawn, type ChildProcess } from "node:child_process";
+import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport, TransportSendOptions } from "@modelcontextprotocol/sdk/shared/transport.js";
 
@@ -106,7 +107,18 @@ export class ProcessStdioTransport implements Transport {
         this.onerror?.(error);
         reject(error);
       });
-      child.once("spawn", () => resolve());
+      child.once("spawn", () => {
+        if (this.closing) {
+          // A timeout or cancellation closed the transport while the OS was
+          // still spawning. Terminate the freshly spawned group so a slow
+          // spawn cannot defeat the startup timeout or leak the process.
+          const pid = child.pid;
+          if (pid) void terminateProcessTree(pid);
+          reject(new Error("ProcessStdioTransport closed during startup"));
+          return;
+        }
+        resolve();
+      });
       child.once("close", () => {
         if (this.child === child) this.child = undefined;
         this.onclose?.();

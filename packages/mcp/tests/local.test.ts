@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { createMcpManager, terminateProcessTree, userConfigPath } from "../src/index.ts";
+import { createMcpManager, terminateProcessTree, ProcessStdioTransport, userConfigPath } from "../src/index.ts";
 
 const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
 const fixtureCwd = dirname(fixture);
@@ -217,6 +217,38 @@ test("session shutdown terminates local descendants in the process group", async
   rmSync(agentDir, { recursive: true, force: true });
   rmSync(projectRoot, { recursive: true, force: true });
   rmSync(dirname(childPidFile), { recursive: true, force: true });
+});
+
+test("local server stderr is piped and bounded on the transport", async () => {
+  const transport = new ProcessStdioTransport({
+    command: process.execPath,
+    args: [fixture],
+    cwd: fixtureCwd,
+    env: { MCP_FIXTURE_STDERR: "1" },
+    stderr: "pipe",
+  });
+  try {
+    await transport.start();
+    // stderr data arrives asynchronously after spawn; wait for the marker.
+    const deadline = Date.now() + 3_000;
+    while (!transport.stderrText.includes("stderr-") && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(transport.stderrText.includes("stderr-"), "server stderr should be captured on the transport");
+    assert.ok(transport.stderrText.length <= 32 * 1024, "stderr capture must be bounded");
+  } finally {
+    await transport.close();
+  }
+});
+
+test("closing a transport before spawn completes rejects startup and kills the process", async () => {
+  const transport = new ProcessStdioTransport({
+    command: process.execPath,
+    args: [fixture],
+    cwd: fixtureCwd,
+  });
+  await transport.close();
+  await assert.rejects(transport.start(), /closed during startup/);
 });
 
 function isProcessAlive(pid: number): boolean {
