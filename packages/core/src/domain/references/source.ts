@@ -88,16 +88,26 @@ export function validateBranch(branch: string): ValidationResult<string> {
 
 /** An object entry must be a plain local or Git source, never both. */
 function validateEntryObject(entry: LocalReferenceEntry | GitReferenceEntry): ValidationResult<ReferenceSource> {
-  if (typeof entry !== "object" || entry === null) {
-    return { ok: false, error: "reference entry must be a string or object" };
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+    return { ok: false, error: "reference entry must be a string or plain object" };
   }
-  const hasPath = "path" in entry && typeof entry.path === "string";
-  const hasRepository = "repository" in entry && typeof entry.repository === "string";
+  const hasPath = "path" in entry;
+  const hasRepository = "repository" in entry;
   if (hasPath === hasRepository) {
     return { ok: false, error: "a reference must specify exactly one of path or repository" };
   }
+  const raw = entry as Record<string, unknown>;
+  if (typeof raw.repository !== "undefined" && typeof raw.repository !== "string") {
+    return { ok: false, error: "reference repository must be a string" };
+  }
+  if (typeof raw.path !== "undefined") {
+    if (typeof raw.path !== "string") return { ok: false, error: "reference path must be a string" };
+    if ("branch" in entry || "repository" in entry) {
+      return { ok: false, error: "a local reference must not carry branch or repository fields" };
+    }
+  }
   if (hasPath) {
-    const path = validateLocalPath(entry.path);
+    const path = validateLocalPath(raw.path as string);
     if (!path.ok) return path;
     return {
       ok: true,
@@ -109,10 +119,14 @@ function validateEntryObject(entry: LocalReferenceEntry | GitReferenceEntry): Va
       },
     };
   }
-  if (!("repository" in entry)) return { ok: false, error: "reference repository must be a string" };
+  if (typeof entry.repository !== "string") return { ok: false, error: "reference repository must be a string" };
+  if ("path" in entry) return { ok: false, error: "a Git reference must not carry a path field" };
   const repository = validateRepository(entry.repository);
   if (!repository.ok) return repository;
   if (!parseRepository(repository.value)) return { ok: false, error: "repository is not a valid Git reference" };
+  if (entry.branch !== undefined && typeof entry.branch !== "string") {
+    return { ok: false, error: "branch must be a string" };
+  }
   const branch = entry.branch === undefined ? undefined : validateBranch(entry.branch);
   if (branch !== undefined && !branch.ok) return branch;
   return {
@@ -149,12 +163,9 @@ export function validateReferenceEntry(alias: string, entry: unknown): Validatio
     return { ok: false, error: "reference entry must be a string or object" };
   }
   const objectEntry = entry as LocalReferenceEntry | GitReferenceEntry;
-  // Validate optional metadata surface before normalizing the source.
-  if (
-    objectEntry.description !== undefined &&
-    (typeof objectEntry.description !== "string" || objectEntry.description.trim().length === 0)
-  ) {
-    return { ok: false, error: "description must be a non-empty string" };
+  // The source schema permits any string description, including empty strings.
+  if (objectEntry.description !== undefined && typeof objectEntry.description !== "string") {
+    return { ok: false, error: "description must be a string" };
   }
   if (objectEntry.hidden !== undefined && typeof objectEntry.hidden !== "boolean") {
     return { ok: false, error: "hidden must be a boolean" };
@@ -168,7 +179,9 @@ export function validateReferenceCatalog(
 ): ValidationResult<{ readonly references: Readonly<Record<string, ReferenceSource>> }> {
   if (typeof doc !== "object" || doc === null) return { ok: false, error: "catalog document must be an object" };
   const refs = (doc as { references?: unknown }).references;
-  if (typeof refs !== "object" || refs === null) return { ok: false, error: "references must be an object" };
+  if (typeof refs !== "object" || refs === null || Array.isArray(refs)) {
+    return { ok: false, error: "references must be an object map" };
+  }
   const out: Record<string, ReferenceSource> = {};
   const errors: string[] = [];
   for (const [alias, entry] of Object.entries(refs as Record<string, unknown>)) {
@@ -178,8 +191,12 @@ export function validateReferenceCatalog(
       continue;
     }
     const source = validateReferenceEntry(alias, entry);
-    if (source.ok) out[alias] = source.value;
-    else errors.push(`${alias}: ${source.error}`);
+    if (source.ok) {
+      // Define own properties so an alias such as `__proto__` cannot mutate the result prototype.
+      Object.defineProperty(out, alias, { value: source.value, enumerable: true, writable: true, configurable: true });
+    } else {
+      errors.push(`${alias}: ${source.error}`);
+    }
   }
   if (errors.length > 0) return { ok: false, error: errors.join("; ") };
   return { ok: true, value: { references: out } };

@@ -75,7 +75,34 @@ test("rejects unsafe aliases, malformed entries, and relative local paths", () =
   assert.equal(validateReferenceEntry("docs", { path: "docs" }).ok, false);
   assert.equal(validateReferenceEntry("docs", { path: "/srv/docs", hidden: "yes" }).ok, false);
   assert.equal(validateReferenceEntry("docs", { path: "/srv/docs", repository: "owner/repo" }).ok, false);
+  assert.equal(validateReferenceEntry("docs", { path: "/srv/docs", repository: 42 }).ok, false);
+  assert.equal(validateReferenceEntry("docs", { path: 42, repository: "owner/repo" }).ok, false);
+  assert.equal(validateReferenceEntry("docs", { path: "/srv/docs", branch: "main" }).ok, false);
   assert.equal(validateReferenceEntry("docs", { repository: "owner/repo", branch: "bad branch" }).ok, false);
+});
+
+test("returns structured failures for malformed optional fields", () => {
+  for (const branch of [null, 42, [], {}]) {
+    const result = validateReferenceEntry("sdk", { repository: "owner/repo", branch });
+    assert.equal(result.ok, false);
+    assert.equal(typeof result.error, "string");
+  }
+  for (const entry of [null, 42, [], { repository: "owner/repo", hidden: null }, { repository: "owner/repo", description: 42 }]) {
+    const result = validateReferenceEntry("sdk", entry);
+    assert.equal(result.ok, false);
+    assert.equal(typeof result.error, "string");
+  }
+});
+
+test("preserves empty descriptions because the reference schema permits every string", () => {
+  assert.deepEqual(validateReferenceEntry("docs", { path: "/srv/docs", description: "" }), {
+    ok: true,
+    value: { type: "local", path: "/srv/docs", description: "" },
+  });
+  assert.deepEqual(validateReferenceEntry("docs", { path: "/srv/docs", description: "   " }), {
+    ok: true,
+    value: { type: "local", path: "/srv/docs", description: "   " },
+  });
 });
 
 test("rejects unsafe repositories and branches without echoing sensitive input", () => {
@@ -116,4 +143,17 @@ test("supports deterministic file Git repositories for isolated tests", () => {
   assert.equal(repository.protocol, "file:");
   assert.equal(repository.host, "file");
   assert.equal(repository.path, "/tmp/reference-fixture.git");
+});
+
+test("requires a reference object map and safely preserves a __proto__ alias", () => {
+  assert.equal(validateReferenceCatalog({ references: ["owner/repo"] }).ok, false);
+  const result = validateReferenceCatalog(
+    JSON.parse('{"references":{"__proto__":{"path":"/tmp/docs"},"sdk":"owner/repo"}}'),
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(Object.prototype.hasOwnProperty.call(result.value.references, "__proto__"), true);
+    assert.deepEqual(result.value.references["__proto__"], { type: "local", path: "/tmp/docs" });
+    assert.deepEqual(result.value.references.sdk, { type: "git", repository: "owner/repo" });
+  }
 });
