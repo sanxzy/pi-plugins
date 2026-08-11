@@ -155,11 +155,30 @@ test("corrupt project, session, and agent manifests fail closed", () => {
   writeFileSync(started.projectManifest.path, "{broken");
   assert.throws(() => readProjectManifest(root), /Corrupt JSON manifest/);
 
+  const structurallyInvalidRoot = project();
+  const invalidProject = startRootSession({ projectRoot: structurallyInvalidRoot, sessionId: "root-invalid" });
+  writeFileSync(invalidProject.projectManifest.path, JSON.stringify({ canonicalRoot: canonicalProjectRoot(structurallyInvalidRoot) }));
+  assert.throws(() => startRootSession({ projectRoot: structurallyInvalidRoot, sessionId: "root-invalid" }), /Invalid project manifest/);
+
+  const wrongRoot = project();
+  const wrongRootStart = startRootSession({ projectRoot: wrongRoot, sessionId: "root-wrong" });
+  writeFileSync(wrongRootStart.projectManifest.path, JSON.stringify({
+    canonicalRoot: canonicalProjectRoot(root),
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }));
+  assert.throws(() => readProjectManifest(wrongRoot), /root mismatch/);
+
   const sessionRoot = project();
   startRootSession({ projectRoot: sessionRoot, sessionId: "root-session-2" });
   const sessionPath = homeSessionManifestFile(encodeProjectId(sessionRoot), "root-session-2");
   writeFileSync(sessionPath, "{broken");
   assert.throws(() => readSessionManifest(sessionRoot, "root-session-2"), /Corrupt JSON manifest/);
+
+  const invalidSessionRoot = project();
+  const invalidSession = startRootSession({ projectRoot: invalidSessionRoot, sessionId: "root-structural" });
+  writeFileSync(homeSessionManifestFile(encodeProjectId(invalidSessionRoot), "root-structural"), JSON.stringify({ active: true }));
+  assert.throws(() => readSessionManifest(invalidSessionRoot, "root-structural"), /Invalid session manifest/);
 
   const agentRoot = project();
   const store = createAgentManifestStore({ projectRoot: agentRoot, rootSessionId: "root-session-3", jobId: "job-agent" });
@@ -167,4 +186,10 @@ test("corrupt project, session, and agent manifests fail closed", () => {
   chmodSync(store.manifestPath, PRIVATE_FILE);
   writeFileSync(store.manifestPath, "{broken");
   assert.throws(() => readAgentManifest(agentRoot, "root-session-3", "job-agent"), /Corrupt JSON manifest/);
+
+  const invalidAgentRoot = project();
+  const invalidAgent = createAgentManifestStore({ projectRoot: invalidAgentRoot, rootSessionId: "root-invalid-agent", jobId: "job-invalid" });
+  invalidAgent.create({ status: "created", description: "x", subagentType: "x" });
+  writeFileSync(invalidAgent.manifestPath, JSON.stringify({ agentId: "invalid" }));
+  assert.throws(() => createAgentManifestStore({ projectRoot: invalidAgentRoot, rootSessionId: "root-invalid-agent", jobId: "job-invalid" }).create({ status: "created", description: "x", subagentType: "x" }), /Invalid agent manifest/);
 });

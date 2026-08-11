@@ -199,7 +199,9 @@ test("a gated background agent stays queued until running with a live handle", a
     const agentManifest = homeAgentManifestFile(encodeProjectId(cwd), "root-session", agentId);
     const eventLog = agentManifest.replace("agent.json", "events.jsonl");
     assert.equal(existsSync(agentManifest), true);
-    assert.equal(JSON.parse(readFileSync(agentManifest, "utf8")).status, "completed");
+    const persistedAgent = JSON.parse(readFileSync(agentManifest, "utf8")) as { status: string; piSessionId: string };
+    assert.equal(persistedAgent.status, "completed");
+    assert.equal(persistedAgent.piSessionId.startsWith("job-"), false);
     assert.equal(readFileSync(eventLog, "utf8").trim().split("\n").length >= 5, true);
     assert.equal(statSync(agentManifest).mode & 0o777, 0o600);
   } finally {
