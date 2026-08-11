@@ -99,10 +99,28 @@ export function normalizeResourceResult(
   const contentBlocks: ResourceContentBlock[] = [];
   const omitted: string[] = [];
   let total = 0;
+  let truncated = false;
   const push = (part: string): void => {
-    const bounded = limit(part, MAX_TEXT - Math.max(0, total));
-    parts.push(bounded);
-    total += bounded.length;
+    if (truncated || total >= MAX_TEXT) {
+      truncated = true;
+      return;
+    }
+    const separator = parts.length > 0 ? 1 : 0;
+    const available = MAX_TEXT - total - separator;
+    if (available <= 0) {
+      truncated = true;
+      return;
+    }
+    const marker = "\n[output truncated]";
+    if (part.length > available) {
+      const bodyLimit = Math.max(0, available - marker.length);
+      parts.push(`${part.slice(0, bodyLimit)}${marker}`);
+      total = MAX_TEXT;
+      truncated = true;
+      return;
+    }
+    parts.push(part);
+    total += separator + part.length;
   };
   for (const content of result.contents ?? []) {
     if (typeof content.text === "string") {
