@@ -100,7 +100,9 @@ export function createScopedRegistry(projectRoot: string, rootSessionId?: string
       const job = event.type === "created" ? event.job : index.get(event.jobId);
       const parentSessionId = job?.parentSessionId;
       if (!parentSessionId) return;
-      registryForParent(parentSessionId).append(event);
+      const registry = registryForParent(parentSessionId);
+      registry.append(event);
+      registry.prune();
       load();
     },
     createJob(job): void {
@@ -110,15 +112,17 @@ export function createScopedRegistry(projectRoot: string, rootSessionId?: string
       }
       const next = job.parentSessionId === undefined ? { ...job, parentSessionId } : job;
       registryForParent(parentSessionId).createJob(next);
-      index.set(next.jobId, next);
-      ownerByJob.set(next.jobId, parentSessionId);
+      // The parent registry may have pruned history; reload so the index agrees
+      // with the on-disk (and per-agent-capped) state.
+      load();
     },
     updateJob(jobId, update): void {
       const parentSessionId = ownerByJob.get(jobId) ?? index.get(jobId)?.parentSessionId;
       if (!parentSessionId) return;
       registryForParent(parentSessionId).updateJob(jobId, update);
-      const next = byParent.get(parentSessionId)?.get(jobId);
-      if (next) index.set(jobId, next);
+      // The parent registry may have pruned history; reload so the index agrees
+      // with the on-disk (and per-agent-capped) state.
+      load();
     },
     fold(): Map<string, Job> {
       load();
@@ -129,6 +133,10 @@ export function createScopedRegistry(projectRoot: string, rootSessionId?: string
     },
     all(): Map<string, Job> {
       return index;
+    },
+    prune(): void {
+      for (const registry of byParent.values()) registry.prune();
+      load();
     },
     ensureSession,
     fileForJob(jobId): string | undefined {

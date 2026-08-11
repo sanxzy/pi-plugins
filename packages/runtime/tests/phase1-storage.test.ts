@@ -145,6 +145,116 @@ test("scope API recursively returns descendants, status, duration, and live ente
   assert.deepEqual(childScope.map((entry) => entry.jobId), ["job-c"]);
 });
 
+test("scoped registry prunes terminal jobs beyond the cap, oldest first, keeping active jobs", () => {
+  const root = projectRoot();
+  const registry = createScopedRegistry(root);
+
+  // 30 terminal jobs under one parent; creation times spread so update order is deterministic.
+  for (let i = 0; i < 30; i++) {
+    const id = `done-${String(i).padStart(2, "0")}`;
+    registry.createJob(newJob({
+      jobId: id,
+      parentSessionId: "root-session",
+      status: "completed",
+      createdAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      updatedAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+    }));
+  }
+
+  assert.equal(registry.all().size, 25, "only the newest 25 terminal jobs are retained");
+  assert.equal(registry.get("done-00"), undefined, "oldest terminal job is pruned");
+  assert.equal(registry.get("done-04"), undefined, "an early terminal job is pruned");
+  assert.ok(registry.get("done-29"), "newest terminal job is retained");
+  assert.ok(registry.get("done-25"), "the 25th newest terminal job is retained");
+});
+
+test("scoped registry pruning keeps active jobs and their ancestors", () => {
+  const root = projectRoot();
+  const registry = createScopedRegistry(root);
+
+  // A running parent with a running child and many completed siblings.
+  registry.createJob(newJob({
+    jobId: "parent",
+    parentSessionId: "root-session",
+    status: "running",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  }));
+  registry.createJob(newJob({
+    jobId: "child",
+    parentSessionId: "parent",
+    parentJobId: "parent",
+    status: "running",
+    createdAt: "2026-01-01T00:00:01.000Z",
+  }));
+  for (let i = 0; i < 30; i++) {
+    registry.createJob(newJob({
+      jobId: `sib-${String(i).padStart(2, "0")}`,
+      parentSessionId: "root-session",
+      status: "completed",
+      createdAt: `2026-01-01T00:01:${String(i).padStart(2, "0")}.000Z`,
+      updatedAt: `2026-01-01T00:01:${String(i).padStart(2, "0")}.000Z`,
+    }));
+  }
+
+  assert.ok(registry.get("parent"), "running parent is never pruned");
+  assert.ok(registry.get("child"), "running child is never pruned");
+  assert.equal(
+    [...registry.all().values()].filter((job) => job.status === "completed").length,
+    25,
+    "exactly 25 completed siblings remain",
+  );
+});
+
+test("pruning caps each agent's own history recursively, so grandchildren are isolated", () => {
+  const root = projectRoot();
+  const registry = createScopedRegistry(root);
+
+  // Root agent spawns 30 completed children, each no deeper.
+  for (let i = 0; i < 30; i++) {
+    registry.createJob(newJob({
+      jobId: `root-child-${String(i).padStart(2, "0")}`,
+      parentSessionId: "root-session",
+      status: "completed",
+      createdAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      updatedAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+    }));
+  }
+  // One of those children is itself an agent that spawns 30 completed grandchildren.
+  registry.createJob(newJob({
+    jobId: "agent-a",
+    parentSessionId: "root-session",
+    status: "completed",
+    createdAt: "2026-01-01T00:01:00.000Z",
+    updatedAt: "2026-01-01T00:01:00.000Z",
+  }));
+  for (let i = 0; i < 30; i++) {
+    registry.createJob(newJob({
+      jobId: `grand-${String(i).padStart(2, "0")}`,
+      parentSessionId: "agent-a",
+      parentJobId: "agent-a",
+      status: "completed",
+      createdAt: `2026-01-01T00:02:${String(i).padStart(2, "0")}.000Z`,
+      updatedAt: `2026-01-01T00:02:${String(i).padStart(2, "0")}.000Z`,
+    }));
+  }
+
+  // Root's own history is capped at 25 (agent-a is the newest completed child).
+  const rootChildren = [...registry.all().values()]
+    .filter((job) => job.parentSessionId === "root-session")
+    .filter((job) => job.status === "completed");
+  assert.equal(rootChildren.length, 25, "root agent keeps 25 completed children");
+  assert.ok(rootChildren.some((job) => job.jobId === "agent-a"), "agent-a is retained as root's newest child");
+  assert.equal(registry.get("root-child-00"), undefined, "oldest root child is pruned");
+
+  // Agent-a's own history is capped at 25 independently of the root.
+  const grandchildren = [...registry.all().values()]
+    .filter((job) => job.parentSessionId === "agent-a")
+    .filter((job) => job.status === "completed");
+  assert.equal(grandchildren.length, 25, "agent-a keeps 25 completed grandchildren");
+  assert.equal(registry.get("grand-00"), undefined, "oldest grandchild is pruned");
+  assert.ok(registry.get("grand-29"), "newest grandchild is retained");
+});
+
 test("scope API never reads legacy flat jobs or sessions", () => {
   const root = projectRoot();
   const legacyRegistry = join(root, ".pi", "pi-code", "jobs.jsonl");
