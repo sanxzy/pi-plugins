@@ -27,3 +27,32 @@ export {
 } from "./manager.ts";
 export { registerMcpLifecycle, type McpLifecycleRegistrationOptions } from "./lifecycle.ts";
 export { ProcessStdioTransport, terminateProcessTree } from "./stdio.ts";
+export {
+  connectRemote,
+  finishRemoteAuth,
+  logoutRemote,
+  startRemoteAuth,
+  type ConnectRemoteOptions,
+  type RemoteConnectionResult,
+  type RemoteStatus,
+} from "./remote.ts";
+export {
+  authStorePath,
+  createAuthStore,
+  createDefaultAuthStore,
+  type AuthStore,
+  type StoredAuthEntry,
+  type StoredClientInfo,
+  type StoredTokens,
+} from "./auth-store.ts";
+export {
+  cancelOAuthCallback,
+  ensureCallbackServer,
+  isCallbackServerRunning,
+  parseRedirectUri,
+  PiOAuthProvider,
+  stopCallbackServer,
+  waitForOAuthCallback,
+  type OAuthProviderOptions,
+  type OAuthStatus,
+} from "./oauth.ts";

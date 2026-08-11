@@ -14,9 +14,11 @@ import {
   type McpConfigLoadOptions,
   type McpConfigResult,
   type McpLocalServerConfig,
+  type McpRemoteServerConfig,
   type McpTimeoutConfig,
 } from "./config.ts";
 import { ProcessStdioTransport } from "./stdio.ts";
+import { connectRemote as connectRemoteTransport, type RemoteStatus } from "./remote.ts";
 
 const DEFAULT_STARTUP_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 30_000;
@@ -25,7 +27,9 @@ export type McpServerStatus =
   | { status: "configured" }
   | { status: "disabled" }
   | { status: "connected"; toolCount: number }
-  | { status: "failed"; error: string };
+  | { status: "failed"; error: string }
+  | { status: "needs_auth" }
+  | { status: "needs_client_registration"; error: string };
 
 export interface McpConnectionResult {
   status: McpServerStatus;
@@ -35,7 +39,7 @@ export interface McpConnectionResult {
 
 interface ActiveConnection {
   client: Client;
-  transport: ProcessStdioTransport;
+  transport?: { close(): Promise<void> };
   catalog: ServerCatalog;
 }
 
@@ -61,6 +65,7 @@ export interface McpManager {
   reload(): McpConfigResult;
   start(): Promise<McpManagerState>;
   connectLocal(name: string, server: McpLocalServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
+  connectRemote(name: string, server: McpRemoteServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
   close(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -103,7 +108,10 @@ function withTimeout<T>(operation: Promise<T>, timeoutMs: number, onTimeout: () 
 }
 
 async function closeConnection(connection: ActiveConnection): Promise<void> {
-  await Promise.allSettled([connection.client.close(), connection.transport.close()]);
+  await Promise.allSettled([
+    connection.client.close(),
+    connection.transport ? connection.transport.close() : Promise.resolve(),
+  ]);
 }
 
 /** Resolve a timeout from server, then global config, then default. */
@@ -203,6 +211,49 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     signal?: AbortSignal,
   ): Promise<McpConnectionResult> => serialize(() => connectLocalInternal(name, server, signal));
 
+  const connectRemoteInternal = async (
+    name: string,
+    server: McpRemoteServerConfig,
+    signal?: AbortSignal,
+  ): Promise<McpConnectionResult> => {
+    const old = connections.get(name);
+    if (old) {
+      connections.delete(name);
+      await closeConnection(old);
+    }
+    if (server.disabled === true) {
+      const disabled = { status: "disabled" } as const;
+      setStatus(name, disabled);
+      return { status: disabled, tools: [], catalog: emptyCatalog() };
+    }
+    const result = await connectRemoteTransport({
+      url: server.url,
+      agentDir,
+      projectRoot,
+      headers: server.headers,
+      oauth: server.oauth,
+      timeout: server.timeout ?? state.config?.timeout,
+      signal,
+      onRedirect: () => {},
+    });
+    const status = mapRemoteStatus(result.status);
+    setStatus(name, status);
+    if (result.status.status === "connected" && result.client) {
+      wireListChangedHandlers(result.client, result.catalog);
+      connections.set(name, { client: result.client, catalog: result.catalog });
+      const connected = { status: "connected", toolCount: result.catalog.tools.length } as const;
+      setStatus(name, connected);
+      return { status: connected, tools: result.catalog.tools, catalog: result.catalog };
+    }
+    return { status, tools: [], catalog: emptyCatalog() };
+  };
+
+  const connectRemote = (
+    name: string,
+    server: McpRemoteServerConfig,
+    signal?: AbortSignal,
+  ): Promise<McpConnectionResult> => serialize(() => connectRemoteInternal(name, server, signal));
+
   const closeInternal = async (): Promise<void> => {
     const active = [...connections.entries()];
     connections.clear();
@@ -225,6 +276,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       }
       for (const [name, server] of Object.entries(state.config?.servers ?? {})) {
         if (server.type === "local") await connectLocalInternal(name, server);
+        else if (server.type === "remote") await connectRemoteInternal(name, server);
       }
       return state;
     });
@@ -246,6 +298,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     reload,
     start,
     connectLocal,
+    connectRemote,
     close,
     stop,
   };
@@ -253,4 +306,17 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
 
 function emptyCatalog(): ServerCatalog {
   return { tools: [], prompts: [], resources: [], resourceTemplates: [] };
+}
+
+function mapRemoteStatus(status: RemoteStatus): McpServerStatus {
+  switch (status.status) {
+    case "connected":
+      return { status: "connected", toolCount: 0 };
+    case "failed":
+      return { status: "failed", error: status.error };
+    case "needs_auth":
+      return { status: "needs_auth" };
+    case "needs_client_registration":
+      return { status: "needs_client_registration", error: status.error };
+  }
 }
