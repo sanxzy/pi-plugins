@@ -110,8 +110,9 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
 
   const tick = (cwd: string): void => {
     if (deliverySuspended) return;
+    const normalizedCwd = normalizeGoalCwd(cwd);
     const goals = store.fold();
-    const goal = goals.get(cwd);
+    const goal = goals.get(normalizedCwd);
     if (!goal) {
       clearScheduler(cwd);
       return;

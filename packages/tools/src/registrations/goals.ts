@@ -19,7 +19,10 @@ type GoalToolResult = AgentToolResult<GoalToolDetails>;
 
 function isMainHost(ctx: ExtensionContext): boolean {
   const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
-  return pool.isRootSession(ctx.sessionManager.getSessionId()) || pool.shouldBootstrapRootSession(ctx.sessionManager.getSessionId());
+  // Tool authorization is an ordinary call-site boundary, not lifecycle
+  // bootstrap. Only a persisted active session manifest may authorize goals;
+  // unknown/unpersisted ids must remain unavailable.
+  return pool.isRootSession(ctx.sessionManager.getSessionId());
 }
 
 function unavailableToChild(): GoalToolResult {
