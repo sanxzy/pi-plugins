@@ -224,9 +224,6 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
               setThinkingLevel: (level) => pi.setThinkingLevel(level),
             },
             clearQueue: () => activeListener?.clearQueue(),
-            // Local experiment: allow command-only controls (e.g. /reload) to
-            // create an ExtensionCommandContext at dispatch time via the SDK seam.
-            createCommandContext: () => pi.createCommandContext?.(),
           });
           if (handled) return;
         }

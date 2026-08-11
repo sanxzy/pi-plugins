@@ -16,6 +16,8 @@ import {
 } from "@xzy-ai/channels";
 import {
   clearTelegramCommandContext,
+  getTelegramCommandContext,
+  setTelegramCommandContext,
 } from "./telegram-controls.ts";
 import {
   clearTelegramProjectManager,
@@ -66,6 +68,9 @@ export function registerTelegramLifecycle(
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
     if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
+    // Retain a fresh command context per project so Telegram native controls
+    // (e.g. /reload) can call command-only Pi APIs such as reload().
+    await retainCommandContext(pi, projectRoot);
     const lifecycle = lifecycleFor(projectRoot, ctx.sessionManager.getSessionId(), deps);
     const started = await lifecycle.start();
     if (!started.ok && started.code !== "missing") {
@@ -85,6 +90,22 @@ export function registerTelegramLifecycle(
     // process keeps its active connection and lifecycle identity.
     clearTelegramProjectManager(projectRoot);
   });
+}
+
+/**
+ * Retain a fresh command context for the project root through the SDK seam.
+ * The runner is bound by the time session_start fires, so createCommandContext
+ * is available; an unavailable runtime silently skips retention and dispatch
+ * keeps falling back to the createCommandContext seam or the unavailable reply.
+ */
+async function retainCommandContext(pi: ExtensionAPI, projectRoot: string): Promise<void> {
+  try {
+    setTelegramCommandContext(projectRoot, pi.createCommandContext());
+  } catch {
+    // createCommandContext requires a bound runner with command actions. The
+    // first startup always has one; runtime gaps fall back to dispatch-time
+    // creation or the unavailable reply.
+  }
 }
 
 /** Test seam for process-local lifecycle isolation. */

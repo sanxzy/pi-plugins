@@ -22,7 +22,6 @@ import {
   registerTelegramInbound,
   registerGoalCommand,
   createDefaultTelegramCommandExpander,
-  registerTelegramCommandContext,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import type {
@@ -48,9 +47,6 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   // publishes the same catalog as the Telegram bot menu on every start.
   const getCommands = () => pi.getCommands();
   const expander = createDefaultTelegramCommandExpander(getCommands);
-  // Experimental local bridge: populate the command-only context reference so
-  // Telegram native controls can invoke Pi APIs such as ExtensionCommandContext.reload().
-  registerTelegramCommandContext(pi);
 
   const getMenuCommands = () => expander.menuSources();
   registerTelegramSetup(pi, { getCommands: getMenuCommands });

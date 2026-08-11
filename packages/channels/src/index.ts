@@ -99,6 +99,19 @@ export {
   type TelegramExpansionTarget,
 } from "./expansion.ts";
 export {
+  clearGlobalChannelChatRegistry,
+  createChannelChatRegistry,
+  getGlobalChannelChatRegistry,
+  type ChannelChatAdapter,
+  type ChannelChatRegistry,
+  type ChannelChoiceResult,
+  type ChannelMediaResult,
+  type ChannelReactionResult,
+  type ChannelTarget,
+  type ChannelTargetValidation,
+  type ChannelTextResult,
+} from "./chat.ts";
+export {
   createTelegramInbound,
   defaultTelegramPairingState,
   decodeAcceptedText,

@@ -91,7 +91,7 @@ export function decodeAcceptedText(context: unknown): TelegramUpdate | undefined
  */
 export function formatTelegramSignature(chatId: string, messageId?: number): string {
   const origin = messageId === undefined ? chatId : `${chatId}:${messageId}`;
-  return `\n\n---\n[from:telegram:${origin}]\nUser active on Telegram. Be indifferent toward the default TUI window: keep thinking and reasoning normally, but write only a minimal concise do/act summary there — no conversational text, no attempt to communicate. To communicate directly with the user, use the \`user_telegram_chat\` tool.\n---`;
+  return `\n\n---\n[from:telegram:${origin}]\nUser active on Telegram. Be indifferent toward the default TUI window: keep thinking and reasoning normally, but write only a minimal concise do/act summary there — no conversational text, no attempt to communicate. To communicate directly with the user, use the \`telegram_chat\` tool.\n---`;
 }
 
 const TELEGRAM_SIGNATURE_PATTERN = /\[from:telegram:(-?\d+)(?::(\d+))?\]/g;
@@ -122,7 +122,7 @@ export function extractTelegramMessageOrigin(text: string): TelegramMessageOrigi
  */
 export function formatTelegramCommandSignature(chatId: string, messageId?: number): string {
   const origin = messageId === undefined ? chatId : `${chatId}:${messageId}`;
-  return `\n\n---\n[from:telegram:${origin}]\nUser active on Telegram. Reply through the \`user_telegram_chat\` tool.\n---`;
+  return `\n\n---\n[from:telegram:${origin}]\nUser active on Telegram. Reply through the \`telegram_chat\` tool.\n---`;
 }
 
 const TELEGRAM_COMMAND_NAME_PATTERN = /^[a-z0-9_]{1,32}$/;

@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerTelegramChatTool } from "../src/registrations/telegram.ts";
+import { registerTelegramChatTool, createTelegramChatAdapter } from "../src/registrations/telegram.ts";
 import { telegramChatParams } from "../src/tools.ts";
+import { createChannelChatRegistry } from "@xzy-ai/channels";
 
 function capture(deps: any = {}) {
   let tool: any;
-  registerTelegramChatTool({ registerTool(value: any) { tool = value; } } as unknown as ExtensionAPI, deps);
+  registerTelegramChatTool({ registerTool(value: any) { tool = value; } } as unknown as ExtensionAPI, {
+    ...deps,
+    registry: deps.registry ?? createChannelChatRegistry([]),
+  });
   return tool;
 }
 
@@ -22,6 +26,7 @@ test("schema rejects legacy, actionless, and incomplete send_text payloads", () 
   assert.equal(Value.Check(telegramChatParams, { chat_id: "777", text: "hello" }), false);
   assert.equal(Value.Check(telegramChatParams, { action: "send_text", chat_id: "777" }), false);
   assert.equal(Value.Check(telegramChatParams, sendText), true);
+  assert.equal(Value.Check(telegramChatParams, { ...sendText, channel: "telegram" }), false);
 });
 
 test("schema rejects mixed-action and unknown fields on send_text", () => {
@@ -262,4 +267,23 @@ test("send_text fails closed when the channel is not configured", async () => {
   });
   const result = await tool.execute("call", sendText, undefined, undefined, context());
   assert.equal(result.details.category, "not_configured");
+});
+
+test("the telegram adapter and registry support future channel adapters", async () => {
+  const adapter = createTelegramChatAdapter({ send: async () => ({ ok: true, sent: 1, failed: 0, messageIds: [7] }) });
+  assert.equal(adapter.id, "telegram");
+  assert.equal(adapter.label, "Telegram");
+  const custom = {
+    id: "discord",
+    label: "Discord",
+    validateTarget: async () => ({ ok: true, targetId: "tux" }),
+    sendText: async () => ({ ok: true, sent: 1, failed: 0, messageIds: [1] }),
+    react: async () => ({ ok: true, sent: 1, failed: 0, messageIds: [1] }),
+    sendChoices: async () => ({ ok: true, messageId: 1, expiresAt: 5 }),
+    sendMedia: async () => ({ ok: true, messageId: 1, mediaType: "photo", bytes: 1 }),
+  } as never;
+  const registry = createChannelChatRegistry([adapter, custom]);
+  assert.equal(registry.get("discord"), custom);
+  assert.equal(registry.get("telegram"), adapter);
+  assert.equal(registry.list().length, 2);
 });

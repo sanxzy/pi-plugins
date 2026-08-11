@@ -63,6 +63,30 @@ test("root session shutdown clears the retained reload command context", async (
   clearTelegramLifecycleRegistry();
 });
 
+test("root session start retains a command context through the SDK seam and shutdown clears it", async () => {
+  const cwd = projectRoot();
+  clearTelegramCommandContext(cwd);
+  const commandContext = { reload: async () => {} } as never;
+  const handlers = new Map<string, Handler>();
+  const pi = {
+    on(event: string, handler: Handler) {
+      handlers.set(event, handler);
+    },
+    createCommandContext: () => commandContext,
+  } as unknown as ExtensionAPI;
+  registerTelegramLifecycle(pi);
+  assert.equal(handlers.has("session_start"), true);
+  await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root"));
+  assert.equal(
+    getTelegramCommandContext(cwd),
+    commandContext,
+    "session_start retains the ExtensionCommandContext reference in the registry",
+  );
+  await handlers.get("session_shutdown")!({ reason: "quit" }, context(cwd, "root"));
+  assert.equal(getTelegramCommandContext(cwd), undefined, "shutdown clears the retained context");
+  clearTelegramLifecycleRegistry();
+});
+
 test("a valid configuration starts one connection on session start and stops it on shutdown", async () => {
   const cwd = projectRoot();
   writeValidConfig(cwd);

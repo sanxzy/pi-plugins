@@ -42,7 +42,7 @@ test("pi-code extension registers Telegram setup and goal workflow alongside exi
   assert.ok(names.includes("question"), "question tool registered");
   assert.ok(names.includes("agent"), "agent tool registered");
   assert.ok(names.includes("agent_status"), "agent_status tool registered");
-  assert.ok(names.includes("user_telegram_chat"), "user_telegram_chat tool registered");
+  assert.ok(names.includes("telegram_chat"), "telegram_chat tool registered");
   assert.ok(names.includes("web_search"), "web_search tool registered");
   assert.ok(names.includes("web_fetch"), "web_fetch tool registered");
   assert.ok(names.includes("llm_wikis_search"), "llm_wikis_search tool registered");
@@ -95,7 +95,7 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "web_fetch",
     "web_search",
     "llm_wikis_search",
-    "user_telegram_chat",
+    "telegram_chat",
   ]);
 });
 

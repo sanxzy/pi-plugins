@@ -25,7 +25,6 @@ export {
   clearTelegramControlState,
   dispatchTelegramControl,
   getTelegramCommandContext,
-  registerTelegramCommandContext,
   setTelegramCommandContext,
   type TelegramControlDispatchOptions,
 } from "./registrations/telegram-controls.ts";

@@ -2,19 +2,24 @@ import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-
 import { Text } from "@earendil-works/pi-tui";
 import {
   clearTelegramChoiceTokens,
+  createChannelChatRegistry,
   createTelegramChoice,
   createTelegramOutbound,
+  getGlobalChannelChatRegistry,
   resolveMediaSource,
   reactToMessage,
   sendTelegramMessage,
   validateStandardReaction,
   validateTelegramTarget,
+  type ChannelChatAdapter,
+  type ChannelChatRegistry,
   type OutboundChoiceResult,
   type OutboundMediaResult,
   type OutboundTextResult,
   type TelegramChoice,
   type TelegramMediaInput,
   type TelegramMediaType,
+  type TelegramTextFormat,
   type TelegramTargetValidation,
 } from "@xzy-ai/channels";
 import { telegramChatParams, type TelegramChatParams } from "../tools.ts";
@@ -36,7 +41,7 @@ function safeTelegramError(error: unknown): string {
 export interface TelegramChatDeps {
   /** Injectable send seam so tests verify delivery and partial results offline. */
   send?: (projectRoot: string, chatId: string, message: string, options?: {
-    format?: "plain" | "html" | "markdown_v2";
+    format?: TelegramTextFormat;
     messageId?: number;
     linkPreviewOptions?: Record<string, unknown>;
     disableNotification?: boolean;
@@ -52,11 +57,13 @@ export interface TelegramChatDeps {
   /** Injectable choice prompt seam so tests verify delivery offline. */
   sendChoices?: (projectRoot: string, chatId: string, question: string, choices: TelegramChoice[], replyToMessageId?: number, sessionId?: string) => Promise<OutboundChoiceResult>;
   /** Injectable media source resolution and delivery seam. */
-  sendMedia?: (projectRoot: string, chatId: string, mediaType: TelegramMediaType, source: TelegramMediaInput, options?: { caption?: string; filename?: string }) => Promise<OutboundMediaResult>;
+  sendMedia?: (projectRoot: string, chatId: string, mediaType: TelegramMediaType, source: TelegramMediaInput, options?: { caption?: string; filename?: string }, sessionId?: string) => Promise<OutboundMediaResult>;
+  /** Adapter registry override (tests). Defaults to the shared process registry. */
+  registry?: ChannelChatRegistry;
 }
 
-/** Register the parent-only unified Telegram communication/reporting tool. */
-export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDeps = {}): void {
+/** Adapt the Telegram transport to the generic channel-chat port. */
+export function createTelegramChatAdapter(deps: TelegramChatDeps = {}): ChannelChatAdapter {
   const send = deps.send ?? sendTelegramMessage;
   const react = deps.react ?? reactToMessage;
   const sendChoices = deps.sendChoices ?? (async (projectRoot: string, chatId: string, question: string, choices: TelegramChoice[], replyToMessageId?: number, sessionId = "root") => {
@@ -87,8 +94,56 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
     return createTelegramOutbound().sendMedia(projectRoot, chatId, mediaType, resolved.source, options);
   });
 
+  return {
+    id: "telegram",
+    label: "Telegram",
+    async validateTarget(projectRoot, targetId) {
+      const result = await validateTarget(projectRoot, targetId);
+      return result.ok ? { ok: true, targetId: result.chatId } : result;
+    },
+    async sendText(projectRoot, targetId, text, options) {
+      const cast = (options ?? {}) as {
+        format?: TelegramTextFormat;
+        messageId?: number;
+        linkPreviewOptions?: Record<string, unknown>;
+        disableNotification?: boolean;
+      };
+      return send(projectRoot, targetId, text, cast);
+    },
+    async react(projectRoot, targetId, messageId, emoji) {
+      if (!validateStandardReaction(emoji)) {
+        return { ok: false, sent: 0, failed: 1, error: "Unsupported reaction", category: "telegram_rejected" };
+      }
+      return react(projectRoot, targetId, messageId, emoji);
+    },
+    async sendChoices(projectRoot, targetId, question, choices, replyToMessageId, sessionId) {
+      return sendChoices(projectRoot, targetId, question, choices as unknown as TelegramChoice[], replyToMessageId, sessionId);
+    },
+    async sendMedia(projectRoot, targetId, mediaType, source, options, sessionId) {
+      if (source === null || typeof source !== "object") {
+        return { ok: false, error: "Unsupported media source", category: "telegram_rejected" };
+      }
+      const input = source as TelegramMediaInput;
+      if (input.kind !== "file_id" && input.kind !== "artifact_id" && input.kind !== "https") {
+        return { ok: false, error: "Unsupported media source", category: "telegram_rejected" };
+      }
+      if (input.kind === "https" && !input.url.toLowerCase().startsWith("https://")) {
+        return { ok: false, error: "Media source must be an HTTPS URL", category: "telegram_rejected" };
+      }
+      const cast = (options ?? {}) as { caption?: string; filename?: string };
+      return sendMedia(projectRoot, targetId, mediaType as TelegramMediaType, input, cast, sessionId);
+    },
+  };
+}
+
+/** Register the parent-only Telegram communication tool bound to its adapter. */
+export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDeps = {}): void {
+  const adapter = createTelegramChatAdapter(deps);
+  const registry = deps.registry ?? getGlobalChannelChatRegistry();
+  registry.register(adapter);
+
   pi.registerTool({
-    name: "user_telegram_chat",
+    name: "telegram_chat",
     label: "Telegram",
     description: "Send a communication or report to an approved Telegram private chat. Requires an explicit action and chat_id; refuses unapproved or unsupported targets.",
     parameters: telegramChatParams,
@@ -109,7 +164,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           category: "telegram_rejected",
         });
       }
-      const target = await validateTarget(ctx.cwd, params.chat_id);
+      const target = await adapter.validateTarget(ctx.cwd, params.chat_id);
       if (!target.ok) {
         return errorResult(target.error, {
           action: params.action,
@@ -128,7 +183,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
             return errorResult("Choice labels and values must be unique", {
               action: params.action,
               sent: false,
-              chatId: target.chatId,
+              chatId: target.targetId,
               question: params.question,
               error: "Choice labels and values must be unique",
               category: "telegram_rejected",
@@ -137,13 +192,13 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           labels.add(choice.label);
           values.add(choice.value);
         }
-        const choiceResult = await sendChoices(ctx.cwd, target.chatId, params.question, params.choices, params.message_id, ctx.sessionManager.getSessionId());
+        const choiceResult = await adapter.sendChoices(ctx.cwd, target.targetId, params.question, params.choices, params.message_id, ctx.sessionManager.getSessionId());
         if (!choiceResult.ok) {
           const error = safeTelegramError(choiceResult.error);
           return errorResult(`Telegram choices failed: ${error}`, {
             action: params.action,
             sent: false,
-            chatId: target.chatId,
+            chatId: target.targetId,
             question: params.question,
             error,
             category: choiceResult.category,
@@ -152,7 +207,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         return textResult(`Telegram choices sent (${params.choices.length} options)`, {
           action: params.action,
           sent: true,
-          chatId: target.chatId,
+          chatId: target.targetId,
           question: params.question,
           messageId: choiceResult.messageId,
           expiresAt: choiceResult.expiresAt,
@@ -160,27 +215,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       }
 
       if (params.action === "send_media") {
-        if (params.source.kind !== "file_id" && params.source.kind !== "artifact_id" && params.source.kind !== "https") {
-          return errorResult("Unsupported media source", {
-            action: params.action,
-            sent: false,
-            chatId: target.chatId,
-            mediaType: params.media_type,
-            error: "Unsupported media source",
-            category: "telegram_rejected",
-          });
-        }
-        if (params.source.kind === "https" && !params.source.url.toLowerCase().startsWith("https://")) {
-          return errorResult("Media source must be an HTTPS URL", {
-            action: params.action,
-            sent: false,
-            chatId: target.chatId,
-            mediaType: params.media_type,
-            error: "Media source must be an HTTPS URL",
-            category: "telegram_rejected",
-          });
-        }
-        const mediaResult = await sendMedia(ctx.cwd, target.chatId, params.media_type, params.source, {
+        const mediaResult = await adapter.sendMedia(ctx.cwd, target.targetId, params.media_type, params.source, {
           caption: params.caption,
           filename: params.filename,
         }, ctx.sessionManager.getSessionId());
@@ -189,7 +224,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           return errorResult(`Telegram media failed: ${error}`, {
             action: params.action,
             sent: false,
-            chatId: target.chatId,
+            chatId: target.targetId,
             mediaType: params.media_type,
             error,
             category: mediaResult.category,
@@ -198,33 +233,22 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         return textResult(`Telegram ${params.media_type} sent`, {
           action: params.action,
           sent: true,
-          chatId: target.chatId,
+          chatId: target.targetId,
           messageId: mediaResult.messageId,
-          mediaType: mediaResult.mediaType,
+          mediaType: params.media_type,
           bytes: mediaResult.bytes,
           ...(mediaResult.filename ? { filename: mediaResult.filename } : {}),
         });
       }
 
       if (params.action === "react") {
-        if (!validateStandardReaction(params.emoji)) {
-          return errorResult("Unsupported reaction", {
-            action: params.action,
-            sent: false,
-            chatId: target.chatId,
-            messageId: params.message_id,
-            emoji: params.emoji,
-            error: "Unsupported reaction",
-            category: "telegram_rejected",
-          });
-        }
-        const reactionResult = await react(ctx.cwd, target.chatId, params.message_id, params.emoji);
+        const reactionResult = await adapter.react(ctx.cwd, target.targetId, params.message_id, params.emoji);
         if (!reactionResult.ok) {
           const error = safeTelegramError(reactionResult.error);
           return errorResult(`Telegram reaction failed: ${error}`, {
             action: params.action,
             sent: false,
-            chatId: target.chatId,
+            chatId: target.targetId,
             messageId: params.message_id,
             emoji: params.emoji,
             error,
@@ -234,13 +258,13 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         return textResult(`Reaction applied to message ${params.message_id}`, {
           action: params.action,
           sent: true,
-          chatId: target.chatId,
+          chatId: target.targetId,
           messageId: params.message_id,
           emoji: params.emoji,
         });
       }
 
-      const result = await send(ctx.cwd, target.chatId, params.text, {
+      const result = await adapter.sendText(ctx.cwd, target.targetId, params.text, {
         format: params.format,
         messageId: params.message_id,
         linkPreviewOptions: params.link_preview_options,
@@ -251,7 +275,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         return errorResult(`Telegram delivery failed: ${error}`, {
           action: params.action,
           sent: false,
-          chatId: target.chatId,
+          chatId: target.targetId,
           sentChunks: result.sent,
           failedChunks: result.failed,
           error,
@@ -261,7 +285,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       return textResult(`Telegram message sent (${result.sent} message${result.sent === 1 ? "" : "s"})`, {
         action: params.action,
         sent: true,
-        chatId: target.chatId,
+        chatId: target.targetId,
         chunks: result.sent,
         messageIds: result.messageIds,
       });
@@ -274,7 +298,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
           : args.action === "send_choices"
             ? `choices ${args.question}`
             : `media ${args.media_type} → ${args.chat_id}`;
-      return new Text(theme.fg("toolTitle", theme.bold("user_telegram_chat ")) + theme.fg("muted", summary), 0, 0);
+      return new Text(theme.fg("toolTitle", theme.bold("telegram_chat ")) + theme.fg("muted", summary), 0, 0);
     },
     renderResult(result: AgentToolResult<TelegramChatDetails>, _options, theme) {
       const details = result.details;
@@ -283,4 +307,9 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       return new Text(theme.fg("success", `✓ Sent to Telegram${suffix}`), 0, 0);
     },
   });
+}
+
+/** Test helper: isolated registry preloaded with a Telegram adapter. */
+export function createTelegramChatRegistry(deps: TelegramChatDeps = {}): ChannelChatRegistry {
+  return createChannelChatRegistry([createTelegramChatAdapter(deps)]);
 }
