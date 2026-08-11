@@ -14,10 +14,12 @@ interface HandlerMap {
 function fakePi(): HandlerMap & {
   on(event: string, handler: (event: unknown, ctx: unknown) => Promise<void> | void): void;
   registerCommand(name: string, def: { description: string; handler(args: string, ctx: unknown): Promise<void> | void }): void;
+  registerTool(def: { name: string }): void;
   commands: Map<string, { description: string; handler(args: string, ctx: unknown): Promise<void> | void }>;
 } {
   const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void> | void>();
   const commands = new Map<string, { description: string; handler(args: string, ctx: unknown): Promise<void> | void }>();
+  const tools = new Map<string, { name: string }>();
   return {
     handlers,
     commands,
@@ -26,6 +28,9 @@ function fakePi(): HandlerMap & {
     },
     registerCommand(name, def) {
       commands.set(name, def);
+    },
+    registerTool(def) {
+      tools.set(def.name, def);
     },
   };
 }
