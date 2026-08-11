@@ -88,7 +88,8 @@ test("agent_jobs lists only the active parent session's running and historical d
     const tool = register(registerJobsTool);
     const result = await tool.execute("call", {}, undefined, undefined, context(cwd, "root-a"));
     const jobs = result.details.jobs as Array<{ jobId: string }>;
-    assert.deepEqual(jobs.map((entry) => entry.jobId), ["a-running", "a-completed", "a-cancelled"]);
+    assert.deepEqual(new Set(jobs.map((entry) => entry.jobId)), new Set(["a-running", "a-completed", "a-cancelled"]));
+    assert.deepEqual(jobs.filter((entry) => entry.jobId === "a-running").length, 1);
     assert.equal(result.content[0]?.text.includes("b-running"), false);
     assert.equal(result.content[0]?.text.includes("b-completed"), false);
     assert.equal(result.content[0]?.text.includes("b-cancelled"), false);
@@ -206,6 +207,29 @@ test("agent steer output names the targeted subagent type and remains allowed ou
     assert.deepEqual(result.details, { jobId: "a-running", status: "running" });
     assert.equal(steers, 1);
   });
+});
+
+test("a child agent spawn derives parent lineage from the actual caller session", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-nested-agent-"));
+  mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "agents", "test-agent.md"), "---\nname: test-agent\ndescription: Test agent\n---\ntest body", "utf8");
+  const pool = getChildPool(cwd, "root-a");
+  const parent = createJob({ jobId: "parent", parentSessionId: "root-a", sessionId: "parent-session", status: "running", description: "parent", subagentType: "test-agent" });
+  pool.registry.createJob(parent);
+  const previousFactory = spawnChildSession.__createChild;
+  spawnChildSession.__createChild = async () => { throw new Error("stop after record"); };
+  try {
+    const tool = register(registerAgentTool);
+    const result = await tool.execute("call", { description: "grandchild", prompt: "work", subagent_type: "test-agent" }, undefined, undefined, context(cwd, "parent-session"));
+    const child = pool.registry.get(result.details.jobId as string);
+    assert.equal(child?.parentJobId, "parent");
+    assert.equal(child?.rootJobId, "parent");
+    assert.equal(child?.depth, 1);
+    assert.deepEqual(child?.parentAgentIds, ["parent"]);
+  } finally {
+    spawnChildSession.__createChild = previousFactory;
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("agent resumes a terminal job in the background using a copied transcript", async () => {

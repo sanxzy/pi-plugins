@@ -37,6 +37,7 @@ export { createDeliveryCoordinator, type DeliveryCoordinator } from "./infrastru
 export { createInterruptionSweep, interruptRunningJobs } from "./infrastructure/pool/interruption.ts";
 export { createRegistry, foldLog, recordNewJob, type Registry } from "./infrastructure/registry/registry.ts";
 export { createScopedRegistry, scopedRegistryForSession, type ScopedRegistry } from "./infrastructure/registry/scoped-registry.ts";
+export { createAgentEventRegistry, canonicalJobId, MAX_RETAINED_TERMINAL_AGENTS, type AgentEventRegistry } from "./infrastructure/registry/agent-event-registry.ts";
 export { prepareResumeSessionFile } from "./infrastructure/sessions/resume-file.ts";
 export { scopeDescendants, scopeRegistry, sessionTreeJobs, type ScopedSessionRow, type ScopeRegistry } from "./infrastructure/sessions/scope.ts";
 export {
@@ -46,6 +47,7 @@ export {
   encodeProjectId,
   ensurePrivateDirectory,
   childSessionPaths,
+  canonicalStorageJobId,
   homeAgentDir,
   homeAgentDirectory,
   homeAgentErrorsFile,

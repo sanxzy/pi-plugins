@@ -27,6 +27,8 @@ export interface Job {
   readonly rootJobId: string;
   /** Depth in the lineage (root = 0). */
   readonly depth: number;
+  /** Structured agent lineage used by the event read model (unchanged, resident on Job). */
+  readonly parentAgentIds?: readonly string[];
   /** Exact session file path returned by the child session manager, if known. */
   readonly sessionFile?: string;
   /** Token/usage accounting, populated when the child completes. */
@@ -59,6 +61,7 @@ export interface NewJobInput {
   rootJobId?: string;
   depth?: number;
   sessionFile?: string;
+  parentAgentIds?: readonly string[];
   createdAt?: string;
 }
 
@@ -84,6 +87,7 @@ export function createJob(input: NewJobInput): Job {
     parentJobId,
     rootJobId,
     depth,
+    parentAgentIds: input.parentAgentIds,
     sessionFile: input.sessionFile,
     usage: undefined,
     delivered: false,
@@ -96,6 +100,7 @@ export function createJob(input: NewJobInput): Job {
 export interface JobUpdate {
   status?: JobStatus;
   sessionFile?: string;
+  parentAgentIds?: readonly string[];
   usage?: Job["usage"];
   delivered?: boolean;
   updatedAt?: string;

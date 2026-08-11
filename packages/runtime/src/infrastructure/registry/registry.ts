@@ -180,6 +180,7 @@ export function recordNewJob(registry: Registry, input: {
   sessionId?: string;
   parentSessionId?: string;
   sessionFile?: string;
+  parentAgentIds?: readonly string[];
 }): Job {
   const job = createJob(input);
   registry.createJob(job);

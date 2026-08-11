@@ -11,10 +11,10 @@ import type { ChildPool } from "@xzy-ai/runtime";
  */
 export function callerFor(ctx: ExtensionContext, pool: ChildPool): ControlCaller {
   const sessionId = ctx.sessionManager.getSessionId();
-  const job = pool.registry.get(sessionId);
+  const job = pool.registry.getBySessionId(sessionId);
   return {
     sessionId,
-    jobId: job ? sessionId : undefined,
+    jobId: job?.jobId,
     rootJobId: job?.rootJobId,
   };
 }

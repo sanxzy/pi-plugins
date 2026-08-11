@@ -14,7 +14,7 @@ import {
 import { createDeliveryCoordinator } from "@xzy-ai/runtime";
 import { createConcurrencyGate } from "@xzy-ai/runtime";
 import { MAX_CONCURRENCY } from "@xzy-ai/core";
-import { createAgentManifestStore, foldAgentEvents } from "@xzy-ai/runtime";
+import { createAgentEventRegistry } from "@xzy-ai/runtime";
 
 /**
  * Phase 5 background-delivery tests.
@@ -239,66 +239,42 @@ test("runBackgroundJob catches an unexpected throw and marks the job failed", as
   assert.deepEqual(delivered, ['Background agent test-agent (bg-4) failed: unexpected']);
 });
 
-test("runBackgroundJob persists a real agent lifecycle that re-folds to the materialized snapshot", async () => {
-  const home = mkdtempSync(join(tmpdir(), "pi-code-phase3-agent-home-"));
+test("runBackgroundJob persists a real agent lifecycle in the event read model", async () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-code-phase5-agent-home-"));
   process.env.XZY_PI_CODE_HOME = home;
-  const projectRoot = mkdtempSync(join(tmpdir(), "pi-code-phase3-agent-project-"));
-  const registry = createFakeRegistry();
+  const projectRoot = mkdtempSync(join(tmpdir(), "pi-code-phase5-agent-project-"));
+  const eventRegistry = createAgentEventRegistry(projectRoot, "root-session");
   const job = makeJob("job-live", "queued");
+  eventRegistry.createJob(job);
+  const registry = createFakeRegistry();
   registry.jobs.set(job.jobId, job);
   const coordinator = createDeliveryCoordinator();
   coordinator.register("parent.jsonl", () => {});
-  const manifest = createAgentManifestStore({
-    projectRoot,
-    rootSessionId: "root-session",
-    jobId: job.jobId,
-    piSessionId: "pi-session-live",
-    now: "2026-08-11T12:00:00.000Z",
-  });
-  manifest.create({ status: "created", description: job.description, subagentType: job.subagentType });
-  manifest.update({ status: "queued", at: "2026-08-11T12:00:01.000Z" });
 
   await runBackgroundJob(
-    { registry, delivery: coordinator, manifest },
+    { registry: eventRegistry, delivery: coordinator },
     job,
     {
       parentSessionFile: "parent.jsonl",
       runChild: async () => {
-        registry.updateJob(job.jobId, { status: "running" });
-        manifest.update({ status: "running", startedAt: "2026-08-11T12:00:02.000Z", at: "2026-08-11T12:00:02.000Z" });
+        eventRegistry.updateJob(job.jobId, { status: "running" });
         return { sessionFile: "transcript.jsonl", output: "done", status: "completed" };
       },
     },
   );
 
-  const folded = foldAgentEvents(manifest.eventsPath);
+  const folded = eventRegistry.get("job-live");
   assert.ok(folded);
-  assert.equal(folded.agentId, "live");
-  assert.equal(folded.piSessionId, "pi-session-live");
-  assert.equal(folded.rootSessionId, "root-session");
-  assert.deepEqual(folded.parentAgentIds, []);
-  assert.equal(folded.depth, 0);
+  assert.equal(folded.jobId, "job-live");
   assert.equal(folded.status, "completed");
   assert.equal(folded.delivered, true);
   assert.equal(folded.sessionFile, "transcript.jsonl");
-
-  const materialized = JSON.parse(readFileSync(manifest.manifestPath, "utf8")) as typeof folded;
-  assert.equal(materialized.status, "completed");
-  assert.equal(materialized.delivered, true);
-  assert.equal(materialized.sessionFile, "transcript.jsonl");
-  const lifecycle = readFileSync(manifest.eventsPath, "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line) as { type: string; status: string });
-  assert.deepEqual(lifecycle.map((event) => `${event.type}:${event.status}`), [
-    "agent_created:created",
-    "agent_updated:queued",
-    "agent_updated:running",
-    "agent_updated:completed",
-    "agent_updated:completed",
-  ]);
-  assert.equal(statSync(manifest.manifestPath).mode & 0o777, 0o600);
-  assert.equal(statSync(manifest.eventsPath).mode & 0o777, 0o600);
+  const persisted = eventRegistry.get("live");
+  assert.equal(persisted?.status, "completed");
+  const eventsPath = eventRegistry.fileForJob("live");
+  assert.ok(eventsPath);
+  assert.equal(statSync(eventsPath).mode & 0o777, 0o600);
+  assert.equal(statSync(eventsPath.replace("events.jsonl", "agent.json")).mode & 0o777, 0o600);
 });
 
 test("a background job beyond the cap is queued and starts when a slot frees", async () => {

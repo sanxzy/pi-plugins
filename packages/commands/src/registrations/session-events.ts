@@ -69,7 +69,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     const sessionId = ctx.sessionManager.getSessionId();
     const rootPool = getChildPool(ctx.cwd, sessionId);
-    const isRootSession = rootPool.registry.get(sessionId) === undefined;
+    const isRootSession = rootPool.isRootSession(sessionId) || rootPool.shouldBootstrapRootSession(sessionId);
     if (isRootSession) {
       const identity = currentProcessIdentity();
       startRootSession({
@@ -163,7 +163,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // Child sessions also emit `quit` when they are disposed after settling.
     // Only the root orchestrator may sweep its own session tree; a child must
     // never abort its siblings or its parent while it is being cleaned up.
-    const isChildSession = pool.registry.get(rootSessionId) !== undefined;
+    const isChildSession = !pool.isRootSession(rootSessionId) && !pool.shouldBootstrapRootSession(rootSessionId);
     if (isChildSession) return;
 
     // Process quit and a confirmed `/new` both terminate the current host

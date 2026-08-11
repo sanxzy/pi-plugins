@@ -2,7 +2,6 @@ import type { Job, JobUpdate } from "@xzy-ai/core";
 import type { ChildRunResult } from "@xzy-ai/core";
 import type { DeliveryCoordinator } from "./delivery.ts";
 import type { AgentManifestStore } from "../manifests/manifests.ts";
-
 /**
  * Background agent execution.
  *
@@ -36,6 +35,7 @@ interface BackgroundJobDeps {
     updateJob(jobId: string, update: JobUpdate): void;
   };
   delivery: DeliveryCoordinator;
+  /** Compatibility seam for isolated lifecycle tests; production uses the registry. */
   manifest?: AgentManifestStore;
 }
 
@@ -80,7 +80,6 @@ export async function runBackgroundJob(
       status: "failed",
     }));
     deps.registry.updateJob(job.jobId, { delivered: true });
-    deps.manifest?.update({ status: "failed", delivered: true });
     return;
   }
 

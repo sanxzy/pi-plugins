@@ -1,6 +1,8 @@
 import { MAX_CONCURRENCY } from "@xzy-ai/core";
 import type { ChildSessionControl } from "@xzy-ai/core";
-import { createScopedRegistry, type ScopedRegistry } from "../registry/scoped-registry.ts";
+import { createAgentEventRegistry, type AgentEventRegistry } from "../registry/agent-event-registry.ts";
+import { readSessionManifest } from "../manifests/manifests.ts";
+import { canonicalProjectRoot } from "../../shared/paths.ts";
 import { createDeliveryCoordinator, type DeliveryCoordinator } from "./delivery.ts";
 import { createConcurrencyGate, type ConcurrencyGate } from "./concurrency-gate.ts";
 import { createInterruptionSweep } from "./interruption.ts";
@@ -17,9 +19,13 @@ import { createInterruptionSweep } from "./interruption.ts";
 export interface ChildPool {
   readonly projectRoot: string;
   /** Session-scoped registry for all job lifecycle and manager operations. */
-  readonly registry: ScopedRegistry;
+  readonly registry: AgentEventRegistry;
   /** Alias retained for manager callers that name the scoped view explicitly. */
-  readonly scopedRegistry: ScopedRegistry;
+  readonly scopedRegistry: AgentEventRegistry;
+  // Root/child detection is based on the persisted session boundary.
+  readonly isRootSession: (sessionId: string) => boolean;
+  /** Explicit startup bootstrap check before a root manifest exists. */
+  readonly shouldBootstrapRootSession: (sessionId: string) => boolean;
   /** Live root session id registered by the current host session, if known. */
   readonly rootSessionId?: string;
   /** Global child-run gate: at most MAX_CONCURRENCY children run at once. */
@@ -61,7 +67,7 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
   // with the root live session id so the root session's folder (which is not a
   // job) is scoped correctly; child job records carry their own parent session
   // id and route to their parent's folder on append.
-  const registry = createScopedRegistry(projectRoot, rootSessionId);
+  const registry = createAgentEventRegistry(projectRoot, rootSessionId);
   const liveChildren = new Map<string, ChildSessionControl>();
 
   const pool: ChildPool = {
@@ -69,6 +75,16 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
     registry,
     scopedRegistry: registry,
     rootSessionId,
+    isRootSession: (sessionId: string) => {
+      if (registry.getBySessionId(sessionId) !== undefined) return false;
+      try {
+        const session = readSessionManifest(canonicalProjectRoot(projectRoot), sessionId);
+        return session.sessionId === sessionId && session.active;
+      } catch {
+        return false;
+      }
+    },
+    shouldBootstrapRootSession: (sessionId: string) => registry.getBySessionId(sessionId) === undefined && sessionId === rootSessionId,
     concurrency: createConcurrencyGate(MAX_CONCURRENCY),
     delivery: createDeliveryCoordinator(),
     liveChildren,

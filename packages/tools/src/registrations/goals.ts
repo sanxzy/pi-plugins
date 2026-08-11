@@ -18,7 +18,8 @@ interface GoalToolDetails {
 type GoalToolResult = AgentToolResult<GoalToolDetails>;
 
 function isMainHost(ctx: ExtensionContext): boolean {
-  return getChildPool(ctx.cwd).registry.get(ctx.sessionManager.getSessionId()) === undefined;
+  const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
+  return pool.isRootSession(ctx.sessionManager.getSessionId()) || pool.shouldBootstrapRootSession(ctx.sessionManager.getSessionId());
 }
 
 function unavailableToChild(): GoalToolResult {

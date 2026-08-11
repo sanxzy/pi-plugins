@@ -78,7 +78,7 @@ function isRootSession(ctx: ExtensionContext): boolean {
   // The shared pool keeps its first rootSessionId across host replacement
   // (/new, reload, resume). The registry is the stable discriminator: child
   // sessions are jobs, while every replacement root is not.
-  return pool.registry.get(ctx.sessionManager.getSessionId()) === undefined;
+  return pool.isRootSession(ctx.sessionManager.getSessionId()) || pool.shouldBootstrapRootSession(ctx.sessionManager.getSessionId());
 }
 
 /** Wire the authorized text-only Telegram inbound path into the extension. */

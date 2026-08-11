@@ -10,7 +10,6 @@ import {
 import { isInSessionScope, resumeDisposition } from "@xzy-ai/core";
 import { createAgentDiscovery } from "@xzy-ai/runtime";
 import { backgroundModeError, runBackgroundJob } from "@xzy-ai/runtime";
-import { createAgentManifestStore } from "@xzy-ai/runtime";
 import { getChildPool } from "@xzy-ai/runtime";
 import { copySessionFile } from "@xzy-ai/runtime";
 import { recordNewJob } from "@xzy-ai/runtime";
@@ -47,7 +46,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
-      const pool = getChildPool(ctx.cwd);
+      const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
 
       const countAgentCall = (): AgentToolResult<AgentDetails | AgentErrorDetails> | undefined => {
         if (pool.concurrency.countAgentCall(MAX_PARALLEL_AGENTS)) return undefined;
@@ -175,10 +174,12 @@ function startBackgroundAgent(
     );
   }
 
-  const parent = resume.parentJobId ? pool.registry.get(resume.parentJobId) : undefined;
+  const caller = callerFor(ctx, pool);
+  const parent = resume.parentJobId ? pool.registry.get(resume.parentJobId) : caller.jobId ? pool.registry.get(caller.jobId) : undefined;
   const parentSessionId = ctx.sessionManager.getSessionId();
   const parentAgentIds = resume.parentAgentIds;
-  const allParentAgentIds = parent ? [...(parentAgentIds ?? []), parent.jobId] : parentAgentIds ?? [];
+  const inheritedParentIds = parent?.parentAgentIds ?? [];
+  const allParentAgentIds = parent ? [...inheritedParentIds, parent.jobId] : parentAgentIds ?? [];
   let jobId = makeJobId();
   let sessionFile = resume.sessionFile;
   if (resume.sourceSessionFile) {
@@ -202,18 +203,8 @@ function startBackgroundAgent(
     sessionFile,
     sessionId: jobId,
     parentSessionId,
-  });
-  const manifest = createAgentManifestStore({
-    projectRoot: ctx.cwd,
-    rootSessionId: pool.rootSessionId ?? parentSessionId,
-    jobId,
     parentAgentIds: allParentAgentIds,
-    rootAgentId: parent?.rootJobId,
-    depth: job.depth,
   });
-  manifest.create({ description: job.description, subagentType: job.subagentType });
-  manifest.update({ status: "queued" });
-
   // The direct-parent session file keys result delivery and the parent session
   // id scopes the job's storage folder. The child lifecycle runs under the
   // shared concurrency gate, so a call beyond the cap stays `queued` and only
@@ -222,7 +213,7 @@ function startBackgroundAgent(
   // quitting the PI process interrupts it.
   const parentSessionFile = ctx.sessionManager.getSessionFile() ?? "";
   void runBackgroundJob(
-    { registry: pool.registry, delivery: pool.delivery, manifest },
+    { registry: pool.registry, delivery: pool.delivery },
     job,
     {
       parentSessionFile,
@@ -233,7 +224,6 @@ function startBackgroundAgent(
           parentAgentIds: allParentAgentIds,
           sessionFile,
           signal: undefined,
-          manifest,
         }),
     },
   );

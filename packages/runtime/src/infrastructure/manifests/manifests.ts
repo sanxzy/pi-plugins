@@ -1,5 +1,5 @@
 import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
-import type { JobStatus } from "@xzy-ai/core";
+import { canTransition, type JobStatus } from "@xzy-ai/core";
 import {
   AGENT_MANIFEST_FILE_NAME,
   EVENTS_FILE_NAME,
@@ -100,9 +100,12 @@ function validateSessionManifest(raw: Partial<SessionManifest>, path: string): S
 /** Validate an agent manifest, failing closed on structural corruption. */
 function validateAgentManifest(raw: Partial<AgentManifest>, path: string): AgentManifest {
   if (
+    typeof raw.jobId !== "string" ||
     typeof raw.agentId !== "string" ||
     typeof raw.piSessionId !== "string" ||
     typeof raw.rootSessionId !== "string" ||
+    (raw.parentJobId !== undefined && typeof raw.parentJobId !== "string") ||
+    (raw.parentSessionId !== undefined && typeof raw.parentSessionId !== "string") ||
     typeof raw.depth !== "number" ||
     typeof raw.description !== "string" ||
     typeof raw.subagentType !== "string" ||
@@ -227,15 +230,20 @@ export type AgentLifecycleEvent =
   | {
       readonly type: "agent_created";
       readonly at: string;
+      readonly jobId: string;
+      readonly sequence?: number;
       readonly agentId: string;
       readonly piSessionId: string;
       readonly rootSessionId: string;
       readonly parentAgentIds: readonly string[];
+      readonly parentJobId?: string;
+      readonly parentSessionId?: string;
       readonly rootAgentId: string;
       readonly depth: number;
       readonly status: "created";
       readonly description: string;
       readonly subagentType: string;
+      readonly sessionFile?: string;
     }
   | {
       readonly type: "agent_updated";
@@ -250,10 +258,14 @@ export type AgentLifecycleEvent =
 
 /** The materialized snapshot reproduced by folding agent events. */
 export interface AgentManifest {
+  readonly jobId: string;
+  readonly sequence?: number;
   readonly agentId: string;
   readonly piSessionId: string;
   readonly rootSessionId: string;
   readonly parentAgentIds: readonly string[];
+  readonly parentJobId?: string;
+  readonly parentSessionId?: string;
   readonly rootAgentId: string;
   readonly depth: number;
   status: JobStatus;
@@ -267,11 +279,35 @@ export interface AgentManifest {
   sessionFile?: string;
 }
 
+const JOB_STATUSES = new Set<JobStatus>(["created", "queued", "running", "completed", "failed", "cancelled", "interrupted"]);
+
 function parseAgentEvent(line: string): AgentLifecycleEvent | null {
   if (!line) return null;
   try {
     const parsed = JSON.parse(line) as AgentLifecycleEvent;
-    if (parsed && typeof parsed.type === "string") return parsed;
+    if (!parsed || typeof parsed.type !== "string") return null;
+    if (parsed.type === "agent_created") {
+      if (
+        typeof parsed.at !== "string" ||
+        typeof parsed.jobId !== "string" ||
+        typeof parsed.agentId !== "string" ||
+        typeof parsed.piSessionId !== "string" ||
+        typeof parsed.rootSessionId !== "string" ||
+        !Array.isArray(parsed.parentAgentIds) ||
+        typeof parsed.rootAgentId !== "string" ||
+        typeof parsed.depth !== "number" ||
+        (parsed.status !== "created") ||
+        typeof parsed.description !== "string" ||
+        typeof parsed.subagentType !== "string"
+      ) {
+        return null;
+      }
+      return parsed as AgentLifecycleEvent;
+    }
+    if (parsed.type === "agent_updated") {
+      if (typeof parsed.at !== "string" || typeof parsed.agentId !== "string" || typeof parsed.status !== "string" || !JOB_STATUSES.has(parsed.status as JobStatus)) return null;
+      return parsed as AgentLifecycleEvent;
+    }
     return null;
   } catch {
     return null;
@@ -296,20 +332,25 @@ export function foldAgentEvents(filePath: string): AgentManifest | undefined {
   for (const { event } of reads) {
     if (event.type === "agent_created") {
       snapshot = {
+        jobId: event.jobId,
+        sequence: event.sequence,
         agentId: event.agentId,
         piSessionId: event.piSessionId,
         rootSessionId: event.rootSessionId,
         parentAgentIds: [...event.parentAgentIds],
+        parentJobId: event.parentJobId,
+        parentSessionId: event.parentSessionId,
         rootAgentId: event.rootAgentId,
         depth: event.depth,
         status: event.status,
         description: event.description,
         subagentType: event.subagentType,
         delivered: false,
+        sessionFile: event.sessionFile,
         createdAt: event.at,
         updatedAt: event.at,
       };
-    } else if (snapshot) {
+    } else if (snapshot && event.agentId === snapshot.agentId && (event.status === snapshot.status || canTransition(snapshot.status, event.status))) {
       snapshot = {
         ...snapshot,
         status: event.status,
@@ -334,13 +375,18 @@ export interface CreateAgentManifestStoreInput {
   jobId: string;
   piSessionId?: string;
   parentAgentIds?: readonly string[];
+  parentJobId?: string;
+  parentSessionId?: string;
   rootAgentId?: string;
   depth?: number;
+  sessionFile?: string;
+  sequence?: number;
   now?: string;
 }
 
 export interface AgentManifestStore {
   readonly agentId: string;
+  readonly jobId: string;
   readonly agentDir: string;
   readonly manifestPath: string;
   readonly eventsPath: string;
@@ -355,11 +401,12 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
   const projectRoot = canonicalProjectRoot(input.projectRoot);
   const projectId = encodeProjectId(projectRoot);
   const agentId = canonicalAgentIdFromJobId(input.jobId);
+  const jobId = input.jobId;
   const rootSessionId = input.rootSessionId;
+  const piSessionId = input.piSessionId ?? canonicalAgentId(input.jobId);
   const parentAgentIds = (input.parentAgentIds ?? []).map(canonicalAgentIdFromJobId);
   const rootAgentId = input.rootAgentId ? canonicalAgentIdFromJobId(input.rootAgentId) : agentId;
   const depth = input.depth ?? (parentAgentIds.length === 0 ? 0 : parentAgentIds.length + 1);
-  const piSessionId = input.piSessionId ?? canonicalAgentId(input.jobId);
   const eventsPath = homeAgentEventsFile(projectId, rootSessionId, agentId, parentAgentIds);
   const manifestPath = homeAgentManifestFile(projectId, rootSessionId, agentId, parentAgentIds);
   const agentDir = homeAgentDir(projectId, rootSessionId, agentId, parentAgentIds);
@@ -380,6 +427,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
 
   const store: AgentManifestStore = {
     agentId,
+    jobId,
     agentDir,
     manifestPath,
     eventsPath,
@@ -393,27 +441,35 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
       }
       const existing = foldAgentEvents(eventsPath);
       if (existing) {
-        if (!existsSync(manifestPath)) writePrivateJson(manifestPath, existing);
+        if (!existsSync(manifestPath) || !readAgentSnapshotValid(manifestPath, existing)) writePrivateJson(manifestPath, existing);
         return;
       }
       const created: AgentLifecycleEvent = {
         type: "agent_created",
         at: input.now ?? new Date().toISOString(),
+        jobId,
+        sequence: input.sequence,
         agentId,
         piSessionId,
         rootSessionId,
         parentAgentIds,
+        parentJobId: input.parentJobId,
+        parentSessionId: input.parentSessionId,
         rootAgentId,
         depth,
         status: "created",
         description,
         subagentType,
+        sessionFile: input.sessionFile,
       };
       append(created);
       const snapshot = foldAgentEvents(eventsPath);
       if (snapshot) writePrivateJson(manifestPath, snapshot);
     },
     update(cfg): void {
+      const current = foldAgentEvents(eventsPath);
+      if (!current) return;
+      if (cfg.status !== current.status && !canTransition(current.status, cfg.status)) return;
       const updated: AgentLifecycleEvent = {
         type: "agent_updated",
         at: cfg.at ?? new Date().toISOString(),
@@ -422,17 +478,40 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
         startedAt: cfg.startedAt,
         endedAt: cfg.endedAt,
         delivered: cfg.delivered,
-        sessionFile: cfg.sessionFile,
+        sessionFile: cfg.sessionFile ?? current.sessionFile,
       };
       append(updated);
-      const snapshot = foldAgentEvents(eventsPath);
-      if (snapshot) writePrivateJson(manifestPath, snapshot);
+      rebuildSnapshot(eventsPath, manifestPath);
     },
     read(): AgentManifest | undefined {
-      return foldAgentEvents(eventsPath);
+      const folded = foldAgentEvents(eventsPath);
+      if (folded && (!existsSync(manifestPath) || !readAgentSnapshotValid(manifestPath, folded))) rebuildSnapshot(eventsPath, manifestPath);
+      return folded;
     },
   };
   return store;
+}
+
+/** Rebuild the private agent.json snapshot from the authoritative event log. */
+function rebuildSnapshot(eventsPath: string, manifestPath: string): void {
+  const snapshot = foldAgentEvents(eventsPath);
+  if (snapshot) writePrivateJson(manifestPath, snapshot);
+}
+
+/** A snapshot is usable only when it is structurally valid and matches the fold. */
+function readAgentSnapshotValid(manifestPath: string, folded: AgentManifest): boolean {
+  if (!existsSync(manifestPath)) return false;
+  try {
+    const snapshot = validateAgentManifest(readPrivateJson<Partial<AgentManifest>>(manifestPath), manifestPath);
+    return (
+      snapshot.agentId === folded.agentId &&
+      snapshot.rootSessionId === folded.rootSessionId &&
+      snapshot.status === folded.status &&
+      snapshot.updatedAt === folded.updatedAt
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Read one agent snapshot directly, failing closed on a corrupt manifest. */

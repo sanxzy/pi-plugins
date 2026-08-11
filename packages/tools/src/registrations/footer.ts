@@ -71,7 +71,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
     const pool = getChildPool(ctx.cwd);
-    if (pool.registry.get(ctx.sessionManager.getSessionId()) !== undefined) return;
+    if (!pool.isRootSession(ctx.sessionManager.getSessionId()) && !pool.shouldBootstrapRootSession(ctx.sessionManager.getSessionId())) return;
     ctx.ui.setFooter(undefined);
   });
 }

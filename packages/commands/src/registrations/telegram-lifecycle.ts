@@ -42,7 +42,7 @@ function isRootSession(ctx: ExtensionContext): boolean {
   // The shared pool keeps its first rootSessionId across host replacement
   // (/new, reload, resume). The registry is the stable discriminator: child
   // sessions are jobs, while every replacement root is not.
-  return pool.registry.get(sessionId) === undefined;
+  return pool.isRootSession(sessionId) || pool.shouldBootstrapRootSession(sessionId);
 }
 
 function lifecycleFor(

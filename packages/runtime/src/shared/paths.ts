@@ -20,6 +20,11 @@ export const TRANSCRIPT_FILE_NAME = "transcript.jsonl";
 export const SCOPED_REGISTRY_PREFIX = "jobs-";
 export const SCOPED_REGISTRY_SUFFIX = ".jsonl";
 
+/** Canonical storage id for a job/agent; legacy-looking `job-` is not stored. */
+export function canonicalStorageJobId(jobId: string): string {
+  return jobId.replace(/^job-/, "");
+}
+
 const SAFE_PROJECT_ID_BYTE = (byte: number): boolean =>
   (byte >= 0x41 && byte <= 0x5a) ||
   (byte >= 0x61 && byte <= 0x7a) ||
@@ -177,10 +182,10 @@ export function homeAgentDir(
   agentId: string,
   parentAgentIds: readonly string[] = [],
 ): string {
-  const parentIds = parentAgentIds.map((id) => validateId(id, "parent agent id"));
+  const parentIds = parentAgentIds.map((id) => validateId(canonicalStorageJobId(id), "parent agent id"));
   const nestedPath: string[] = [AGENTS_DIR_NAME];
   for (const parentId of parentIds) nestedPath.push(parentId, AGENTS_DIR_NAME);
-  nestedPath.push(validateId(agentId, "agent id"));
+  nestedPath.push(validateId(canonicalStorageJobId(agentId), "agent id"));
   return join(homeSessionDir(projectId, rootSessionId), ...nestedPath);
 }
 
@@ -215,7 +220,7 @@ export function childSessionPaths(options: {
 }): ChildSessionPaths {
   const projectId = encodeProjectId(options.cwd);
   const projectDir = homeProjectDir(projectId);
-  const agentDir = homeAgentDir(projectId, options.rootSessionId, options.jobId, options.parentAgentIds);
+  const agentDir = homeAgentDir(projectId, options.rootSessionId, canonicalStorageJobId(options.jobId), options.parentAgentIds);
   return { projectDir, agentDir, transcriptFile: join(agentDir, TRANSCRIPT_FILE_NAME) };
 }
 

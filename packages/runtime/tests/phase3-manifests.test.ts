@@ -104,6 +104,7 @@ test("agent lifecycle events fold into the materialized private snapshot", () =>
 
   const folded = foldAgentEvents(store.eventsPath);
   assert.ok(folded);
+  assert.equal(folded.jobId, "job-child-1");
   assert.equal(folded.agentId, "child-1");
   assert.equal(folded.piSessionId, "pi-session-1");
   assert.equal(folded.rootSessionId, "root-session");
