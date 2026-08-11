@@ -57,9 +57,10 @@ function startAuthServer(): Promise<AuthServer> {
         });
         req.on("end", () => {
           const params = new URLSearchParams(raw);
-          const hasCode = params.get("grant_type") === "authorization_code" && Boolean(params.get("code"));
-          const hasVerifier = Boolean(params.get("code_verifier"));
-          if (!hasCode || !hasVerifier) {
+          const grant = params.get("grant_type");
+          const isRefresh = grant === "refresh_token" && Boolean(params.get("refresh_token"));
+          const hasCode = grant === "authorization_code" && Boolean(params.get("code")) && Boolean(params.get("code_verifier"));
+          if (!(isRefresh || hasCode)) {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "invalid_grant" }));
             return;
@@ -67,7 +68,7 @@ function startAuthServer(): Promise<AuthServer> {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              access_token: "access-token-from-exchange",
+              access_token: isRefresh ? "access-token-refreshed" : "access-token-from-exchange",
               token_type: "Bearer",
               refresh_token: "refresh-token-from-exchange",
               expires_in: 3600,
@@ -142,8 +143,11 @@ test("full OAuth flow: start, callback redirect, finish, and commit credentials"
     assert.equal(callbackResponse.status, 200);
 
     await finishRemoteAuth(options);
-    // Credentials were committed to the store.
-    started = await startRemoteAuth(options);
+    // Credentials were committed to the store and can be loaded by a fresh
+    // provider on the next connection attempt.
+    const { createDefaultAuthStore } = await import("../src/index.ts");
+    const stored = createDefaultAuthStore(agentDir).getForUrl(`${auth.origin}/mcp`);
+    assert.equal(stored?.tokens?.accessToken, "access-token-from-exchange");
   } finally {
     await teardownRemoteAuth();
     await auth.close();

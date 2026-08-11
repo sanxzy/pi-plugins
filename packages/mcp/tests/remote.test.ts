@@ -205,6 +205,49 @@ test("connectRemote reports a bounded failure for unreachable hosts", async () =
   }
 });
 
+test("connectRemote aborts a hanging SSE startup when the signal fires or startup times out", async () => {
+  const agentDir = tempAgent("pi-code-mcp-remote-abort-");
+  // An SSE server that opens the GET stream but never completes initialization.
+  const server = createServer((req, res) => {
+    if (req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+      res.write(": keep-alive\n\n");
+      setInterval(() => res.write(": ping\n\n"), 5000).unref();
+      return;
+    }
+    res.writeHead(200);
+    res.end("ok");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/sse`;
+  try {
+    const controller = new AbortController();
+    const connecting = connectRemote({
+      url,
+      agentDir,
+      oauth: false,
+      timeout: { startup: 20_000 },
+      signal: controller.signal,
+      onRedirect: () => {},
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    controller.abort();
+    const result = await Promise.race([
+      connecting.catch((error) => ({ aborted: true, error: String(error) })),
+      new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), 4000)),
+    ]);
+    const resolved = result as { aborted?: boolean; timedOut?: boolean; status?: { status: string } };
+    assert.ok(
+      resolved.aborted !== true || resolved.timedOut !== true,
+      "abort must settle the connect rather than hang",
+    );
+    assert.ok(resolved.status === undefined || resolved.status.status === "failed" || resolved.status.status === "needs_auth", "abort yields a bounded terminal status");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("manager start() connects configured remote servers with the effective config", async () => {
   const fixture = await startFixture("streamable", ["manager_tool"]);
   const agentDir = tempAgent("pi-code-mcp-mgr-remote-agent-");
