@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { getGoalPool, normalizeGoalCwd } from "@xzy-ai/runtime";
+import { encodeProjectId, getGoalPool, homeGoalFile, normalizeGoalCwd } from "@xzy-ai/runtime";
 
 function projectRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-goal-store-"));
@@ -54,7 +54,7 @@ test("goal store tolerates malformed log lines and isolates multiple cwd records
   const store = getGoalPool(root);
   store.create({ cwd: "/a", prompt: "A", intervalMs: 10_000 });
   store.create({ cwd: "/b", prompt: "B", intervalMs: 20_000 });
-  appendFileSync(join(root, ".pi", "pi-code", "goals.jsonl"), "{not json}\n{\"event\":\"goal_created\"}\n");
+  appendFileSync(homeGoalFile(encodeProjectId(root), "root"), "{not json}\n{\"event\":\"goal_created\"}\n");
   const fresh = getGoalPool(root);
   assert.equal(fresh.get("/a")?.prompt, "A");
   assert.equal(fresh.get("/b")?.prompt, "B");

@@ -42,8 +42,8 @@ function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler> } {
   return { handlers, pi };
 }
 
-function addActiveGoal(cwd: string, prompt = "p"): void {
-  const pool = getGoalPool(cwd);
+function addActiveGoal(cwd: string, prompt = "p", sessionId = "root"): void {
+  const pool = getGoalPool(cwd, sessionId);
   pool.setScheduler(() => ({ clear() {} }));
   pool.bind({
     cwd,
@@ -73,7 +73,7 @@ test("session start with a persisted active goal pauses delivery pending confirm
   }
 });
 
-test("/new with a persisted active goal asks continue-or-clear and clears on Decline", async () => {
+test("/new does not clear the current root session goal or ask to continue it", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
   try {
     addActiveGoal(cwd);
@@ -84,7 +84,7 @@ test("/new with a persisted active goal asks continue-or-clear and clears on Dec
       context(cwd, "root", async () => false),
     );
     assert.deepEqual(result, { cancel: false });
-    assert.equal(getGoalPool(cwd).get(cwd), undefined);
+    assert.equal(getGoalPool(cwd, "root").get(cwd)?.status, "active");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -105,10 +105,10 @@ test("session shutdown preserves the persisted goal while stopping delivery", as
   }
 });
 
-test("startup with a persisted active goal awaits confirmation and continues on Continue", async () => {
+test("startup does not offer continuation for a goal from another root session", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
   try {
-    addActiveGoal(cwd);
+    addActiveGoal(cwd, "p", "old-root");
     const confirmed: string[] = [];
     const d = registrations();
     let sent = 0;
@@ -121,35 +121,36 @@ test("startup with a persisted active goal awaits confirmation and continues on 
         return true;
       }),
     );
-    assert.equal(confirmed.length, 1);
-    // Continue preserves the goal and never delivers immediately.
-    assert.equal(getGoalPool(cwd).get(cwd)?.status, "active");
+    assert.equal(confirmed.length, 0);
+    // The current root session has no inherited goal.
+    assert.equal(getGoalPool(cwd, "root").get(cwd), undefined);
     assert.equal(sent, 0);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("startup confirmation clears the goal on Decline", async () => {
+test("startup leaves the prior root session goal untouched", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
   try {
-    addActiveGoal(cwd);
+    addActiveGoal(cwd, "p", "old-root");
     const d = registrations();
     registerSessionEvents(d.pi);
     await d.handlers.get("session_start")!(
       { reason: "startup" },
       context(cwd, "root", async () => false),
     );
-    assert.equal(getGoalPool(cwd).get(cwd), undefined);
+    assert.equal(getGoalPool(cwd, "root").get(cwd), undefined);
+    assert.equal(getGoalPool(cwd, "old-root").get(cwd)?.prompt, "p");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("startup confirmation still runs when the host has no session file", async () => {
+test("startup with no session file does not offer another session's goal", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
   try {
-    addActiveGoal(cwd);
+    addActiveGoal(cwd, "p", "old-root");
     const d = registrations();
     const confirmations: string[] = [];
     registerSessionEvents(d.pi);
@@ -160,67 +161,39 @@ test("startup confirmation still runs when the host has no session file", async 
         return true;
       }, true, undefined),
     );
-    assert.deepEqual(confirmations, ["Persisted goal"]);
-    assert.equal(getGoalPool(cwd).get(cwd)?.status, "active");
+    assert.deepEqual(confirmations, []);
+    assert.equal(getGoalPool(cwd, "root").get(cwd), undefined);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
- test("replacement Continue rebinds the fresh host and waits for one new interval", async () => {
+ test("resume replacement starts with an empty goal pool for the fresh root", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
   try {
-    const goalPool = getGoalPool(cwd);
-    const oldSent: string[] = [];
-    const freshSent: string[] = [];
-    const callbacks: Array<() => void> = [];
-    goalPool.setScheduler((callback) => {
-      callbacks.push(callback);
-      return { clear() {} };
-    });
-    goalPool.bind({
-      cwd,
-      hasUI: true,
-      sendUserMessage: (content) => oldSent.push(content),
-      notify: () => {},
-    });
+    const goalPool = getGoalPool(cwd, "old");
+    goalPool.setScheduler(() => ({ clear() {} }));
+    goalPool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {} });
     assert.equal(goalPool.create({ cwd, prompt: "p", interval: "1m" }).ok, true);
-
     const d = registrations();
     registerLifecycleGates(d.pi);
     registerSessionEvents(d.pi);
     const switchResult = await d.handlers.get("session_before_switch")!(
       { reason: "resume" },
-      context(cwd, "old", async () => true),
+      context(cwd, "old", async () => { throw new Error("old goal must not be offered"); }),
     );
     assert.deepEqual(switchResult, { cancel: false });
-    assert.equal(callbacks.length, 1);
-
-    await d.handlers.get("session_shutdown")!(
-      { reason: "resume" },
-      context(cwd, "old", async () => true),
-    );
-    d.pi.sendUserMessage = (content: string) => { freshSent.push(content); };
-    await d.handlers.get("session_start")!(
-      { reason: "resume" },
-      context(cwd, "fresh", async () => {
-        throw new Error("replacement Continue must not prompt twice");
-      }),
-    );
-
-    assert.equal(callbacks.length, 2);
-    callbacks[0]!();
-    assert.deepEqual(oldSent, []);
-    assert.deepEqual(freshSent, []);
-    callbacks[1]!();
-    assert.equal(oldSent.length, 0);
-    assert.equal(freshSent.length, 1);
+    await d.handlers.get("session_start")!({ reason: "resume" }, context(cwd, "fresh", async () => {
+      throw new Error("fresh session must not prompt");
+    }));
+    assert.equal(getGoalPool(cwd, "fresh").get(cwd), undefined);
+    assert.equal(getGoalPool(cwd, "old").get(cwd)?.prompt, "p");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("no-UI /new replacement cancels without clearing the goal and resumes current delivery", async () => {
+test("no-UI /new does not offer or clear another session's goal", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
   try {
     const d = registrations();
@@ -239,13 +212,10 @@ test("no-UI /new replacement cancels without clearing the goal and resumes curre
       { reason: "new" },
       context(cwd, "root", async () => true, false),
     );
-    // No-UI follows the existing cancellation boundary: cancel the switch and
-    // preserve the goal rather than silently clearing it. Since this host stays
-    // active, delivery must be rolled back rather than left suspended.
-    assert.deepEqual(result, { cancel: true });
-    assert.equal(getGoalPool(cwd).get(cwd)?.status, "active");
-    callbacks[callbacks.length - 1]!();
-    assert.equal(sent.length, 1);
+    assert.deepEqual(result, { cancel: false });
+    assert.equal(getGoalPool(cwd, "root").get(cwd)?.status, "active");
+    void callbacks;
+    void sent;
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

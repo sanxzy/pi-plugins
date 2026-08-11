@@ -48,30 +48,11 @@ async function confirmNewWithRunningJobs(
  */
 async function confirmGoalOnSwitch(
   _event: SessionBeforeSwitchEvent,
-  ctx: ExtensionContext,
+  _ctx: ExtensionContext,
 ): Promise<{ cancel?: boolean }> {
-  const pool = getGoalPool(ctx.cwd);
-  const activeCount = Array.from(pool.all().values()).filter((goal) => goal.status === "active").length;
-  if (activeCount === 0) return { cancel: false };
-
-  pool.beginSessionConfirmation();
-  if (!ctx.hasUI) {
-    // The switch is cancelled and the current host stays active, so restore its
-    // goal delivery rather than leaving it suspended forever with no fresh
-    // session to resume it.
-    pool.resumeDelivery();
-    return { cancel: true };
-  }
-
-  const continueGoal = await ctx.ui.confirm(
-    "Persisted goal",
-    "A persisted active goal still exists. Continue it in the new session? Choose Cancel to clear it.",
-  );
-  if (continueGoal) {
-    pool.continueAfterReplacement();
-    return { cancel: false };
-  }
-  pool.clearActiveGoals();
+  // Goals are root-session scoped. A switch creates or selects a different
+  // root session and therefore cannot continue, clear, or confirm the old
+  // session's goal. The old pool is stopped by its own session_shutdown.
   return { cancel: false };
 }
 

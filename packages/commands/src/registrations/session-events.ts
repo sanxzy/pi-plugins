@@ -102,37 +102,13 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
         .filter((name) => name !== "ls" && (!managedNames.has(name) || currentSessionNames.has(name))),
     );
 
-    // Bind the goal pool to the fresh host. On a fresh session the prior host
-    // is gone; delivery may resume only after the user confirms continuation.
-    const goalPool = getGoalPool(ctx.cwd);
+    // Bind the goal pool to the fresh host. Goals are strictly per-root
+    // session: a new, resumed, reloaded, or forked root never inherits or is
+    // offered continuation of another session's goal, so delivery starts only
+    // for the current root's own persisted goal (if any).
+    const goalPool = getGoalPool(ctx.cwd, sessionId);
     goalPool.bind(goalBinding(pi, ctx));
-
-    // Goal confirmation must run even for an unpersisted host session, because
-    // the goal record is independent of the child-session delivery registry.
-    // A Continue decision made by session_before_switch belongs to this fresh
-    // host. Consume it before checking startup-like reasons so `/resume` does
-    // not ask the user twice after the switch has already been authorized.
-    if (goalPool.takeReplacementContinuation()) {
-      goalPool.resumeDelivery();
-    } else if (event.reason === "startup" || event.reason === "resume" || event.reason === "reload") {
-      if (ctx.hasUI && goalPool.beginSessionConfirmation()) {
-        const continueGoal = await ctx.ui.confirm(
-          "Persisted goal",
-          "A persisted active goal still exists. Continue it in this session? Choose Cancel to clear it.",
-        );
-        if (continueGoal) {
-          goalPool.resumeDelivery();
-        } else {
-          goalPool.clearActiveGoals();
-        }
-      } else if (!ctx.hasUI) {
-        goalPool.beginSessionConfirmation();
-      } else {
-        goalPool.resumeDelivery();
-      }
-    } else {
-      goalPool.resumeDelivery();
-    }
+    goalPool.resumeDelivery();
 
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile) return;
@@ -140,8 +116,8 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // The root orchestrator session is not a job, but its live session id still
     // owns a session-scoped folder; the pool registers it as the scoped root so
     // the manager tree is seeded from it. Forked sessions get their own id.
-    const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
-    pool.registry.ensureSession(ctx.sessionManager.getSessionId());
+    const pool = getChildPool(ctx.cwd, sessionId);
+    pool.registry.ensureSession(sessionId);
     if (event.reason === "fork" && event.previousSessionFile) {
       // Fork creates the descendant before this event. Pending results that
       // were addressed to the replaced parent must follow that descendant.
@@ -189,6 +165,6 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // Every root host teardown must stop goal timers and detach delivery. The
     // persisted goal remains in the append-only store for the replacement host
     // to confirm; child-session ownership is already isolated above.
-    getGoalPool(ctx.cwd).shutdown();
+    getGoalPool(ctx.cwd, rootSessionId).shutdown();
   });
 }

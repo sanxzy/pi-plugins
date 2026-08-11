@@ -30,7 +30,7 @@ function unavailableToChild(): GoalToolResult {
 
 function goalOrError(ctx: ExtensionContext): { pool: ReturnType<typeof getGoalPool>; cwd: string } | GoalToolResult {
   if (!isMainHost(ctx)) return unavailableToChild();
-  return { pool: getGoalPool(ctx.cwd), cwd: ctx.cwd };
+  return { pool: getGoalPool(ctx.cwd, ctx.sessionManager.getSessionId()), cwd: ctx.cwd };
 }
 
 function formatGoal(goal: Goal): string {

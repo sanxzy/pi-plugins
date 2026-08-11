@@ -6,7 +6,7 @@ import {
   validateGoalInput,
   type Goal,
 } from "@xzy-ai/core";
-import { goalsFile } from "../../shared/paths.ts";
+import { encodeProjectId, homeGoalFile } from "../../shared/paths.ts";
 import { createGoalStore, type GoalStore } from "./goal-store.ts";
 
 export interface GoalCreateInput {
@@ -36,6 +36,7 @@ export interface GoalTimerHandle {
 
 export interface GoalPool {
   readonly projectRoot: string;
+  readonly rootSessionId: string;
   readonly store: GoalStore;
   create(input: GoalCreateInput): GoalMutationResult;
   pause(cwd: string, reason: string): GoalMutationResult;
@@ -79,8 +80,8 @@ interface SchedulerRecord {
   readonly generation: number;
 }
 
-export function createGoalPool(projectRoot: string): GoalPool {
-  const store = createGoalStore(goalsFile(projectRoot));
+export function createGoalPool(projectRoot: string, rootSessionId = "root"): GoalPool {
+  const store = createGoalStore(homeGoalFile(encodeProjectId(projectRoot), rootSessionId));
   const lockByCwd = new Set<string>();
   const bindings = new Map<string, GoalDeliveryBinding>();
   const schedulers = new Map<string, SchedulerRecord>();
@@ -159,6 +160,7 @@ export function createGoalPool(projectRoot: string): GoalPool {
 
   const pool: GoalPool = {
     projectRoot,
+    rootSessionId,
     store,
     create(input) {
       const cwd = normalizeGoalCwd(input.cwd);
@@ -269,11 +271,11 @@ declare global {
 
 const GOAL_POOL_SLOT_PREFIX = "pi-code-goals:";
 
-export function getGoalPool(projectRoot: string): GoalPool {
-  const slot = `${GOAL_POOL_SLOT_PREFIX}${projectRoot}`;
+export function getGoalPool(projectRoot: string, rootSessionId = "root"): GoalPool {
+  const slot = `${GOAL_POOL_SLOT_PREFIX}${projectRoot}:${rootSessionId}`;
   const existing = globalThis.piCodeGoalPools?.[slot];
   if (existing) return existing;
-  const pool = createGoalPool(projectRoot);
+  const pool = createGoalPool(projectRoot, rootSessionId);
   globalThis.piCodeGoalPools ??= {};
   globalThis.piCodeGoalPools[slot] = pool;
   return pool;
