@@ -5,7 +5,7 @@ import type {
   SessionStartEvent,
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { allMcpNames } from "@xzy-ai/core";
+import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot } from "@xzy-ai/channels";
 import { getChildPool, getGoalPool, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
@@ -78,12 +78,13 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // Activate every registered tool so built-ins beyond the default
     // read/bash/edit/write (find, grep) are model-callable too. `ls` stays
     // excluded — the model should list files via `find`/`grep` instead.
-    const activeNames = new Set(allMcpNames());
+    const managedNames = new Set(allMcpNames());
+    const currentSessionNames = new Set(sessionMcpNames(ctx.cwd, sessionId));
     pi.setActiveTools(
       pi
         .getAllTools()
         .map((tool) => tool.name)
-        .filter((name) => name !== "ls" && !activeNames.has(name)),
+        .filter((name) => name !== "ls" && (!managedNames.has(name) || currentSessionNames.has(name))),
     );
 
     // Bind the goal pool to the fresh host. On a fresh session the prior host
