@@ -27,16 +27,33 @@ test("explicit child tool lists cannot enable goal capabilities but gain the web
   assert.deepEqual(resolveChildTools(discoveredAgent(tools)), ["read", "web_search", "web_fetch", "llm_wikis_search"]);
 });
 
-test("an absent tools list enables all seven built-in tools plus the web tools", () => {
-  assert.deepEqual(resolveChildTools(discoveredAgent()), ALL_CHILD_TOOLS);
+test("an absent tools list enables built-in, discovered MCP, and web tools", () => {
+  assert.deepEqual(resolveChildTools(discoveredAgent(), ["alpha_lookup", "beta_search"]), [
+    ...ALL_BUILTIN_TOOLS,
+    "alpha_lookup",
+    "beta_search",
+    "web_search",
+    "web_fetch",
+    "llm_wikis_search",
+  ]);
 });
 
 test("an empty tools list enables all seven built-in tools plus the web tools", () => {
   assert.deepEqual(resolveChildTools(discoveredAgent([])), ALL_CHILD_TOOLS);
 });
 
+test("discovered MCP tools are filtered through explicit child restrictions and root-only controls", () => {
+  assert.deepEqual(resolveChildTools(discoveredAgent(["read", "alpha_lookup", "goal_create"]), ["alpha_lookup", "beta_search", "mcp_resources_list"]), [
+    "read",
+    "alpha_lookup",
+    "web_search",
+    "web_fetch",
+    "llm_wikis_search",
+  ]);
+});
+
 test("the fallback allowlist includes the read-only built-in and web tools", () => {
-  const tools = resolveChildTools(discoveredAgent());
+  const tools = resolveChildTools(discoveredAgent(), []);
   assert.deepEqual(tools, ALL_CHILD_TOOLS);
   assert.ok(tools.includes("grep"));
   assert.ok(tools.includes("find"));
