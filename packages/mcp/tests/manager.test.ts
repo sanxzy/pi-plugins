@@ -168,9 +168,18 @@ test("connection close marks a server failed and reconnects with bounded backoff
   try {
     await manager.start();
     assert.equal(manager.status("reconnect")?.status, "connected");
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    assert.equal(manager.status("reconnect")?.status, "connected");
+    // Wait for the fixture to crash and the manager to record the failed
+    // transition before polling for the reconnected state.
+    const failedDeadline = Date.now() + 3_000;
+    while (Date.now() < failedDeadline && !statuses.includes("failed")) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
     assert.ok(statuses.includes("failed"), "close reports a failed transition");
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline && manager.status("reconnect")?.status !== "connected") {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    assert.equal(manager.status("reconnect")?.status, "connected");
   } finally {
     await manager.stop();
     rmSync(root, { recursive: true, force: true });
@@ -198,6 +207,25 @@ test("remote session expiration reinitializes once and retries the request", asy
     await new Promise<void>((resolve) => fixture.server.close(() => resolve()));
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("close performs full watcher and reconnect cleanup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-close-cleanup-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    disabled: { type: "local", command: [process.execPath, "unused"], disabled: true },
+  } } }));
+  let unsubscribed = 0;
+  const manager = createMcpManager({ agentDir, projectRoot, watch: () => () => { unsubscribed += 1; } });
+  await manager.start();
+  await manager.close();
+  assert.equal(unsubscribed, 1);
+  assert.equal(manager.state().running, false);
+  await manager.close();
+  assert.equal(unsubscribed, 1);
+  rmSync(root, { recursive: true, force: true });
 });
 
 test("manager reload updates state and invokes the reload callback", async () => {
