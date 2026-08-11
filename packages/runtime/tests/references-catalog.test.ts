@@ -21,7 +21,8 @@ import {
 /** Materializer that never reaches the network; Git entries stay unavailable. */
 function offlineMaterializer() {
   return createGitMaterializer({
-    run: async () => {
+    run: async (args) => {
+      if (args[1] === "ls-remote") return { stdout: "hash refs/heads/main\n", stderr: "" };
       throw new Error("offline test materializer");
     },
   });
@@ -149,7 +150,8 @@ test("keeps valid entries when strict JSON contains malformed entries", async ()
     agentDir: join(root, "agent"),
     homeDir: root,
     materializer: offlineMaterializer(),
-  });  mkdirSync(dirname(catalog.filePath), { recursive: true });
+  });
+  mkdirSync(dirname(catalog.filePath), { recursive: true });
   writeFileSync(
     catalog.filePath,
     JSON.stringify({
@@ -163,7 +165,9 @@ test("keeps valid entries when strict JSON contains malformed entries", async ()
   );
 
   const result = await catalog.read();
-  assert.deepEqual(result.entries.map(({ name }) => name), ["good"]);
+  assert.deepEqual(result.entries.map(({ name }) => name), ["badBranch", "badShape", "good"]);
+  assert.equal(result.entries.find((entry) => entry.name === "badBranch")?.status, "unavailable");
+  assert.equal(result.entries.find((entry) => entry.name === "badShape")?.status, "unavailable");
   assert.equal(result.diagnostics.length, 2);
   assert.ok(result.diagnostics.every((message) => !message.includes("owner/repo")));
 });
@@ -212,6 +216,47 @@ test("saves validated JSON atomically with mode 0644 and preserves the prior fil
   assert.deepEqual(renameFailed, { ok: false, error: "Unable to save references configuration" });
   assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), first);
   assert.deepEqual(readdirSync(dirname(catalog.filePath)).filter((name) => name.includes(".tmp-")), []);
+});
+
+test("preflight rejects unavailable Git sources before persistence", async () => {
+  const root = tempRoot();
+  const catalog = createReferenceCatalog({
+    agentDir: join(root, "agent"),
+    homeDir: root,
+    materializer: createGitMaterializer({
+      run: async (args) => {
+        if (args[1] === "ls-remote") return { stdout: "", stderr: "" };
+        throw new Error("should not materialize during preflight rejection");
+      },
+    }),
+  });
+  await catalog.save({ references: { docs: "/tmp/docs" } });
+  const result = await catalog.save({ references: { remote: { repository: "owner/repo", branch: "main" } } });
+  assert.deepEqual(result, { ok: false, error: "Git reference preflight failed" });
+  assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), { references: { docs: "/tmp/docs" } });
+});
+
+test("publishes Git materialization status through the public catalog", async () => {
+  const root = tempRoot();
+  const catalog = createReferenceCatalog({
+    agentDir: join(root, "agent"),
+    homeDir: root,
+    materializer: {
+      preflight: async () => ({ ok: true }),
+      ensure: async () => ({
+        localPath: join(root, "cache", "repo"),
+        status: "cloned" as const,
+        head: "abc123",
+        branch: "main",
+      }),
+    },
+  });
+  assert.deepEqual(await catalog.save({ references: { remote: { repository: "owner/repo", branch: "main" } } }), { ok: true });
+  const result = await catalog.read();
+  const entry = result.entries[0]!;
+  assert.equal(entry.status, "available");
+  assert.equal(entry.materialization, "cloned");
+  assert.equal(entry.path, join(root, "cache", "repo"));
 });
 
 test("save rejects invalid documents before touching the existing file", async () => {

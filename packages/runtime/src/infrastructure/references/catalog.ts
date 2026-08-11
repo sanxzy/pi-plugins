@@ -19,6 +19,8 @@ export const REFERENCES_FILE_MODE = 0o644;
 
 export type ReferenceAvailability = "available" | "unavailable";
 
+export type ReferenceMaterializationStatus = "cached" | "cloned" | "refreshed";
+
 export interface ReferenceCatalogEntry {
   readonly name: string;
   readonly source: ReferenceSource;
@@ -27,6 +29,7 @@ export interface ReferenceCatalogEntry {
   readonly hidden?: boolean;
   readonly branch?: string;
   readonly head?: string;
+  readonly materialization?: ReferenceMaterializationStatus;
   readonly status: ReferenceAvailability;
   readonly diagnostic?: string;
 }
@@ -55,6 +58,7 @@ export interface ReferenceCatalog {
   readonly filePath: string;
   readonly reposDir: string;
   readonly read: () => Promise<ReferenceCatalogReadResult>;
+  readonly preflight: (document: unknown) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
   readonly save: (document: unknown) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
 }
 
@@ -82,13 +86,27 @@ export function createReferenceCatalog(options: ReferenceCatalogOptions = {}): R
     writeReferenceJson(path, content, options.fileSystem));
   const materializer = options.materializer ?? createGitMaterializer();
 
+  const preflight = async (document: unknown): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> => {
+    const validated = validateReferenceCatalog(document);
+    if (!validated.ok) return { ok: false, error: "Invalid references configuration" };
+    for (const source of Object.values(validated.value.references)) {
+      if (source.type !== "git") continue;
+      const repository = parseRepository(source.repository);
+      if (!repository) return { ok: false, error: "Invalid Git reference" };
+      const result = await materializer.preflight({ reference: repository, branch: source.branch });
+      if (!result.ok) return { ok: false, error: "Git reference preflight failed" };
+    }
+    return { ok: true };
+  };
+
   return {
     filePath,
     reposDir,
     read: () => readReferenceCatalog(filePath, homeDir, reposDir, options.refresh, materializer),
+    preflight,
     save: async (document) => {
-      const validated = validateReferenceCatalog(document);
-      if (!validated.ok) return { ok: false, error: "Invalid references configuration" };
+      const preflightResult = await preflight(document);
+      if (!preflightResult.ok) return preflightResult;
       try {
         await atomicWrite(filePath, serializeReferenceDocument(document));
         return { ok: true };
@@ -134,7 +152,7 @@ async function readReferenceCatalog(
     }
     const rawEntry = document.references[name];
     const source = validateReferenceEntry(name, rawEntry);
-    const fallback = source.ok ? undefined : rejectedRelativeLocalSource(rawEntry);
+    const fallback = source.ok ? undefined : rejectedSourceFallback(rawEntry);
     if (!source.ok && fallback === undefined) {
       diagnostics.push(`Reference '${name}' is invalid`);
       continue;
@@ -175,6 +193,7 @@ async function resolveCatalogEntry(
           ...metadata,
           path: result.localPath,
           status: "available",
+          materialization: result.status,
           ...(result.head === undefined ? {} : { head: result.head }),
           ...(result.branch === undefined ? {} : { branch: result.branch }),
         },
@@ -230,21 +249,31 @@ function requirePathSeparator(): string {
   return process.platform === "win32" ? "\\\\" : "/";
 }
 
-function rejectedRelativeLocalSource(rawEntry: unknown): ReferenceSource | undefined {
+function rejectedSourceFallback(rawEntry: unknown): ReferenceSource | undefined {
   if (typeof rawEntry === "string") {
-    return rawEntry.startsWith(".") ? { type: "local", path: rawEntry } : undefined;
-  }
-  if (!isRecord(rawEntry) || typeof rawEntry.path !== "string" || Object.prototype.hasOwnProperty.call(rawEntry, "repository")) {
+    if (rawEntry.startsWith(".") || rawEntry.startsWith("/")) return { type: "local", path: rawEntry };
+    if (rawEntry.includes("/") || rawEntry.includes(":")) return { type: "git", repository: rawEntry };
     return undefined;
   }
-  if (rawEntry.description !== undefined && typeof rawEntry.description !== "string") return undefined;
-  if (rawEntry.hidden !== undefined && typeof rawEntry.hidden !== "boolean") return undefined;
-  return {
-    type: "local",
-    path: rawEntry.path,
-    ...(rawEntry.description === undefined ? {} : { description: rawEntry.description }),
-    ...(rawEntry.hidden === undefined ? {} : { hidden: rawEntry.hidden }),
-  };
+  if (!isRecord(rawEntry)) return undefined;
+  if (typeof rawEntry.path === "string" && !Object.prototype.hasOwnProperty.call(rawEntry, "repository")) {
+    return {
+      type: "local",
+      path: rawEntry.path,
+      ...(typeof rawEntry.description === "string" ? { description: rawEntry.description } : {}),
+      ...(typeof rawEntry.hidden === "boolean" ? { hidden: rawEntry.hidden } : {}),
+    };
+  }
+  if (typeof rawEntry.repository === "string") {
+    return {
+      type: "git",
+      repository: rawEntry.repository,
+      ...(typeof rawEntry.branch === "string" ? { branch: rawEntry.branch } : {}),
+      ...(typeof rawEntry.description === "string" ? { description: rawEntry.description } : {}),
+      ...(typeof rawEntry.hidden === "boolean" ? { hidden: rawEntry.hidden } : {}),
+    };
+  }
+  return undefined;
 }
 
 async function writeReferenceJson(filePath: string, content: string, fileSystem?: ReferenceFileSystem): Promise<void> {
