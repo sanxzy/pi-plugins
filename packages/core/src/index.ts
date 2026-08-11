@@ -10,3 +10,4 @@ export * from "./domain/ports/child-session.ts";
 export * from "./application/control/control.ts";
 export * from "./shared/constants.ts";
 export * from "./domain/references/index.ts";
+export * from "./shared/session-mcp.ts";

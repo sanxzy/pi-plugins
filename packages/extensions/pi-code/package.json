@@ -15,6 +15,7 @@
   "dependencies": {
     "@xzy-ai/commands": "workspace:*",
     "@xzy-ai/core": "workspace:*",
+    "@xzy-ai/mcp": "workspace:*",
     "@xzy-ai/runtime": "workspace:*",
     "@xzy-ai/tools": "workspace:*",
     "@earendil-works/pi-coding-agent": "^0.80.2"

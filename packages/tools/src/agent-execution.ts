@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { Job } from "@xzy-ai/core";
-import type { ChildRunResult } from "@xzy-ai/core";
+import { sessionMcpNames, type ChildRunResult } from "@xzy-ai/core";
 import type { ChildPool } from "@xzy-ai/runtime";
 import { spawnChildSession } from "@xzy-ai/runtime";
 import type { AgentParams } from "./tools.ts";
@@ -35,6 +35,7 @@ export async function spawnWithControl(
       onControl: (control) => {
         pool.liveChildren.set(job.jobId, control);
       },
+      mcpToolNames: sessionMcpNames(ctx.cwd, options.parentSessionId),
       run: (operation) =>
         pool.concurrency.run(() => {
           pool.registry.updateJob(job.jobId, { status: "running" });
