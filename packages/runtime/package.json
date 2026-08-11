@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/scaffold.smoke.test.ts tests/registry.test.ts tests/goal-store.test.ts tests/goal-scheduler.test.ts tests/child-status.test.ts tests/concurrency-gate.test.ts tests/background-delivery.test.ts tests/control.test.ts tests/phase1-storage.test.ts tests/home-storage.test.ts tests/phase2-transcript.test.ts tests/phase3-manifests.test.ts tests/phase7-lifecycle.test.ts tests/phase8-agents.test.ts tests/child-tools.test.ts tests/child-live.test.ts"
+    "test": "node --test --import tsx tests/scaffold.smoke.test.ts tests/registry.test.ts tests/goal-store.test.ts tests/goal-scheduler.test.ts tests/child-status.test.ts tests/concurrency-gate.test.ts tests/background-delivery.test.ts tests/control.test.ts tests/phase1-storage.test.ts tests/home-storage.test.ts tests/phase2-transcript.test.ts tests/phase3-manifests.test.ts tests/phase5-agent-events.test.ts tests/phase7-lifecycle.test.ts tests/phase8-agents.test.ts tests/child-tools.test.ts tests/child-live.test.ts"
   },
   "dependencies": {
     "@xzy-ai/core": "workspace:*",

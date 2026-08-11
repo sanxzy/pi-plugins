@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createJob } from "@xzy-ai/core";
 import {
-  createScopedRegistry,
+  createAgentEventRegistry,
   homeAgentEventsFile,
   homeAgentManifestFile,
   homeProjectDir,
   encodeProjectId,
   startRootSession,
   getChildPool,
+  childSessionPaths,
 } from "@xzy-ai/runtime";
 import { makeJobId } from "@xzy-ai/tools";
 
@@ -46,7 +47,7 @@ function job(input: {
 test("scoped registry uses each agent event log and snapshot as its durable read model", () => {
   setupHome();
   const root = project();
-  const registry = createScopedRegistry(root, "root-session");
+  const registry = createAgentEventRegistry(root, "root-session");
   const child = job({ id: "agent-a", parentSessionId: "root-session" });
   registry.createJob(child);
   registry.updateJob(child.jobId, { status: "running" });
@@ -61,7 +62,7 @@ test("scoped registry uses each agent event log and snapshot as its durable read
   assert.equal(readFileSync(eventsPath, "utf8").trim().split("\n").length, 5);
   assert.equal(existsSync(join(homeProjectDir(projectId), "sessions", "root-session", "jobs-root-session.jsonl")), false);
 
-  const fresh = createScopedRegistry(root, "root-session");
+  const fresh = createAgentEventRegistry(root, "root-session");
   const restored = fresh.get("agent-a");
   assert.equal(restored?.status, "completed");
   assert.equal(restored?.sessionFile, "/private/transcript.jsonl");
@@ -72,10 +73,10 @@ test("scoped registry uses each agent event log and snapshot as its durable read
 test("nested agent lineage and recursive visibility survive a fresh event-log read", () => {
   setupHome();
   const root = project();
-  const registry = createScopedRegistry(root, "root-session");
+  const registry = createAgentEventRegistry(root, "root-session");
   registry.createJob(job({ id: "parent", parentSessionId: "root-session", status: "running" }));
-  registry.createJob(job({ id: "grandchild", parentSessionId: "parent", parentJobId: "parent", status: "running" }));
-  const fresh = createScopedRegistry(root, "root-session");
+  registry.createJob({ ...job({ id: "grandchild", parentSessionId: "parent", parentJobId: "parent", status: "running" }), rootJobId: "parent" });
+  const fresh = createAgentEventRegistry(root, "root-session");
   const child = fresh.get("grandchild");
   assert.equal(child?.parentJobId, "parent");
   assert.equal(child?.rootJobId, "parent");
@@ -86,7 +87,7 @@ test("nested agent lineage and recursive visibility survive a fresh event-log re
 test("terminal retention trims only old terminal agents and keeps active records", () => {
   setupHome();
   const root = project();
-  const registry = createScopedRegistry(root, "root-session");
+  const registry = createAgentEventRegistry(root, "root-session");
   for (let index = 0; index < 27; index += 1) {
     const id = `terminal-${index}`;
     const created = job({ id, parentSessionId: "root-session", createdAt: `2026-01-01T00:00:${String(index).padStart(2, "0")}.000Z` });
@@ -96,10 +97,55 @@ test("terminal retention trims only old terminal agents and keeps active records
   }
   const active = job({ id: "active", parentSessionId: "root-session", status: "running", createdAt: "2026-01-01T00:01:00.000Z" });
   registry.createJob(active);
-  const fresh = createScopedRegistry(root, "root-session");
+  const fresh = createAgentEventRegistry(root, "root-session");
   assert.equal(fresh.get("active")?.status, "running");
   assert.equal([...fresh.all().values()].filter((entry) => entry.status === "completed").length <= 25, true);
   assert.equal(fresh.get("terminal-0"), undefined);
+});
+
+test("terminal lifecycle transitions cannot be overwritten by later completion", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(job({ id: "race", parentSessionId: "root-session", status: "running" }));
+  registry.updateJob("race", { status: "cancelled" });
+  registry.updateJob("race", { status: "completed", sessionFile: "/late.jsonl" });
+  assert.equal(registry.get("race")?.status, "cancelled");
+  assert.equal(registry.get("race")?.sessionFile, undefined);
+});
+
+test("malformed or incomplete agent events do not break fresh readers", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(job({ id: "safe", parentSessionId: "root-session", status: "running" }));
+  const events = registry.fileForJob("safe");
+  assert.ok(events);
+  appendFileSync(events, '{"type":"unknown","at":null}\\n{"type":"agent_updated"}\\n{broken\\n');
+  const fresh = createAgentEventRegistry(root, "root-session");
+  assert.equal(fresh.get("safe")?.status, "running");
+});
+
+test("event logs remain authoritative when the materialized snapshot is missing", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(job({ id: "snapshotless", parentSessionId: "root-session", status: "running" }));
+  const events = registry.fileForJob("snapshotless");
+  assert.ok(events);
+  unlinkSync(events.replace("events.jsonl", "agent.json"));
+  const fresh = createAgentEventRegistry(root, "root-session");
+  assert.equal(fresh.get("snapshotless")?.status, "running");
+  assert.equal(existsSync(events.replace("events.jsonl", "agent.json")), true);
+});
+
+test("prefixed job inputs use the same canonical transcript storage as unprefixed inputs", () => {
+  setupHome();
+  const root = project();
+  assert.equal(
+    childSessionPaths({ cwd: root, rootSessionId: "root-session", jobId: "job-same" }).agentDir,
+    childSessionPaths({ cwd: root, rootSessionId: "root-session", jobId: "same" }).agentDir,
+  );
 });
 
 test("root-versus-child detection uses the root session manifest boundary", () => {
@@ -109,6 +155,8 @@ test("root-versus-child detection uses the root session manifest boundary", () =
   const pool = getChildPool(root, "root-session");
   assert.equal(pool.isRootSession("root-session"), true);
   assert.equal(pool.isRootSession("child-session"), false);
+  const missing = getChildPool(project(), "unpersisted-root");
+  assert.equal(missing.isRootSession("unpersisted-root"), false);
 });
 
 test("new canonical job IDs are unprefixed", () => {
