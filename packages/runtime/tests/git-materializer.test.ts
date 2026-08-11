@@ -202,6 +202,47 @@ test("serializes same-cache materialization and validates preflight branches", a
   assert.equal((await materializer.preflight({ reference, branch: "../unsafe" })).ok, false);
 });
 
+test("does not retain raw credential errors as an Error cause", async () => {
+  const rootDir = root();
+  const secret = "cause-secret-token";
+  const reference = parseRepository(`https://user:${secret}@example.com/org/repo.git`);
+  assert.ok(reference);
+  const materializer = createGitMaterializer({
+    run: async () => {
+      throw new Error(`fatal https://user:${secret}@example.com/org/repo.git denied`);
+    },
+  });
+  await assert.rejects(
+    materializer.ensure({ reference, cacheRoot: join(rootDir, "cache") }),
+    (error: unknown) => {
+      const candidate = error as { message?: string; cause?: unknown };
+      return !String(candidate.message).includes(secret) && !String(candidate.cause).includes(secret);
+    },
+  );
+});
+
+test("cleans a partial checkout even when the Git operation is aborted", async () => {
+  const rootDir = root();
+  const remote = join(rootDir, "remote");
+  init(remote);
+  commit(remote, "main", "main");
+  const reference = repository(remote);
+  const controller = new AbortController();
+  const materializer = createGitMaterializer({
+    run: async (args, _cwd, options) => {
+      if (args.includes("clone")) {
+        const destination = args.at(-1)!;
+        mkdirSync(join(destination, ".git", "partial"), { recursive: true });
+        controller.abort();
+        throw new Error("clone aborted");
+      }
+      throw new Error("unexpected Git operation");
+    },
+  });
+  await assert.rejects(materializer.ensure({ reference, cacheRoot: join(rootDir, "cache"), signal: controller.signal }), /aborted|clone/);
+  assert.equal(existsSync(join(cachePath(join(rootDir, "cache"), reference), ".git")), false);
+});
+
 test("applies operation timeouts and never exposes credentials in failures", async () => {
   const rootDir = root();
   const script = join(rootDir, "fake-git");
