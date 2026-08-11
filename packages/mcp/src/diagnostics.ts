@@ -1,5 +1,5 @@
-const SENSITIVE_KEY = /(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|client[_-]?id|authorization|(?:x[_-]?)?(?:api[_-]?key|apiKey|auth[_-]?token|access[_-]?token)|apikey|password|passwd|secret|code[_-]?(?:verifier|challenge)|state|token|key)/i;
-const SENSITIVE_QUERY_KEY = /(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|client[_-]?id|authorization|api[_-]?key|apikey|password|passwd|secret|code[_-]?(?:verifier|challenge)|state|token|key)/i;
+const SENSITIVE_KEY = /(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|client[_-]?id|authorization|(?:x[_-]?)?(?:api[_-]?key|apiKey|auth[_-]?token|access[_-]?token)|apikey|password|passwd|secret|code|code[_-]?(?:verifier|challenge)|state|token|key)/i;
+const SENSITIVE_QUERY_KEY = /(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|client[_-]?id|authorization|api[_-]?key|apikey|password|passwd|secret|code|code[_-]?(?:verifier|challenge)|state|token|key)/i;
 
 function redactValue(value: string): string {
   return /^\s*$/.test(value) ? value : "[REDACTED]";
@@ -12,7 +12,8 @@ function redactValue(value: string): string {
 export function redactDiagnostic(value: unknown, maxLength = 1_000): string {
   let text = value instanceof Error ? value.message : String(value);
   text = text
-    .replace(/Bearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
+    .replace(/\bAuthorization\s*:\s*(?:Bearer|Basic|Token|token)?\s*\S+/gi, "Authorization=[REDACTED]")
+    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
     .replace(/(https?:\/\/)([^\s/@:]+)(?::[^\s/@]*)?@/gi, "$1[REDACTED]@")
     .replace(/\bBasic\s+[A-Za-z0-9+/=]+/gi, "Basic [REDACTED]");
   // Redact key=value pairs in query strings and header-like contexts.
@@ -27,6 +28,9 @@ export function redactDiagnostic(value: unknown, maxLength = 1_000): string {
   });
   // Fallback for bare key=token-like sequences.
   text = text.replace(/(Authorization|Bearer|token|secret|password|api[_-]?key|apiKey|access[_-]?token|refresh[_-]?token|client[_-]?secret|code[_-]?verifier)[\s:=]+([^\s,;]+)/gi, (match, key: string, _val: string) => `${key}=[REDACTED]`);
+  // Final URL-query pass also catches values following transformed header
+  // fragments and OAuth callback parameters.
+  text = text.replace(/([?&](?:code|state|token)=)[^&\s,;]+/gi, "$1[REDACTED]");
   return text.slice(0, maxLength);
 }
 
