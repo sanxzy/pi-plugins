@@ -205,4 +205,3 @@ test("save rejects invalid documents before touching the existing file", async (
   assert.equal(result.ok, false);
   assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), { references: { docs: "/tmp/docs" } });
 });
-
