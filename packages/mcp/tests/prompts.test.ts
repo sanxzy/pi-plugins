@@ -30,8 +30,8 @@ const manager = {
 test("prompt normalization preserves roles and bounds text", () => {
   const result = normalizePromptResult("demo", "greet", {
     messages: [
-      { role: "user", content: [{ type: "text", text: "hello" }] },
-      { role: "assistant", content: [{ type: "text", text: "world" }] },
+      { role: "user", content: { type: "text", text: "hello" } },
+      { role: "assistant", content: { type: "text", text: "world" } },
     ],
   });
   assert.deepEqual(result.messages, [
@@ -76,7 +76,7 @@ test("prompt commands are server-scoped, parse JSON arguments, pass abort signal
     manager,
     async (server, prompt, args, signal) => {
       calls.push({ server, prompt, args, signal });
-      return normalizePromptResult(server, prompt, { messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }] });
+      return normalizePromptResult(server, prompt, { messages: [{ role: "user", content: { type: "text", text: "hello" } }] });
     },
     async (_server, uri) => normalizeResourceResult("demo", uri, { contents: [{ uri, text: "resource" }] }),
     () => [],
@@ -135,7 +135,7 @@ test("prompt identity command names remain stable when catalog order changes", a
   const exposer = new McpPromptsResourcesExposer(pi as never);
   const readPrompt = async (_server: string, prompt: string) => {
     calls.push(prompt);
-    return normalizePromptResult("demo", prompt, { messages: [{ role: "user", content: [{ type: "text", text: prompt }] }] });
+    return normalizePromptResult("demo", prompt, { messages: [{ role: "user", content: { type: "text", text: prompt } }] });
   };
   exposer.register(first, readPrompt, async () => normalizeResourceResult("demo", "x", { contents: [] }), () => []);
   const names = [...pi.commands.keys()];
