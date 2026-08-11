@@ -54,6 +54,7 @@ export {
   parseRedirectUri,
   PiOAuthProvider,
   stopCallbackServer,
+  stopCallbackServerIfIdle,
   waitForOAuthCallback,
   type OAuthProviderOptions,
   type OAuthStatus,

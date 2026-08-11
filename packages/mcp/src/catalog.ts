@@ -58,6 +58,10 @@ export async function discoverCatalog(client: Client, timeout: number, signal?: 
   const requestOptions: RequestOptions = {
     timeout,
     resetTimeoutOnProgress: true,
+    // Registering a progress handler makes the SDK attach a progress token to
+    // the request; servers that emit notifications/progress then reset the
+    // per-request timeout instead of failing long-running discovery.
+    onprogress: () => undefined,
     ...(signal ? { signal } : {}),
   };
   const capabilities = client.getServerCapabilities();

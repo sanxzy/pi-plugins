@@ -66,6 +66,7 @@ export interface McpManager {
   start(): Promise<McpManagerState>;
   connectLocal(name: string, server: McpLocalServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
   connectRemote(name: string, server: McpRemoteServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
+  disconnect(name: string): Promise<void>;
   close(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -264,6 +265,16 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     }
   };
 
+  const disconnectInternal = async (name: string): Promise<void> => {
+    const connection = connections.get(name);
+    connections.delete(name);
+    if (connection) await closeConnection(connection);
+    if (state.servers[name]) {
+      setStatus(name, state.config?.servers[name]?.disabled === true ? { status: "disabled" } : { status: "configured" });
+    }
+  };
+
+  const disconnect = (name: string): Promise<void> => serialize(() => disconnectInternal(name));
   const close = (): Promise<void> => serialize(closeInternal);
 
   const start = (): Promise<McpManagerState> =>
@@ -300,6 +311,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     start,
     connectLocal,
     connectRemote,
+    disconnect,
     close,
     stop,
   };

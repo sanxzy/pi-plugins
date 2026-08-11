@@ -140,9 +140,18 @@ export class PiOAuthProvider implements OAuthClientProvider {
       return;
     }
     if (scope === "all") {
+      // SDK recovery after InvalidClient/UnauthorizedClient: invalidate only
+      // registration and transactional state. Committed working credentials
+      // must survive a failed reauthentication, so keep the stored tokens.
       this.pendingTokens = undefined;
       this.pendingClientInfo = undefined;
-      this.authStore.remove(this.serverUrl);
+      this.authStore.update(this.serverUrl, (entry) => {
+        const next = { ...entry };
+        delete next.clientInfo;
+        delete next.codeVerifier;
+        delete next.oauthState;
+        return next;
+      });
       return;
     }
     this.authStore.update(this.serverUrl, (entry) => {
@@ -257,6 +266,9 @@ function stopIfIdle(): void {
   if (pendingAuths.size > 0 || !callbackServer) return;
   const server = callbackServer;
   callbackServer = undefined;
+  // closeAllConnections drops undici keep-alive sockets so server.close()
+  // resolves immediately instead of waiting for the client's idle timeout.
+  server.closeAllConnections();
   closingServer = new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
@@ -329,7 +341,9 @@ export async function ensureCallbackServer(redirectUri?: string): Promise<{ port
     await closing;
   }
   if (callbackServer) return { port: callbackPort, path: callbackPath };
-  if (await isPortInUse(port)) return { port, path };
+  if (await isPortInUse(port)) {
+    throw new Error(`MCP OAuth callback port ${port} is already in use and cannot be managed by Pi`);
+  }
   callbackPort = port;
   callbackPath = path;
   callbackServer = createServer(handleCallbackRequest);
@@ -373,6 +387,11 @@ export function cancelOAuthCallback(url: string): void {
   }
 }
 
+/** Stop the callback server when no authorization is pending (failed flows). */
+export function stopCallbackServerIfIdle(): void {
+  stopIfIdle();
+}
+
 /** Stop the callback server and reject any still-pending callbacks. */
 export async function stopCallbackServer(): Promise<void> {
   if (closingServer) {
@@ -381,7 +400,10 @@ export async function stopCallbackServer(): Promise<void> {
     await closing;
   }
   if (callbackServer) {
-    await new Promise<void>((resolve) => callbackServer!.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      callbackServer!.closeAllConnections();
+      callbackServer!.close(() => resolve());
+    });
     callbackServer = undefined;
   }
   for (const [, pending] of pendingAuths) {

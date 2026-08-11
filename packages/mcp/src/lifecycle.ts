@@ -5,7 +5,6 @@ import {
   startRemoteAuth,
   finishRemoteAuth,
   logoutRemote,
-  cancelRemoteAuth,
 } from "./remote.ts";
 
 export interface McpLifecycleRegistrationOptions extends Omit<McpManagerOptions, "projectRoot"> {
@@ -71,15 +70,20 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
             return;
           }
           const agentDir = userAgentDir(options.agentDir);
-          const started = await startRemoteAuth({ url: server.url, agentDir, onRedirect: async (url) => {
-            notify(ctx, `MCP auth \"${name}\": open ${url.toString()}`);
-          } });
+          const started = await startRemoteAuth({
+            url: server.url,
+            agentDir,
+            oauth: server.oauth,
+            onRedirect: async (url) => {
+              notify(ctx, `MCP auth \"${name}\": open ${url.toString()}`);
+            },
+          });
           // When the user completes the browser flow, the loopback callback
           // resolves the authorization code and finishRemoteAuth commits it.
           void started.callback.then(
             async (code) => {
               if (!code) return;
-              await finishRemoteAuth({ url: server.url, agentDir, onRedirect: async () => {} }, code);
+              await finishRemoteAuth({ url: server.url, agentDir, oauth: server.oauth, onRedirect: async () => {} }, code);
               notify(ctx, `MCP auth \"${name}\": authorized.`);
             },
             async () => {
@@ -93,8 +97,11 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
             notify(ctx, name ? `MCP: \"${name}\" is not a remote server.` : "MCP logout usage: /mcp logout <server>");
             return;
           }
-          logoutRemote({ url: server.url, agentDir: userAgentDir(options.agentDir), onRedirect: () => {} });
-          cancelRemoteAuth(server.url);
+          const agentDir = userAgentDir(options.agentDir);
+          // Close any active transport first so logout leaves no authenticated
+          // client alive, then clear credentials and pending callbacks.
+          await manager.disconnect(name);
+          logoutRemote({ url: server.url, agentDir, oauth: server.oauth, onRedirect: () => {} });
           notify(ctx, `MCP: logged out \"${name}\".`);
           return;
         }

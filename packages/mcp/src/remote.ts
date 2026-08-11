@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { UnauthorizedError, auth as runOAuth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { discoverCatalog, type ServerCatalog } from "./catalog.ts";
 import { createDefaultAuthStore } from "./auth-store.ts";
-import { PiOAuthProvider, ensureCallbackServer, waitForOAuthCallback, cancelOAuthCallback, stopCallbackServer, type OAuthProviderOptions } from "./oauth.ts";
+import { PiOAuthProvider, ensureCallbackServer, waitForOAuthCallback, cancelOAuthCallback, stopCallbackServer, stopCallbackServerIfIdle, type OAuthProviderOptions } from "./oauth.ts";
 import type { McpRemoteServerConfig, McpTimeoutConfig } from "./config.ts";
 import { pathToFileURL } from "node:url";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -129,8 +129,20 @@ async function connectTransport(
   }
   try {
     await Promise.race([started, deadline, aborted]);
-    const catalog = await discoverCatalog(client, requestTimeout, signal);
-    return { client, catalog };
+    let requestTimer: NodeJS.Timeout | undefined;
+    const requestDeadline = new Promise<never>((_, reject) => {
+      requestTimer = setTimeout(() => {
+        void transport.close().catch(() => undefined);
+        reject(new Error(`MCP remote request timed out after ${requestTimeout}ms`));
+      }, requestTimeout);
+      requestTimer.unref();
+    });
+    try {
+      const catalog = await Promise.race([discoverCatalog(client, requestTimeout, signal), requestDeadline]);
+      return { client, catalog };
+    } finally {
+      if (requestTimer) clearTimeout(requestTimer);
+    }
   } finally {
     if (timer) clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);
@@ -194,6 +206,11 @@ export async function connectRemote(options: ConnectRemoteOptions): Promise<Remo
           ? { status: { status: "needs_client_registration", error: "Provide a pre-registered OAuth client ID" }, catalog: emptyCatalog() }
           : { status: { status: "needs_auth" }, catalog: emptyCatalog() };
       }
+      // A bounded startup/request cancellation is already a terminal result;
+      // retrying another transport would duplicate work and delay the caller.
+      if (/MCP remote (startup|request) timed out|MCP remote connection aborted/i.test(lastError)) {
+        return { status: { status: "failed", error: lastError }, catalog: emptyCatalog() };
+      }
     }
   }
   return { status: { status: "failed", error: lastError }, catalog: emptyCatalog() };
@@ -238,23 +255,45 @@ export async function startRemoteAuth(
       await options.onRedirect(url);
     },
   });
-  const result = await runOAuth(redirecting, { serverUrl: options.url });
+  let result: Awaited<ReturnType<typeof runOAuth>>;
+  try {
+    result = await runOAuth(redirecting, { serverUrl: options.url });
+  } catch (error) {
+    // No callback is pending when discovery/exchange fails before the browser
+    // flow is registered. Do not leave a process-wide listener behind.
+    stopCallbackServerIfIdle();
+    throw error;
+  }
   if (result === "AUTHORIZED") await redirecting.commit();
-  if (!redirect) throw new Error("OAuth provider did not return an authorization URL");
+  if (!redirect) {
+    stopCallbackServerIfIdle();
+    throw new Error("OAuth provider did not return an authorization URL");
+  }
   const state = redirect.searchParams.get("state");
-  if (!state) throw new Error("OAuth authorization URL did not include a state parameter");
+  if (!state) {
+    stopCallbackServerIfIdle();
+    throw new Error("OAuth authorization URL did not include a state parameter");
+  }
   // Register the loopback callback so the browser redirect resolves the
   // authorization code for finishRemoteAuth. Swallow cancellation so a logout
   // or shutdown never surfaces an unhandled rejection.
   const callback = waitForOAuthCallback(state, options.url);
-  // Pre-attach a handler so a cancelled callback cannot surface an unhandled
-  // rejection; finishRemoteAuth still observes the settled value.
   callback.catch(() => undefined);
   pendingRemoteAuth.set(options.url, {
     provider: redirecting,
     state,
     authorizationUrl: redirect.toString(),
     callback,
+  });
+  // Any settled callback ends the flow (finished, cancelled, or timed out).
+  // Drop the map entry once consumers have had their turn so a later /mcp
+  // auth starts a fresh flow instead of reusing a dead one.
+  callback.then(undefined, () => {
+    // Rejected callbacks are cancelled or timed out and cannot be finished;
+    // successful callbacks remain indexed until finishRemoteAuth commits them.
+    if (pendingRemoteAuth.get(options.url)?.callback === callback) {
+      pendingRemoteAuth.delete(options.url);
+    }
   });
   return { authorizationUrl: redirect.toString(), provider: redirecting, state, callback };
 }
@@ -270,10 +309,21 @@ export async function finishRemoteAuth(
   const code = authorizationCode ?? (pending ? await pending.callback : undefined);
   if (!code) throw new Error("No OAuth authorization code is pending");
   if (pending) cancelOAuthCallback(options.url);
-  const result = await runOAuth(provider, { serverUrl: options.url, authorizationCode: code });
-  if (result !== "AUTHORIZED") throw new Error("OAuth authorization did not complete");
-  await provider.commit();
-  pendingRemoteAuth.delete(options.url);
+  try {
+    const result = await runOAuth(provider, { serverUrl: options.url, authorizationCode: code });
+    if (result !== "AUTHORIZED") throw new Error("OAuth authorization did not complete");
+    await provider.commit();
+    pendingRemoteAuth.delete(options.url);
+  } catch (error) {
+    // A failed finish must not leave a dead flow behind: cancel the callback,
+    // drop the entry, and stop the listener when nothing else is pending.
+    if (pending) {
+      cancelOAuthCallback(options.url);
+      pendingRemoteAuth.delete(options.url);
+    }
+    stopCallbackServerIfIdle();
+    throw error;
+  }
 }
 
 /** Clear stored credentials and cancel any pending callback for a remote URL. */
