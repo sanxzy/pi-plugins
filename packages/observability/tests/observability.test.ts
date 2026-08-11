@@ -129,6 +129,31 @@ test("masking removes common API-key, bearer, authorization, private-key, and er
   for (const value of rawValues) assert.equal(raw.includes(value), false, `raw value leaked: ${value}`);
 });
 
+test("masking redacts generic secret assignments in nested params, results, and error messages", async () => {
+  const paths = scope();
+  const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
+  const paramSecret = "p_secret_123";
+  const resultSecret = "r_password_456";
+  const errorSecret = "e_token_789";
+  await processWithLog({
+    operation: "nested.result",
+    parameters: { nested: { secret: paramSecret, token: paramSecret, password: paramSecret, api_secret: paramSecret } },
+  }, () => ({ nestedResult: { secret: resultSecret, token: resultSecret, password: resultSecret, api_secret: resultSecret } }));
+  assert.throws(
+    () => processWithLog({ operation: "nested.error" }, () => {
+      throw new Error(`secret=${errorSecret} token=${errorSecret} password=${errorSecret} api_secret=${errorSecret}`);
+    }),
+  );
+  const raw = readFileSync(paths.errorsPath, "utf8") + readFileSync(paths.eventsPath, "utf8");
+  for (const value of [paramSecret, resultSecret, errorSecret]) {
+    assert.equal(raw.includes(value), false, `raw value leaked: ${value}`);
+  }
+  assert.equal(raw.includes("secret="), false);
+  assert.equal(raw.includes("token="), false);
+  assert.equal(raw.includes("password="), false);
+  assert.equal(raw.includes("api_secret="), false);
+});
+
 test("session logger routes agent errors to its error file and enforces private modes", async () => {
   const paths = scope();
   const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", agentId: "agent-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
