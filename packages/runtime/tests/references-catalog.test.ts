@@ -13,9 +13,19 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
+  createGitMaterializer,
   createReferenceCatalog,
   referenceConfigFile,
 } from "@xzy-ai/runtime";
+
+/** Materializer that never reaches the network; Git entries stay unavailable. */
+function offlineMaterializer() {
+  return createGitMaterializer({
+    run: async () => {
+      throw new Error("offline test materializer");
+    },
+  });
+}
 
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-references-"));
@@ -104,7 +114,11 @@ test("resolves local paths and reports unavailable roots without throwing", asyn
   mkdirSync(homeDocs, { recursive: true });
   mkdirSync(absoluteDocs, { recursive: true });
   writeFileSync(fileRoot, "file", "utf8");
-  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: home });
+  const catalog = createReferenceCatalog({
+    agentDir: join(root, "agent"),
+    homeDir: home,
+    materializer: offlineMaterializer(),
+  });
   await catalog.save({
     references: {
       home: "~/docs",
@@ -131,8 +145,11 @@ test("keeps valid entries when strict JSON contains malformed entries", async ()
   const root = tempRoot();
   const docs = join(root, "docs");
   mkdirSync(docs, { recursive: true });
-  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: root });
-  mkdirSync(dirname(catalog.filePath), { recursive: true });
+  const catalog = createReferenceCatalog({
+    agentDir: join(root, "agent"),
+    homeDir: root,
+    materializer: offlineMaterializer(),
+  });  mkdirSync(dirname(catalog.filePath), { recursive: true });
   writeFileSync(
     catalog.filePath,
     JSON.stringify({
