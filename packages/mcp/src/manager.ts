@@ -1,5 +1,5 @@
 import { existsSync, statSync, watch as fsWatch, type FSWatcher } from "node:fs";
-import { dirname, basename, join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
@@ -154,7 +154,8 @@ function defaultWatch(paths: readonly string[], onChange: () => void): () => voi
       const watcher = fsWatch(directory, (_event, changed) => {
         if (!changed) return;
         const name = String(changed);
-        if (paths.some((path) => basename(path) === name || join(dirname(path), name) === path)) onChange();
+        const resolved = join(directory, name);
+        if (paths.some((path) => resolved === path)) onChange();
       });
       watcher.unref?.();
       watchers.push(watcher);
@@ -303,10 +304,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     };
     candidate.client.onclose = () => fail("MCP connection closed");
     candidate.client.onerror = (error) => fail(errorMessage(error));
-    if (candidate.transport) {
-      candidate.transport.onclose = () => fail("MCP transport closed");
-      candidate.transport.onerror = (error) => fail(errorMessage(error));
-    }
+
   };
 
   const reload = (): McpConfigResult => {
