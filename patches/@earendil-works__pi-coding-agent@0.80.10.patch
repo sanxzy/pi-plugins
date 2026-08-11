@@ -1,5 +1,5 @@
 diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
-index 7b381711789938056cddea92182dadf9cacf9fc6..9155f22a5572739e071a80b883ce0fab2f3e246c 100644
+index 7b38171..9155f22 100644
 --- a/dist/core/extensions/loader.js
 +++ b/dist/core/extensions/loader.js
 @@ -154,6 +154,8 @@ export function createExtensionRuntime() {
@@ -25,7 +25,7 @@ index 7b381711789938056cddea92182dadf9cacf9fc6..9155f22a5572739e071a80b883ce0fab
              runtime.assertActive();
              runtime.registerProvider(name, config, extension.path);
 diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
-index 92e796571348fcffebc115845e78c445e12baaf2..5c254c8fccc018f45641beec1a741eddfb935900 100644
+index 92e7965..5c254c8 100644
 --- a/dist/core/extensions/runner.js
 +++ b/dist/core/extensions/runner.js
 @@ -153,6 +153,10 @@ export class ExtensionRunner {
@@ -40,7 +40,7 @@ index 92e796571348fcffebc115845e78c445e12baaf2..5c254c8fccc018f45641beec1a741edd
      bindCore(actions, contextActions, providerActions) {
          // Copy actions into the shared runtime (all extension APIs reference this)
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
-index f1c2e80e67fdbeafeea091483cb4206640cd3e39..3f8c880f205f64ad4280422cb476bd7d76f7d27f 100644
+index f1c2e80..3f8c880 100644
 --- a/dist/core/extensions/types.d.ts
 +++ b/dist/core/extensions/types.d.ts
 @@ -927,6 +927,11 @@ export interface ExtensionAPI {
@@ -64,3 +64,147 @@ index f1c2e80e67fdbeafeea091483cb4206640cd3e39..3f8c880f205f64ad4280422cb476bd7d
  }
  /**
   * Actions for ExtensionContext (ctx.* in event handlers).
+diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
+index 00c4b5b..d157831 100644
+--- a/dist/core/session-manager.d.ts
++++ b/dist/core/session-manager.d.ts
+@@ -13,6 +13,8 @@ export interface SessionHeader {
+ export interface NewSessionOptions {
+     id?: string;
+     parentSession?: string;
++    /** pi-code patch: fixed filename for the session transcript (e.g. "transcript.jsonl"). */
++    sessionFilename?: string;
+ }
+ export interface SessionEntryBase {
+     type: string;
+diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
+index 249d106..846c5b8 100644
+--- a/dist/core/session-manager.js
++++ b/dist/core/session-manager.js
+@@ -1,6 +1,6 @@
+ import { uuidv7 } from "@earendil-works/pi-agent-core";
+ import { randomUUID } from "crypto";
+-import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
++import { appendFileSync, chmodSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
+ import { readdir, stat } from "fs/promises";
+ import { join, resolve } from "path";
+ import { createInterface } from "readline";
+@@ -9,6 +9,17 @@ import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js"
+ import { normalizePath, resolvePath } from "../utils/paths.js";
+ import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage, } from "./messages.js";
+ export const CURRENT_SESSION_VERSION = 3;
++/** pi-code patch: enforce owner-only modes on the session directory and file. */
++function ensurePrivateSessionDir(dir) {
++    if (!dir) return;
++    mkdirSync(dir, { recursive: true, mode: 0o700 });
++    try { chmodSync(dir, 0o700); } catch { /* best-effort */ }
++}
++function ensurePrivateSessionFile(file) {
++    if (!file) return;
++    try { chmodSync(file, 0o600); } catch { /* best-effort */ }
++}
++
+ function createSessionId() {
+     return uuidv7();
+ }
+@@ -539,8 +550,8 @@ export class SessionManager {
+         this.cwd = resolvePath(cwd);
+         this.sessionDir = normalizePath(sessionDir);
+         this.persist = persist;
+-        if (persist && this.sessionDir && !existsSync(this.sessionDir)) {
+-            mkdirSync(this.sessionDir, { recursive: true });
++        if (persist && this.sessionDir) {
++            ensurePrivateSessionDir(this.sessionDir);
+         }
+         if (sessionFile) {
+             this.setSessionFile(sessionFile);
+@@ -552,6 +563,10 @@ export class SessionManager {
+     /** Switch to a different session file (used for resume and branching) */
+     setSessionFile(sessionFile) {
+         this.sessionFile = resolvePath(sessionFile);
++        if (this.persist) {
++            ensurePrivateSessionDir(this.getSessionDir());
++            ensurePrivateSessionFile(this.sessionFile);
++        }
+         if (existsSync(this.sessionFile)) {
+             this.fileEntries = loadEntriesFromFile(this.sessionFile);
+             // If file was empty, initialize it with a valid session header. If it was
+@@ -602,11 +617,19 @@ export class SessionManager {
+         this.leafId = null;
+         this.flushed = false;
+         if (this.persist) {
+-            const fileTimestamp = timestamp.replace(/[:.]/g, "-");
+-            this.sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${this.sessionId}.jsonl`);
++            ensurePrivateSessionDir(this.getSessionDir());
++            this.sessionFile = join(this.getSessionDir(), this._resolveSessionFilename(options));
+         }
+         return this.sessionFile;
+     }
++    /** pi-code patch: prefer a caller-fixed sessionFilename, else the stock timestamped name. */
++    _resolveSessionFilename(options) {
++        const explicit = options?.sessionFilename;
++        if (typeof explicit === "string" && explicit.length > 0) return explicit;
++        const timestamp = new Date().toISOString();
++        const fileTimestamp = timestamp.replace(/[:.]/g, "-");
++        return `${fileTimestamp}_${this.sessionId}.jsonl`;
++    }
+     _buildIndex() {
+         this.byId.clear();
+         this.labelsById.clear();
+@@ -641,6 +664,7 @@ export class SessionManager {
+         finally {
+             closeSync(fd);
+         }
++        ensurePrivateSessionFile(this.sessionFile);
+     }
+     isPersisted() {
+         return this.persist;
+@@ -675,7 +699,7 @@ export class SessionManager {
+             return;
+         }
+         if (!this.flushed) {
+-            const fd = openSync(this.sessionFile, "wx");
++            const fd = openSync(this.sessionFile, existsSync(this.sessionFile) ? "w" : "wx");
+             try {
+                 for (const e of this.fileEntries) {
+                     writeFileSync(fd, `${JSON.stringify(e)}\n`);
+@@ -684,10 +708,12 @@ export class SessionManager {
+             finally {
+                 closeSync(fd);
+             }
++            ensurePrivateSessionFile(this.sessionFile);
+             this.flushed = true;
+         }
+         else {
+             appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
++            ensurePrivateSessionFile(this.sessionFile);
+         }
+     }
+     _appendEntry(entry) {
+@@ -1176,8 +1202,9 @@ export class SessionManager {
+         }
+         const newSessionId = options?.id ?? createSessionId();
+         const timestamp = new Date().toISOString();
++        const fixedName = options?.sessionFilename;
+         const fileTimestamp = timestamp.replace(/[:.]/g, "-");
+-        const newSessionFile = join(dir, `${fileTimestamp}_${newSessionId}.jsonl`);
++        const newSessionFile = join(dir, (typeof fixedName === "string" && fixedName.length > 0) ? fixedName : `${fileTimestamp}_${newSessionId}.jsonl`);
+         // Write new header pointing to source as parent, with updated cwd
+         const newHeader = {
+             type: "session",
+@@ -1187,6 +1214,7 @@ export class SessionManager {
+             cwd: resolvedTargetCwd,
+             parentSession: resolvedSourcePath,
+         };
++        ensurePrivateSessionDir(dir);
+         writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
+         // Copy all non-header entries from source
+         for (const entry of sourceEntries) {
+@@ -1194,6 +1222,7 @@ export class SessionManager {
+                 appendFileSync(newSessionFile, `${JSON.stringify(entry)}\n`);
+             }
+         }
++        ensurePrivateSessionFile(newSessionFile);
+         return new SessionManager(resolvedTargetCwd, dir, newSessionFile, true);
+     }
+     /**
