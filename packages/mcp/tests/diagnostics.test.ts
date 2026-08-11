@@ -22,6 +22,19 @@ test("diagnostics redact credential-bearing headers, URLs, query values, and JSO
   assert.ok(value.length <= 1_000);
 });
 
+test("diagnostics redact every common authorization scheme and OAuth query credential", () => {
+  const value = redactDiagnostic([
+    "Authorization: Token token-secret",
+    "Authorization: token lower-secret",
+    "Authorization: Bearer bearer-secret",
+    "Authorization: Basic YWJjOnNlY3JldA==",
+    "https://example.test/callback?code=oauth-code&state=oauth-state&token=query-token",
+  ].join(" | "));
+  for (const secret of ["token-secret", "lower-secret", "bearer-secret", "YWJjOnNlY3JldA==", "oauth-code", "oauth-state", "query-token"]) {
+    assert.equal(value.includes(secret), false, `leaked ${secret}`);
+  }
+});
+
 test("diagnostic categories are stable and do not expose raw errors", () => {
   assert.equal(diagnosticCategory(new Error("request timed out")), "timeout");
   assert.equal(diagnosticCategory(new Error("401 unauthorized access_token=secret")), "authentication");
