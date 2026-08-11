@@ -1,3 +1,5 @@
+import { existsSync, statSync, watch as fsWatch, type FSWatcher } from "node:fs";
+import { dirname, basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
@@ -58,7 +60,7 @@ export interface McpConnectionResult {
 
 interface ActiveConnection {
   client: Client;
-  transport?: { close(): Promise<void> };
+  transport?: { close(): Promise<void>; onclose?: () => void; onerror?: (error: Error) => void };
   catalog: ServerCatalog;
   /** Whether this connection uses a remote (streamable-http/sse) transport. */
   remote?: boolean;
@@ -130,6 +132,42 @@ function stateFor(result: McpConfigResult, running: boolean): McpManagerState {
   return { config: result.value, issues: result.issues, servers, running };
 }
 
+function existingWatchDirectory(path: string): string | undefined {
+  let current = dirname(path);
+  while (current !== dirname(current)) {
+    try {
+      if (statSync(current).isDirectory()) return current;
+    } catch {
+      // Walk toward an existing ancestor for files/directories not created yet.
+    }
+    current = dirname(current);
+  }
+  return existsSync(current) ? current : undefined;
+}
+
+/** Watch both config paths, including files that are created after startup. */
+function defaultWatch(paths: readonly string[], onChange: () => void): () => void {
+  const watchers: FSWatcher[] = [];
+  const directories = new Set(paths.map(existingWatchDirectory).filter((path): path is string => Boolean(path)));
+  for (const directory of directories) {
+    try {
+      const watcher = fsWatch(directory, (_event, changed) => {
+        if (!changed) return;
+        const name = String(changed);
+        if (paths.some((path) => basename(path) === name || join(dirname(path), name) === path)) onChange();
+      });
+      watcher.unref?.();
+      watchers.push(watcher);
+    } catch {
+      // A missing/inaccessible source is reported by config loading; do not
+      // terminate the Pi session because a watcher cannot be installed.
+    }
+  }
+  return () => {
+    for (const watcher of watchers) watcher.close();
+  };
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -199,6 +237,8 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   let operation: Promise<unknown> = Promise.resolve();
   let reloadTimer: NodeJS.Timeout | undefined;
   let stopped = false;
+  let generation = 0;
+  let managerAbortController = new AbortController();
   const connections = new Map<string, ActiveConnection>();
   const reconnectTimers = new Map<string, NodeJS.Timeout>();
   const reconnectAttempts = new Map<string, number>();
@@ -217,6 +257,11 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     state = { ...state, servers: { ...state.servers, [name]: status } };
   };
 
+  const signalFor = (signal?: AbortSignal): AbortSignal => {
+    if (!signal) return managerAbortController.signal;
+    return AbortSignal.any([managerAbortController.signal, signal]);
+  };
+
   const clearReconnect = (name: string): void => {
     const timer = reconnectTimers.get(name);
     if (timer) clearTimeout(timer);
@@ -226,6 +271,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
 
   const scheduleReconnect = (name: string): void => {
     if (stopped || reconnectTimers.has(name)) return;
+    const scheduledGeneration = generation;
     const attempt = reconnectAttempts.get(name) ?? 0;
     if (attempt >= reconnectMaxAttempts) return;
     const delay = reconnectBaseDelayMs * 2 ** attempt;
@@ -233,7 +279,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     const timer = setTimeout(() => {
       reconnectTimers.delete(name);
       const server = state.config?.servers[name];
-      if (stopped || !server || server.disabled === true) return;
+      if (stopped || scheduledGeneration !== generation || !server || server.disabled === true) return;
       void serialize(async () => {
         const result = server.type === "local"
           ? await connectLocalInternal(name, server)
@@ -247,13 +293,20 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   };
 
   const attachConnectionLifecycle = (name: string, candidate: ActiveConnection): void => {
-    candidate.client.onclose = () => {
+    const fail = (message: string): void => {
       if (stopped || connections.get(name) !== candidate) return;
       connections.delete(name);
-      setStatus(name, { status: "failed", error: "MCP connection closed", errorCategory: "transport" });
+      setStatus(name, { status: "failed", error: message, errorCategory: "transport" });
+      void closeConnection(candidate).catch(() => undefined);
       scheduleReconnect(name);
       options.onServerChanged?.(name);
     };
+    candidate.client.onclose = () => fail("MCP connection closed");
+    candidate.client.onerror = (error) => fail(errorMessage(error));
+    if (candidate.transport) {
+      candidate.transport.onclose = () => fail("MCP transport closed");
+      candidate.transport.onerror = (error) => fail(errorMessage(error));
+    }
   };
 
   const reload = (): McpConfigResult => {
@@ -320,10 +373,10 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     const startupTimeout = resolveTimeout(server.timeout, state.config?.timeout, "startup");
     const requestTimeout = resolveTimeout(server.timeout, state.config?.timeout, "request");
     try {
-      await withTimeout(client.connect(transport, signal ? { signal } : undefined), startupTimeout, () =>
+      await withTimeout(client.connect(transport, { signal: signalFor(signal) }), startupTimeout, () =>
         closeConnection(candidate),
       );
-      candidate.catalog = await discoverCatalog(client, requestTimeout, signal);
+      candidate.catalog = await discoverCatalog(client, requestTimeout, signalFor(signal));
       wireListChangedHandlers(client, candidate.catalog, () => {
         if (!stopped && connections.get(name) === candidate) options.onCatalogChanged?.(name);
       });
@@ -374,7 +427,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       headers: server.headers,
       oauth: server.oauth,
       timeout: server.timeout ?? state.config?.timeout,
-      signal,
+      signal: signalFor(signal),
       onRedirect: () => {},
     });
     const status = mapRemoteStatus(result.status);
@@ -411,6 +464,27 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     }
   };
 
+  const beginShutdown = (): void => {
+    if (stopped) return;
+    stopped = true;
+    generation += 1;
+    managerAbortController.abort();
+    const current = unsubscribe;
+    unsubscribe = undefined;
+    current?.();
+    for (const timer of reconnectTimers.values()) clearTimeout(timer);
+    reconnectTimers.clear();
+    reconnectAttempts.clear();
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = undefined;
+  };
+
+  const shutdown = async (): Promise<void> => {
+    beginShutdown();
+    await closeInternal();
+    state = { ...state, running: false };
+  };
+
   const disconnectInternal = async (name: string): Promise<void> => {
     const connection = connections.get(name);
     connections.delete(name);
@@ -426,7 +500,13 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   };
 
   const disconnect = (name: string): Promise<void> => serialize(() => disconnectInternal(name));
-  const close = (): Promise<void> => serialize(closeInternal);
+  const close = (): Promise<void> => {
+    beginShutdown();
+    return serialize(async () => {
+      await closeInternal();
+      state = { ...state, running: false };
+    });
+  };
 
   const callWithRecovery = async <T>(
     name: string,
@@ -475,7 +555,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
           timeout: requestTimeout,
           resetTimeoutOnProgress: true,
           onprogress: () => undefined,
-          ...(signal ? { signal } : {}),
+          signal: signalFor(signal),
         },
       ) as Promise<CallToolResult>,
       signal,
@@ -501,7 +581,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     ),
     resetTimeoutOnProgress: true,
     onprogress: () => undefined,
-    ...(signal ? { signal } : {}),
+    signal: signalFor(signal),
   });
 
   const getPromptInternal = async (
@@ -553,7 +633,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       state.config?.timeout,
       "request",
     );
-    const catalog = await discoverCatalog(connection.client, requestTimeout, signal);
+    const catalog = await discoverCatalog(connection.client, requestTimeout, signalFor(signal));
     connection.catalog = catalog;
     wireListChangedHandlers(connection.client, catalog, () => {
       if (!stopped && connections.get(name) === connection) options.onCatalogChanged?.(name);
@@ -584,30 +664,25 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const start = (): Promise<McpManagerState> =>
     serialize(async () => {
       stopped = false;
+      managerAbortController = new AbortController();
       reload();
       state = { ...state, running: true };
-      if (!unsubscribe && options.watch) {
-        unsubscribe = options.watch([...configPaths], () => {
+      if (!unsubscribe) {
+        const watch = options.watch ?? defaultWatch;
+        unsubscribe = watch([...configPaths], () => {
           scheduleConfigReload();
         });
       }
       return reconcileInternal();
     });
 
-  const stop = (): Promise<void> =>
-    serialize(async () => {
-      stopped = true;
-      const current = unsubscribe;
-      unsubscribe = undefined;
-      current?.();
-      for (const timer of reconnectTimers.values()) clearTimeout(timer);
-      reconnectTimers.clear();
-      reconnectAttempts.clear();
-      if (reloadTimer) clearTimeout(reloadTimer);
-      reloadTimer = undefined;
+  const stop = (): Promise<void> => {
+    beginShutdown();
+    return serialize(async () => {
       await closeInternal();
       state = { ...state, running: false };
     });
+  };
 
   return {
     projectRoot,
