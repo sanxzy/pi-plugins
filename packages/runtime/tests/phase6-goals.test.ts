@@ -6,12 +6,14 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createJob } from "@xzy-ai/core";
 import {
+  createGoalPool,
   encodeProjectId,
   getChildPool,
   getGoalPool,
   homeGoalFile,
 } from "@xzy-ai/runtime";
 import { registerSessionEvents } from "../../commands/src/registrations/session-events.ts";
+import { registerGoalTools } from "../../tools/src/registrations/goals.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 
@@ -80,21 +82,19 @@ test("a new root session start never offers continuation of another session's go
   assert.equal(a.get(root)?.prompt, "P", "the original root's goal must remain untouched");
 });
 
-test("child agent call sites cannot manage goals (no new store surfaces them)", () => {
+test("child agent call sites receive unavailable goal-tool behavior", async () => {
   home();
   const root = projectRoot();
-  // A child session id must not create or expose a goal store; goal tools reject
-  // it via the child-vertex discriminator.
   const pool = getChildPool(root, "root-session");
-  pool.registry.createJob(createJob({
-    jobId: "child-session",
-    parentSessionId: "root-session",
-    sessionId: "child-session",
-    status: "running",
-    description: "child",
-    subagentType: "test-agent",
-  }));
-  assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "child-session")), false);
+  const registered = new Map<string, { execute: (...args: unknown[]) => Promise<{ content: Array<{ type: string; text?: string }> }> }>();
+  registerGoalTools({
+    registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<{ content: Array<{ type: string; text?: string }> }> }) {
+      registered.set(tool.name, tool);
+    },
+  } as unknown as ExtensionAPI);
+  const result = await registered.get("goal_status")!.execute("call", {}, undefined, undefined, context(root, "unknown-child"));
+  assert.match(result.content[0]?.text ?? "", /goal tools are unavailable in child sessions/i);
+  assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "unknown-child")), false);
 });
 
 test("clearing one root session goal leaves other root sessions isolated", () => {
@@ -138,8 +138,8 @@ test("session shutdown removes the root session goal store only on quit/new swee
 test("two root sessions keep isolated goal stores with their own scheduler delivery", () => {
   home();
   const root = projectRoot();
-  const a = poolFor(root, "root-a");
-  const b = poolFor(root, "root-b");
+  const a = createGoalPool(root, "root-a");
+  const b = createGoalPool(root, "root-b");
   const sentOnA: string[] = [];
   const sentOnB: string[] = [];
   a.setScheduler(() => ({ clear() {} }));
@@ -155,6 +155,8 @@ test("two root sessions keep isolated goal stores with their own scheduler deliv
   assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-b")), true);
   a.tick(root);
   b.tick(root);
-  assert.ok(sentOnA.length <= 1);
-  assert.ok(sentOnB.length <= 1);
+  assert.equal(sentOnA.length, 1);
+  assert.match(sentOnA[0]!, /^A\n/);
+  assert.equal(sentOnB.length, 1);
+  assert.match(sentOnB[0]!, /^B\n/);
 });
