@@ -162,9 +162,10 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
         reason: event.reason,
       });
     }
-    // Every root host teardown must stop goal timers and detach delivery. The
-    // persisted goal remains in the append-only store for the replacement host
-    // to confirm; child-session ownership is already isolated above.
-    getGoalPool(ctx.cwd, rootSessionId).shutdown();
+    // Every root host teardown stops delivery and removes only this root
+    // session's persisted goal store. Other root sessions and project-level
+    // channel state remain untouched.
+    const goalPool = getGoalPool(ctx.cwd, rootSessionId);
+    goalPool.clearStore();
   });
 }

@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   GOAL_DELIVERY_FOOTER,
@@ -48,6 +48,8 @@ export interface GoalPool {
   bind(binding: GoalDeliveryBinding): void;
   /** Stop every timer and detach every host handle. */
   shutdown(): void;
+  /** Remove this root session's persisted goal store during root cleanup. */
+  clearStore(): void;
   /** Pause all active delivery while a fresh session is confirmed. */
   beginSessionConfirmation(): boolean;
   /** Resume delivery after the replacement confirmation chooses Continue. */
@@ -225,6 +227,13 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
       bindings.clear();
       currentBinding = undefined;
       deliverySuspended = true;
+    },
+    clearStore() {
+      clearAllSchedulers();
+      bindings.clear();
+      currentBinding = undefined;
+      deliverySuspended = true;
+      rmSync(store.filePath, { force: true });
     },
     beginSessionConfirmation() {
       const activeGoals = Array.from(store.fold().values()).filter((goal) => goal.status === "active");
