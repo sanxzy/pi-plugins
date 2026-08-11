@@ -1,5 +1,5 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
-export { createGitMaterializer, type GitCommandRunner, type GitMaterializeResult, type GitMaterializer, type GitMaterializerOptions } from "./infrastructure/references/git-materializer.ts";
+export { createGitMaterializer, type GitCommandRunner, type GitMaterializeResult, type GitMaterializer, type GitMaterializerOptions, type GitMaterializeStatus } from "./infrastructure/references/git-materializer.ts";
 export {
   createReferenceCatalog,
   referenceConfigFile,
