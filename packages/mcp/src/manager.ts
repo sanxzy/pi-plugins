@@ -528,6 +528,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         return await operationFor(replacement);
       } catch (retryError) {
         if (connections.get(name) === replacement) connections.delete(name);
+        await closeConnection(replacement);
         const failed = { status: "failed", error: errorMessage(retryError), errorCategory: errorCategory(retryError) } as const;
         setStatus(name, failed);
         scheduleReconnect(name);
