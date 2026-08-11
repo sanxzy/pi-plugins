@@ -109,11 +109,13 @@ test("clearing one root session goal leaves other root sessions isolated", () =>
   assert.equal(b.get(root)?.prompt, "B");
 });
 
-test("session shutdown removes the root session goal store only on quit/new sweep", async () => {
+test("root-session cleanup removes only that session's goal store", async () => {
   home();
   const root = projectRoot();
   const a = poolFor(root, "root-a");
+  const b = poolFor(root, "root-b");
   a.create({ cwd: root, prompt: "A", interval: "1m" });
+  b.create({ cwd: root, prompt: "B", interval: "1m" });
   const handlers = new Map<string, Handler>();
   registerSessionEvents({
     on(event: string, handler: Handler) { handlers.set(event, handler); },
@@ -129,10 +131,9 @@ test("session shutdown removes the root session goal store only on quit/new swee
   if (pull) {
     await pull({ reason: "quit" }, context(root, "root-a"));
   }
-  // The goal store file remains scoped to the root session; only Phase 7
-  // cleanup physically removes it. A fresh reader of the same session sees it.
-  assert.equal(getGoalPool(root, "root-a").get(root)?.prompt, "A");
-
+  assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-a")), false);
+  assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-b")), true);
+  assert.equal(getGoalPool(root, "root-b").get(root)?.prompt, "B");
 });
 
 test("two root sessions keep isolated goal stores with their own scheduler delivery", () => {
