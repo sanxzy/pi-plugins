@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { createMcpManager } from "../src/index.ts";
+import { createMcpManager, userConfigPath } from "../src/index.ts";
 
 const fixture = fileURLToPath(new URL("./fixtures/stdio-server.ts", import.meta.url));
 const fixtureCwd = dirname(fixture);
@@ -12,6 +12,30 @@ const fixtureCwd = dirname(fixture);
 function tempRoot(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
+
+test("start() auto-connects configured local servers from the effective configuration", async () => {
+  const agentDir = join(tempRoot("pi-code-mcp-local-agent3-"), "agent");
+  const projectRoot = tempRoot("pi-code-mcp-local-project3-");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(
+    userConfigPath(agentDir),
+    JSON.stringify({
+      mcp: {
+        servers: {
+          fixture: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd },
+        },
+      },
+    }),
+  );
+  const manager = createMcpManager({ agentDir, projectRoot });
+  const state = await manager.start();
+  assert.equal(state.servers.fixture?.status, "connected");
+  assert.equal(state.servers.fixture?.toolCount, 1);
+  await manager.stop();
+  assert.equal(manager.status("fixture")?.status, "disabled");
+  rmSync(agentDir, { recursive: true, force: true });
+  rmSync(projectRoot, { recursive: true, force: true });
+});
 
 test("connects a local stdio server, initializes MCP, and discovers tools", async () => {
   const agentDir = join(tempRoot("pi-code-mcp-local-agent-"), "agent");
