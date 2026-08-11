@@ -102,6 +102,15 @@ test("prompt commands are server-scoped, parse JSON arguments, pass abort signal
   assert.match(pi.sent[0] ?? "", /user: hello/);
 });
 
+test("resource listing reports unknown servers instead of silently returning empty", async () => {
+  const pi = fakePi();
+  const exposer = new McpPromptsResourcesExposer(pi as never);
+  exposer.register(manager, async () => normalizePromptResult("demo", "greet", { messages: [] }), async () => normalizeResourceResult("demo", "x", { contents: [] }), (server) => server === "demo" ? [] : undefined);
+  const result = await pi.tools.get("mcp_resources_list")!.execute("id", { server: "missing" }, undefined, undefined, {});
+  assert.match(result.content[0].text, /unknown MCP server/);
+  assert.equal(result.details.unknown, true);
+});
+
 test("resource list/read tools use current accessors and authorization", async () => {
   const pi = fakePi();
   const reads: string[] = [];

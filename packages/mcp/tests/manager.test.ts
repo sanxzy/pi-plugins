@@ -1,9 +1,31 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { createMcpManager, projectConfigPath, userConfigPath } from "../src/index.ts";
+
+test("explicit reload reconciliation keeps active server status and removes removed connections", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-reconcile-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(agentDir, { recursive: true });
+  const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
+  const fixtureCwd = dirname(fixture);
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    fixture: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd },
+  } } }));
+  const manager = createMcpManager({ agentDir, projectRoot });
+  await manager.start();
+  assert.equal(manager.status("fixture")?.status, "connected");
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {} } }));
+  manager.reload();
+  await manager.reconcile();
+  assert.equal(manager.status("fixture"), undefined);
+  assert.deepEqual(manager.serverNames(), []);
+  await manager.stop();
+  rmSync(root, { recursive: true, force: true });
+});
 
 test("manager start/stop is deterministic, idempotent, and wires an injected watcher", async () => {
   const agentDir = join(mkdtempSync(join(tmpdir(), "pi-code-mcp-mgr-agent-")), "agent");

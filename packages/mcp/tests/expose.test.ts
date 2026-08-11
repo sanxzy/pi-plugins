@@ -30,6 +30,15 @@ const entries: McpToolSnapshotEntry[] = [
   { serverName: "GitHub", nativeName: "list issues", description: "Same normalized name", inputSchema: { type: "object" } },
 ];
 
+test("McpToolExposer reserves dedicated resource tool names", () => {
+  const pi = fakePi();
+  const exposer = new McpToolExposer(pi as never);
+  exposer.sync([{ serverName: "mcp_resources", nativeName: "list", inputSchema: { type: "object" } }], 1);
+  const names = [...pi.tools.keys()];
+  assert.equal(names.includes("mcp_resources_list"), false);
+  assert.match(names[0] ?? "", /^mcp_resources_list_[0-9a-f]{8}$/);
+});
+
 test("McpToolExposer reserves all currently registered extension names", () => {
   const pi = fakePi(["agent_cancel", "agent_jobs"]);
   const exposer = new McpToolExposer(pi as never);
