@@ -1,6 +1,8 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { McpToolExposer, type McpToolSnapshotEntry } from "./expose.ts";
 import { normalizeCallToolResult, type NormalizedDetails } from "./results.ts";
+import { McpPromptsResourcesExposer } from "./prompts-exposer.ts";
+import { normalizePromptResult, normalizeResourceResult } from "./prompts-resources.ts";
 import { userAgentDir } from "./config.ts";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
 import {
@@ -70,6 +72,37 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       }
     }
     exposer.sync(snapshot, 1);
+
+    const promptResourceExposer = new McpPromptsResourcesExposer(pi);
+    promptResourceExposer.register(
+      manager,
+      async (serverName, nativeName, args, signal) => {
+        try {
+          return normalizePromptResult(serverName, nativeName, await manager.getPrompt(serverName, nativeName, args, signal));
+        } catch (error) {
+          return normalizePromptResult(serverName, nativeName, undefined, {
+            cancelled: signal?.aborted,
+            transportError: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      async (serverName, uri, signal) => {
+        try {
+          return normalizeResourceResult(serverName, uri, await manager.readResource(serverName, uri, signal));
+        } catch (error) {
+          return normalizeResourceResult(serverName, uri, undefined, {
+            cancelled: signal?.aborted,
+            transportError: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+      (serverName) => (manager.resourcesFor(serverName) ?? []).map((resource) => ({
+        uri: resource.uri,
+        name: resource.name,
+        description: resource.description,
+        mimeType: resource.mimeType,
+      })),
+    );
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {

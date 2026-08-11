@@ -1,6 +1,14 @@
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ListRootsRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ListRootsRequestSchema,
+  type CallToolResult,
+  type GetPromptResult,
+  type Prompt,
+  type ReadResourceResult,
+  type Resource,
+  type Tool,
+} from "@modelcontextprotocol/sdk/types.js";
 import { discoverCatalog, wireListChangedHandlers, type ServerCatalog } from "./catalog.ts";
 import {
   loadMcpConfig,
@@ -72,6 +80,10 @@ export interface McpManager {
   toolsFor(name: string): Tool[] | undefined;
   /** Invoke a native tool on a connected server, routing the original name. */
   callTool(name: string, nativeName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult>;
+  promptsFor(name: string): Prompt[] | undefined;
+  resourcesFor(name: string): Resource[] | undefined;
+  getPrompt(name: string, nativeName: string, args: Record<string, string>, signal?: AbortSignal): Promise<GetPromptResult>;
+  readResource(name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult>;
   close(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -320,6 +332,52 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     signal?: AbortSignal,
   ): Promise<CallToolResult> => serialize(() => callToolInternal(name, nativeName, args, signal));
 
+  const requestOptionsFor = (name: string, signal?: AbortSignal) => ({
+    timeout: resolveTimeout(
+      state.config?.servers[name]?.type === "local"
+        ? (state.config.servers[name] as McpLocalServerConfig).timeout
+        : state.config?.servers[name]?.type === "remote"
+          ? (state.config.servers[name] as McpRemoteServerConfig).timeout
+          : undefined,
+      state.config?.timeout,
+      "request",
+    ),
+    resetTimeoutOnProgress: true,
+    onprogress: () => undefined,
+    ...(signal ? { signal } : {}),
+  });
+
+  const getPromptInternal = async (
+    name: string,
+    nativeName: string,
+    args: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<GetPromptResult> => {
+    const connection = connections.get(name);
+    if (!connection) throw new Error(`MCP server "${name}" is not connected`);
+    return connection.client.getPrompt({ name: nativeName, arguments: args }, requestOptionsFor(name, signal));
+  };
+
+  const getPrompt = (
+    name: string,
+    nativeName: string,
+    args: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<GetPromptResult> => serialize(() => getPromptInternal(name, nativeName, args, signal));
+
+  const readResourceInternal = async (
+    name: string,
+    uri: string,
+    signal?: AbortSignal,
+  ): Promise<ReadResourceResult> => {
+    const connection = connections.get(name);
+    if (!connection) throw new Error(`MCP server "${name}" is not connected`);
+    return connection.client.readResource({ uri }, requestOptionsFor(name, signal));
+  };
+
+  const readResource = (name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> =>
+    serialize(() => readResourceInternal(name, uri, signal));
+
   const start = (): Promise<McpManagerState> =>
     serialize(async () => {
       reload();
@@ -357,7 +415,11 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     disconnect,
     serverNames: () => [...connections.keys()],
     toolsFor: (name) => connections.get(name)?.catalog.tools,
+    promptsFor: (name) => connections.get(name)?.catalog.prompts,
+    resourcesFor: (name) => connections.get(name)?.catalog.resources,
     callTool,
+    getPrompt,
+    readResource,
     close,
     stop,
   };

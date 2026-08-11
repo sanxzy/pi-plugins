@@ -30,6 +30,23 @@ export { NameRegistry, collisionSuffix, resolvePiName, serverToolPiName, slugify
 export { McpToolExposer, DEFAULT_RESERVED_TOOL_NAMES, type McpToolInvokeHandler, type McpToolMapping, type McpToolSnapshotEntry } from "./expose.ts";
 export { objectSchemaFromMcp, toTypeBoxSchema } from "./schema.ts";
 export { RESULT_LIMITS, boundedText, normalizeCallToolResult, normalizeMcpContent, type NormalizeContext, type NormalizedDetails } from "./results.ts";
+export {
+  normalizePromptResult,
+  normalizeResourceResult,
+  promptResultToText,
+  resourceResultToText,
+  type McpPromptResult,
+  type McpResourceResult,
+} from "./prompts-resources.ts";
+export {
+  McpPromptsResourcesExposer,
+  type McpAuthorize,
+  type McpManagerLike,
+  type McpPromptsResourcesOptions,
+  type McpReadPrompt,
+  type McpResourceAccess,
+  type McpResourceLister,
+} from "./prompts-exposer.ts";
 export { ProcessStdioTransport, terminateProcessTree } from "./stdio.ts";
 export {
   cancelRemoteAuth,
