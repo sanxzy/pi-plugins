@@ -44,6 +44,9 @@ export interface McpToolSnapshotEntry {
   inputSchema?: unknown;
 }
 
+/** Maximum length for an inlined server description in the registered tool. */
+export const MAX_TOOL_DESCRIPTION = 1_000;
+
 export interface McpToolMapping extends McpToolSnapshotEntry {
   piName: string;
   label: string;
@@ -81,7 +84,17 @@ export class McpToolExposer {
     private readonly pi: ExtensionAPI,
     options: { reservedToolNames?: Iterable<string> } = {},
   ) {
-    this.registry = new NameRegistry(new Set(options.reservedToolNames ?? DEFAULT_RESERVED_TOOL_NAMES));
+    const reserved = new Set(options.reservedToolNames ?? DEFAULT_RESERVED_TOOL_NAMES);
+    // Reserve every tool the host currently has registered (built-ins plus
+    // extension tools) so MCP names never clobber an existing definition.
+    try {
+      for (const tool of pi.getAllTools()) {
+        if (tool && typeof tool.name === "string") reserved.add(tool.name);
+      }
+    } catch {
+      // getAllTools may be unavailable in tests/hosts; fall back to the static list.
+    }
+    this.registry = new NameRegistry(reserved);
   }
 
   setInvokeHandler(handler: McpToolInvokeHandler): void {
@@ -140,6 +153,17 @@ export class McpToolExposer {
     for (const [piName, mapping] of next) {
       this.register(piName, mapping);
     }
+    // Exclude removed tools from the host's active/visible set: Pi cannot
+    // unregister definitions, so deactivation is the only way to hide them.
+    if (removed.length > 0) {
+      try {
+        const active = new Set(this.pi.getActiveTools());
+        for (const piName of removed) active.delete(piName);
+        this.pi.setActiveTools([...active]);
+      } catch {
+        // Some hosts do not expose active-tool control; ignore.
+      }
+    }
     return { added, updated, removed };
   }
 
@@ -186,7 +210,7 @@ function identityKey(serverName: string, nativeName: string): string {
 }
 
 function toolDescription(entry: McpToolSnapshotEntry): string {
-  const native = entry.description?.trim() ? String(entry.description).trim() : "";
+  const native = (entry.description?.trim() ? String(entry.description).trim() : "").slice(0, MAX_TOOL_DESCRIPTION);
   return [
     `MCP tool "${entry.nativeName}" from server "${entry.serverName}".`,
     ...(native ? [native] : []),

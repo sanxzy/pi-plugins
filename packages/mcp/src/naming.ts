@@ -39,6 +39,12 @@ export class NameRegistry {
   private readonly allocated = new Set<string>();
   constructor(private readonly reserved: ReadonlySet<string> = new Set()) {}
 
+  /** Add host tool names discovered after construction. */
+  reserve(names: Iterable<string>): void {
+    const target = this.reserved as Set<string>;
+    for (const name of names) target.add(name);
+  }
+
   /**
    * Resolve (or allocate) the stable Pi name for a native identity. `occupied`
    * is the set of names already claimed by other identities in the same call.

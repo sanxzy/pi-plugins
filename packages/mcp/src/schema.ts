@@ -39,7 +39,13 @@ function convertType(schema: unknown): TSchema {
   switch (typeName(schema)) {
     case "string": {
       if (Array.isArray(schema.enum)) {
-        return annotate(Type.Union(schema.enum.map((value) => Type.Literal(value as string | number | boolean))));
+        const primitive = schema.enum.every((value) =>
+          typeof value === "string" || typeof value === "number" || typeof value === "boolean",
+        );
+        if (primitive && schema.enum.length > 0) {
+          return annotate(Type.Union(schema.enum.map((value) => Type.Literal(value as string | number | boolean))));
+        }
+        return annotate(Type.String());
       }
       return annotate(Type.String());
     }
@@ -50,12 +56,12 @@ function convertType(schema: unknown): TSchema {
     case "boolean":
       return annotate(Type.Boolean());
     case "array":
-      return annotate(Type.Array(convertType(schema.items)));
+      return annotate(Type.Array(safeConvertType(schema.items)));
     case "object": {
       const properties: Record<string, TSchema> = {};
       const required = new Set(Array.isArray(schema.required) ? schema.required : []);
       for (const [key, value] of Object.entries(schema.properties ?? {})) {
-        const converted = convertType(value);
+        const converted = safeConvertType(value);
         properties[key] = required.has(key) ? converted : Type.Optional(converted);
       }
       return annotate(Type.Object(properties));
@@ -65,13 +71,26 @@ function convertType(schema: unknown): TSchema {
   }
 }
 
+/** Convert a schema subtree, falling back to a permissive type on any error. */
+function safeConvertType(schema: unknown): TSchema {
+  try {
+    return convertType(schema);
+  } catch {
+    return Type.Any();
+  }
+}
+
 /** Convert an MCP tool input schema into a TypeBox schema (may be non-object). */
 export function toTypeBoxSchema(inputSchema?: unknown): TSchema {
-  if (isRecord(inputSchema) && typeName(inputSchema) === "object") {
-    return convertType(inputSchema);
+  try {
+    if (isRecord(inputSchema) && typeName(inputSchema) === "object") {
+      return convertType(inputSchema);
+    }
+    // Non-object or missing schemas are wrapped so the tool still takes an object.
+    return Type.Object({ value: convertType(inputSchema) });
+  } catch {
+    return Type.Object({});
   }
-  // Non-object or missing schemas are wrapped so the tool still takes an object.
-  return Type.Object({ value: convertType(inputSchema) });
 }
 
 /** Always produce an object parameter schema for a Pi tool registration. */
