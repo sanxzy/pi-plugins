@@ -34,6 +34,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
     label: "Agent",
     description: [
       "Delegate work to a specialized in-process subagent in the background.",
+      "Prefer agent_id when continuing related work: steering or resuming an existing agent preserves its transcript and working context, while omitting agent_id starts a fresh agent with no prior work memory.",
       "A call without agent_id spawns a new background job; agent_id steers a running job or resumes a finished one.",
       `A single response may issue at most ${MAX_PARALLEL_AGENTS} agent calls.`,
     ].join(" "),
