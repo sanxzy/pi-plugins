@@ -1,7 +1,7 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
 export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
-export { resolveChildTools, spawnChildSession, copySessionFile } from "./infrastructure/pi-sdk/child-session.ts";
+export { createChildSessionManager, resolveChildTools, spawnChildSession, copySessionFile } from "./infrastructure/pi-sdk/child-session.ts";
 export {
   attachAgentSessionLiveFeed,
   liveStatusForSession,
@@ -23,6 +23,7 @@ export {
   decodeProjectId,
   encodeProjectId,
   ensurePrivateDirectory,
+  childSessionPaths,
   homeAgentDir,
   homeAgentDirectory,
   homeAgentErrorsFile,
@@ -46,6 +47,7 @@ export {
   homeProjectsDir,
   readPrivateJson,
   writePrivateJson,
+  writePrivateText,
   childSessionDir,
   childTranscriptDir,
   childTranscriptFile,

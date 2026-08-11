@@ -1,6 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { sessionDir } from "../../shared/paths.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { childSessionPaths, sessionDir, writePrivateText } from "../../shared/paths.ts";
 
 type SessionEntry = {
   type?: unknown;
@@ -68,6 +67,8 @@ export function prepareResumeSessionFile(
   newJobId: string,
   cwd: string,
   parentSessionId?: string,
+  rootSessionId?: string,
+  parentAgentIds?: readonly string[],
 ): string {
   if (!existsSync(source)) {
     throw new Error(`session file does not exist: ${source}`);
@@ -88,11 +89,12 @@ export function prepareResumeSessionFile(
   if (!parentSessionId) {
     throw new Error("A resume transcript requires its parent session id");
   }
-  // Every transcript belongs to the folder owned by the live session that
-  // spawned it. There is no flat fallback: storage is session-scoped only.
-  const directory = sessionDir(cwd, parentSessionId);
-  mkdirSync(directory, { recursive: true });
-  const destination = join(directory, `${newJobId}.jsonl`);
-  writeFileSync(destination, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  // Future children use the canonical home-scoped agent directory. The legacy
+  // fallback remains only for callers that have not migrated their root-session
+  // boundary yet.
+  const destination = rootSessionId
+    ? childSessionPaths({ cwd, rootSessionId, jobId: newJobId, parentAgentIds }).transcriptFile
+    : `${sessionDir(cwd, parentSessionId)}/${newJobId}.jsonl`;
+  writePrivateText(destination, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
   return destination;
 }

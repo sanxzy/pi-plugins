@@ -20,7 +20,7 @@ export async function spawnWithControl(
   ctx: ExtensionContext,
   job: Job,
   agent: ResolvedAgent,
-  options: { parentSessionId: string; sessionFile?: string; signal?: AbortSignal },
+  options: { parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; signal?: AbortSignal },
 ): Promise<ChildRunResult | undefined> {
   try {
     return await spawnChildSession({
@@ -29,6 +29,8 @@ export async function spawnWithControl(
       agent,
       prompt: params.prompt,
       parentSessionId: options.parentSessionId,
+      rootSessionId: options.rootSessionId,
+      parentAgentIds: options.parentAgentIds,
       sessionFile: options.sessionFile,
       model: ctx.model,
       signal: options.signal,

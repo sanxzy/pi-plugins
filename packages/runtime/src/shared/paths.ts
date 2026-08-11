@@ -200,6 +200,25 @@ export function homeAgentTranscriptFile(projectId: string, rootSessionId: string
   return join(homeAgentDir(projectId, rootSessionId, agentId, parentAgentIds), TRANSCRIPT_FILE_NAME);
 }
 
+export interface ChildSessionPaths {
+  readonly projectDir: string;
+  readonly agentDir: string;
+  readonly transcriptFile: string;
+}
+
+/** Resolve the future home-scoped directory and deterministic transcript for one child agent. */
+export function childSessionPaths(options: {
+  cwd: string;
+  rootSessionId: string;
+  jobId: string;
+  parentAgentIds?: readonly string[];
+}): ChildSessionPaths {
+  const projectId = encodeProjectId(options.cwd);
+  const projectDir = homeProjectDir(projectId);
+  const agentDir = homeAgentDir(projectId, options.rootSessionId, options.jobId, options.parentAgentIds);
+  return { projectDir, agentDir, transcriptFile: join(agentDir, TRANSCRIPT_FILE_NAME) };
+}
+
 export function homeGoalFile(projectId: string, rootSessionId: string): string {
   return join(homeSessionDir(projectId, rootSessionId), GOALS_FILE_NAME);
 }
@@ -252,13 +271,13 @@ export function ensurePrivateDirectory(directory: string): void {
 }
 
 /** Atomically write JSON with owner-only permissions. */
-export function writePrivateJson(filePath: string, value: unknown): void {
+function writePrivateText(filePath: string, content: string): void {
   const directory = dirname(filePath);
   ensurePrivateDirectory(directory);
   const base = filePath.split(/[\\/]/).pop()!;
   const temporaryPath = join(directory, `.${base}.${randomUUID()}.tmp`);
   try {
-    writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    writeFileSync(temporaryPath, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
     chmodSync(temporaryPath, 0o600);
     renameSync(temporaryPath, filePath);
     chmodSync(filePath, 0o600);
@@ -267,6 +286,14 @@ export function writePrivateJson(filePath: string, value: unknown): void {
     throw error;
   }
 }
+
+/** Atomically write JSON with owner-only permissions. */
+export function writePrivateJson(filePath: string, value: unknown): void {
+  writePrivateText(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/** Atomically write raw UTF-8 content with owner-only permissions. */
+export { writePrivateText };
 
 /** Read a private JSON manifest without repairing or replacing corrupt state. */
 export function readPrivateJson<T>(filePath: string): T {

@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
-import { sessionDir } from "../../shared/paths.ts";
+import { childSessionPaths, ensurePrivateDirectory, sessionDir } from "../../shared/paths.ts";
 import type {
   ChildSessionControl,
   SpawnChildSession,
@@ -137,6 +137,8 @@ async function createIsolatedChild(options: {
   model: unknown;
   agent: ResolvedAgent;
   parentSessionId: string;
+  rootSessionId?: string;
+  parentAgentIds?: readonly string[];
   sessionFile?: string;
   mcpToolNames?: readonly string[];
 }): Promise<ChildSessionServices> {
@@ -159,16 +161,14 @@ async function createIsolatedChild(options: {
   await resourceLoader.reload();
 
   const { runtime, modelRuntime } = await createChildModelRuntime({ agentDir });
-  // A fresh child's transcript is created directly under the live session folder
-  // of its parent, so the folder for `<parent-session-id>` contains exactly its
-  // children's transcripts. A resumed child already lives in that folder.
-  const childDir = sessionDir(options.cwd, options.parentSessionId);
-  const sessionManager = options.sessionFile
-    ? SessionManager.open(options.sessionFile, childDir)
-    : SessionManager.create(options.cwd, childDir, {
-        id: options.jobId,
-        parentSession: options.parentSessionId,
-      });
+  const sessionManager = createChildSessionManager({
+    cwd: options.cwd,
+    jobId: options.jobId,
+    parentSessionId: options.parentSessionId,
+    rootSessionId: options.rootSessionId,
+    parentAgentIds: options.parentAgentIds,
+    sessionFile: options.sessionFile,
+  });
 
   // Model mapping: an explicit frontmatter model is resolved against the child
   // runtime and falls back to the inherited parent model when resolution fails
@@ -221,13 +221,49 @@ function resolveChildModel(model: string, modelRuntime: ModelRuntime | undefined
  * original job's stored session file. The copy's header id is rewritten to the
  * new job id, so the reopened session's live id matches its storage folder and
  * the original transcript stays stable and untouched. The copy lives under the
- * new job's parent live-session folder (`sessions/<parent-session-id>/`), so it
- * is discoverable and removable alongside the other children of that parent.
+ * the new job's home-scoped agent directory.
  */
-export function copySessionFile(source: string, jobId: string, cwd: string, parentSessionId?: string): string | undefined {
+/**
+ * Resolve the isolated child's `SessionManager` for a fresh or resumed child.
+ *
+ * When a root-session boundary is supplied the manager writes its transcript to
+ * the deterministic home-scoped agent location; otherwise it falls back to the
+ * legacy project-local session folder. This keeps the adapter testable without
+ * AI credentials while mirroring exactly what `createIsolatedChild` does.
+ */
+export function createChildSessionManager(options: {
+  cwd: string;
+  jobId: string;
+  parentSessionId: string;
+  rootSessionId?: string;
+  parentAgentIds?: readonly string[];
+  sessionFile?: string;
+}): SessionManager {
+  const storage = options.rootSessionId
+    ? childSessionPaths({ cwd: options.cwd, rootSessionId: options.rootSessionId, jobId: options.jobId, parentAgentIds: options.parentAgentIds })
+    : undefined;
+  const childDir = storage?.agentDir ?? sessionDir(options.cwd, options.parentSessionId);
+  if (storage) ensurePrivateDirectory(childDir);
+  return options.sessionFile
+    ? SessionManager.open(options.sessionFile, childDir)
+    : SessionManager.create(options.cwd, childDir, {
+        id: options.jobId,
+        parentSession: options.parentSessionId,
+        ...(storage ? { sessionFilename: "transcript.jsonl", privateRoot: storage.projectDir } : {}),
+      });
+}
+
+export function copySessionFile(
+  source: string,
+  jobId: string,
+  cwd: string,
+  parentSessionId?: string,
+  rootSessionId?: string,
+  parentAgentIds?: readonly string[],
+): string | undefined {
   if (!source) return undefined;
   try {
-    return prepareResumeSessionFile(source, jobId, cwd, parentSessionId);
+    return prepareResumeSessionFile(source, jobId, cwd, parentSessionId, rootSessionId, parentAgentIds);
   } catch {
     return undefined;
   }
@@ -283,7 +319,7 @@ function findLastAssistantMessage(session: AgentSession): {
 export const spawnChildSession: SpawnChildSession & {
   /** Test seam: override isolated child construction without AI credentials. */
   __createChild?: (
-    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; sessionFile?: string; mcpToolNames?: readonly string[] },
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[] },
   ) => Promise<ChildSessionServices>;
 } = (async (options) => {
   // A cancelled parent run must not start a child at all.
@@ -305,6 +341,8 @@ export const spawnChildSession: SpawnChildSession & {
         model: options.model,
         agent: options.agent,
         parentSessionId,
+        rootSessionId: options.rootSessionId,
+        parentAgentIds: options.parentAgentIds,
         sessionFile: options.sessionFile,
         mcpToolNames: options.mcpToolNames,
       });
@@ -379,7 +417,7 @@ export const spawnChildSession: SpawnChildSession & {
   });
 }) as SpawnChildSession & {
   __createChild?: (
-    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; sessionFile?: string; mcpToolNames?: readonly string[] },
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[] },
   ) => Promise<ChildSessionServices>;
 };
 

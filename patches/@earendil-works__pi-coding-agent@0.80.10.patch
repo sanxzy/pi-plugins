@@ -65,39 +65,51 @@ index f1c2e80..3f8c880 100644
  /**
   * Actions for ExtensionContext (ctx.* in event handlers).
 diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index 00c4b5b..d157831 100644
+index 00c4b5b..2fd2902 100644
 --- a/dist/core/session-manager.d.ts
 +++ b/dist/core/session-manager.d.ts
-@@ -13,6 +13,8 @@ export interface SessionHeader {
+@@ -13,6 +13,10 @@ export interface SessionHeader {
  export interface NewSessionOptions {
      id?: string;
      parentSession?: string;
 +    /** pi-code patch: fixed filename for the session transcript (e.g. "transcript.jsonl"). */
 +    sessionFilename?: string;
++    /** pi-code patch: private storage boundary whose existing ancestors are repaired to 0700. */
++    privateRoot?: string;
  }
  export interface SessionEntryBase {
      type: string;
 diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index 249d106..846c5b8 100644
+index 249d106..85c03bb 100644
 --- a/dist/core/session-manager.js
 +++ b/dist/core/session-manager.js
-@@ -1,6 +1,6 @@
+@@ -1,14 +1,33 @@
  import { uuidv7 } from "@earendil-works/pi-agent-core";
  import { randomUUID } from "crypto";
 -import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
 +import { appendFileSync, chmodSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
  import { readdir, stat } from "fs/promises";
- import { join, resolve } from "path";
+-import { join, resolve } from "path";
++import { dirname, join, resolve } from "path";
  import { createInterface } from "readline";
-@@ -9,6 +9,17 @@ import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js"
+ import { StringDecoder } from "string_decoder";
+ import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
  import { normalizePath, resolvePath } from "../utils/paths.js";
  import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage, } from "./messages.js";
  export const CURRENT_SESSION_VERSION = 3;
 +/** pi-code patch: enforce owner-only modes on the session directory and file. */
-+function ensurePrivateSessionDir(dir) {
++function ensurePrivateSessionDir(dir, boundary) {
 +    if (!dir) return;
 +    mkdirSync(dir, { recursive: true, mode: 0o700 });
-+    try { chmodSync(dir, 0o700); } catch { /* best-effort */ }
++    const resolved = resolve(dir);
++    const stop = boundary ? resolve(boundary) : resolved;
++    for (let current = resolved; ; ) {
++        chmodSync(current, 0o700);
++        if (current === stop) break;
++        const parent = dirname(current);
++        if (parent === current) break;
++        current = parent;
++    }
 +}
 +function ensurePrivateSessionFile(file) {
 +    if (!file) return;
@@ -107,35 +119,35 @@ index 249d106..846c5b8 100644
  function createSessionId() {
      return uuidv7();
  }
-@@ -539,8 +550,8 @@ export class SessionManager {
+@@ -539,8 +558,8 @@ export class SessionManager {
          this.cwd = resolvePath(cwd);
          this.sessionDir = normalizePath(sessionDir);
          this.persist = persist;
 -        if (persist && this.sessionDir && !existsSync(this.sessionDir)) {
 -            mkdirSync(this.sessionDir, { recursive: true });
 +        if (persist && this.sessionDir) {
-+            ensurePrivateSessionDir(this.sessionDir);
++            ensurePrivateSessionDir(this.sessionDir, newSessionOptions?.privateRoot);
          }
          if (sessionFile) {
              this.setSessionFile(sessionFile);
-@@ -552,6 +563,10 @@ export class SessionManager {
+@@ -552,6 +571,10 @@ export class SessionManager {
      /** Switch to a different session file (used for resume and branching) */
      setSessionFile(sessionFile) {
          this.sessionFile = resolvePath(sessionFile);
 +        if (this.persist) {
-+            ensurePrivateSessionDir(this.getSessionDir());
++            ensurePrivateSessionDir(this.getSessionDir(), undefined);
 +            ensurePrivateSessionFile(this.sessionFile);
 +        }
          if (existsSync(this.sessionFile)) {
              this.fileEntries = loadEntriesFromFile(this.sessionFile);
              // If file was empty, initialize it with a valid session header. If it was
-@@ -602,11 +617,19 @@ export class SessionManager {
+@@ -602,11 +625,19 @@ export class SessionManager {
          this.leafId = null;
          this.flushed = false;
          if (this.persist) {
 -            const fileTimestamp = timestamp.replace(/[:.]/g, "-");
 -            this.sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${this.sessionId}.jsonl`);
-+            ensurePrivateSessionDir(this.getSessionDir());
++            ensurePrivateSessionDir(this.getSessionDir(), undefined);
 +            this.sessionFile = join(this.getSessionDir(), this._resolveSessionFilename(options));
          }
          return this.sessionFile;
@@ -151,7 +163,7 @@ index 249d106..846c5b8 100644
      _buildIndex() {
          this.byId.clear();
          this.labelsById.clear();
-@@ -641,6 +664,7 @@ export class SessionManager {
+@@ -641,6 +672,7 @@ export class SessionManager {
          finally {
              closeSync(fd);
          }
@@ -159,7 +171,7 @@ index 249d106..846c5b8 100644
      }
      isPersisted() {
          return this.persist;
-@@ -675,7 +699,7 @@ export class SessionManager {
+@@ -675,7 +707,7 @@ export class SessionManager {
              return;
          }
          if (!this.flushed) {
@@ -168,7 +180,7 @@ index 249d106..846c5b8 100644
              try {
                  for (const e of this.fileEntries) {
                      writeFileSync(fd, `${JSON.stringify(e)}\n`);
-@@ -684,10 +708,12 @@ export class SessionManager {
+@@ -684,10 +716,12 @@ export class SessionManager {
              finally {
                  closeSync(fd);
              }
@@ -181,7 +193,7 @@ index 249d106..846c5b8 100644
          }
      }
      _appendEntry(entry) {
-@@ -1176,8 +1202,9 @@ export class SessionManager {
+@@ -1176,8 +1210,9 @@ export class SessionManager {
          }
          const newSessionId = options?.id ?? createSessionId();
          const timestamp = new Date().toISOString();
@@ -192,7 +204,7 @@ index 249d106..846c5b8 100644
          // Write new header pointing to source as parent, with updated cwd
          const newHeader = {
              type: "session",
-@@ -1187,6 +1214,7 @@ export class SessionManager {
+@@ -1187,6 +1222,7 @@ export class SessionManager {
              cwd: resolvedTargetCwd,
              parentSession: resolvedSourcePath,
          };
@@ -200,7 +212,7 @@ index 249d106..846c5b8 100644
          writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
          // Copy all non-header entries from source
          for (const entry of sourceEntries) {
-@@ -1194,6 +1222,7 @@ export class SessionManager {
+@@ -1194,6 +1230,7 @@ export class SessionManager {
                  appendFileSync(newSessionFile, `${JSON.stringify(entry)}\n`);
              }
          }

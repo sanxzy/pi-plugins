@@ -186,6 +186,10 @@ export type SpawnChildSession = (options: {
   prompt: string;
   /** Parent session id, preserved in the child session header. */
   parentSessionId?: string;
+  /** Root Pi session id owning the home-scoped agent tree. */
+  rootSessionId?: string;
+  /** Parent agent ids for nested home-scoped agent directories. */
+  parentAgentIds?: readonly string[];
   /** Stored transcript to reopen for a resume, if any. */
   sessionFile?: string;
   /** Model-facing MCP names discovered by the owning parent session. */

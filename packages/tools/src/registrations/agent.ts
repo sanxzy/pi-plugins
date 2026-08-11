@@ -156,7 +156,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
 function startBackgroundAgent(
   params: AgentParams,
   ctx: ExtensionContext,
-  resume: { parentJobId?: string; sessionFile?: string; sourceSessionFile?: string } = {},
+  resume: { parentJobId?: string; sessionFile?: string; sourceSessionFile?: string; parentAgentIds?: readonly string[] } = {},
 ): AgentToolResult<AgentDetails | AgentErrorDetails> {
   const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
 
@@ -180,7 +180,7 @@ function startBackgroundAgent(
   let sessionFile = resume.sessionFile;
   if (resume.sourceSessionFile) {
     jobId = makeJobId();
-    sessionFile = copySessionFile(resume.sourceSessionFile, jobId, ctx.cwd, parentSessionId);
+    sessionFile = copySessionFile(resume.sourceSessionFile, jobId, ctx.cwd, parentSessionId, pool.rootSessionId, resume.parentAgentIds);
     if (!sessionFile) {
       return errorResult(`could not copy the transcript for agent ${resume.parentJobId ?? jobId}`, {
         jobId: resume.parentJobId,
@@ -216,6 +216,8 @@ function startBackgroundAgent(
       runChild: () =>
         spawnWithControl(pool, params, ctx, job, agent, {
           parentSessionId,
+          rootSessionId: pool.rootSessionId,
+          parentAgentIds: resume.parentAgentIds,
           sessionFile,
           signal: undefined,
         }),
