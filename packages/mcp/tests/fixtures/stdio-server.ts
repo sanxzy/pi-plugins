@@ -13,6 +13,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const mode = process.env.MCP_FIXTURE_MODE ?? "tools";
+const malformedOnce = process.env.MCP_FIXTURE_MALFORMED_ONCE_FILE;
 
 if (mode === "hang") {
   process.stderr.write("fixture startup is intentionally hanging\n");
@@ -121,3 +122,8 @@ if (process.env.MCP_FIXTURE_EXIT_ONCE_FILE && !existsSync(process.env.MCP_FIXTUR
 }
 
 await server.connect(new StdioServerTransport());
+
+if (malformedOnce && !existsSync(malformedOnce)) {
+  writeFileSync(malformedOnce, "malformed\n");
+  setTimeout(() => process.stdout.write("{malformed-json\n"), Number(process.env.MCP_FIXTURE_MALFORMED_AFTER_MS ?? 100)).unref();
+}

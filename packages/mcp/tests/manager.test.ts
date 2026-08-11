@@ -101,6 +101,42 @@ test("manager start/stop is deterministic, idempotent, and wires an injected wat
   rmSync(projectRoot, { recursive: true, force: true });
 });
 
+test("default filesystem watcher reconciles edits in user and project config files", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-default-watch-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  const projectConfigDir = join(projectRoot, ".pi");
+  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(projectConfigDir, { recursive: true });
+  const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
+  const fixtureCwd = dirname(fixture);
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    user_server: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd },
+  } } }));
+  writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ mcp: { servers: {
+    project_server: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, disabled: true },
+  } } }));
+  const changed: string[][] = [];
+  const manager = createMcpManager({ agentDir, projectRoot, reloadDebounceMs: 30, onConfigChanged: (names) => changed.push(names) });
+  try {
+    await manager.start();
+    assert.equal(manager.status("user_server")?.status, "connected");
+    assert.equal(manager.status("project_server")?.status, "disabled");
+    writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ mcp: { servers: {
+      project_server: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd },
+    } } }));
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline && manager.status("project_server")?.status !== "connected") {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    assert.equal(manager.status("project_server")?.status, "connected");
+    assert.ok(changed.some((names) => names.includes("project_server")));
+  } finally {
+    await manager.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("watched configuration changes debounce and reconcile only affected servers", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-watch-"));
   const agentDir = join(root, "agent");
@@ -138,6 +174,32 @@ test("watched configuration changes debounce and reconcile only affected servers
     assert.deepEqual(manager.status("first"), { status: "disabled", errorCategory: "none" });
     assert.equal(manager.status("second")?.status, "connected");
     assert.deepEqual(changed, [["first"]]);
+  } finally {
+    await manager.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("transport errors mark the affected server failed and recover independently", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-transport-error-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(agentDir, { recursive: true });
+  const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
+  const malformed = join(root, "malformed-once");
+  const statuses: string[] = [];
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    broken: { type: "local", command: [process.execPath, fixture], cwd: dirname(fixture), environment: {
+      MCP_FIXTURE_MALFORMED_ONCE_FILE: malformed,
+      MCP_FIXTURE_MALFORMED_AFTER_MS: "100",
+    } },
+  } } }));
+  const manager = createMcpManager({ agentDir, projectRoot, reconnectBaseDelayMs: 20, onServerChanged: (name) => statuses.push(manager.status(name)?.status ?? "missing") });
+  try {
+    await manager.start();
+    const failedDeadline = Date.now() + 3_000;
+    while (Date.now() < failedDeadline && !statuses.includes("failed")) await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(statuses.includes("failed"), "transport error reports a failed transition");
   } finally {
     await manager.stop();
     rmSync(root, { recursive: true, force: true });
