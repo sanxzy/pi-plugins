@@ -43,6 +43,12 @@ test("toTypeBoxSchema falls back safely for empty, missing, or exotic schemas", 
   assert.ok(checkShape(toTypeBoxSchema({ type: "string" }), {}), "non-object schemas wrap into an object");
 });
 
+test("exotic enum schemas fall back to permissive types instead of throwing", () => {
+  assert.ok(checkShape(toTypeBoxSchema({ type: "object", properties: { a: { type: "string", enum: [{ x: 1 }] } } }), {}));
+  assert.ok(checkShape(toTypeBoxSchema({ type: "object", properties: { a: { type: "array", items: { enum: [{ x: 1 }] } } } }), {}));
+  assert.ok(checkShape(toTypeBoxSchema({ type: "string", enum: [{ x: 1 }] }), {}));
+});
+
 test("objectSchemaFromMcp always yields an object schema with a bounded property set", () => {
   const empty = objectSchemaFromMcp(undefined);
   assert.ok(checkShape(empty, {}));
@@ -53,4 +59,14 @@ test("objectSchemaFromMcp always yields an object schema with a bounded property
     required: ["query"],
   });
   assert.ok(checkShape(concrete, {}));
+});
+
+test("objectSchemaFromMcp never throws even for pathological schemas", () => {
+  for (const pathological of [
+    { type: "object", properties: { a: { type: "string", enum: [{ deep: { x: 1 } }] } } },
+    { type: "object", properties: { a: { enum: [1, 2, { b: 3 }] } } },
+    { type: "array", items: { type: "string", enum: [[1, 2]] } },
+  ]) {
+    assert.ok(checkShape(objectSchemaFromMcp(pathological), {}));
+  }
 });

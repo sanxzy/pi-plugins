@@ -3,12 +3,24 @@ import { test } from "node:test";
 import { McpToolExposer } from "../src/expose.ts";
 import { type McpToolSnapshotEntry } from "../src/expose.ts";
 
-function fakePi() {
+function fakePi(existingNames: string[] = []) {
   const tools = new Map<string, { name: string; description: string; execute: (...args: unknown[]) => Promise<unknown> }>();
+  const active: string[] = [...existingNames];
   return {
     tools,
+    active,
     registerTool(def: { name: string; description: string; execute: (...args: unknown[]) => Promise<unknown> }) {
       tools.set(def.name, def);
+      if (!active.includes(def.name)) active.push(def.name);
+    },
+    getAllTools() {
+      return existingNames.map((name) => ({ name }));
+    },
+    getActiveTools() {
+      return [...active];
+    },
+    setActiveTools(names: string[]) {
+      active.splice(0, active.length, ...names);
     },
   };
 }
@@ -17,6 +29,16 @@ const entries: McpToolSnapshotEntry[] = [
   { serverName: "GitHub", nativeName: "list-issues", description: "List issues", inputSchema: { type: "object", properties: { repo: { type: "string" } } } },
   { serverName: "GitHub", nativeName: "list issues", description: "Same normalized name", inputSchema: { type: "object" } },
 ];
+
+test("McpToolExposer reserves all currently registered extension names", () => {
+  const pi = fakePi(["agent_cancel", "agent_jobs"]);
+  const exposer = new McpToolExposer(pi as never);
+  exposer.sync([
+    { serverName: "server", nativeName: "agent_cancel", inputSchema: { type: "object" } },
+    { serverName: "server", nativeName: "agent_jobs", inputSchema: { type: "object" } },
+  ], 1);
+  assert.ok([...pi.tools.keys()].every((name) => !["agent_cancel", "agent_jobs"].includes(name)));
+});
 
 test("McpToolExposer registers each discovered tool with valid schema and stable names", () => {
   const pi = fakePi();
@@ -42,6 +64,23 @@ test("McpToolExposer routes invocation through the original server and native na
   const registered = [...pi.tools.values()][0]!;
   await registered.execute("call-1", { answer: 42 }, undefined, undefined, { cwd: "/tmp" });
   assert.deepEqual(calls, [{ server: "server", tool: "native-tool", args: { answer: 42 } }]);
+});
+
+test("removed tools are excluded from the host active tool set", () => {
+  const pi = fakePi();
+  const exposer = new McpToolExposer(pi as never);
+  exposer.sync([{ serverName: "server", nativeName: "removed", inputSchema: { type: "object" } }], 1);
+  const name = [...pi.tools.keys()][0]!;
+  assert.ok(pi.active.includes(name));
+  exposer.sync([], 2);
+  assert.equal(pi.active.includes(name), false);
+});
+
+test("tool descriptions are bounded even when a server returns pathological text", () => {
+  const pi = fakePi();
+  const exposer = new McpToolExposer(pi as never);
+  exposer.sync([{ serverName: "server", nativeName: "large", description: "x".repeat(100_000), inputSchema: { type: "object" } }], 1);
+  assert.ok([...pi.tools.values()][0]!.description.length < 5_000);
 });
 
 test("refresh updates current bindings and removed definitions become unavailable", async () => {
