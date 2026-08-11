@@ -3,10 +3,13 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
+  CallToolRequestSchema,
+  GetPromptRequestSchema,
   ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListResourceTemplatesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
 const mode = process.env.MCP_FIXTURE_MODE ?? "tools";
@@ -31,12 +34,13 @@ if (process.env.MCP_FIXTURE_CHILD_PID_FILE) {
 }
 
 const fullCatalog = mode === "full-catalog";
+const policyMode = mode === "policy";
 const server = new Server(
   { name: "mcp-pi-code-stdio", version: "1.0.0" },
   {
     capabilities: {
       ...(mode === "fail-discovery" || mode === "tools" ? { tools: {} } : {}),
-      ...(fullCatalog ? { tools: {}, prompts: { listChanged: true }, resources: { listChanged: true } } : {}),
+      ...(fullCatalog || policyMode ? { tools: {}, prompts: { listChanged: true }, resources: { listChanged: true } } : {}),
     },
   },
 );
@@ -53,6 +57,40 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     ],
   };
 });
+
+if (policyMode) {
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      { name: "protected_read", description: "Protected tool", inputSchema: { type: "object", properties: { value: { type: "string" } } } },
+      { name: "allowed_read", description: "Allowed tool", inputSchema: { type: "object", properties: { value: { type: "string" } } } },
+      { name: "ask_read", description: "Ask tool", inputSchema: { type: "object", properties: { value: { type: "string" } } } },
+    ],
+  }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: [
+      { name: "protected_prompt", description: "Protected prompt", arguments: [{ name: "value" }] },
+      { name: "allowed_prompt", description: "Allowed prompt", arguments: [{ name: "value" }] },
+      { name: "ask_prompt", description: "Ask prompt", arguments: [{ name: "value" }] },
+    ],
+  }));
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [
+      { uri: "file:///protected", name: "protected", mimeType: "text/plain" },
+      { uri: "file:///allowed", name: "allowed", mimeType: "text/plain" },
+      { uri: "file:///ask", name: "ask", mimeType: "text/plain" },
+    ],
+  }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [] }));
+  server.setRequestHandler(CallToolRequestSchema, async (request) => ({
+    content: [{ type: "text", text: `tool:${request.params.name}:${request.params.arguments?.value ?? ""}` }],
+  }));
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => ({
+    messages: [{ role: "user", content: { type: "text", text: `prompt:${request.params.name}:${request.params.arguments?.value ?? ""}` } }],
+  }));
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => ({
+    contents: [{ uri: request.params.uri, mimeType: "text/plain", text: `resource:${request.params.uri}` }],
+  }));
+}
 
 if (fullCatalog) {
   server.setRequestHandler(ListPromptsRequestSchema, async (request) =>

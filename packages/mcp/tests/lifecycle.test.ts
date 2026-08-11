@@ -6,23 +6,29 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { registerMcpLifecycle } from "../src/index.ts";
 import { userConfigPath, createDefaultAuthStore } from "../src/index.ts";
+import { dirname } from "node:path";
+
+const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
+const fixtureCwd = dirname(fixture);
 
 interface HandlerMap {
   handlers: Map<string, (event: unknown, ctx: unknown) => Promise<void> | void>;
+  tools: Map<string, { name: string; execute: (...args: unknown[]) => Promise<unknown> }>;
 }
 
 function fakePi(): HandlerMap & {
   on(event: string, handler: (event: unknown, ctx: unknown) => Promise<void> | void): void;
   registerCommand(name: string, def: { description: string; handler(args: string, ctx: unknown): Promise<void> | void }): void;
-  registerTool(def: { name: string }): void;
+  registerTool(def: { name: string; execute?: (...args: unknown[]) => Promise<unknown> }): void;
   commands: Map<string, { description: string; handler(args: string, ctx: unknown): Promise<void> | void }>;
 } {
   const handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<void> | void>();
   const commands = new Map<string, { description: string; handler(args: string, ctx: unknown): Promise<void> | void }>();
-  const tools = new Map<string, { name: string }>();
+  const tools = new Map<string, { name: string; execute: (...args: unknown[]) => Promise<unknown> }>();
   return {
     handlers,
     commands,
+    tools,
     on(event, handler) {
       handlers.set(event, handler);
     },
@@ -30,7 +36,7 @@ function fakePi(): HandlerMap & {
       commands.set(name, def);
     },
     registerTool(def) {
-      tools.set(def.name, def);
+      if (def.execute) tools.set(def.name, { name: def.name, execute: def.execute });
     },
   };
 }
@@ -223,6 +229,8 @@ test("/mcp control-plane subcommands operate without adding tools and use bounde
     await startup({ reason: "startup" }, noUiCtx);
     await cmdHandler("list", noUiCtx);
     assert.ok(sent.some((line) => line.includes("remote") && line.includes("tools=")), "list reports tool counts");
+    await cmdHandler("disconnect unknown-server", noUiCtx);
+    assert.ok(sent.some((line) => line.includes("unknown server")), "unknown disconnect is rejected");
     await cmdHandler("disconnect remote", noUiCtx);
     await cmdHandler("reload", noUiCtx);
     assert.ok(sent.some((line) => line.toLowerCase().includes("reloaded")), "reload reports completion");
@@ -234,6 +242,99 @@ test("/mcp control-plane subcommands operate without adding tools and use bounde
     assert.equal(toolRegistrations.includes("mcp_connect"), false);
   } finally {
     await shutdown({ reason: "quit" }, noUiCtx);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("lifecycle enforces allow/deny/ask policy for tools, prompts, and resources", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-policy-lifecycle-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    policy: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_MODE: "policy" } },
+  } } }));
+  mkdirSync(join(projectRoot, ".pi"), { recursive: true });
+  writeFileSync(join(projectRoot, ".pi", "mcp.json"), JSON.stringify({ mcp: { permissions: {
+    tools: [
+      { effect: "deny", server: "policy", name: "protected_*" },
+      { effect: "allow", server: "policy", name: "allowed_*" },
+      { effect: "ask", server: "policy", name: "ask_*" },
+    ],
+    prompts: [
+      { effect: "deny", server: "policy", name: "protected_*" },
+      { effect: "allow", server: "policy", name: "allowed_*" },
+      { effect: "ask", server: "policy", name: "ask_*" },
+    ],
+    resources: [
+      { effect: "deny", server: "policy", name: "file:///protected" },
+      { effect: "allow", server: "policy", name: "file:///allowed" },
+      { effect: "ask", server: "policy", name: "file:///ask" },
+    ],
+  } } }));
+  const pi = fakePi();
+  const sent: string[] = [];
+  const realPi = { ...pi, sendUserMessage: (content: string) => { sent.push(content); } };
+  registerMcpLifecycle(realPi as never, { agentDir });
+  const start = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  const ctxBase = { ...context(projectRoot, "policy-session"), signal: undefined };
+  const noUi = { ...ctxBase, hasUI: false, ui: {} };
+  try {
+    await start({ reason: "startup" }, noUi);
+    const statusCommand = pi.commands.get("mcp")?.handler;
+    assert.ok(statusCommand);
+    await statusCommand("status", noUi);
+    assert.ok(sent.some((message) => message.includes("policy") && message.includes("errorCategory=none") && message.includes("mappings=") && message.includes("policy_allowed_read->allowed_read")));
+    const allowedTool = pi.tools.get("policy_allowed_read");
+    const protectedTool = pi.tools.get("policy_protected_read");
+    const askTool = pi.tools.get("policy_ask_read");
+    assert.ok(allowedTool && protectedTool && askTool);
+    const allowed = await allowedTool.execute("allowed", { value: "ok" }, undefined, undefined, noUi);
+    assert.match(String((allowed as { content: Array<{ text: string }> }).content[0]?.text), /tool:allowed_read:ok/);
+    const denied = await protectedTool.execute("denied", { value: "blocked" }, undefined, undefined, noUi) as { details: { failure?: string } };
+    assert.equal(denied.details.failure, "policy_denied");
+    const noUiAsk = await askTool.execute("ask-no-ui", { value: "blocked" }, undefined, undefined, noUi) as { details: { failure?: string } };
+    assert.equal(noUiAsk.details.failure, "policy_denied");
+
+    let confirms = 0;
+    const approveCtx = { ...ctxBase, hasUI: true, ui: { confirm: async () => { confirms += 1; return true; }, notify() {} } };
+    const approved = await askTool.execute("ask-approve", { value: "yes" }, undefined, undefined, approveCtx) as { content: Array<{ text: string }> };
+    assert.match(approved.content[0]?.text ?? "", /tool:ask_read:yes/);
+    assert.equal(confirms, 1);
+    const rejectCtx = { ...ctxBase, hasUI: true, ui: { confirm: async () => false, notify() {} } };
+    const rejected = await askTool.execute("ask-reject", { value: "no" }, undefined, undefined, rejectCtx) as { details: { failure?: string } };
+    assert.equal(rejected.details.failure, "policy_denied");
+    const throwingCtx = { ...ctxBase, hasUI: true, ui: { confirm: async () => { throw new Error("credential=secret"); }, notify() {} } };
+    const failedConfirm = await askTool.execute("ask-throw", { value: "no" }, undefined, undefined, throwingCtx) as { details: { failure?: string } };
+    assert.equal(failedConfirm.details.failure, "policy_denied");
+
+    const allowedPrompt = pi.commands.get("mcp_prompt_policy_allowed_prompt");
+    const protectedPrompt = pi.commands.get("mcp_prompt_policy_protected_prompt");
+    const askPrompt = pi.commands.get("mcp_prompt_policy_ask_prompt");
+    assert.ok(allowedPrompt && protectedPrompt && askPrompt);
+    await allowedPrompt.handler("value=ok", approveCtx);
+    assert.ok(sent.some((message) => message.includes("prompt:allowed_prompt:ok")));
+    await protectedPrompt.handler("value=blocked", noUi);
+    assert.ok(!sent.some((message) => message.includes("prompt:protected_prompt:blocked")), "denied prompt does not reach the server");
+    assert.ok(sent.some((message) => /denied by policy/i.test(message)), "denied prompt reports denial");
+    await askPrompt.handler("value=blocked", noUi);
+    assert.ok(!sent.some((message) => message.includes("prompt:ask_prompt:blocked")), "no-UI ask fails closed");
+    await askPrompt.handler("value=approved", approveCtx);
+    assert.ok(sent.some((message) => message.includes("prompt:ask_prompt:approved")));
+
+    const readResource = pi.tools.get("mcp_resources_read");
+    assert.ok(readResource);
+    const allowedResource = await readResource.execute("resource-allow", { server: "policy", uri: "file:///allowed" }, undefined, undefined, noUi) as { content: Array<{ text: string }> };
+    assert.match(allowedResource.content[0]?.text ?? "", /resource:file:\/\/\/allowed/);
+    const deniedResource = await readResource.execute("resource-deny", { server: "policy", uri: "file:///protected" }, undefined, undefined, noUi) as { details: { denied?: boolean } };
+    assert.equal(deniedResource.details.denied, true);
+    const noUiResourceAsk = await readResource.execute("resource-ask", { server: "policy", uri: "file:///ask" }, undefined, undefined, noUi) as { details: { denied?: boolean } };
+    assert.equal(noUiResourceAsk.details.denied, true);
+    const approvedResource = await readResource.execute("resource-approve", { server: "policy", uri: "file:///ask" }, undefined, undefined, approveCtx) as { content: Array<{ text: string }> };
+    assert.match(approvedResource.content[0]?.text ?? "", /resource:file:\/\/\/ask/);
+  } finally {
+    await shutdown({ reason: "quit" }, noUi);
     rmSync(root, { recursive: true, force: true });
   }
 });

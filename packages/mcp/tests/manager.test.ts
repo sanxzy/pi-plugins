@@ -29,7 +29,7 @@ test("manager start/stop is deterministic, idempotent, and wires an injected wat
 
   const start1 = await manager.start();
   assert.equal(start1.running, true);
-  assert.deepEqual(start1.servers.s, { status: "disabled" });
+  assert.deepEqual(start1.servers.s, { status: "disabled", errorCategory: "none" });
   assert.equal(manager.state().running, true);
   assert.deepEqual(watched, [[userConfigPath(agentDir), projectConfigPath(projectRoot)]]);
 

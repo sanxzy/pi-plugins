@@ -77,8 +77,9 @@ test("a disabled local server does not spawn and a failed server is isolated", a
     timeout: { startup: 500 },
   });
   assert.equal(failed.status.status, "failed");
-  assert.deepEqual(manager.status("disabled"), { status: "disabled" });
+  assert.deepEqual(manager.status("disabled"), { status: "disabled", errorCategory: "none" });
   assert.equal(manager.status("failed")?.status, "failed");
+  assert.equal(manager.status("failed")?.errorCategory, "transport");
 
   await manager.close();
   rmSync(agentDir, { recursive: true, force: true });
