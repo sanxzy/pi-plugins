@@ -7,6 +7,8 @@ import pino from "pino";
 const PRIVATE_DIR = 0o700;
 const PRIVATE_FILE = 0o600;
 const TOKEN_PATTERN = /\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g;
+const SECRET_KEY_PATTERN = /(?:token|password|credential|api[-_]?key|api[-_]?secret|secret|authorization|bearer|cookie|private[-_]?key)/i;
+const SECRET_VALUE_PATTERN = /(?:bearer\s+|api[-_]?key\s*[=:]\s*|authorization\s*[=:]\s*|credential\s*[=:]\s*|private[-_]?key\s*[=:]\s*)[^\s,;]+/gi;
 const TELEGRAM_UPDATE_KEYS = new Set([
   "message", "edited_message", "channel_post", "edited_channel_post", "inline_query",
   "chosen_inline_result", "callback_query", "shipping_query", "pre_checkout_query", "poll",
@@ -57,7 +59,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isSecretKey(key: string): boolean {
-  return /(?:token|password|credential|api[-_]?secret|secret|authorization|cookie|privateKey)/i.test(key);
+  return SECRET_KEY_PATTERN.test(key);
 }
 
 function isUpdateKey(key: string): boolean {
@@ -70,7 +72,7 @@ function isTelegramUpdate(value: Record<string, unknown>): boolean {
 
 /** Mask recursively at the persistence boundary. */
 export function mask(value: unknown, key?: string): unknown {
-  if (typeof value === "string") return value.replace(TOKEN_PATTERN, "[Redacted]");
+  if (typeof value === "string") return value.replace(TOKEN_PATTERN, "[Redacted]").replace(SECRET_VALUE_PATTERN, "[Redacted]");
   if (value === null || typeof value !== "object") return value;
   if (isRecord(value)) {
     if (isTelegramUpdate(value) || (key !== undefined && isUpdateKey(key))) return "[Omitted]";
