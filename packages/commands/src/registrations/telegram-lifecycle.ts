@@ -19,6 +19,7 @@ import {
   getTelegramCommandContext,
   setTelegramCommandContext,
 } from "./telegram-controls.ts";
+
 import {
   clearTelegramProjectManager,
   clearTelegramProjectManagers,
@@ -69,7 +70,9 @@ export function registerTelegramLifecycle(
     if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     // Retain a fresh command context per project so Telegram native controls
-    // (e.g. /reload) can call command-only Pi APIs such as reload().
+    // (e.g. /reload) can call command-only Pi APIs such as reload(). A Telegram
+    // /reload marks the project before the extension runtime is torn down; the
+    // generic session-events handler consumes it and steers the model.
     await retainCommandContext(pi, projectRoot);
     const lifecycle = lifecycleFor(projectRoot, ctx.sessionManager.getSessionId(), deps);
     const started = await lifecycle.start();

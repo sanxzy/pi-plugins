@@ -9,6 +9,7 @@ import {
   setTelegramCommandContext,
   takeTelegramCompactionOrigin,
 } from "../src/registrations/telegram-controls.ts";
+import { takeSessionReload } from "../src/registrations/session-events.ts";
 
 function command(name: string, args = ""): { name: string; args: string } {
   return { name, args };
@@ -47,7 +48,7 @@ test("non-control commands are not owned by the handler", async () => {
   assert.deepEqual(messages, []);
 });
 
-test("reload invokes the retained command context", async () => {
+test("reload invokes the retained command context and marks the session reload", async () => {
   clearTelegramCommandContext("/tmp/reload-project");
   let reloadCalled = 0;
   setTelegramCommandContext("/tmp/reload-project", {
@@ -66,7 +67,28 @@ test("reload invokes the retained command context", async () => {
     "♻️ Reloading the active Pi session...",
     "✅ Active Pi session reloaded.",
   ]);
+  // The fresh session_start runtime consumes this marker and steers the model,
+  // since the pre-reload dispatch frame's `pi` is stale after reload().
+  assert.equal(takeSessionReload("/tmp/reload-project"), true);
   clearTelegramCommandContext("/tmp/reload-project");
+});
+
+test("failed reload does not mark the session for a reload notification", async () => {
+  clearTelegramCommandContext("/tmp/reload-fail-marker");
+  setTelegramCommandContext("/tmp/reload-fail-marker", {
+    reload: async () => { throw new Error("reload failed"); },
+  } as unknown as ExtensionCommandContext);
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(command("reload"), {
+    projectRoot: "/tmp/reload-fail-marker",
+    chatId: "555",
+    context: context(),
+    sendMessage: send,
+  });
+  assert.equal(handled, true);
+  assert.ok(messages[1]?.includes("failed"));
+  assert.equal(takeSessionReload("/tmp/reload-fail-marker"), false, "a failed reload must not flag a notification");
+  clearTelegramCommandContext("/tmp/reload-fail-marker");
 });
 
 test("reload refuses busy or queued sessions", async () => {

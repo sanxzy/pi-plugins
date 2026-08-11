@@ -5,7 +5,36 @@ import type {
   SessionStartEvent,
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
+import { canonicalProjectRoot } from "@xzy-ai/channels";
 import { getChildPool, getGoalPool, type GoalDeliveryBinding } from "@xzy-ai/runtime";
+
+const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
+type SessionReloadMarkers = Map<string, boolean>;
+
+function sessionReloadMarkers(): SessionReloadMarkers {
+  const global = globalThis as unknown as Record<symbol, SessionReloadMarkers | undefined>;
+  global[SESSION_RELOAD_MARKERS_KEY] ??= new Map<string, boolean>();
+  return global[SESSION_RELOAD_MARKERS_KEY] as SessionReloadMarkers;
+}
+
+/** Mark the next fresh session_start for a project as a reload continuation. */
+export function markSessionReload(projectRoot: string): void {
+  sessionReloadMarkers().set(canonicalProjectRoot(projectRoot), true);
+}
+
+/** Consume the reload marker for a project. */
+export function takeSessionReload(projectRoot: string): boolean {
+  const markers = sessionReloadMarkers();
+  const key = canonicalProjectRoot(projectRoot);
+  const marked = markers.get(key) === true;
+  markers.delete(key);
+  return marked;
+}
+
+/** Clear a marker when the reload operation fails before session_start. */
+export function clearSessionReload(projectRoot: string): void {
+  sessionReloadMarkers().delete(canonicalProjectRoot(projectRoot));
+}
 
 function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext): GoalDeliveryBinding {
   return {
@@ -35,6 +64,16 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
+    const projectRoot = canonicalProjectRoot(ctx.cwd);
+    const sessionId = ctx.sessionManager.getSessionId();
+    const rootPool = getChildPool(ctx.cwd, sessionId);
+    const isRootSession = rootPool.registry.get(sessionId) === undefined;
+    if (isRootSession && takeSessionReload(projectRoot)) {
+      // This handler runs in the fresh runtime after reload; unlike the old
+      // command frame, this pi API is valid and can steer the model safely.
+      pi.sendUserMessage("Your session was reloaded.", { deliverAs: "steer" });
+    }
+
     // Activate every registered tool so built-ins beyond the default
     // read/bash/edit/write (find, grep) are model-callable too. `ls` stays
     // excluded — the model should list files via `find`/`grep` instead.

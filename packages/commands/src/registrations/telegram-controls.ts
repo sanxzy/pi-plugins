@@ -8,6 +8,7 @@ import {
   sendTelegramMessage,
   type TelegramCommand,
 } from "@xzy-ai/channels";
+import { clearSessionReload, markSessionReload } from "./session-events.ts";
 
 export interface TelegramControlDispatchOptions {
   projectRoot: string;
@@ -215,10 +216,15 @@ export async function dispatchTelegramControl(
         return true;
       }
       await reply("♻️ Reloading the active Pi session...");
+      // Set the marker before reload tears down this extension runtime. The
+      // fresh session_start handler consumes it and sends the steer through
+      // the new, valid ExtensionAPI instance.
+      markSessionReload(options.projectRoot);
       try {
         await commandContext.reload();
         await reply("✅ Active Pi session reloaded.");
       } catch (error) {
+        clearSessionReload(options.projectRoot);
         const message = error instanceof Error ? error.message : String(error);
         await reply(`Pi session reload failed: ${message}`);
       }
