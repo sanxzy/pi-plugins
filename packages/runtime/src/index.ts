@@ -3,9 +3,11 @@ export { createGitMaterializer, type GitCommandRunner, type GitMaterializeResult
 export {
   createReferenceCatalog,
   referenceConfigFile,
+  referenceReposDir,
   REFERENCES_DIRECTORY,
   REFERENCES_FILE_MODE,
   REFERENCES_FILE_NAME,
+  REFERENCES_REPOS_DIRECTORY,
   type AtomicReferenceWrite,
   type ReferenceAvailability,
   type ReferenceCatalog,

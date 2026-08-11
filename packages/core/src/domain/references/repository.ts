@@ -6,6 +6,7 @@
  * GitHub-style shorthand, host/path strings, scp-style remotes, and `file://`
  * URLs for deterministic local test fixtures.
  */
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type RepositoryReference =
@@ -188,6 +189,6 @@ export function cacheIdentity(reference: RepositoryReference): string {
 
 /** Derive a deterministic, branch-isolated cache directory for a repository. */
 export function cachePath(root: string, reference: RepositoryReference, branch?: string): string {
-  const base = `${root}/${reference.host}/${reference.path}`;
+  const base = join(root, reference.host, ...reference.segments);
   return branch ? `${base}@${encodeURIComponent(branch)}` : base;
 }

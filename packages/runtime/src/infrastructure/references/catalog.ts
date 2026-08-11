@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { parseRepository } from "@xzy-ai/core";
+import { createGitMaterializer, type GitMaterializer } from "./git-materializer.ts";
 import {
   validateReferenceAlias,
   validateReferenceCatalog,
@@ -12,6 +14,7 @@ import {
 
 export const REFERENCES_DIRECTORY = "pi-code";
 export const REFERENCES_FILE_NAME = "references.json";
+export const REFERENCES_REPOS_DIRECTORY = "repos";
 export const REFERENCES_FILE_MODE = 0o644;
 
 export type ReferenceAvailability = "available" | "unavailable";
@@ -22,6 +25,8 @@ export interface ReferenceCatalogEntry {
   readonly path?: string;
   readonly description?: string;
   readonly hidden?: boolean;
+  readonly branch?: string;
+  readonly head?: string;
   readonly status: ReferenceAvailability;
   readonly diagnostic?: string;
 }
@@ -42,10 +47,13 @@ export interface ReferenceCatalogOptions {
   readonly homeDir?: string;
   readonly atomicWrite?: AtomicReferenceWrite;
   readonly fileSystem?: ReferenceFileSystem;
+  readonly materializer?: GitMaterializer;
+  readonly refresh?: boolean;
 }
 
 export interface ReferenceCatalog {
   readonly filePath: string;
+  readonly reposDir: string;
   readonly read: () => Promise<ReferenceCatalogReadResult>;
   readonly save: (document: unknown) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>;
 }
@@ -53,6 +61,11 @@ export interface ReferenceCatalog {
 /** Derive the global references configuration from the active Pi agent directory. */
 export function referenceConfigFile(agentDir = getAgentDir()): string {
   return join(agentDir, REFERENCES_DIRECTORY, REFERENCES_FILE_NAME);
+}
+
+/** Derive the global Git repository cache directory below the active Pi agent directory. */
+export function referenceReposDir(agentDir = getAgentDir()): string {
+  return join(agentDir, REFERENCES_DIRECTORY, REFERENCES_REPOS_DIRECTORY);
 }
 
 /**
@@ -64,12 +77,15 @@ export function createReferenceCatalog(options: ReferenceCatalogOptions = {}): R
   const agentDir = options.agentDir ?? getAgentDir();
   const homeDir = options.homeDir ?? homedir();
   const filePath = referenceConfigFile(agentDir);
+  const reposDir = referenceReposDir(agentDir);
   const atomicWrite = options.atomicWrite ?? ((path: string, content: string) =>
     writeReferenceJson(path, content, options.fileSystem));
+  const materializer = options.materializer ?? createGitMaterializer();
 
   return {
     filePath,
-    read: () => readReferenceCatalog(filePath, homeDir),
+    reposDir,
+    read: () => readReferenceCatalog(filePath, homeDir, reposDir, options.refresh, materializer),
     save: async (document) => {
       const validated = validateReferenceCatalog(document);
       if (!validated.ok) return { ok: false, error: "Invalid references configuration" };
@@ -83,7 +99,13 @@ export function createReferenceCatalog(options: ReferenceCatalogOptions = {}): R
   };
 }
 
-async function readReferenceCatalog(filePath: string, homeDir: string): Promise<ReferenceCatalogReadResult> {
+async function readReferenceCatalog(
+  filePath: string,
+  homeDir: string,
+  reposDir: string,
+  refresh: boolean | undefined,
+  materializer: GitMaterializer,
+): Promise<ReferenceCatalogReadResult> {
   let raw: string;
   try {
     raw = await readFile(filePath, "utf8");
@@ -117,7 +139,7 @@ async function readReferenceCatalog(filePath: string, homeDir: string): Promise<
       diagnostics.push(`Reference '${name}' is invalid`);
       continue;
     }
-    const resolved = await resolveCatalogEntry(name, source.ok ? source.value : fallback!, homeDir);
+    const resolved = await resolveCatalogEntry(name, source.ok ? source.value : fallback!, homeDir, reposDir, refresh, materializer);
     entries.push(resolved.entry);
     if (resolved.diagnostic) diagnostics.push(resolved.diagnostic);
   }
@@ -128,17 +150,41 @@ async function resolveCatalogEntry(
   name: string,
   source: ReferenceSource,
   homeDir: string,
+  reposDir: string,
+  refresh: boolean | undefined,
+  materializer: GitMaterializer,
 ): Promise<{ readonly entry: ReferenceCatalogEntry; readonly diagnostic?: string }> {
   const metadata = referenceEntryMetadata(name, source);
   if (source.type === "git") {
-    return {
-      entry: {
-        ...metadata,
-        status: "unavailable",
-        diagnostic: "Git reference is not materialized",
-      },
-      diagnostic: `Reference '${name}' is unavailable until Git materialization is configured`,
-    };
+    const repository = parseRepository(source.repository);
+    if (!repository) {
+      return {
+        entry: { ...metadata, status: "unavailable", diagnostic: "Git reference is invalid" },
+        diagnostic: `Reference '${name}' is unavailable`,
+      };
+    }
+    try {
+      const result = await materializer.ensure({
+        reference: repository,
+        cacheRoot: reposDir,
+        branch: source.branch,
+        refresh,
+      });
+      return {
+        entry: {
+          ...metadata,
+          path: result.localPath,
+          status: "available",
+          ...(result.head === undefined ? {} : { head: result.head }),
+          ...(result.branch === undefined ? {} : { branch: result.branch }),
+        },
+      };
+    } catch {
+      return {
+        entry: { ...metadata, status: "unavailable", diagnostic: "Git reference is unavailable" },
+        diagnostic: `Reference '${name}' is unavailable`,
+      };
+    }
   }
 
   const isHomeRelative = source.path.startsWith("~/");
