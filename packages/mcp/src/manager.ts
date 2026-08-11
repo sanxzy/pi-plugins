@@ -60,6 +60,8 @@ interface ActiveConnection {
   client: Client;
   transport?: { close(): Promise<void> };
   catalog: ServerCatalog;
+  /** Whether this connection uses a remote (streamable-http/sse) transport. */
+  remote?: boolean;
 }
 
 export interface McpManagerState {
@@ -76,6 +78,16 @@ export interface McpManagerOptions extends McpConfigLoadOptions {
   onReload?: (state: McpManagerState) => void;
   /** Invoked when a connected server reports a list-changed notification. */
   onCatalogChanged?: (name: string) => void;
+  /** Invoked after a watched configuration change is reconciled. */
+  onConfigChanged?: (names: string[]) => void;
+  /** Invoked when one live connection changes state. */
+  onServerChanged?: (name: string) => void;
+  /** Debounce delay (ms) for config-change reconciliation. Defaults to 500. */
+  reloadDebounceMs?: number;
+  /** Base backoff delay (ms) for reconnect retries. Defaults to 2_000. */
+  reconnectBaseDelayMs?: number;
+  /** Max reconnect attempts before giving up. Defaults to 5. */
+  reconnectMaxAttempts?: number;
 }
 
 export interface McpManager {
@@ -84,7 +96,7 @@ export interface McpManager {
   state(): McpManagerState;
   status(name: string): McpServerStatus | undefined;
   reload(): McpConfigResult;
-  reconcile(): Promise<McpManagerState>;
+  reconcile(names?: string[]): Promise<McpManagerState>;
   start(): Promise<McpManagerState>;
   connectLocal(name: string, server: McpLocalServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
   connectRemote(name: string, server: McpRemoteServerConfig, signal?: AbortSignal): Promise<McpConnectionResult>;
@@ -120,6 +132,11 @@ function stateFor(result: McpConfigResult, running: boolean): McpManagerState {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isSessionExpired(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return /session (?:not found|expired|invalid)|invalid session|mcp-session|session id/i.test(message);
 }
 
 function errorCategory(error: unknown): Exclude<McpErrorCategory, "none"> {
@@ -180,7 +197,15 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   let state: McpManagerState = { issues: [], servers: {}, running: false };
   let unsubscribe: (() => void) | undefined;
   let operation: Promise<unknown> = Promise.resolve();
+  let reloadTimer: NodeJS.Timeout | undefined;
+  let stopped = false;
   const connections = new Map<string, ActiveConnection>();
+  const reconnectTimers = new Map<string, NodeJS.Timeout>();
+  const reconnectAttempts = new Map<string, number>();
+  const reloadDebounceMs = options.reloadDebounceMs ?? 500;
+  const reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 2_000;
+  const reconnectMaxAttempts = options.reconnectMaxAttempts ?? 5;
+  const configFingerprints = new Map<string, string>();
 
   const serialize = <T>(task: () => Promise<T>): Promise<T> => {
     const next = operation.then(task, task);
@@ -192,11 +217,74 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     state = { ...state, servers: { ...state.servers, [name]: status } };
   };
 
+  const clearReconnect = (name: string): void => {
+    const timer = reconnectTimers.get(name);
+    if (timer) clearTimeout(timer);
+    reconnectTimers.delete(name);
+    reconnectAttempts.delete(name);
+  };
+
+  const scheduleReconnect = (name: string): void => {
+    if (stopped || reconnectTimers.has(name)) return;
+    const attempt = reconnectAttempts.get(name) ?? 0;
+    if (attempt >= reconnectMaxAttempts) return;
+    const delay = reconnectBaseDelayMs * 2 ** attempt;
+    reconnectAttempts.set(name, attempt + 1);
+    const timer = setTimeout(() => {
+      reconnectTimers.delete(name);
+      const server = state.config?.servers[name];
+      if (stopped || !server || server.disabled === true) return;
+      void serialize(async () => {
+        const result = server.type === "local"
+          ? await connectLocalInternal(name, server)
+          : await connectRemoteInternal(name, server);
+        if (result.status.status === "connected") clearReconnect(name);
+        else scheduleReconnect(name);
+      }).catch(() => scheduleReconnect(name));
+    }, delay);
+    timer.unref();
+    reconnectTimers.set(name, timer);
+  };
+
+  const attachConnectionLifecycle = (name: string, candidate: ActiveConnection): void => {
+    candidate.client.onclose = () => {
+      if (stopped || connections.get(name) !== candidate) return;
+      connections.delete(name);
+      setStatus(name, { status: "failed", error: "MCP connection closed", errorCategory: "transport" });
+      scheduleReconnect(name);
+      options.onServerChanged?.(name);
+    };
+  };
+
   const reload = (): McpConfigResult => {
+    const previousConfig = state.config;
+    const previousServers = state.servers;
     const result = loadMcpConfig(agentDir, projectRoot, options);
-    state = stateFor(result, state.running);
+    const next = stateFor(result, state.running);
+    if (result.ok && previousConfig) {
+      for (const name of connections.keys()) {
+        if (JSON.stringify(previousConfig.servers[name]) === JSON.stringify(result.value.servers[name]) && previousServers[name]?.status === "connected") {
+          next.servers[name] = previousServers[name]!;
+        }
+      }
+    }
+    state = next;
     options.onReload?.(state);
     return result;
+  };
+
+  const scheduleConfigReload = (): void => {
+    if (stopped) return;
+    if (reloadTimer) clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      reloadTimer = undefined;
+      const before = new Map(Object.entries(state.config?.servers ?? {}).map(([name, server]) => [name, JSON.stringify(server)]));
+      reload();
+      const after = new Map(Object.entries(state.config?.servers ?? {}).map(([name, server]) => [name, JSON.stringify(server)]));
+      const names = [...new Set([...before.keys(), ...after.keys()])].filter((name) => before.get(name) !== after.get(name));
+      if (names.length) void reconcile(names).then(() => options.onConfigChanged?.(names), () => undefined);
+    }, reloadDebounceMs);
+    reloadTimer.unref();
   };
 
   const connectLocalInternal = async (
@@ -237,9 +325,11 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       );
       candidate.catalog = await discoverCatalog(client, requestTimeout, signal);
       wireListChangedHandlers(client, candidate.catalog, () => {
-        options.onCatalogChanged?.(name);
+        if (!stopped && connections.get(name) === candidate) options.onCatalogChanged?.(name);
       });
+      attachConnectionLifecycle(name, candidate);
       connections.set(name, candidate);
+      clearReconnect(name);
       const connected = { status: "connected", toolCount: candidate.catalog.tools.length, errorCategory: "none" } as const;
       setStatus(name, connected);
       return {
@@ -251,6 +341,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       await closeConnection(candidate);
       const failed = { status: "failed", error: errorMessage(error), errorCategory: errorCategory(error) } as const;
       setStatus(name, failed);
+      if (!stopped && state.running) scheduleReconnect(name);
       return { status: failed, tools: [], catalog: emptyCatalog() };
     }
   };
@@ -289,14 +380,18 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     const status = mapRemoteStatus(result.status);
     setStatus(name, status);
     if (result.status.status === "connected" && result.client) {
+      const candidateRemote: ActiveConnection = { client: result.client, catalog: result.catalog, remote: true };
       wireListChangedHandlers(result.client, result.catalog, () => {
-        options.onCatalogChanged?.(name);
+        if (!stopped && connections.get(name) === candidateRemote) options.onCatalogChanged?.(name);
       });
-      connections.set(name, { client: result.client, catalog: result.catalog });
+      attachConnectionLifecycle(name, candidateRemote);
+      connections.set(name, candidateRemote);
+      clearReconnect(name);
       const connected = { status: "connected", toolCount: result.catalog.tools.length, errorCategory: "none" } as const;
       setStatus(name, connected);
       return { status: connected, tools: result.catalog.tools, catalog: result.catalog };
     }
+    if (status.status === "failed" && !stopped && state.running) scheduleReconnect(name);
     return { status, tools: [], catalog: emptyCatalog() };
   };
 
@@ -333,6 +428,26 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const disconnect = (name: string): Promise<void> => serialize(() => disconnectInternal(name));
   const close = (): Promise<void> => serialize(closeInternal);
 
+  const callWithRecovery = async <T>(
+    name: string,
+    initial: ActiveConnection,
+    operationFor: (connection: ActiveConnection) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> => {
+    try {
+      return await operationFor(initial);
+    } catch (error) {
+      if (signal?.aborted || !initial.remote || !isSessionExpired(error)) throw error;
+      const server = state.config?.servers[name];
+      if (!server || server.type !== "remote") throw error;
+      const reconnected = await connectRemoteInternal(name, server, signal);
+      if (reconnected.status.status !== "connected") throw error;
+      const replacement = connections.get(name);
+      if (!replacement) throw error;
+      return operationFor(replacement);
+    }
+  };
+
   const callToolInternal = async (
     name: string,
     nativeName: string,
@@ -352,16 +467,19 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       state.config?.timeout,
       "request",
     );
-    return connection.client.callTool(
-      { name: nativeName, arguments: args },
-      undefined,
-      {
-        timeout: requestTimeout,
-        resetTimeoutOnProgress: true,
-        onprogress: () => undefined,
-        ...(signal ? { signal } : {}),
-      },
-    ) as Promise<CallToolResult>;
+    return callWithRecovery(name, connection, (current) =>
+      current.client.callTool(
+        { name: nativeName, arguments: args },
+        undefined,
+        {
+          timeout: requestTimeout,
+          resetTimeoutOnProgress: true,
+          onprogress: () => undefined,
+          ...(signal ? { signal } : {}),
+        },
+      ) as Promise<CallToolResult>,
+      signal,
+    );
   };
 
   const callTool = (
@@ -394,7 +512,10 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   ): Promise<GetPromptResult> => {
     const connection = connections.get(name);
     if (!connection) throw new Error(`MCP server "${name}" is not connected`);
-    return connection.client.getPrompt({ name: nativeName, arguments: args }, requestOptionsFor(name, signal));
+    return callWithRecovery(name, connection, (current) =>
+      current.client.getPrompt({ name: nativeName, arguments: args }, requestOptionsFor(name, signal)),
+      signal,
+    );
   };
 
   const getPrompt = (
@@ -411,7 +532,10 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   ): Promise<ReadResourceResult> => {
     const connection = connections.get(name);
     if (!connection) throw new Error(`MCP server "${name}" is not connected`);
-    return connection.client.readResource({ uri }, requestOptionsFor(name, signal));
+    return callWithRecovery(name, connection, (current) =>
+      current.client.readResource({ uri }, requestOptionsFor(name, signal)),
+      signal,
+    );
   };
 
   const readResource = (name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> =>
@@ -431,7 +555,9 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     );
     const catalog = await discoverCatalog(connection.client, requestTimeout, signal);
     connection.catalog = catalog;
-    wireListChangedHandlers(connection.client, catalog, () => options.onCatalogChanged?.(name));
+    wireListChangedHandlers(connection.client, catalog, () => {
+      if (!stopped && connections.get(name) === connection) options.onCatalogChanged?.(name);
+    });
     setStatus(name, { status: "connected", toolCount: catalog.tools.length, errorCategory: "none" });
     return catalog;
   };
@@ -439,28 +565,30 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const refreshCatalog = (name: string, signal?: AbortSignal): Promise<ServerCatalog | undefined> =>
     serialize(() => refreshCatalogInternal(name, signal));
 
-  const reconcileInternal = async (): Promise<McpManagerState> => {
+  const reconcileInternal = async (names?: string[]): Promise<McpManagerState> => {
     const configured = state.config?.servers ?? {};
+    const scoped = new Set(names ?? [...new Set([...Object.keys(configured), ...connections.keys()])]);
     for (const name of [...connections.keys()]) {
       const server = configured[name];
-      if (!server || server.disabled === true) await disconnectInternal(name);
+      if (scoped.has(name) && (!server || server.disabled === true)) await disconnectInternal(name);
     }
     for (const [name, server] of Object.entries(configured)) {
-      if (server.type === "local") await connectLocalInternal(name, server);
-      else if (server.type === "remote") await connectRemoteInternal(name, server);
+      if (scoped.has(name) && server.type === "local") await connectLocalInternal(name, server);
+      else if (scoped.has(name) && server.type === "remote") await connectRemoteInternal(name, server);
     }
     return state;
   };
 
-  const reconcile = (): Promise<McpManagerState> => serialize(reconcileInternal);
+  const reconcile = (names?: string[]): Promise<McpManagerState> => serialize(() => reconcileInternal(names));
 
   const start = (): Promise<McpManagerState> =>
     serialize(async () => {
+      stopped = false;
       reload();
       state = { ...state, running: true };
       if (!unsubscribe && options.watch) {
         unsubscribe = options.watch([...configPaths], () => {
-          reload();
+          scheduleConfigReload();
         });
       }
       return reconcileInternal();
@@ -468,9 +596,15 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
 
   const stop = (): Promise<void> =>
     serialize(async () => {
+      stopped = true;
       const current = unsubscribe;
       unsubscribe = undefined;
       current?.();
+      for (const timer of reconnectTimers.values()) clearTimeout(timer);
+      reconnectTimers.clear();
+      reconnectAttempts.clear();
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = undefined;
       await closeInternal();
       state = { ...state, running: false };
     });

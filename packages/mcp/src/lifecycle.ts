@@ -50,6 +50,14 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       ...options,
       projectRoot: ctx.cwd,
       agentDir: userAgentDir(options.agentDir),
+      onConfigChanged: (names) => {
+        if (disposed.has(key) || managers.get(key) !== manager) return;
+        reconcile?.();
+      },
+      onServerChanged: (name) => {
+        if (disposed.has(key) || managers.get(key) !== manager) return;
+        reconcile?.();
+      },
       onCatalogChanged: (serverName) => {
         if (disposed.has(key) || managers.get(key) !== manager) return;
         void manager.refreshCatalog(serverName).then(
