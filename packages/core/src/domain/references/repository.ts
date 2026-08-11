@@ -90,10 +90,6 @@ function buildRemote(input: {
   };
 }
 
-function filePath(segments: string[]): string {
-  return `/${segments.join("/")}`;
-}
-
 function buildFile(repositoryPath: string, remote: string): RepositoryReference {
   const segments = repositoryPath.split(/[\\/]+/).filter(Boolean);
   return {
@@ -147,7 +143,7 @@ export function parseRepository(input: string): RepositoryReference | undefined 
     host: url.host,
     segments,
     remote: url.host === "github.com" ? `https://github.com/${segments.join("/")}.git` : cleaned,
-    protocol: url.protocol as RepositoryReference extends infer _ ? "https:" | "git:" | "http:" | "ssh:" : never,
+    protocol: url.protocol as "https:" | "git:" | "http:" | "ssh:",
   });
 }
 

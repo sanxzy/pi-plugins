@@ -88,6 +88,9 @@ export function validateBranch(branch: string): ValidationResult<string> {
 
 /** An object entry must be a plain local or Git source, never both. */
 function validateEntryObject(entry: LocalReferenceEntry | GitReferenceEntry): ValidationResult<ReferenceSource> {
+  if (typeof entry !== "object" || entry === null) {
+    return { ok: false, error: "reference entry must be a string or object" };
+  }
   const hasPath = "path" in entry && typeof entry.path === "string";
   const hasRepository = "repository" in entry && typeof entry.repository === "string";
   if (hasPath === hasRepository) {
@@ -128,7 +131,7 @@ function validateEntryObject(entry: LocalReferenceEntry | GitReferenceEntry): Va
  * Normalize a raw reference entry into a validated source. A string shorthand
  * is local when it begins with `/` or `~/`, otherwise it is a Git reference.
  */
-export function validateReferenceEntry(alias: string, entry: ReferenceEntry): ValidationResult<ReferenceSource> {
+export function validateReferenceEntry(alias: string, entry: unknown): ValidationResult<ReferenceSource> {
   const aliasOk = validateReferenceAlias(alias);
   if (!aliasOk.ok) return aliasOk;
   if (typeof entry === "string") {
@@ -142,17 +145,21 @@ export function validateReferenceEntry(alias: string, entry: ReferenceEntry): Va
     if (!parseRepository(repository.value)) return { ok: false, error: "repository is not a valid Git reference" };
     return { ok: true, value: { type: "git", repository: repository.value } };
   }
+  if (typeof entry !== "object" || entry === null) {
+    return { ok: false, error: "reference entry must be a string or object" };
+  }
+  const objectEntry = entry as LocalReferenceEntry | GitReferenceEntry;
   // Validate optional metadata surface before normalizing the source.
   if (
-    entry.description !== undefined &&
-    (typeof entry.description !== "string" || entry.description.trim().length === 0)
+    objectEntry.description !== undefined &&
+    (typeof objectEntry.description !== "string" || objectEntry.description.trim().length === 0)
   ) {
     return { ok: false, error: "description must be a non-empty string" };
   }
-  if (entry.hidden !== undefined && typeof entry.hidden !== "boolean") {
+  if (objectEntry.hidden !== undefined && typeof objectEntry.hidden !== "boolean") {
     return { ok: false, error: "hidden must be a boolean" };
   }
-  return validateEntryObject(entry);
+  return validateEntryObject(objectEntry);
 }
 
 /** Validate a full strict JSON catalog document defensively. */
@@ -170,7 +177,7 @@ export function validateReferenceCatalog(
       errors.push(`${alias}: ${aliasOk.error}`);
       continue;
     }
-    const source = validateReferenceEntry(alias, entry as ReferenceEntry);
+    const source = validateReferenceEntry(alias, entry);
     if (source.ok) out[alias] = source.value;
     else errors.push(`${alias}: ${source.error}`);
   }
