@@ -8,7 +8,7 @@ const PRIVATE_DIR = 0o700;
 const PRIVATE_FILE = 0o600;
 const TOKEN_PATTERN = /\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g;
 const SECRET_KEY_PATTERN = /(?:token|password|credential|api[-_]?key|api[-_]?secret|secret|authorization|bearer|cookie|private[-_]?key)/i;
-const SECRET_VALUE_PATTERN = /(?:bearer\s+|api[-_]?key\s*[=:]\s*|authorization\s*[=:]\s*|credential\s*[=:]\s*|private[-_]?key\s*[=:]\s*)[^\s,;]+/gi;
+const SECRET_VALUE_PATTERN = /(?:bearer\s+|api[-_]?key\s*[=:]\s*|api[-_]?secret\s*[=:]\s*|authorization\s*[=:]\s*|credential\s*[=:]\s*|private[-_]?key\s*[=:]\s*|secret\s*[=:]\s*|token\s*[=:]\s*|password\s*[=:]\s*)[^\s,;}+]+/gi;
 const TELEGRAM_UPDATE_KEYS = new Set([
   "message", "edited_message", "channel_post", "edited_channel_post", "inline_query",
   "chosen_inline_result", "callback_query", "shipping_query", "pre_checkout_query", "poll",
