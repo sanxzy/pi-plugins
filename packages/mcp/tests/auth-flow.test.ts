@@ -258,4 +258,3 @@ test("connectRemote over streamable with default oauth (true) and a preauth 401 
     rmSync(agentDir, { recursive: true, force: true });
   }
 });
-

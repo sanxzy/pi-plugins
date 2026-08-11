@@ -209,7 +209,7 @@ export class McpToolExposer {
     pi.registerTool({
       name: piName,
       label: mapping.label,
-      description: mapping.description ?? `MCP tool ${mapping.nativeName}`, 
+      description: mapping.description ?? `MCP tool ${mapping.nativeName}`,
       parameters: mapping.parameters as never,
       execute: invoke,
     });
