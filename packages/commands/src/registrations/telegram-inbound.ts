@@ -202,6 +202,8 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         // lifecycle status remain the operator's diagnostic surfaces.
       },
       async onAccepted(updateId, chatId, text, messageId) {
+        const activity = createChannelLogger({ projectRoot, sessionId });
+        if (activity.ok) activity.value.info("telegram_update_accepted", { updateId, chatId, messageId, command: parseTelegramCommand(text)?.name });
         // Every accepted Telegram message is delivered as a steer, regardless of
         // whether the agent is idle, processing, or waiting on a tool call. PI
         // injects the steer before the next LLM call, so Telegram stays
@@ -223,7 +225,8 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
             clearQueue: () => activeListener?.clearQueue(),
           });
           if (handled) {
-            writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
+            const runtime = writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
+            if (!runtime.ok) throw new Error(runtime.message);
             return;
           }
         }
@@ -236,7 +239,8 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
           ? `${expanded}${formatTelegramCommandSignature(chatId, messageId)}`
           : `${text}${formatTelegramSignature(chatId, messageId)}`;
         pi.sendUserMessage(content, { deliverAs: "steer" });
-        writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
+        const runtime = writeChannelRuntime(projectRoot, { lastUpdateId: updateId });
+        if (!runtime.ok) throw new Error(runtime.message);
       },
     });
 

@@ -1,6 +1,7 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync } from "node:fs";
 import pino, { type DestinationStream, type Logger } from "pino";
-import { channelLogFile, channelLogsDir } from "./shared/paths.ts";
+import { ensurePrivateDirectory } from "@xzy-ai/runtime";
+import { channelLogFile } from "./shared/paths.ts";
 import type { StateResult } from "./state.ts";
 
 /** Named fields and nested values that must never be written to channel logs. */
@@ -144,17 +145,16 @@ function buildChannelLogger(base: Logger, sessionId: string, filePath: string): 
 export function createChannelLogger(options: ChannelLogOptions): ChannelLogResult {
   try {
     const filePath = channelLogFile(options.projectRoot, options.sessionId);
-    // Create the logs directory up front so the destination stream can open the
-    // file. The directory and file are owner-only because logs can contain
-    // private conversation metadata.
-    mkdirSync(channelLogsDir(options.projectRoot), { recursive: true, mode: 0o700 });
-    chmodSync(channelLogsDir(options.projectRoot), 0o700);
+    // Create and repair the actual dated session-log directory before pino
+    // opens the destination. All home ancestors and the file are private.
+    const logDirectory = filePath.slice(0, filePath.lastIndexOf("/"));
+    ensurePrivateDirectory(logDirectory);
 
     // Default destination is a synchronous file destination. Synchronous
     // writes make `close` deterministic for the short lifecycle log entries
     // emitted during setup and shutdown.
     const destination = options.destination ?? pino.destination({ dest: filePath, append: true, mkdir: true, sync: true });
-    if (!options.destination) chmodSync(filePath, 0o600);
+    chmodSync(filePath, 0o600);
 
     const logger = pino(
       {

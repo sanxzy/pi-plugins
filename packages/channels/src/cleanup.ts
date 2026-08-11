@@ -106,8 +106,11 @@ export function cleanupRootSessions(
     let interruptedAgents = 0;
     for (const session of sessions) {
       if (!session.active) continue;
-      const sameProcess = session.pid === currentPid && session.processStartTime === currentProcessStartTime;
-      const alive = session.pid !== undefined && checkAlive(session.pid);
+      const samePid = session.pid === currentPid;
+      const sameProcess = samePid && session.processStartTime === currentProcessStartTime;
+      // A matching PID with a different start time is PID reuse, even if the
+      // operating system reports that PID as alive. Other PIDs use liveness.
+      const alive = !samePid && session.pid !== undefined && checkAlive(session.pid);
       if (sameProcess || alive) continue;
       const registry = createAgentEventRegistry(projectRoot, session.sessionId);
       for (const job of registry.all().values()) {

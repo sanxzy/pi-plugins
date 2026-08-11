@@ -28,6 +28,7 @@ function projectRoot(): string {
 }
 
 test("channel state (config, runtime, owner) stays project-owned under home storage", () => {
+  home();
   const proj = projectRoot();
   const projectId = encodeProjectId(proj);
   const cfg = channelConfigFile(proj);
@@ -35,18 +36,19 @@ test("channel state (config, runtime, owner) stays project-owned under home stor
   const owner = channelOwnerFile(proj);
   // All three are single project-owned files under the home project dir, not
   // under any root session directory.
-  assert.ok(cfg.includes(".pi") === false, "config must move to home storage");
+  assert.equal(cfg.includes("/.pi/"), false, "config must move to home storage");
   assert.equal(runtime.endsWith("channel.runtime.json"), true);
   assert.equal(owner.endsWith("channel.owner.json"), true);
   assert.ok(cfg.includes("/sessions/") === false, "config must stay project-owned, not session-owned");
 });
 
 test("channel activity log is scoped to the active root session under home storage", () => {
+  home();
   const proj = projectRoot();
   // Session-scoped channel log lives under a root-session-scoped path, not the
   // project-local .pi tree.
   const log = channelLogFile(proj, "root-a");
-  assert.ok(log.includes(".pi") === false, "channel log must move to home storage");
+  assert.equal(log.includes("/.pi/"), false, "channel log must move to home storage");
 });
 
 test("root-session cleanup removes the full session directory (goals, logs, agents, manifests)", () => {
