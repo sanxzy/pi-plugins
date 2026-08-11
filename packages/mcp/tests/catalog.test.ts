@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { paginateTools } from "../src/catalog.ts";
+import { paginate, paginateTools } from "../src/catalog.ts";
 
 test("paginates tools across multiple cursors and stops on the final page", async () => {
   const results = await paginateTools(async (cursor) => {
@@ -14,5 +14,15 @@ test("rejects repeated cursors", async () => {
   await assert.rejects(
     paginateTools(async () => ({ tools: [], nextCursor: "repeat" })),
     /duplicate cursor/,
+  );
+});
+
+test("rejects an excessive page sequence", async () => {
+  await assert.rejects(
+    paginate(
+      async (cursor) => ({ items: [], nextCursor: cursor ? `${cursor}-next` : "page-1" }),
+      2,
+    ),
+    /exceeded 2 pages/,
   );
 });
