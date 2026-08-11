@@ -16,6 +16,9 @@ importers:
       '@grammyjs/runner':
         specifier: 2.0.3
         version: 2.0.3(grammy@1.45.1)
+      '@xzy-ai/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@xzy-ai/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -47,6 +50,9 @@ importers:
       '@xzy-ai/core':
         specifier: workspace:*
         version: link:../core
+      '@xzy-ai/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@xzy-ai/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -120,6 +126,19 @@ importers:
         specifier: ^4.22.2
         version: 4.23.8
 
+  packages/observability:
+    dependencies:
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.22.2
+        version: 4.23.8
+
   packages/runtime:
     dependencies:
       '@earendil-works/pi-coding-agent':
@@ -128,6 +147,9 @@ importers:
       '@xzy-ai/core':
         specifier: workspace:*
         version: link:../core
+      '@xzy-ai/observability':
+        specifier: workspace:*
+        version: link:../observability
     devDependencies:
       '@types/node':
         specifier: ^24.13.3
@@ -150,6 +172,9 @@ importers:
       '@xzy-ai/core':
         specifier: workspace:*
         version: link:../core
+      '@xzy-ai/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@xzy-ai/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -181,6 +206,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: ^0.80.2
         version: 0.80.10
+      '@xzy-ai/observability':
+        specifier: workspace:*
+        version: link:../observability
     devDependencies:
       '@types/node':
         specifier: ^24.13.3

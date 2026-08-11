@@ -15,6 +15,8 @@
     "paths": {
       "@xzy-ai/core": ["./packages/core/src/index.ts"],
       "@xzy-ai/core/*": ["./packages/core/src/*", "./packages/core/src/*.ts"],
+      "@xzy-ai/observability": ["./packages/observability/src/index.ts"],
+      "@xzy-ai/observability/*": ["./packages/observability/src/*", "./packages/observability/src/*.ts"],
       "@xzy-ai/runtime": ["./packages/runtime/src/index.ts"],
       "@xzy-ai/runtime/*": ["./packages/runtime/src/*", "./packages/runtime/src/*.ts"],
       "@xzy-ai/tools": ["./packages/tools/src/index.ts"],
