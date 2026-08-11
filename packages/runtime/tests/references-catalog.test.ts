@@ -62,7 +62,8 @@ test("rejects home-relative traversal as unavailable", async () => {
   const result = await catalog.read();
   const traversal = result.entries.find((item) => item.name === "traversal");
   assert.equal(traversal?.status, "unavailable");
-  assert.equal(traversal?.path?.startsWith(outside), false);
+  assert.equal(traversal?.path, undefined);
+  assert.equal(traversal?.diagnostic, "Home-relative path escapes the configured home");
 });
 
 test("retains rejected relative local paths as unavailable entries", async () => {
@@ -178,6 +179,20 @@ test("saves validated JSON atomically with mode 0644 and preserves the prior fil
   });
   const failed = await failing.save({ references: { changed: "/tmp/changed" } });
   assert.deepEqual(failed, { ok: false, error: "Unable to save references configuration" });
+  assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), first);
+  assert.deepEqual(readdirSync(dirname(catalog.filePath)).filter((name) => name.includes(".tmp-")), []);
+
+  const renameFailing = createReferenceCatalog({
+    agentDir: join(root, "agent"),
+    homeDir: root,
+    fileSystem: {
+      rename: async () => {
+        throw new Error("simulated rename failure");
+      },
+    },
+  });
+  const renameFailed = await renameFailing.save({ references: { renamed: "/tmp/renamed" } });
+  assert.deepEqual(renameFailed, { ok: false, error: "Unable to save references configuration" });
   assert.deepEqual(JSON.parse(readFileSync(catalog.filePath, "utf8")), first);
   assert.deepEqual(readdirSync(dirname(catalog.filePath)).filter((name) => name.includes(".tmp-")), []);
 });
