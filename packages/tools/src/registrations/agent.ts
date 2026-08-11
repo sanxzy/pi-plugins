@@ -32,7 +32,11 @@ export function registerAgentTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "agent",
     label: "Agent",
-    description: "Delegate work to a specialized in-process subagent in the background. A call without agent_id spawns a new background job; agent_id steers a running job or resumes a finished one. Every result is delivered to the direct parent when the child settles. A single response may issue at most ${MAX_PARALLEL_AGENTS} agent calls.",
+    description: [
+      "Delegate work to a specialized in-process subagent in the background.",
+      "A call without agent_id spawns a new background job; agent_id steers a running job or resumes a finished one.",
+      `A single response may issue at most ${MAX_PARALLEL_AGENTS} agent calls.`,
+    ].join(" "),
     promptSnippet: "Delegate a focused task to a specialized subagent.",
     parameters: agentParams,
     async execute(
