@@ -37,6 +37,7 @@ export function validateRepository(
   repo: string,
 ): { readonly ok: true; readonly value: string } | { readonly ok: false; readonly error: string } {
   if (repo.trim().length === 0) return { ok: false, error: "repository must not be empty" };
+  if (repo.includes("\0")) return { ok: false, error: "repository must not contain NUL bytes" };
   if (/[\s\\;`$]/.test(repo)) {
     return { ok: false, error: "repository must not contain whitespace or shell metacharacters" };
   }
@@ -54,8 +55,15 @@ function parts(input: string): string[] {
     .filter(Boolean);
 }
 
-function safeSegment(segment: string): boolean {
-  return segment !== "." && segment !== ".." && !segment.includes(":") && !/[\s/\\]/.test(segment);
+function safeSegment(segment: string, decodedSegment = segment): boolean {
+  return (
+    decodedSegment !== "." &&
+    decodedSegment !== ".." &&
+    !segment.includes(":") &&
+    !decodedSegment.includes("\0") &&
+    !/[\s/\\]/.test(decodedSegment) &&
+    !/[\/\\]/.test(segment)
+  );
 }
 
 function safeHost(host: string): boolean {
@@ -77,7 +85,16 @@ function buildRemote(input: {
   protocol?: "https:" | "git:" | "http:" | "ssh:" | undefined;
 }): RepositoryReference | undefined {
   const segments = input.segments.map((s) => s.replace(/\.git$/, "")).filter(Boolean);
-  if (!safeHost(input.host) || segments.length === 0 || segments.some((s) => !safeSegment(s))) return undefined;
+  if (!safeHost(input.host) || segments.length === 0) return undefined;
+  if (
+    segments.some((segment) => {
+      try {
+        return !safeSegment(segment, decodeURIComponent(segment));
+      } catch {
+        return true;
+      }
+    })
+  ) return undefined;
   const host = input.host.toLowerCase();
   const repositoryPath = segments.join("/");
   return {
@@ -127,6 +144,19 @@ export function parseRepository(input: string): RepositoryReference | undefined 
   try {
     url = new URL(cleaned);
   } catch {
+    return undefined;
+  }
+  // Validate the raw URL pathname before URL normalization collapses encoded
+  // `.`/`..` segments or decodes an encoded NUL.
+  const rawPath = cleaned.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/]*(\/[^?#]*)?/u)?.[1] ?? "";
+  if (rawPath.includes("\0")) return undefined;
+  let decodedRawPath: string;
+  try {
+    decodedRawPath = decodeURIComponent(rawPath);
+  } catch {
+    return undefined;
+  }
+  if (decodedRawPath.includes("\0") || decodedRawPath.split("/").some((segment) => segment === "." || segment === "..")) {
     return undefined;
   }
   if (url.protocol === "file:") {

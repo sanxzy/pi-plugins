@@ -77,13 +77,21 @@ export function validateLocalPath(path: string): ValidationResult<string> {
   return { ok: false, error: "local path must be an absolute path or begin with ~/" };
 }
 
-/** A branch is alphanumeric plus `/`, `_`, `.`, `-`, not starting with `-`, no `..`. */
+/** A branch is a safe subset of Git ref-names, isolated by cachePath encoding. */
 export function validateBranch(branch: string): ValidationResult<string> {
   if (branch.length === 0) return { ok: false, error: "branch must not be empty" };
-  if (/^[A-Za-z0-9/_.-]+$/.test(branch) && !branch.startsWith("-") && !branch.includes("..")) {
+  if (
+    /^[A-Za-z0-9/_.-]+$/.test(branch) &&
+    !branch.startsWith("-") &&
+    !branch.includes("..") &&
+    !branch.includes("//") &&
+    !branch.startsWith("/") &&
+    !branch.endsWith("/") &&
+    !branch.split("/").some((segment) => segment === "." || segment === ".." || segment.length === 0)
+  ) {
     return { ok: true, value: branch };
   }
-  return { ok: false, error: "branch must contain only alphanumerics, /, _, ., - and not start with - or contain .." };
+  return { ok: false, error: "branch must contain only safe Git ref components and not start with - or contain empty, ., or .. segments" };
 }
 
 /** An object entry must be a plain local or Git source, never both. */
