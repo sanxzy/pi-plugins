@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@xzy-ai/channels": "workspace:*",
+    "@xzy-ai/core": "workspace:*",
     "@xzy-ai/runtime": "workspace:*",
     "@xzy-ai/tui": "workspace:*",
     "@earendil-works/pi-coding-agent": "^0.80.2"

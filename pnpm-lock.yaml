@@ -44,6 +44,9 @@ importers:
       '@xzy-ai/channels':
         specifier: workspace:*
         version: link:../channels
+      '@xzy-ai/core':
+        specifier: workspace:*
+        version: link:../core
       '@xzy-ai/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -103,6 +106,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
+      '@xzy-ai/core':
+        specifier: workspace:*
+        version: link:../core
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1

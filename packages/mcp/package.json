@@ -12,6 +12,7 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.2",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "@xzy-ai/core": "workspace:*",
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
