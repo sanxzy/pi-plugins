@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -48,6 +49,49 @@ test("missing configuration is an empty catalog and reads are on demand", async 
   const reread = await catalog.read();
   assert.equal(reread.entries.length, 1);
   assert.equal(reread.entries[0]?.name, "docs");
+});
+
+test("rejects home-relative traversal as unavailable", async () => {
+  const root = tempRoot();
+  const home = join(root, "home");
+  const outside = join(root, "outside");
+  mkdirSync(join(home, "docs"), { recursive: true });
+  mkdirSync(outside, { recursive: true });
+  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: home });
+  await catalog.save({ references: { traversal: "~/../outside" } });
+  const result = await catalog.read();
+  const traversal = result.entries.find((item) => item.name === "traversal");
+  assert.equal(traversal?.status, "unavailable");
+  assert.equal(traversal?.path?.startsWith(outside), false);
+});
+
+test("retains rejected relative local paths as unavailable entries", async () => {
+  const root = tempRoot();
+  const docs = join(root, "docs");
+  mkdirSync(docs, { recursive: true });
+  const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: root });
+  mkdirSync(dirname(catalog.filePath), { recursive: true });
+  writeFileSync(catalog.filePath, JSON.stringify({ references: { relative: "./docs", good: docs } }), "utf8");
+  const result = await catalog.read();
+  assert.equal(result.entries.find((item) => item.name === "relative")?.status, "unavailable");
+  assert.equal(result.entries.find((item) => item.name === "relative")?.path, "./docs");
+  assert.equal(result.entries.some((item) => item.name === "good"), true);
+});
+
+test("reports permission-blocked local roots as unavailable", async () => {
+  const root = tempRoot();
+  const blocked = join(root, "blocked");
+  mkdirSync(blocked, { recursive: true });
+  const previousMode = statSync(blocked).mode & 0o777;
+  chmodSync(blocked, 0o000);
+  try {
+    const catalog = createReferenceCatalog({ agentDir: join(root, "agent"), homeDir: root });
+    await catalog.save({ references: { blocked: join(blocked, "child") } });
+    const result = await catalog.read();
+    assert.equal(result.entries.find((item) => item.name === "blocked")?.status, "unavailable");
+  } finally {
+    chmodSync(blocked, previousMode);
+  }
 });
 
 test("resolves local paths and reports unavailable roots without throwing", async () => {
