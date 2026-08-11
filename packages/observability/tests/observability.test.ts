@@ -112,7 +112,7 @@ test("masking removes secrets, tokens, credentials, and raw Telegram updates", a
 test("masking removes common API-key, bearer, authorization, private-key, and error-message secrets", async () => {
   const paths = scope();
   const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
-  const rawValues = ["APIKEY_123", "BEARERTOK_456", "cred_abc", "RAW_PRIVATE_KEY"];
+  const rawValues = ["APIKEY_123", "BEARERTOK_456", "cred_abc", "RAW_PRIVATE_KEY", "BEARER_FREE", "AUTH_VALUE"];
   await assert.rejects(
     () => processWithLog({
       operation: "auth.check",
@@ -121,9 +121,11 @@ test("masking removes common API-key, bearer, authorization, private-key, and er
         api_key: rawValues[0],
         bearer: rawValues[1],
         authorization: `Bearer ${rawValues[1]}`,
+        bearerAssignment: `bearer=${rawValues[4]}`,
+        authorizationAssignment: `authorization=Bearer ${rawValues[5]}`,
         nested: { privateKey: rawValues[3], credential: rawValues[2] },
       },
-    }, () => Promise.reject(new Error(`Bearer ${rawValues[1]} apiKey=${rawValues[0]} credential=${rawValues[2]}`))),
+    }, () => Promise.reject(new Error(`Bearer ${rawValues[1]} apiKey=${rawValues[0]} credential=${rawValues[2]} bearer=${rawValues[4]} authorization=Bearer ${rawValues[5]}`))),
   );
   const raw = readFileSync(paths.errorsPath, "utf8") + readFileSync(paths.eventsPath, "utf8");
   for (const value of rawValues) assert.equal(raw.includes(value), false, `raw value leaked: ${value}`);
