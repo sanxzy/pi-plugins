@@ -1,8 +1,10 @@
 import type {
   ExtensionAPI,
+  ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
+  canonicalProjectRoot,
   sendTelegramMessage,
   type TelegramCommand,
 } from "@xzy-ai/channels";
@@ -21,6 +23,53 @@ export interface TelegramControlDispatchOptions {
   sendMessage?: (projectRoot: string, chatId: string, text: string) => Promise<unknown>;
   /** Development-mode gate used by /system_prompt. Defaults to a real env read. */
   isDevMode?: () => boolean;
+}
+
+/**
+ * Bridge for Telegram controls that need command-only Pi APIs.
+ *
+ * Pi exposes `reload()` on ExtensionCommandContext, while lifecycle handlers
+ * receive only ExtensionContext. The command context is populated by the local
+ * `/telegram_commands` command and retained per project root as a process-local
+ * reference so the Telegram native `/reload` control can call the same Pi API.
+ */
+const TELEGRAM_COMMAND_CONTEXTS_KEY = Symbol.for("@xzy-ai/pi-code:telegram-command-contexts");
+
+type TelegramCommandContextRegistry = Map<string, ExtensionCommandContext>;
+
+function telegramCommandContextRegistry(): TelegramCommandContextRegistry {
+  const global = globalThis as unknown as Record<symbol, TelegramCommandContextRegistry | undefined>;
+  global[TELEGRAM_COMMAND_CONTEXTS_KEY] ??= new Map<string, ExtensionCommandContext>();
+  return global[TELEGRAM_COMMAND_CONTEXTS_KEY] as TelegramCommandContextRegistry;
+}
+
+/** Retain the command context for a project so native controls can use it. */
+export function setTelegramCommandContext(projectRoot: string, context: ExtensionCommandContext | undefined): void {
+  const registry = telegramCommandContextRegistry();
+  const key = canonicalProjectRoot(projectRoot);
+  if (context === undefined) registry.delete(key);
+  else registry.set(key, context);
+}
+
+/** Read the retained command context for a project, if populated. */
+export function getTelegramCommandContext(projectRoot: string): ExtensionCommandContext | undefined {
+  return telegramCommandContextRegistry().get(canonicalProjectRoot(projectRoot));
+}
+
+/** Drop the retained command context for a project (e.g. on session shutdown). */
+export function clearTelegramCommandContext(projectRoot: string): void {
+  telegramCommandContextRegistry().delete(canonicalProjectRoot(projectRoot));
+}
+
+/** Register the local command that populates the command-context reference. */
+export function registerTelegramCommandContext(pi: ExtensionAPI): void {
+  pi.registerCommand("telegram_commands", {
+    description: "Populate the command context used by Telegram native controls",
+    handler: async (_args, context) => {
+      setTelegramCommandContext(context.cwd, context);
+      context.ui.notify("Telegram command context populated. Send /reload in Telegram to reload the Pi session.", "info");
+    },
+  });
 }
 
 const compactionByProject = new Set<string>();
@@ -87,6 +136,7 @@ export async function dispatchTelegramControl(
     "compact",
     "abort",
     "stop",
+    "reload",
     "context",
     "status",
     "system_prompt",
@@ -161,6 +211,27 @@ export async function dispatchTelegramControl(
       options.context.abort();
       options.clearQueue?.();
       await reply(wasBusy ? "🛑 Pi operation aborted and Telegram queue cleared." : "🛑 Telegram queue cleared; no active Pi operation.");
+      return true;
+    }
+
+    case "reload": {
+      if (!options.context.isIdle() || options.context.hasPendingMessages()) {
+        await reply("Cannot reload while Pi is busy or has pending messages. Send /abort first.");
+        return true;
+      }
+      const commandContext = getTelegramCommandContext(options.projectRoot);
+      if (!commandContext) {
+        await reply("Pi session reload is unavailable. Run /telegram_commands in the TUI first, then send /reload again.");
+        return true;
+      }
+      await reply("♻️ Reloading the active Pi session...");
+      try {
+        await commandContext.reload();
+        await reply("✅ Active Pi session reloaded.");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await reply(`Pi session reload failed: ${message}`);
+      }
       return true;
     }
 

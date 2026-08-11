@@ -11,6 +11,11 @@ import {
   createTelegramChannelLifecycle,
 } from "@xzy-ai/channels";
 import { registerTelegramLifecycle, clearTelegramLifecycleRegistry } from "../src/registrations/telegram-lifecycle.ts";
+import {
+  clearTelegramCommandContext,
+  getTelegramCommandContext,
+  setTelegramCommandContext,
+} from "../src/registrations/telegram-controls.ts";
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
@@ -45,6 +50,18 @@ function context(cwd: string, sessionId: string): ExtensionContext {
     sessionManager: { getSessionId: () => sessionId },
   } as unknown as ExtensionContext;
 }
+
+test("root session shutdown clears the retained reload command context", async () => {
+  const cwd = projectRoot();
+  clearTelegramCommandContext(cwd);
+  setTelegramCommandContext(cwd, {} as never);
+  assert.ok(getTelegramCommandContext(cwd), "command context is retained before shutdown");
+  const { pi, handlers } = registrations();
+  registerTelegramLifecycle(pi);
+  await handlers.get("session_shutdown")!({ reason: "quit" }, context(cwd, "root"));
+  assert.equal(getTelegramCommandContext(cwd), undefined, "root shutdown clears the command context");
+  clearTelegramLifecycleRegistry();
+});
 
 test("a valid configuration starts one connection on session start and stops it on shutdown", async () => {
   const cwd = projectRoot();

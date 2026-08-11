@@ -179,7 +179,7 @@ test("a gated background agent stays queued until running with a live handle", a
     assert.equal(result.details.status, "queued");
     assert.equal(
       result.content[0]?.text,
-      "Agent test-agent (" + jobId + ") is running. Take a rest while the agent works. Do not poll; the agent will send its report as soon as it finishes.",
+      "Agent test-agent (" + jobId + ") is running. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.",
     );
 
     // Free one gate slot. The queued background operation is admitted, marks

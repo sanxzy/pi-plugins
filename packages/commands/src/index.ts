@@ -21,8 +21,12 @@ export {
   type TelegramInboundDeps,
 } from "./registrations/telegram-inbound.ts";
 export {
+  clearTelegramCommandContext,
   clearTelegramControlState,
   dispatchTelegramControl,
+  getTelegramCommandContext,
+  registerTelegramCommandContext,
+  setTelegramCommandContext,
   type TelegramControlDispatchOptions,
 } from "./registrations/telegram-controls.ts";
 export {

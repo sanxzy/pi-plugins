@@ -37,6 +37,7 @@ export interface TelegramCommandExpanderOptions {
 export const TELEGRAM_NATIVE_MENU_COMMANDS: readonly TelegramNativeMenuSource[] = [
   { name: "abort", description: "Abort the current Pi operation", source: "extension" },
   { name: "stop", description: "Abort Pi operation and clear the Telegram queue", source: "extension" },
+  { name: "reload", description: "Reload the active Pi session runtime", source: "extension" },
   { name: "compact", description: "Compact the current session", source: "extension" },
   { name: "context", description: "Show context usage", source: "extension" },
   { name: "status", description: "Show runtime status", source: "extension" },

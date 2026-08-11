@@ -8,7 +8,7 @@ import { toJobSummary } from "../job-summary.ts";
 import { errorResult, textResult } from "../results.ts";
 
 export function formatRunningAgentText(subagentType: string, jobId: string): string {
-  return `Agent ${subagentType} (${jobId}) is running. Take a rest while the agent works. Do not poll; the agent will send its report as soon as it finishes.`;
+  return `Agent ${subagentType} (${jobId}) is running. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.`;
 }
 
 export function registerStatusTool(pi: ExtensionAPI): void {

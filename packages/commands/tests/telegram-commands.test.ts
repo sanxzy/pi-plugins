@@ -48,7 +48,7 @@ test("native menu sources are populated", () => {
     isDevMode: () => true,
   });
   assert.deepEqual(expander.menuSources().map((command) => command.name), [
-    "abort", "stop", "compact", "context", "status", "system_prompt", "model", "thinking",
+    "abort", "stop", "reload", "compact", "context", "status", "system_prompt", "model", "thinking",
   ]);
 });
 

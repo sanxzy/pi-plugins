@@ -15,6 +15,9 @@ import {
   type TelegramMenuCommandSource,
 } from "@xzy-ai/channels";
 import {
+  clearTelegramCommandContext,
+} from "./telegram-controls.ts";
+import {
   clearTelegramProjectManager,
   clearTelegramProjectManagers,
   getTelegramProjectManager,
@@ -73,6 +76,7 @@ export function registerTelegramLifecycle(
   pi.on("session_shutdown", async (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
     if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
+    clearTelegramCommandContext(projectRoot);
     const lifecycle = lifecyclesByProject.get(projectRoot);
     if (!lifecycle) return;
     await lifecycle.stop();

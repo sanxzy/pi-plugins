@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+  clearTelegramCommandContext,
   clearTelegramControlState,
   dispatchTelegramControl,
+  setTelegramCommandContext,
   takeTelegramCompactionOrigin,
 } from "../src/registrations/telegram-controls.ts";
 
@@ -42,6 +44,86 @@ test("non-control commands are not owned by the handler", async () => {
   );
   assert.equal(handled, false);
   assert.deepEqual(messages, []);
+});
+
+test("reload invokes the retained command context", async () => {
+  clearTelegramCommandContext("/tmp/reload-project");
+  let reloadCalled = 0;
+  setTelegramCommandContext("/tmp/reload-project", {
+    reload: async () => { reloadCalled += 1; },
+  } as unknown as ExtensionCommandContext);
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(command("reload"), {
+    projectRoot: "/tmp/reload-project",
+    chatId: "555",
+    context: context(),
+    sendMessage: send,
+  });
+  assert.equal(handled, true);
+  assert.equal(reloadCalled, 1);
+  assert.deepEqual(messages, [
+    "♻️ Reloading the active Pi session...",
+    "✅ Active Pi session reloaded.",
+  ]);
+  clearTelegramCommandContext("/tmp/reload-project");
+});
+
+test("reload refuses busy or queued sessions", async () => {
+  clearTelegramCommandContext("/tmp/reload-busy");
+  let reloadCalled = false;
+  setTelegramCommandContext("/tmp/reload-busy", {
+    reload: async () => { reloadCalled = true; },
+  } as unknown as ExtensionCommandContext);
+  const busy = collectReplies();
+  await dispatchTelegramControl(command("reload"), {
+    projectRoot: "/tmp/reload-busy",
+    chatId: "555",
+    context: context({ isIdle: () => false }),
+    sendMessage: busy.send,
+  });
+  assert.equal(reloadCalled, false);
+  assert.ok(busy.messages[0]?.includes("busy"));
+
+  const pending = collectReplies();
+  await dispatchTelegramControl(command("reload"), {
+    projectRoot: "/tmp/reload-busy",
+    chatId: "555",
+    context: context({ hasPendingMessages: () => true }),
+    sendMessage: pending.send,
+  });
+  assert.equal(reloadCalled, false);
+  assert.ok(pending.messages[0]?.includes("busy"));
+  clearTelegramCommandContext("/tmp/reload-busy");
+});
+
+test("reload reports unavailable until the TUI context is populated", async () => {
+  clearTelegramCommandContext("/tmp/reload-missing");
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(command("reload"), {
+    projectRoot: "/tmp/reload-missing",
+    chatId: "555",
+    context: context(),
+    sendMessage: send,
+  });
+  assert.equal(handled, true);
+  assert.ok(messages[0]?.includes("/telegram_commands"));
+});
+
+test("reload reports SDK failures without escaping the Telegram handler", async () => {
+  clearTelegramCommandContext("/tmp/reload-failure");
+  setTelegramCommandContext("/tmp/reload-failure", {
+    reload: async () => { throw new Error("stale context"); },
+  } as unknown as ExtensionCommandContext);
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(command("reload"), {
+    projectRoot: "/tmp/reload-failure",
+    chatId: "555",
+    context: context(),
+    sendMessage: send,
+  });
+  assert.equal(handled, true);
+  assert.ok(messages[1]?.includes("stale context"));
+  clearTelegramCommandContext("/tmp/reload-failure");
 });
 
 test("compact preserves its Telegram origin until post-compaction handling", async () => {
