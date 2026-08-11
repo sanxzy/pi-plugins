@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createJob } from "@xzy-ai/core";
-import { getChildPool } from "@xzy-ai/runtime";
+import { getChildPool, startRootSession } from "@xzy-ai/runtime";
 import { registerGoalTools } from "../src/registrations/goals.ts";
 
 interface RegisteredTool {
@@ -49,6 +49,7 @@ function text(result: { content: Array<{ type: string; text?: string }> }): stri
 async function withCwd(run: (cwd: string, registered: Map<string, RegisteredTool>) => Promise<void>): Promise<void> {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-tools-"));
   try {
+    startRootSession({ projectRoot: cwd, sessionId: "root" });
     await run(cwd, tools());
   } finally {
     rmSync(cwd, { recursive: true, force: true });
