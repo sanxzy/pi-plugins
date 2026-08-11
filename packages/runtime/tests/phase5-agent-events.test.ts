@@ -25,7 +25,7 @@ function project(): string {
 
 function setupHome(): string {
   const home = mkdtempSync(join(tmpdir(), "pi-code-phase5-home-"));
-  process.env.XZY_PI_CODE_HOME = home;
+  process.env.PI_CODE_TEST_HOME = home;
   return home;
 }
 

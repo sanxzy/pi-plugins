@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.XZY_PI_CODE_HOME = mkdtempSync(join(tmpdir(), "pi-code-channel-test-home-"));
+process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-channel-test-home-"));
 import {
   createTelegramInbound,
   decodeAcceptedText,

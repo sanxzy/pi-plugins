@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-process.env.XZY_PI_CODE_HOME = mkdtempSync(join(tmpdir(), "pi-code-channels-log-home-"));
+process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-channels-log-home-"));
 import { createChannelLogger, channelLogFile } from "../src/index.ts";
 
 function projectRoot(): string {

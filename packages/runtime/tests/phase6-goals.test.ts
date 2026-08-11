@@ -22,7 +22,7 @@ function projectRoot(): string {
 }
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), "pi-code-phase6-home-"));
-  process.env.XZY_PI_CODE_HOME = dir;
+  process.env.PI_CODE_TEST_HOME = dir;
   return dir;
 }
 function context(cwd: string, sessionId: string, sessionFile: string | undefined = join(cwd, "sessions", `${sessionId}.jsonl`)): ExtensionContext {

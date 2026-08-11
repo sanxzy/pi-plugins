@@ -20,7 +20,7 @@ import {
 
 function home(): string {
   const dir = mkdtempSync(join(tmpdir(), "pi-code-phase7-home-"));
-  process.env.XZY_PI_CODE_HOME = dir;
+  process.env.PI_CODE_TEST_HOME = dir;
   return dir;
 }
 function projectRoot(): string {

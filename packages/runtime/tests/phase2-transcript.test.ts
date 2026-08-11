@@ -17,7 +17,7 @@ import {
 const PRIVATE_DIR = 0o700;
 const PRIVATE_FILE = 0o600;
 const testHome = mkdtempSync(join(tmpdir(), "pi-code-phase2-home-"));
-process.env.XZY_PI_CODE_HOME = testHome;
+process.env.PI_CODE_TEST_HOME = testHome;
 
 function mode(path: string): number {
   return statSync(path).mode & 0o777;

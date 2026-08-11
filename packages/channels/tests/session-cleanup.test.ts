@@ -22,7 +22,7 @@ import {
 
 function setup(): string {
   const home = mkdtempSync(join(tmpdir(), "pi-code-phase7-cleanup-home-"));
-  process.env.XZY_PI_CODE_HOME = home;
+  process.env.PI_CODE_TEST_HOME = home;
   return home;
 }
 function project(): string {

@@ -39,9 +39,9 @@ function context(cwd: string, sessionId: string): ExtensionContext {
 }
 
 test("production session lifecycle creates and finishes the home session manifest", async () => {
-  const previousHome = process.env.XZY_PI_CODE_HOME;
+  const previousHome = process.env.PI_CODE_TEST_HOME;
   const home = mkdtempSync(join(tmpdir(), "pi-code-phase3-command-home-"));
-  process.env.XZY_PI_CODE_HOME = home;
+  process.env.PI_CODE_TEST_HOME = home;
   const cwd = projectRoot();
   try {
     const { pi, handlers } = registrations();
@@ -55,7 +55,7 @@ test("production session lifecycle creates and finishes the home session manifes
     assert.equal(manifest.pid, process.pid);
     assert.ok(manifest.processStartTime);
   } finally {
-    if (previousHome === undefined) delete process.env.XZY_PI_CODE_HOME;
-    else process.env.XZY_PI_CODE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
+    else process.env.PI_CODE_TEST_HOME = previousHome;
   }
 });

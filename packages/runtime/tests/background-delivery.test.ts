@@ -241,7 +241,7 @@ test("runBackgroundJob catches an unexpected throw and marks the job failed", as
 
 test("runBackgroundJob persists a real agent lifecycle in the event read model", async () => {
   const home = mkdtempSync(join(tmpdir(), "pi-code-phase5-agent-home-"));
-  process.env.XZY_PI_CODE_HOME = home;
+  process.env.PI_CODE_TEST_HOME = home;
   const projectRoot = mkdtempSync(join(tmpdir(), "pi-code-phase5-agent-project-"));
   const eventRegistry = createAgentEventRegistry(projectRoot, "root-session");
   const job = makeJob("job-live", "queued");

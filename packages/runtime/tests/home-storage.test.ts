@@ -27,7 +27,7 @@ import {
 } from "@xzy-ai/runtime";
 
 const testHome = mkdtempSync(join(tmpdir(), "pi-code-home-root-"));
-process.env.XZY_PI_CODE_HOME = testHome;
+process.env.PI_CODE_TEST_HOME = testHome;
 
 function projectRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-home-"));
@@ -205,15 +205,15 @@ test("corrupt manifest fails closed when read", () => {
 
 test("home agent directory resolves a configured tilde override", () => {
   const previous = process.env.PI_CODING_AGENT_DIR;
-  const previousHome = process.env.XZY_PI_CODE_HOME;
+  const previousHome = process.env.PI_CODE_TEST_HOME;
   try {
-    process.env.XZY_PI_CODE_HOME = "~/xzy/home";
+    process.env.PI_CODE_TEST_HOME = "~/xzy/home";
     assert.ok(homeRootBase().endsWith(join("xzy", "home")));
     assert.ok(!homeRootBase().includes("~"), "tilde must be expanded, not literal");
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
-    if (previousHome === undefined) delete process.env.XZY_PI_CODE_HOME;
-    else process.env.XZY_PI_CODE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
+    else process.env.PI_CODE_TEST_HOME = previousHome;
   }
 });

@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/job-session.test.ts tests/child-session-live.test.ts tests/goal.test.ts"
+    "test": "node --test --import ../../test-setup.mjs --import tsx tests/job-session.test.ts tests/child-session-live.test.ts tests/goal.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

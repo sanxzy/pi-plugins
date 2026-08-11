@@ -126,7 +126,11 @@ function resolveHome(value: string): string {
 
 /** The configured pi-code home base, or the Pi agent home directory default. */
 export function homeRootBase(): string {
-  const configured = process.env.XZY_PI_CODE_HOME;
+  // Production reads only `PI_CODE_HOME` (or the Pi agent home directory
+  // default). Test runs set `PI_CODE_TEST_HOME`; the test-setup harness
+  // mirrors it into `PI_CODE_HOME` so this resolver never needs to know the
+  // test-only name.
+  const configured = process.env.PI_CODE_HOME;
   const base = configured && configured.length > 0 ? resolveHome(configured) : homeAgentDirectory();
   return canonicalProjectRoot(base);
 }

@@ -97,8 +97,8 @@ test("new background spawns remain TUI-only", async () => {
 });
 
 test("a gated background agent stays queued until running with a live handle", async () => {
-  const previousHome = process.env.XZY_PI_CODE_HOME;
-  process.env.XZY_PI_CODE_HOME = mkdtempSync(join(tmpdir(), "pi-code-background-gate-home-"));
+  const previousHome = process.env.PI_CODE_TEST_HOME;
+  process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-background-gate-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-background-gate-"));
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(
@@ -211,7 +211,7 @@ test("a gated background agent stays queued until running with a live handle", a
     await Promise.allSettled(holdRuns);
     await flush();
     rmSync(cwd, { recursive: true, force: true });
-    if (previousHome === undefined) delete process.env.XZY_PI_CODE_HOME;
-    else process.env.XZY_PI_CODE_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
+    else process.env.PI_CODE_TEST_HOME = previousHome;
   }
 });
