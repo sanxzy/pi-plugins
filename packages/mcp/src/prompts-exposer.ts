@@ -67,7 +67,6 @@ export class McpPromptsResourcesExposer {
         next.set(identity, commandName);
         if (!this.identityNames.has(identity)) {
           this.identityNames.set(identity, commandName);
-          this.promptCommands.set(commandName, identity);
           this.pi.registerCommand(commandName, {
             description: buildPromptDescription(prompt, serverName),
             handler: async (args: string, ctx: ExtensionContext): Promise<void> => {
@@ -75,6 +74,8 @@ export class McpPromptsResourcesExposer {
             },
           });
         }
+        // Re-add a prompt's live dispatch mapping after a refresh.
+        this.promptCommands.set(commandName, identity);
       }
     }
     for (const [identity, commandName] of this.identityNames) {
@@ -132,14 +133,25 @@ export class McpPromptsResourcesExposer {
           return { content: [{ type: "text", text: "Error: MCP resource read denied by policy" }], details: { server, uri, denied: true } };
         }
         const result = await readResource(server, uri, signal);
-        return { content: [{ type: "text", text: resourceResultToText(result) }], details: result };
+        const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> =
+          (result.content ?? []).map((block) =>
+            block.type === "image"
+              ? { type: "image", data: block.data ?? "", mimeType: block.mimeType ?? "image/png" }
+              : { type: "text", text: block.text ?? "" },
+          );
+        if (content.length === 0) {
+          content.push({ type: "text", text: resourceResultToText(result) });
+        }
+        return { content, details: result };
       },
     });
   }
 
   private output(ctx: ExtensionContext, text: string): void {
-    if (ctx.hasUI) ctx.ui.notify(text, "info");
-    else this.pi.sendUserMessage(text, { deliverAs: "steer" });
+    // Prompt results enter the ordinary Pi session flow in every mode. Keep a
+    // UI notification as a lightweight visual acknowledgement as well.
+    this.pi.sendUserMessage(text, { deliverAs: "followUp" });
+    if (ctx.hasUI) ctx.ui.notify("MCP prompt output sent to the session.", "info");
   }
 }
 

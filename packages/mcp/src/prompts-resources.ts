@@ -22,12 +22,21 @@ export interface McpResourceResult {
   server: string;
   uri: string;
   text: string;
+  content?: ResourceContentBlock[];
   isError: boolean;
   failure?: "mcp_error" | "transport_error" | "cancelled" | "policy_denied" | "unavailable";
   omitted?: string[];
 }
 
 const MAX_TEXT = 50_000;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+export interface ResourceContentBlock {
+  type: "text" | "image";
+  text?: string;
+  data?: string;
+  mimeType?: string;
+}
 
 function bounded(value: string | undefined): string {
   if (!value) return "";
@@ -66,7 +75,7 @@ export function normalizePromptResult(
   return { server, prompt, messages, isError: false };
 }
 
-/** Flatten a read-resource result into bounded text plus omission notes. */
+/** Flatten a read-resource result into bounded text/images plus omission notes. */
 export function normalizeResourceResult(
   server: string,
   uri: string,
@@ -87,26 +96,47 @@ export function normalizeResourceResult(
   }
   const result = (raw && typeof raw === "object" ? raw : {}) as { contents?: Array<Record<string, unknown>> };
   const parts: string[] = [];
+  const contentBlocks: ResourceContentBlock[] = [];
   const omitted: string[] = [];
+  let total = 0;
+  const push = (part: string): void => {
+    const bounded = limit(part, MAX_TEXT - Math.max(0, total));
+    parts.push(bounded);
+    total += bounded.length;
+  };
   for (const content of result.contents ?? []) {
     if (typeof content.text === "string") {
-      parts.push(bounded(content.text));
+      push(content.text);
+      contentBlocks.push({ type: "text", text: bounded(content.text) });
       continue;
     }
     if (typeof content.blob === "string") {
       const mime = typeof content.mimeType === "string" ? content.mimeType : "";
       if (mime.startsWith("image/")) {
-        parts.push(`[image resource omitted; use a client that handles binary resources]`);
+        const bytes = Math.floor(content.blob.replace(/\s/g, "").length * 3 / 4);
+        if (bytes > MAX_IMAGE_BYTES) {
+          push(`[image omitted: attachment exceeds ${MAX_IMAGE_BYTES} bytes]`);
+          omitted.push(content.uri ? String(content.uri) : uri);
+        } else {
+          parts.push(`[image: ${mime} ${content.uri ?? uri}]`);
+          contentBlocks.push({ type: "image", data: content.blob, mimeType: mime });
+          total += 64;
+        }
       } else {
-        parts.push(`[binary resource omitted: ${content.uri ?? uri}]`);
+        push(`[binary resource omitted: ${content.uri ?? uri}]`);
+        omitted.push(content.uri ? String(content.uri) : uri);
       }
-      omitted.push(content.uri ? String(content.uri) : uri);
       continue;
     }
     omitted.push(content.uri ? String(content.uri) : uri);
-    parts.push(`[resource content omitted: unsupported type]`);
+    push("[resource content omitted: unsupported type]");
   }
-  return { server, uri, text: parts.join("\n"), isError: false, ...(omitted.length ? { omitted } : {}) };
+  return { server, uri, text: parts.join("\n"), content: contentBlocks, isError: false, ...(omitted.length ? { omitted } : {}) };
+}
+
+function limit(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.max(0, max))}\n[output truncated]`;
 }
 
 /** Build a bounded text message for command output. */

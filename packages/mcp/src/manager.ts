@@ -62,6 +62,8 @@ export interface McpManagerOptions extends McpConfigLoadOptions {
   projectRoot: string;
   watch?: (paths: string[], onChange: () => void) => () => void;
   onReload?: (state: McpManagerState) => void;
+  /** Invoked when a connected server reports a list-changed notification. */
+  onCatalogChanged?: (name: string) => void;
 }
 
 export interface McpManager {
@@ -84,6 +86,8 @@ export interface McpManager {
   resourcesFor(name: string): Resource[] | undefined;
   getPrompt(name: string, nativeName: string, args: Record<string, string>, signal?: AbortSignal): Promise<GetPromptResult>;
   readResource(name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult>;
+  /** Re-discover a connected server's catalogs and bump its revision. */
+  refreshCatalog(name: string, signal?: AbortSignal): Promise<ServerCatalog | undefined>;
   close(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -206,7 +210,9 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         closeConnection(candidate),
       );
       candidate.catalog = await discoverCatalog(client, requestTimeout, signal);
-      wireListChangedHandlers(client, candidate.catalog);
+      wireListChangedHandlers(client, candidate.catalog, () => {
+        options.onCatalogChanged?.(name);
+      });
       connections.set(name, candidate);
       const connected = { status: "connected", toolCount: candidate.catalog.tools.length } as const;
       setStatus(name, connected);
@@ -257,7 +263,9 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     const status = mapRemoteStatus(result.status);
     setStatus(name, status);
     if (result.status.status === "connected" && result.client) {
-      wireListChangedHandlers(result.client, result.catalog);
+      wireListChangedHandlers(result.client, result.catalog, () => {
+        options.onCatalogChanged?.(name);
+      });
       connections.set(name, { client: result.client, catalog: result.catalog });
       const connected = { status: "connected", toolCount: result.catalog.tools.length } as const;
       setStatus(name, connected);
@@ -378,6 +386,28 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const readResource = (name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> =>
     serialize(() => readResourceInternal(name, uri, signal));
 
+  const refreshCatalogInternal = async (name: string, signal?: AbortSignal): Promise<ServerCatalog | undefined> => {
+    const connection = connections.get(name);
+    if (!connection) return undefined;
+    const requestTimeout = resolveTimeout(
+      state.config?.servers[name]?.type === "local"
+        ? (state.config.servers[name] as McpLocalServerConfig).timeout
+        : state.config?.servers[name]?.type === "remote"
+          ? (state.config.servers[name] as McpRemoteServerConfig).timeout
+          : undefined,
+      state.config?.timeout,
+      "request",
+    );
+    const catalog = await discoverCatalog(connection.client, requestTimeout, signal);
+    connection.catalog = catalog;
+    wireListChangedHandlers(connection.client, catalog, () => options.onCatalogChanged?.(name));
+    setStatus(name, { status: "connected", toolCount: catalog.tools.length });
+    return catalog;
+  };
+
+  const refreshCatalog = (name: string, signal?: AbortSignal): Promise<ServerCatalog | undefined> =>
+    serialize(() => refreshCatalogInternal(name, signal));
+
   const start = (): Promise<McpManagerState> =>
     serialize(async () => {
       reload();
@@ -420,6 +450,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     callTool,
     getPrompt,
     readResource,
+    refreshCatalog,
     close,
     stop,
   };

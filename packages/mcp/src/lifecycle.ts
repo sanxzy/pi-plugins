@@ -1,7 +1,7 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { McpToolExposer, type McpToolSnapshotEntry } from "./expose.ts";
 import { normalizeCallToolResult, type NormalizedDetails } from "./results.ts";
-import { McpPromptsResourcesExposer } from "./prompts-exposer.ts";
+import { McpPromptsResourcesExposer, type McpAuthorize } from "./prompts-exposer.ts";
 import { normalizePromptResult, normalizeResourceResult } from "./prompts-resources.ts";
 import { userAgentDir } from "./config.ts";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
@@ -13,6 +13,8 @@ import {
 
 export interface McpLifecycleRegistrationOptions extends Omit<McpManagerOptions, "projectRoot"> {
   agentDir?: string;
+  /** Authorization hook shared by prompt and resource calls (default allow). */
+  authorize?: McpAuthorize;
 }
 
 /**
@@ -38,14 +40,16 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     const key = managerKey(ctx);
     const existing = managers.get(key);
     if (existing) return;
+    let reconcile: (() => void) | undefined;
     const manager = createMcpManager({
       ...options,
       projectRoot: ctx.cwd,
       agentDir: userAgentDir(options.agentDir),
+      onCatalogChanged: () => reconcile?.(),
     });
     managers.set(key, manager);
     const exposer = new McpToolExposer(pi);
-    exposer.setInvokeHandler(async (mapping, args, signal, invokeCtx): Promise<AgentToolResult<NormalizedDetails>> => {
+    exposer.setInvokeHandler(async (mapping, args, signal): Promise<AgentToolResult<NormalizedDetails>> => {
       try {
         const raw = await manager.callTool(mapping.serverName, mapping.nativeName, args, signal);
         return normalizeCallToolResult(raw, { server: mapping.serverName, tool: mapping.nativeName });
@@ -59,50 +63,53 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       }
     });
     exposers.set(key, exposer);
-    await manager.start();
-    const snapshot: McpToolSnapshotEntry[] = [];
-    for (const serverName of manager.serverNames()) {
-      for (const tool of manager.toolsFor(serverName) ?? []) {
-        snapshot.push({
-          serverName,
-          nativeName: tool.name,
-          description: tool.description,
-          inputSchema: tool.inputSchema,
+
+    const promptResourceExposer = new McpPromptsResourcesExposer(pi, { authorize: options.authorize });
+    const readPrompt = async (serverName: string, nativeName: string, args: Record<string, string>, signal?: AbortSignal) => {
+      try {
+        return normalizePromptResult(serverName, nativeName, await manager.getPrompt(serverName, nativeName, args, signal));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return normalizePromptResult(serverName, nativeName, undefined, {
+          cancelled: signal?.aborted,
+          unavailable: /not connected/i.test(message),
+          transportError: /not connected/i.test(message) ? undefined : message,
         });
       }
-    }
-    exposer.sync(snapshot, 1);
-
-    const promptResourceExposer = new McpPromptsResourcesExposer(pi);
-    promptResourceExposer.register(
-      manager,
-      async (serverName, nativeName, args, signal) => {
-        try {
-          return normalizePromptResult(serverName, nativeName, await manager.getPrompt(serverName, nativeName, args, signal));
-        } catch (error) {
-          return normalizePromptResult(serverName, nativeName, undefined, {
-            cancelled: signal?.aborted,
-            transportError: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
-      async (serverName, uri, signal) => {
-        try {
-          return normalizeResourceResult(serverName, uri, await manager.readResource(serverName, uri, signal));
-        } catch (error) {
-          return normalizeResourceResult(serverName, uri, undefined, {
-            cancelled: signal?.aborted,
-            transportError: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
-      (serverName) => (manager.resourcesFor(serverName) ?? []).map((resource) => ({
+    };
+    const readResource = async (serverName: string, uri: string, signal?: AbortSignal) => {
+      try {
+        return normalizeResourceResult(serverName, uri, await manager.readResource(serverName, uri, signal));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return normalizeResourceResult(serverName, uri, undefined, {
+          cancelled: signal?.aborted,
+          unavailable: /not connected/i.test(message),
+          transportError: /not connected/i.test(message) ? undefined : message,
+        });
+      }
+    };
+    await manager.start();
+    promptResourceExposer.register(manager, readPrompt, readResource, (serverName) =>
+      (manager.resourcesFor(serverName) ?? []).map((resource) => ({
         uri: resource.uri,
         name: resource.name,
         description: resource.description,
         mimeType: resource.mimeType,
       })),
     );
+    let revision = 1;
+    reconcile = () => {
+      const snapshot: McpToolSnapshotEntry[] = [];
+      for (const serverName of manager.serverNames()) {
+        for (const tool of manager.toolsFor(serverName) ?? []) {
+          snapshot.push({ serverName, nativeName: tool.name, description: tool.description, inputSchema: tool.inputSchema });
+        }
+      }
+      exposer.sync(snapshot, revision++);
+      promptResourceExposer.syncPrompts(manager, readPrompt);
+    };
+    reconcile();
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {

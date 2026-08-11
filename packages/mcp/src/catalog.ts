@@ -93,14 +93,21 @@ export async function discoverCatalog(client: Client, timeout: number, signal?: 
 }
 
 /** Wire list-changed notifications to bump a change flag on the catalog. */
-export function wireListChangedHandlers(client: Client, catalog: ServerCatalog): void {
+export function wireListChangedHandlers(
+  client: Client,
+  catalog: ServerCatalog,
+  onChanged?: (kind: "tools" | "prompts" | "resources") => void,
+): void {
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
     catalog.listChanged = "tools";
+    onChanged?.("tools");
   });
   client.setNotificationHandler(PromptListChangedNotificationSchema, () => {
     catalog.listChanged = "prompts";
+    onChanged?.("prompts");
   });
   client.setNotificationHandler(ResourceListChangedNotificationSchema, () => {
     catalog.listChanged = "resources";
+    onChanged?.("resources");
   });
 }
