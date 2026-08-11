@@ -37,6 +37,8 @@ export function parseRedirectUri(redirectUri?: string): { port: number; path: st
 export interface OAuthProviderOptions {
   serverUrl: string;
   agentDir: string;
+  /** Session owner for transient PKCE/state isolation. */
+  ownerKey?: string;
   store?: () => AuthStore;
   clientId?: string;
   clientSecret?: string;
@@ -65,6 +67,8 @@ export class PiOAuthProvider implements OAuthClientProvider {
   readonly redirectUrl: string;
   private pendingClientInfo?: OAuthClientInformationFull;
   private pendingTokens?: OAuthTokens;
+  private transientCodeVerifier?: string;
+  private transientState?: string;
 
   constructor(private readonly options: OAuthProviderOptions) {
     this.serverUrl = options.serverUrl;
@@ -119,16 +123,21 @@ export class PiOAuthProvider implements OAuthClientProvider {
   }
 
   async saveCodeVerifier(codeVerifier: string): Promise<void> {
-    this.authStore.update(this.serverUrl, (entry) => ({ ...entry, codeVerifier }));
+    if (this.options.ownerKey) this.transientCodeVerifier = codeVerifier;
+    else this.authStore.update(this.serverUrl, (entry) => ({ ...entry, codeVerifier }));
   }
 
   async codeVerifier(): Promise<string> {
-    const verifier = this.authStore.getForUrl(this.serverUrl)?.codeVerifier;
+    const verifier = this.options.ownerKey ? this.transientCodeVerifier : this.authStore.getForUrl(this.serverUrl)?.codeVerifier;
     if (!verifier) throw new Error(`No PKCE code verifier saved for MCP server: ${this.serverUrl}`);
     return verifier;
   }
 
   async state(): Promise<string> {
+    if (this.options.ownerKey) {
+      this.transientState ??= randomHex(32);
+      return this.transientState;
+    }
     const stored = this.authStore.getForUrl(this.serverUrl)?.oauthState;
     if (stored) return stored;
     const next = randomHex(32);
@@ -245,7 +254,7 @@ let closingServer: Promise<void> | undefined;
 let callbackPort = OAUTH_CALLBACK_PORT;
 let callbackPath = OAUTH_CALLBACK_PATH;
 const pendingAuths = new Map<string, PendingAuth>();
-const stateToUrl = new Map<string, string>();
+const stateToUrl = new Map<string, { url: string; ownerKey?: string }>();
 
 async function isPortInUse(port: number): Promise<boolean> {
   if (port === 0) return false;
@@ -262,12 +271,7 @@ async function isPortInUse(port: number): Promise<boolean> {
 }
 
 function cleanupStateIndex(state: string): void {
-  for (const [url, s] of stateToUrl) {
-    if (s === state) {
-      stateToUrl.delete(url);
-      break;
-    }
-  }
+  stateToUrl.delete(state);
 }
 
 function stopIfIdle(): void {
@@ -367,13 +371,13 @@ export async function ensureCallbackServer(redirectUri?: string): Promise<{ port
 }
 
 /** Register a pending callback for an OAuth state; resolves with the auth code. */
-export function waitForOAuthCallback(state: string, url: string): Promise<string> {
-  stateToUrl.set(url, state);
+export function waitForOAuthCallback(state: string, url: string, ownerKey?: string): Promise<string> {
+  stateToUrl.set(state, { url, ownerKey });
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       if (pendingAuths.has(state)) {
         pendingAuths.delete(state);
-        stateToUrl.delete(url);
+        stateToUrl.delete(state);
         reject(new Error("OAuth callback timeout - authorization took too long"));
         stopIfIdle();
       }
@@ -383,13 +387,13 @@ export function waitForOAuthCallback(state: string, url: string): Promise<string
 }
 
 /** Cancel a pending OAuth callback, e.g. on logout or shutdown. */
-export function cancelOAuthCallback(url: string): void {
-  const state = stateToUrl.get(url);
+export function cancelOAuthCallback(url: string, ownerKey?: string): void {
+  const state = [...stateToUrl.entries()].find(([, binding]) => binding.url === url && binding.ownerKey === ownerKey)?.[0];
   const pending = state ? pendingAuths.get(state) : undefined;
   if (pending) {
     clearTimeout(pending.timeout);
     pendingAuths.delete(state!);
-    stateToUrl.delete(url);
+    stateToUrl.delete(state!);
     pending.reject(new Error("Authorization cancelled"));
     stopIfIdle();
   }

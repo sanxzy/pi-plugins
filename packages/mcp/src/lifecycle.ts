@@ -6,6 +6,7 @@ import { normalizePromptResult, normalizeResourceResult } from "./prompts-resour
 import { evaluatePolicy, policyFromConfig, type PolicyTarget } from "./policy.ts";
 import { redactDiagnostic } from "./diagnostics.ts";
 import { userAgentDir } from "./config.ts";
+import { publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
 import {
   startRemoteAuth,
@@ -89,6 +90,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     const manager = createMcpManager({
       ...options,
       projectRoot: ctx.cwd,
+      ownerKey: managerKey(ctx),
       agentDir: userAgentDir(options.agentDir),
       onConfigChanged: (names) => {
         if (disposed.has(key) || managers.get(key) !== manager) return;
@@ -172,6 +174,10 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
         }
       }
       sharedExposer.syncSession(key, snapshot, sharedRevision++);
+      const childNames = snapshot
+        .map((entry) => sharedExposer.mappingForIdentity(entry.serverName, entry.nativeName)?.piName)
+        .filter((name): name is string => Boolean(name));
+      publishSessionMcpNames(ctx, childNames);
       sharedPromptResourceExposer.syncSession(key);
       reconcileActiveTools();
     };
@@ -188,6 +194,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     authorizers.delete(key);
     sharedExposer.removeSession(key, sharedRevision++);
     sharedPromptResourceExposer.removeSession(key);
+    clearMcpNames(ctx);
     reconciles.delete(key);
     await manager.stop();
     reconcileActiveTools();
@@ -217,6 +224,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
             const started = await startRemoteAuth({
               url: server.url,
               agentDir,
+              ownerKey: managerKey(ctx),
               oauth: server.oauth,
               onRedirect: async (url) => {
                 notify(ctx, `MCP auth \"${name}\": open ${redactDiagnostic(url.toString())}`);
@@ -227,7 +235,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
             void started.callback.then(
               async (code) => {
                 if (!code) return;
-                await finishRemoteAuth({ url: server.url, agentDir, oauth: server.oauth, onRedirect: async () => {} }, code);
+                await finishRemoteAuth({ url: server.url, agentDir, ownerKey: managerKey(ctx), oauth: server.oauth, onRedirect: async () => {} }, code);
                 notify(ctx, `MCP auth \"${name}\": authorized.`);
               },
               async () => {
@@ -250,7 +258,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
           // Close any active transport first so logout leaves no authenticated
           // client alive, then clear credentials and pending callbacks.
           await manager.disconnect(name);
-          logoutRemote({ url: server.url, agentDir, oauth: server.oauth, onRedirect: () => {} });
+          logoutRemote({ url: server.url, agentDir, ownerKey: managerKey(ctx), oauth: server.oauth, onRedirect: () => {} });
           notify(ctx, `MCP: logged out \"${name}\".`);
           return;
         }

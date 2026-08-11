@@ -163,6 +163,18 @@ test("provider client metadata carries Pi identity and configured OAuth settings
   rmSync(agentDir, { recursive: true, force: true });
 });
 
+test("owner-scoped OAuth callbacks do not cancel a simultaneous session flow", async () => {
+  const { port, path } = await ensureCallbackServer("http://127.0.0.1:0/mcp/oauth/callback");
+  const first = waitForOAuthCallback("state-owner-a", "https://server.example/mcp", "session-a");
+  const second = waitForOAuthCallback("state-owner-b", "https://server.example/mcp", "session-b");
+  cancelOAuthCallback("https://server.example/mcp", "session-a");
+  await assert.rejects(first, /cancelled/);
+  const accepted = await fetch(`http://127.0.0.1:${port}${path}?code=owner-b-code&state=state-owner-b`);
+  assert.equal(accepted.status, 200);
+  assert.equal(await second, "owner-b-code");
+  await stopCallbackServer();
+});
+
 test("cancelOAuthCallback rejects an in-flight callback promise", async () => {
   const agentDir = tempAgent("pi-code-mcp-oauth-cancel-");
   const { port, path } = await ensureCallbackServer("http://127.0.0.1:0/mcp/oauth/callback");

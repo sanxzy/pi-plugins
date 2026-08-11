@@ -76,6 +76,8 @@ export interface McpManagerState {
 export interface McpManagerOptions extends McpConfigLoadOptions {
   agentDir?: string;
   projectRoot: string;
+  /** Stable owner key for transient OAuth lifecycle state. */
+  ownerKey?: string;
   watch?: (paths: string[], onChange: () => void) => () => void;
   onReload?: (state: McpManagerState) => void;
   /** Invoked when a connected server reports a list-changed notification. */
@@ -423,6 +425,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       url: server.url,
       agentDir,
       projectRoot,
+      ownerKey: options.ownerKey,
       headers: server.headers,
       oauth: server.oauth,
       timeout: server.timeout ?? state.config?.timeout,
@@ -457,7 +460,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     const active = [...connections.entries()];
     connections.clear();
     await Promise.all(active.map(([, connection]) => closeConnection(connection)));
-    await teardownRemoteAuth();
+    await teardownRemoteAuth(options.ownerKey);
     for (const name of state.config ? Object.keys(state.config.servers) : Object.keys(state.servers)) {
       setStatus(name, { status: "disabled", errorCategory: "none" });
     }

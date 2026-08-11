@@ -113,6 +113,11 @@ export class McpToolExposer {
     return this.mappings.get(piName);
   }
 
+  mappingForIdentity(serverName: string, nativeName: string): McpToolMapping | undefined {
+    const piName = this.byIdentity.get(identityKey(serverName, nativeName));
+    return piName ? this.mappings.get(piName) : undefined;
+  }
+
   /** All currently registered mappings (newest revision for each piName). */
   mappingsSnapshot(): McpToolMapping[] {
     return [...this.mappings.values()];

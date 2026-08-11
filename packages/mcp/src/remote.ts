@@ -28,6 +28,8 @@ export interface ConnectRemoteOptions {
   url: string;
   agentDir: string;
   projectRoot?: string;
+  /** Owner (Pi session) for transient OAuth-flow isolation. */
+  ownerKey?: string;
   headers?: Record<string, string>;
   oauth?: McpRemoteServerConfig["oauth"];
   timeout?: McpTimeoutConfig;
@@ -46,6 +48,10 @@ interface PendingRemoteAuth {
 }
 
 const pendingRemoteAuth = new Map<string, PendingRemoteAuth>();
+
+function authKey(ownerKey: string | undefined, url: string): string {
+  return ownerKey ? `${ownerKey}\u0000${url}` : url;
+}
 
 function getTimeout(timeout: McpTimeoutConfig | undefined, type: "startup" | "request"): number {
   return timeout?.[type] ?? DEFAULT_TIMEOUT;
@@ -80,6 +86,7 @@ function makeProvider(options: ConnectRemoteOptions): PiOAuthProvider | undefine
   const providerOptions: OAuthProviderOptions = {
     serverUrl: options.url,
     agentDir: options.agentDir,
+    ownerKey: options.ownerKey,
     store: options.store ? () => options.store! : undefined,
     clientId: config?.client_id,
     clientSecret: config?.client_secret,
@@ -222,7 +229,8 @@ export async function startRemoteAuth(
 ): Promise<{ authorizationUrl: string; provider: PiOAuthProvider; state: string; callback: Promise<string> }> {
   const provider = makeProvider(options);
   if (!provider) throw new Error("OAuth is disabled for this remote server");
-  const existing = pendingRemoteAuth.get(options.url);
+  const key = authKey(options.ownerKey, options.url);
+  const existing = pendingRemoteAuth.get(key);
   if (existing) {
     // A flow is already in flight for this server; reuse it rather than
     // orphaning the earlier callback until its 5-minute timeout.
@@ -244,6 +252,7 @@ export async function startRemoteAuth(
   const redirecting = new PiOAuthProvider({
     serverUrl: options.url,
     agentDir: options.agentDir,
+    ownerKey: options.ownerKey,
     store: options.store ? () => options.store! : undefined,
     clientId: typeof options.oauth === "object" ? options.oauth.client_id : undefined,
     clientSecret: typeof options.oauth === "object" ? options.oauth.client_secret : undefined,
@@ -277,9 +286,9 @@ export async function startRemoteAuth(
   // Register the loopback callback so the browser redirect resolves the
   // authorization code for finishRemoteAuth. Swallow cancellation so a logout
   // or shutdown never surfaces an unhandled rejection.
-  const callback = waitForOAuthCallback(state, options.url);
+  const callback = waitForOAuthCallback(state, options.url, options.ownerKey);
   callback.catch(() => undefined);
-  pendingRemoteAuth.set(options.url, {
+  pendingRemoteAuth.set(key, {
     provider: redirecting,
     state,
     authorizationUrl: redirect.toString(),
@@ -291,8 +300,8 @@ export async function startRemoteAuth(
   callback.then(undefined, () => {
     // Rejected callbacks are cancelled or timed out and cannot be finished;
     // successful callbacks remain indexed until finishRemoteAuth commits them.
-    if (pendingRemoteAuth.get(options.url)?.callback === callback) {
-      pendingRemoteAuth.delete(options.url);
+    if (pendingRemoteAuth.get(key)?.callback === callback) {
+      pendingRemoteAuth.delete(key);
     }
   });
   return { authorizationUrl: redirect.toString(), provider: redirecting, state, callback };
@@ -303,23 +312,24 @@ export async function finishRemoteAuth(
   options: ConnectRemoteOptions,
   authorizationCode?: string,
 ): Promise<void> {
-  const pending = pendingRemoteAuth.get(options.url);
+  const key = authKey(options.ownerKey, options.url);
+  const pending = pendingRemoteAuth.get(key);
   const provider = pending?.provider ?? makeProvider(options);
   if (!provider) throw new Error("OAuth is disabled for this remote server");
   const code = authorizationCode ?? (pending ? await pending.callback : undefined);
   if (!code) throw new Error("No OAuth authorization code is pending");
-  if (pending) cancelOAuthCallback(options.url);
+  if (pending) cancelOAuthCallback(options.url, options.ownerKey);
   try {
     const result = await runOAuth(provider, { serverUrl: options.url, authorizationCode: code });
     if (result !== "AUTHORIZED") throw new Error("OAuth authorization did not complete");
     await provider.commit();
-    pendingRemoteAuth.delete(options.url);
+    pendingRemoteAuth.delete(key);
   } catch (error) {
     // A failed finish must not leave a dead flow behind: cancel the callback,
     // drop the entry, and stop the listener when nothing else is pending.
     if (pending) {
-      cancelOAuthCallback(options.url);
-      pendingRemoteAuth.delete(options.url);
+      cancelOAuthCallback(options.url, options.ownerKey);
+      pendingRemoteAuth.delete(key);
     }
     stopCallbackServerIfIdle();
     throw error;
@@ -330,28 +340,32 @@ export async function finishRemoteAuth(
 export function logoutRemote(options: ConnectRemoteOptions): void {
   const provider = makeProvider(options);
   provider?.clear();
-  cancelPendingAuth(options.url);
+  cancelPendingAuth(options.url, options.ownerKey);
 }
 
 /** Cancel a pending callback for a single remote URL without global teardown. */
-export function cancelRemoteAuth(url: string): void {
-  cancelPendingAuth(url);
+export function cancelRemoteAuth(url: string, ownerKey?: string): void {
+  cancelPendingAuth(url, ownerKey);
 }
 
 /** Stop the callback server and clear all pending auth, used on session shutdown. */
-export async function teardownRemoteAuth(): Promise<void> {
-  for (const [, pending] of pendingRemoteAuth) {
-    cancelOAuthCallback(pending.provider.serverUrl);
+export async function teardownRemoteAuth(ownerKey?: string): Promise<void> {
+  const prefix = ownerKey ? `${ownerKey}\u0000` : undefined;
+  for (const [key, pending] of pendingRemoteAuth) {
+    if (prefix && !key.startsWith(prefix)) continue;
+    cancelOAuthCallback(pending.provider.serverUrl, ownerKey);
+    pendingRemoteAuth.delete(key);
   }
-  pendingRemoteAuth.clear();
-  await stopCallbackServer();
+  if (!ownerKey) pendingRemoteAuth.clear();
+  stopCallbackServerIfIdle();
 }
 
-function cancelPendingAuth(url: string): void {
-  const pending = pendingRemoteAuth.get(url);
+function cancelPendingAuth(url: string, ownerKey?: string): void {
+  const key = authKey(ownerKey, url);
+  const pending = pendingRemoteAuth.get(key);
   if (pending) {
-    cancelOAuthCallback(url);
-    pendingRemoteAuth.delete(url);
+    cancelOAuthCallback(url, ownerKey);
+    pendingRemoteAuth.delete(key);
   }
 }
 

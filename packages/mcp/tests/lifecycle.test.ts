@@ -56,8 +56,8 @@ test("simultaneous sessions expose isolated MCP managers and shared tool binding
   mkdirSync(agentDir, { recursive: true });
   mkdirSync(join(first, ".pi"), { recursive: true });
   mkdirSync(join(second, ".pi"), { recursive: true });
-  writeFileSync(projectConfigPath(first), JSON.stringify({ mcp: { servers: { first: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_LABEL: "first" } } } } }));
-  writeFileSync(projectConfigPath(second), JSON.stringify({ mcp: { servers: { second: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_LABEL: "second" } } } } }));
+  writeFileSync(projectConfigPath(first), JSON.stringify({ mcp: { servers: { first: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_LABEL: "first", MCP_FIXTURE_MODE: "policy" } } } } }));
+  writeFileSync(projectConfigPath(second), JSON.stringify({ mcp: { servers: { second: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_LABEL: "second", MCP_FIXTURE_MODE: "policy" } } } } }));
   const pi = fakePi();
   const realPi = { ...pi, sendUserMessage() {}, getAllTools() { return [...pi.tools.values()].map((tool) => ({ name: tool.name })); }, getActiveTools() { return []; }, setActiveTools() {} };
   registerMcpLifecycle(realPi as never, { agentDir });
@@ -68,12 +68,19 @@ test("simultaneous sessions expose isolated MCP managers and shared tool binding
   try {
     await start({ reason: "startup" }, firstCtx);
     await start({ reason: "startup" }, secondCtx);
-    assert.ok(pi.tools.has("first_current_directory"));
-    assert.ok(pi.tools.has("second_current_directory"));
-    const firstResult = await pi.tools.get("first_current_directory")!.execute("first", {}, undefined, undefined, firstCtx) as { content: Array<{ text: string }> };
-    const secondResult = await pi.tools.get("second_current_directory")!.execute("second", {}, undefined, undefined, secondCtx) as { content: Array<{ text: string }> };
-    assert.match(firstResult.content[0]?.text ?? "", /first/);
-    assert.match(secondResult.content[0]?.text ?? "", /second/);
+    assert.ok(pi.tools.has("first_protected_read"));
+    assert.ok(pi.tools.has("second_protected_read"));
+    const firstResult = await pi.tools.get("first_allowed_read")!.execute("first", { value: "one" }, undefined, undefined, firstCtx) as { content: Array<{ text: string }> };
+    const secondResult = await pi.tools.get("second_protected_read")!.execute("second", { value: "two" }, undefined, undefined, secondCtx) as { content: Array<{ text: string }> };
+    assert.match(firstResult.content[0]?.text ?? "", /allowed_read:one/);
+    assert.match(secondResult.content[0]?.text ?? "", /protected_read:two/);
+    const prompt = pi.commands.get("mcp_prompt_second_allowed_prompt")!;
+    await prompt.handler('{"value":"two"}', secondCtx);
+    const listed = await pi.tools.get("mcp_resources_list")!.execute("second", { server: "second" }, undefined, undefined, secondCtx) as { content: Array<{ text: string }> };
+    assert.match(listed.content[0]?.text ?? "", /file:\/\/\/allowed/);
+    await shutdown({ reason: "quit" }, firstCtx);
+    const stillUsable = await pi.tools.get("second_allowed_read")!.execute("second", { value: "after" }, undefined, undefined, secondCtx) as { content: Array<{ text: string }> };
+    assert.match(stillUsable.content[0]?.text ?? "", /allowed_read/);
   } finally {
     await shutdown({ reason: "quit" }, firstCtx);
     await shutdown({ reason: "quit" }, secondCtx);

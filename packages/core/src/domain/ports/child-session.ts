@@ -188,6 +188,8 @@ export type SpawnChildSession = (options: {
   parentSessionId?: string;
   /** Stored transcript to reopen for a resume, if any. */
   sessionFile?: string;
+  /** Model-facing MCP names discovered by the owning parent session. */
+  mcpToolNames?: readonly string[];
   /** Abort signal forwarded to the child's run and concurrency wait. */
   signal?: AbortSignal;
   /** Called once the isolated child exists and can be controlled. */

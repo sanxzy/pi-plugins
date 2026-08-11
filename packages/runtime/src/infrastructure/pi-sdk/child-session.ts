@@ -61,10 +61,23 @@ const EXTENSION_TOOLS = ["web_search", "web_fetch", "llm_wikis_search"] as const
  * (grep, find, ls) are active by default. The pi-code web tools and local wiki
  * search are appended in every case so they stay available to subagents.
  */
-export function resolveChildTools(agent: ResolvedAgent): readonly string[] {
-  const tools = agent.tools && agent.tools.length > 0 ? agent.tools : ALL_BUILTIN_TOOLS;
+const ROOT_ONLY_TOOLS = new Set([
+  "goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear",
+  "mcp_resources_list", "mcp_resources_read", "mcp",
+]);
+
+/** Resolve child tools against the session-local discovered MCP catalog. */
+export function resolveChildTools(agent: ResolvedAgent, mcpToolNames: readonly string[] = []): readonly string[] {
+  const requested = agent.tools && agent.tools.length > 0 ? [...agent.tools] : [...ALL_BUILTIN_TOOLS, ...mcpToolNames];
   const extensionNames = EXTENSION_TOOLS as readonly string[];
-  return [...tools.filter((name) => !name.startsWith("goal_") && !extensionNames.includes(name)), ...EXTENSION_TOOLS];
+  const builtinNames = new Set<string>(ALL_BUILTIN_TOOLS);
+  const mcpNames = new Set(mcpToolNames);
+  const filtered = requested.filter((name) =>
+    !name.startsWith("goal_") &&
+    !ROOT_ONLY_TOOLS.has(name) &&
+    (builtinNames.has(name) || extensionNames.includes(name) || mcpNames.has(name)),
+  );
+  return [...new Set([...filtered.filter((name) => !extensionNames.includes(name)), ...EXTENSION_TOOLS])];
 }
 
 /** Convert an unknown thrown value into a stable message string. */
@@ -125,6 +138,7 @@ async function createIsolatedChild(options: {
   agent: ResolvedAgent;
   parentSessionId: string;
   sessionFile?: string;
+  mcpToolNames?: readonly string[];
 }): Promise<ChildSessionServices> {
   const agentDir = getAgentDir();
   const settingsManager = SettingsManager.create(options.cwd, agentDir);
@@ -174,7 +188,8 @@ async function createIsolatedChild(options: {
   // Tool mapping: an explicit non-empty `tools` list becomes the child
   // allowlist; an absent/empty list enables the full built-in set so the
   // read-only Pi tools (grep, find, ls) are active by default.
-  sessionOptions.tools = resolveChildTools(options.agent);
+  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames);
+  sessionOptions.mcpToolNames = options.mcpToolNames ?? [];
 
   const { session } = await (createAgentSession as unknown as (options: Record<string, unknown>) => Promise<{ session: AgentSession }>)(sessionOptions);
 
@@ -268,7 +283,7 @@ function findLastAssistantMessage(session: AgentSession): {
 export const spawnChildSession: SpawnChildSession & {
   /** Test seam: override isolated child construction without AI credentials. */
   __createChild?: (
-    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; sessionFile?: string },
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; sessionFile?: string; mcpToolNames?: readonly string[] },
   ) => Promise<ChildSessionServices>;
 } = (async (options) => {
   // A cancelled parent run must not start a child at all.
@@ -291,6 +306,7 @@ export const spawnChildSession: SpawnChildSession & {
         agent: options.agent,
         parentSessionId,
         sessionFile: options.sessionFile,
+        mcpToolNames: options.mcpToolNames,
       });
       const live = attachAgentSessionLiveFeed(child.session);
       options.onControl?.({
@@ -363,7 +379,7 @@ export const spawnChildSession: SpawnChildSession & {
   });
 }) as SpawnChildSession & {
   __createChild?: (
-    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; sessionFile?: string },
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; sessionFile?: string; mcpToolNames?: readonly string[] },
   ) => Promise<ChildSessionServices>;
 };
 
