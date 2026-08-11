@@ -84,7 +84,7 @@ test("rejects unsafe repositories and branches without echoing sensitive input",
   assert.equal(result.ok, true);
 
   const invalid = validateReferenceEntry("private", {
-    repository: "git@github.com:../../../etc/passwd",
+    repository: "../../etc/passwd",
     branch: "main",
   });
   assert.equal(invalid.ok, false);
