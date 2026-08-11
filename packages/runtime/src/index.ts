@@ -10,6 +10,7 @@ export {
   REFERENCES_REPOS_DIRECTORY,
   type AtomicReferenceWrite,
   type ReferenceAvailability,
+  type ReferenceMaterializationStatus,
   type ReferenceCatalog,
   type ReferenceCatalogEntry,
   type ReferenceCatalogOptions,

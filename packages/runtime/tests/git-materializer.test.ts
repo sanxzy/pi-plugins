@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -136,7 +136,51 @@ test("recovers a stale lock and cleans up a failed clone cache", async () => {
   });
   await assert.rejects(failing.ensure({ reference, cacheRoot: join(rootDir, "failed-cache") }), /clone failed/);
   const failedPath = cachePath(join(rootDir, "failed-cache"), reference);
-  assert.throws(() => readFileSync(join(failedPath, "README.md"), "utf8"));
+  assert.equal(existsSync(failedPath), false);
+  assert.equal(existsSync(join(failedPath, ".git")), false);
+});
+
+test("does not leak credentials from scp remotes and exact-matches preflight branches", async () => {
+  const rootDir = root();
+  const secret = "scp-secret-token";
+  const reference = parseRepository(`user:${secret}@example.com:owner/repo`);
+  assert.ok(reference);
+  const failing = createGitMaterializer({
+    run: async () => {
+      throw new Error(`fatal: user:${secret}@example.com:owner/repo.git denied`);
+    },
+  });
+  await assert.rejects(
+    failing.ensure({ reference, cacheRoot: join(rootDir, "cache") }),
+    (error: unknown) => !String(error).includes(secret),
+  );
+
+  const prefix = createGitMaterializer({
+    run: async () => ({ stdout: "abc\trefs/heads/foo-bar\n", stderr: "" }),
+  });
+  assert.deepEqual(await prefix.preflight({ reference, branch: "foo" }), { ok: false, error: "Repository branch is not available" });
+  assert.deepEqual(await prefix.preflight({ reference, branch: "foo-bar" }), { ok: true });
+});
+
+test("cancels lock contention and verifies heartbeat freshness", async () => {
+  const rootDir = root();
+  const remote = join(rootDir, "remote");
+  init(remote);
+  commit(remote, "main", "main");
+  const reference = repository(remote);
+  const localPath = cachePath(join(rootDir, "cache"), reference);
+  const lockPath = `${localPath}.lock`;
+  mkdirSync(lockPath, { recursive: true });
+  writeFileSync(join(lockPath, "owner"), "active-owner", "utf8");
+  writeFileSync(join(lockPath, "heartbeat"), String(Date.now()), "utf8");
+  const before = statSync(join(lockPath, "heartbeat")).mtimeMs;
+  const controller = new AbortController();
+  const waiting = createGitMaterializer({ lockStaleMs: 100, lockAcquireTimeoutMs: 5_000 });
+  const pending = waiting.ensure({ reference, cacheRoot: join(rootDir, "cache"), signal: controller.signal });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  controller.abort();
+  await assert.rejects(pending, /aborted|cancel/i);
+  assert.equal(statSync(join(lockPath, "heartbeat")).mtimeMs, before);
 });
 
 test("serializes same-cache materialization and validates preflight branches", async () => {
