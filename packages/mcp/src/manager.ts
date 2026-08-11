@@ -285,8 +285,10 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         const result = server.type === "local"
           ? await connectLocalInternal(name, server)
           : await connectRemoteInternal(name, server);
-        if (result.status.status === "connected") clearReconnect(name);
-        else scheduleReconnect(name);
+        if (result.status.status === "connected") {
+          clearReconnect(name);
+          options.onServerChanged?.(name);
+        } else scheduleReconnect(name);
       }).catch(() => scheduleReconnect(name));
     }, delay);
     timer.unref();
@@ -522,7 +524,16 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       if (reconnected.status.status !== "connected") throw error;
       const replacement = connections.get(name);
       if (!replacement) throw error;
-      return operationFor(replacement);
+      try {
+        return await operationFor(replacement);
+      } catch (retryError) {
+        if (connections.get(name) === replacement) connections.delete(name);
+        const failed = { status: "failed", error: errorMessage(retryError), errorCategory: errorCategory(retryError) } as const;
+        setStatus(name, failed);
+        scheduleReconnect(name);
+        options.onServerChanged?.(name);
+        throw retryError;
+      }
     }
   };
 
