@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createDefaultAuthStore, PiOAuthProvider, ensureCallbackServer, waitForOAuthCallback, stopCallbackServer, isCallbackServerRunning, parseRedirectUri } from "../src/index.ts";
+import { cancelOAuthCallback, createDefaultAuthStore, PiOAuthProvider, ensureCallbackServer, waitForOAuthCallback, stopCallbackServer, isCallbackServerRunning, parseRedirectUri } from "../src/index.ts";
 
 function tempAgent(prefix: string): string {
   return join(mkdtempSync(join(tmpdir(), prefix)), "agent");
@@ -115,5 +115,16 @@ test("provider client metadata carries Pi identity and configured OAuth settings
   assert.equal(secured.clientMetadata.token_endpoint_auth_method, "client_secret_post");
   const clientInfo = await secured.clientInformation();
   assert.deepEqual(clientInfo, { client_id: "registered-id", client_secret: "registered-secret" });
+  rmSync(agentDir, { recursive: true, force: true });
+});
+
+test("cancelOAuthCallback rejects an in-flight callback promise", async () => {
+  const agentDir = tempAgent("pi-code-mcp-oauth-cancel-");
+  const { port, path } = await ensureCallbackServer("http://127.0.0.1:0/mcp/oauth/callback");
+  const pending = waitForOAuthCallback("state-cancel", "https://server.example/mcp");
+  await cancelOAuthCallback("https://server.example/mcp");
+  await assert.rejects(pending, /cancelled|stopped/);
+  await stopCallbackServer();
+  assert.equal(port > 0, true);
   rmSync(agentDir, { recursive: true, force: true });
 });

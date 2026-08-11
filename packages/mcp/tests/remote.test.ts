@@ -233,6 +233,40 @@ test("manager start() connects configured remote servers with the effective conf
   }
 });
 
+test("connectRemote reports needs_client_registration when OAuth registration is unavailable", async () => {
+  const agentDir = tempAgent("pi-code-mcp-remote-registration-");
+  const server = createServer((req, res) => {
+    if (req.url?.startsWith("/.well-known/oauth-authorization-server")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        issuer: "http://127.0.0.1",
+        authorization_endpoint: "http://127.0.0.1/authorize",
+        token_endpoint: "http://127.0.0.1/token",
+        response_types_supported: ["code"],
+        grant_types_supported: ["authorization_code"],
+        token_endpoint_auth_methods_supported: ["none"],
+      }));
+      return;
+    }
+    if (req.url?.startsWith("/.well-known/")) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(401, { "WWW-Authenticate": "Bearer" });
+    res.end("registration required");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
+  try {
+    const result = await connectRemote({ url, agentDir, timeout: { startup: 1000 }, onRedirect: () => {} });
+    assert.equal(result.status.status, "needs_client_registration");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("connectRemote reports needs_auth when a server demands OAuth and stops fallback", async () => {
   const agentDir = tempAgent("pi-code-mcp-remote-auth-");
   const server = createServer((req, res) => {
