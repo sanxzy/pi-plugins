@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -51,6 +51,22 @@ test("reopening and reflushing a child transcript preserves its deterministic pa
   assert.equal(mode(agentDir), PRIVATE_DIR);
   assert.equal(mode(file), PRIVATE_FILE);
   assert.deepEqual(readdirSync(agentDir), ["transcript.jsonl"]);
+});
+
+test("reopening an existing permissive transcript repairs its directory and file modes", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-repair-"));
+  const agentDir = join(root, "agent");
+  const first = SessionManager.create(root, agentDir, { id: "agent-3", parentSession: "root-1", sessionFilename: "transcript.jsonl" });
+  flushTranscript(first);
+  const file = first.getSessionFile()!;
+
+  chmodSync(agentDir, 0o755);
+  chmodSync(file, 0o644);
+  const reopened = SessionManager.open(file, agentDir);
+
+  assert.equal(reopened.getSessionFile(), join(agentDir, "transcript.jsonl"));
+  assert.equal(mode(agentDir), PRIVATE_DIR);
+  assert.equal(mode(file), PRIVATE_FILE);
 });
 
 test("nested agent directories remain private when created through SDK sessions", () => {
