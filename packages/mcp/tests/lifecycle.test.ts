@@ -198,6 +198,46 @@ test("/mcp logout closes the active transport before clearing credentials", asyn
   }
 });
 
+test("/mcp control-plane subcommands operate without adding tools and use bounded errors", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-cmd-plane-"));
+  const agentDir = join(root, "agent");
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    remote: { type: "remote", url: "http://127.0.0.1:9/mcp", oauth: false },
+  } } }));
+  const pi = fakePi();
+  const sent: string[] = [];
+  const realPi = { ...pi, sendUserMessage: (content: string) => { sent.push(content); } };
+  const toolRegistrations: string[] = [];
+  const trackingPi = {
+    ...realPi,
+    registerTool(def: { name: string }) { toolRegistrations.push(def.name); },
+  };
+  registerMcpLifecycle(trackingPi as never, { agentDir });
+  const startup = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  const cmdHandler = pi.commands.get("mcp")?.handler;
+  assert.ok(cmdHandler);
+  const noUiCtx = { ...context(join(root, "project"), "plane"), hasUI: false, ui: {} };
+  try {
+    await startup({ reason: "startup" }, noUiCtx);
+    await cmdHandler("list", noUiCtx);
+    assert.ok(sent.some((line) => line.includes("remote") && line.includes("tools=")), "list reports tool counts");
+    await cmdHandler("disconnect remote", noUiCtx);
+    await cmdHandler("reload", noUiCtx);
+    assert.ok(sent.some((line) => line.toLowerCase().includes("reloaded")), "reload reports completion");
+    await cmdHandler("debug", noUiCtx);
+    assert.ok(sent.some((line) => line.startsWith("MCP debug")), "debug reports server state");
+    await cmdHandler("does-not-exist", noUiCtx);
+    assert.ok(sent.some((line) => line.includes("unknown subcommand")), "unknown subcommand is bounded");
+    // Control-plane actions must not add MCP management tools to the catalog.
+    assert.equal(toolRegistrations.includes("mcp_connect"), false);
+  } finally {
+    await shutdown({ reason: "quit" }, noUiCtx);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("logout removes committed credentials for a remote server", async () => {
   const agentDir = join(mkdtempSync(join(tmpdir(), "pi-code-mcp-logout-")), "agent");
   const store = createDefaultAuthStore(agentDir);

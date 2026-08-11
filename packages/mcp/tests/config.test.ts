@@ -33,6 +33,27 @@ function writeProject(projectRoot: string, content: string): string {
   return file;
 }
 
+test("loads permissions with project precedence and preserves rule order", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-config-policy-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(join(projectRoot, ".pi"), { recursive: true });
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { permissions: {
+    tools: [{ effect: "allow", server: "demo", name: "read" }],
+  } } }));
+  writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ mcp: { permissions: {
+    tools: [{ effect: "deny", server: "demo", name: "read" }],
+  } } }));
+  const result = loadMcpConfig(agentDir, projectRoot);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.value.permissions?.tools, [
+    { effect: "deny", server: "demo", name: "read" },
+    { effect: "allow", server: "demo", name: "read" },
+  ]);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("loads JSONC user and project configuration with deep merge and project precedence", () => {
   const agentDir = join(tmpRoot(), "agent");
   const projectRoot = join(tmpRoot(), "project");
