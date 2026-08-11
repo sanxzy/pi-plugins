@@ -95,6 +95,19 @@ test("agent_jobs lists only the active parent session's running and historical d
   });
 });
 
+test("agent_jobs reports active jobs and discourages polling or sleep-based waiting", async () => {
+  await withIsolationPool(async (cwd) => {
+    const tool = register(registerJobsTool);
+    const result = await tool.execute("call", {}, undefined, undefined, context(cwd, "root-a"));
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /Subagent jobs:/);
+    assert.match(text, /a-running: running/);
+    assert.match(text, /1 subagent job\(s\) are still running/);
+    assert.match(text, /Do not poll agent tools or use sleep-based waiting/);
+    assert.match(text, /let the agents notify you when they settle/);
+  });
+});
+
 test("agent_status for a running job mentions the subagent type and discourages polling", async () => {
   await withIsolationPool(async (cwd) => {
     const tool = register(registerStatusTool);

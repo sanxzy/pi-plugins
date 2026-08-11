@@ -27,7 +27,12 @@ export function registerJobsTool(pi: ExtensionAPI): void {
         return textResult("No subagent jobs are currently visible.", { jobs: [] });
       }
       const lines = jobs.map((j) => `- ${j.jobId}: ${j.status} (${j.description})`).join("\n");
-      return textResult(`Subagent jobs:\n${lines}`, { jobs });
+      const active = jobs.filter((j) => j.status === "running" || j.status === "queued");
+      const guidance =
+        active.length > 0
+          ? `\n\n${active.length} subagent job(s) are still ${active.map((j) => j.status).join("/")}. Take a rest while they work. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they settle.`
+          : "";
+      return textResult(`Subagent jobs:\n${lines}${guidance}`, { jobs });
     },
   });
 }
