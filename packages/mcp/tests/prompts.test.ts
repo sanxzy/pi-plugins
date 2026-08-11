@@ -41,16 +41,31 @@ test("prompt normalization preserves roles and bounds text", () => {
   assert.match(promptResultToText(result), /user: hello/);
 });
 
-test("resource normalization preserves text and clearly omits binary content", () => {
+test("resource normalization preserves text, adapts images, and omits unsupported binary content", () => {
   const result = normalizeResourceResult("demo", "file:///x", {
     contents: [
       { uri: "file:///x", mimeType: "text/plain", text: "hello" },
+      { uri: "file:///image", mimeType: "image/png", blob: "aGVsbG8=" },
       { uri: "file:///blob", mimeType: "application/octet-stream", blob: "aGVsbG8=" },
     ],
   });
   assert.equal(result.text.includes("hello"), true);
+  assert.equal(result.content?.some((item) => item.type === "image" && item.mimeType === "image/png"), true);
   assert.equal(result.omitted?.includes("file:///blob"), true);
   assert.match(resourceResultToText(result), /hello/);
+});
+
+test("resource normalization omits oversized images and bounds aggregate text", () => {
+  const result = normalizeResourceResult("demo", "file:///large", {
+    contents: [
+      { uri: "file:///a", mimeType: "text/plain", text: "a".repeat(40_000) },
+      { uri: "file:///b", mimeType: "text/plain", text: "b".repeat(40_000) },
+      { uri: "file:///large.png", mimeType: "image/png", blob: "a".repeat(8 * 1024 * 1024) },
+    ],
+  });
+  assert.ok(result.text.length <= 50_050, "aggregate text is bounded");
+  assert.match(result.text, /image omitted|output truncated/);
+  assert.equal(result.omitted?.includes("file:///large.png"), true);
 });
 
 test("prompt commands are server-scoped, parse JSON arguments, and send normal user output", async () => {
@@ -68,7 +83,7 @@ test("prompt commands are server-scoped, parse JSON arguments, and send normal u
   );
   const command = [...pi.commands.entries()].find(([name]) => name.startsWith("mcp_prompt_demo_greet"));
   assert.ok(command);
-  await command[1].handler('{"who":"Pi"}', { hasUI: false, ui: {}, cwd: "/tmp", sessionManager: { getSessionId: () => "s" } });
+  await command[1].handler('{"who":"Pi"}', { hasUI: true, ui: { notify() {} }, cwd: "/tmp", sessionManager: { getSessionId: () => "s" } });
   assert.deepEqual(calls, [{ server: "demo", prompt: "greet", args: { who: "Pi" } }]);
   assert.match(pi.sent[0] ?? "", /user: hello/);
 });
@@ -92,6 +107,13 @@ test("resource list/read tools use current accessors and authorization", async (
   const result = await read.execute("id", { server: "demo", uri: "file:///ok" }, undefined, undefined, {});
   assert.deepEqual(reads, ["demo:file:///ok"]);
   assert.equal(result.content[0].text, "ok");
+});
+
+test("disconnected prompt and resource access produce explicit unavailable results", async () => {
+  const prompt = normalizePromptResult("demo", "greet", undefined, { unavailable: true });
+  assert.match(promptResultToText(prompt), /unavailable/);
+  const resource = normalizeResourceResult("demo", "file:///gone", undefined, { unavailable: true });
+  assert.match(resourceResultToText(resource), /unavailable/);
 });
 
 test("removed prompt commands become unavailable instead of calling stale access", async () => {

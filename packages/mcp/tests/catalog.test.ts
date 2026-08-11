@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { paginate, paginateTools } from "../src/catalog.ts";
+import { paginate, paginateTools, wireListChangedHandlers } from "../src/catalog.ts";
 import { discoverCatalog, type ServerCatalog } from "../src/catalog.ts";
 
 interface FakeListToolsOptions {
@@ -32,6 +32,20 @@ test("rejects an excessive page sequence", async () => {
     ),
     /exceeded 2 pages/,
   );
+});
+
+test("list-changed notifications invoke the catalog refresh callback", () => {
+  const handlers = new Map<string, () => void>();
+  const client = {
+    setNotificationHandler(schema: { method?: string }, handler: () => void) {
+      handlers.set(schema.method ?? String(handlers.size), handler);
+    },
+  } as never;
+  const catalog = { tools: [], prompts: [], resources: [], resourceTemplates: [] };
+  const changes: string[] = [];
+  wireListChangedHandlers(client, catalog, (kind) => changes.push(kind));
+  for (const handler of handlers.values()) handler();
+  assert.deepEqual(changes, ["tools", "prompts", "resources"]);
 });
 
 test("catalog discovery applies request timeouts, progress resets, and abort signals", async () => {
