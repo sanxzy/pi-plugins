@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -112,6 +112,12 @@ if (fullCatalog) {
 
 if (process.env.MCP_FIXTURE_READY_FILE) {
   appendFileSync(process.env.MCP_FIXTURE_READY_FILE, "ready\n");
+}
+
+// Test-only crash-once mode exercises bounded manager reconnect behavior.
+if (process.env.MCP_FIXTURE_EXIT_ONCE_FILE && !existsSync(process.env.MCP_FIXTURE_EXIT_ONCE_FILE)) {
+  writeFileSync(process.env.MCP_FIXTURE_EXIT_ONCE_FILE, "exited\n");
+  setTimeout(() => process.exit(17), Number(process.env.MCP_FIXTURE_EXIT_AFTER_MS ?? 100)).unref();
 }
 
 await server.connect(new StdioServerTransport());
