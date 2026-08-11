@@ -207,6 +207,25 @@ test("inbound reports delivery failures through onError", async () => {
   listener.stop();
 });
 
+test("a failed delivery remains retryable and does not advance the accepted cursor", async () => {
+  let attempts = 0;
+  const delivered: string[] = [];
+  const { listener, accepted, errors } = makeListener(["111"], async (_id, _chat, text) => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("temporary delivery failure");
+    delivered.push(text);
+  });
+  await listener.handle(privateText(9, "111", "retry-me"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(errors.length, 1);
+  assert.equal(accepted.length, 1);
+  // A retry of the same update id is accepted after the failed attempt.
+  await listener.handle(privateText(9, "111", "retry-me"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(delivered, ["retry-me"]);
+  listener.stop();
+});
+
 test("a persisted last update id suppresses replay after a restart", async () => {
   const { listener, accepted } = makeListener(["111"]);
   // Simulate loading the persisted marker from a previous process that already
