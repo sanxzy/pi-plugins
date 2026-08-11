@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   statSync,
   writeFileSync,
@@ -72,8 +73,8 @@ test("resolves local paths and reports unavailable roots without throwing", asyn
   const result = await catalog.read();
   assert.deepEqual(result.entries.map(({ name }) => name), ["absolute", "file", "home", "missing", "sdk"]);
   const byName = new Map(result.entries.map((item) => [item.name, item]));
-  assert.equal(byName.get("home")?.path, homeDocs);
-  assert.equal(byName.get("absolute")?.path, absoluteDocs);
+  assert.equal(byName.get("home")?.path, realpathSync(homeDocs));
+  assert.equal(byName.get("absolute")?.path, realpathSync(absoluteDocs));
   assert.equal(byName.get("home")?.status, "available");
   assert.equal(byName.get("absolute")?.status, "available");
   assert.equal(byName.get("missing")?.status, "unavailable");

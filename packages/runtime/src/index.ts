@@ -1,4 +1,17 @@
 export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
+export {
+  createReferenceCatalog,
+  referenceConfigFile,
+  REFERENCES_DIRECTORY,
+  REFERENCES_FILE_MODE,
+  REFERENCES_FILE_NAME,
+  type AtomicReferenceWrite,
+  type ReferenceAvailability,
+  type ReferenceCatalog,
+  type ReferenceCatalogEntry,
+  type ReferenceCatalogOptions,
+  type ReferenceCatalogReadResult,
+} from "./infrastructure/references/catalog.ts";
 export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
 export { resolveChildTools, spawnChildSession, copySessionFile } from "./infrastructure/pi-sdk/child-session.ts";
