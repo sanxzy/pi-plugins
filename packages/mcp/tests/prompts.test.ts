@@ -63,9 +63,21 @@ test("resource normalization omits oversized images and bounds aggregate text", 
       { uri: "file:///large.png", mimeType: "image/png", blob: "a".repeat(8 * 1024 * 1024) },
     ],
   });
-  assert.ok(result.text.length <= 50_050, "aggregate text is bounded");
+  assert.ok(result.text.length <= 50_000, "aggregate text is hard bounded");
   assert.match(result.text, /image omitted|output truncated/);
   assert.equal(result.omitted?.includes("file:///large.png"), true);
+});
+
+test("resource normalization emits only one truncation marker after many post-limit blocks", () => {
+  const result = normalizeResourceResult("demo", "file:///many", {
+    contents: Array.from({ length: 100 }, (_, index) => ({
+      uri: `file:///text-${index}`,
+      mimeType: "text/plain",
+      text: "x".repeat(10_000),
+    })),
+  });
+  assert.ok(result.text.length <= 50_000, "many blocks remain hard bounded");
+  assert.equal((result.text.match(/output truncated/g) ?? []).length, 1);
 });
 
 test("prompt commands are server-scoped, parse JSON arguments, pass abort signals, and send normal user output", async () => {
