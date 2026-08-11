@@ -99,7 +99,7 @@ export function normalizeCallToolResult(raw: unknown, context: NormalizeContext)
   if (context.transportError) {
     return {
       content: [{ type: "text", text: `Error: ${boundedText(context.transportError)}` }],
-      details: { ...nativeIdentity, nativeIdentity, isError: true, failure: "transport_error", transportError: context.transportError },
+      details: { ...nativeIdentity, nativeIdentity, isError: true, failure: "transport_error", transportError: boundedText(context.transportError) },
     };
   }
 

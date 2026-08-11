@@ -21,7 +21,9 @@ export const DEFAULT_RESERVED_TOOL_NAMES = new Set([
   "web_fetch",
   "llm_wikis_search",
   "agent",
+  "agent_cancel",
   "agent_status",
+  "agent_jobs",
   "agent_list",
   "cancel",
   "status",
@@ -153,16 +155,25 @@ export class McpToolExposer {
     for (const [piName, mapping] of next) {
       this.register(piName, mapping);
     }
-    // Exclude removed tools from the host's active/visible set: Pi cannot
-    // unregister definitions, so deactivation is the only way to hide them.
-    if (removed.length > 0) {
-      try {
-        const active = new Set(this.pi.getActiveTools());
-        for (const piName of removed) active.delete(piName);
-        this.pi.setActiveTools([...active]);
-      } catch {
-        // Some hosts do not expose active-tool control; ignore.
+    // Reconcile the host's active/visible set so only the current snapshot is
+    // active: Pi cannot unregister definitions, so removed tools are excluded
+    // by deactivation, and tools that return after a removal are reactivated
+    // (hosts only auto-activate names on their first registration).
+    try {
+      const active = new Set(this.pi.getActiveTools());
+      let changed = false;
+      for (const piName of removed) {
+        if (active.delete(piName)) changed = true;
       }
+      for (const piName of next.keys()) {
+        if (!active.has(piName)) {
+          active.add(piName);
+          changed = true;
+        }
+      }
+      if (changed) this.pi.setActiveTools([...active]);
+    } catch {
+      // Some hosts do not expose active-tool control; ignore.
     }
     return { added, updated, removed };
   }
