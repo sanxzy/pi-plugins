@@ -119,8 +119,22 @@ test("rejects unsafe repositories and branches without echoing sensitive input",
 
   const branch = validateBranch("feature/docs.v1");
   assert.deepEqual(branch, { ok: true, value: "feature/docs.v1" });
-  for (const unsafe of ["", "-bad", "bad..branch", "bad branch", "bad\\branch"]) {
+  for (const unsafe of ["", "-bad", "bad..branch", "bad branch", "bad\\branch", "a//b", "/main", "main/", "a/./b", "a/../b"]) {
     assert.equal(validateBranch(unsafe).ok, false, unsafe);
+  }
+});
+
+test("rejects NUL bytes and percent-encoded traversal in repositories", () => {
+  for (const repo of ["owner/repo\u0000evil", "https://host/owner/repo\u0000evil", "file:///tmp/repo\u0000evil.git"]) {
+    assert.equal(validateReferenceEntry("sdk", repo).ok, false, repo);
+  }
+  for (const repo of [
+    "https://host/owner/%2e%2e/evil",
+    "https://host/owner/%00evil",
+    "file:///tmp/x/%2E%2E/escape.git",
+    "owner%2f..%2fevil",
+  ]) {
+    assert.equal(parseRepository(repo), undefined, repo);
   }
 });
 
