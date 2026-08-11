@@ -122,6 +122,18 @@ test("agent lifecycle events fold into the materialized private snapshot", () =>
   assert.equal(EVENTS_FILE_NAME, "events.jsonl");
 });
 
+test("agent creation is idempotent and default Pi session IDs are canonical", () => {
+  setupHome();
+  const root = project();
+  const store = createAgentManifestStore({ projectRoot: root, rootSessionId: "root-session", jobId: "job-agent" });
+  store.create({ status: "created", description: "first", subagentType: "scout" });
+  store.create({ status: "created", description: "replacement", subagentType: "other" });
+  const lines = readFileSync(store.eventsPath, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string });
+  assert.equal(lines.filter((line) => line.type === "agent_created").length, 1);
+  assert.equal(store.read()?.description, "first");
+  assert.equal(store.read()?.piSessionId, "agent");
+});
+
 test("corrupt project, session, and agent manifests fail closed", () => {
   setupHome();
   const root = project();

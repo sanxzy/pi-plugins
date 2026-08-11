@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { createJob, updateJob, type Job, type JobUpdate } from "@xzy-ai/core";
 import { canTransition } from "@xzy-ai/core";
@@ -11,6 +14,7 @@ import {
 import { createDeliveryCoordinator } from "@xzy-ai/runtime";
 import { createConcurrencyGate } from "@xzy-ai/runtime";
 import { MAX_CONCURRENCY } from "@xzy-ai/core";
+import { createAgentManifestStore, foldAgentEvents } from "@xzy-ai/runtime";
 
 /**
  * Phase 5 background-delivery tests.
@@ -233,6 +237,50 @@ test("runBackgroundJob catches an unexpected throw and marks the job failed", as
   assert.equal(registry.jobs.get("bg-4")?.status, "failed");
   assert.equal(registry.jobs.get("bg-4")?.delivered, true);
   assert.deepEqual(delivered, ['Background agent test-agent (bg-4) failed: unexpected']);
+});
+
+test("runBackgroundJob persists a real agent lifecycle that re-folds to the materialized snapshot", async () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-code-phase3-agent-home-"));
+  process.env.XZY_PI_CODE_HOME = home;
+  const projectRoot = mkdtempSync(join(tmpdir(), "pi-code-phase3-agent-project-"));
+  const registry = createFakeRegistry();
+  const job = makeJob("job-live", "queued");
+  registry.jobs.set(job.jobId, job);
+  const coordinator = createDeliveryCoordinator();
+  coordinator.register("parent.jsonl", () => {});
+  const manifest = createAgentManifestStore({
+    projectRoot,
+    rootSessionId: "root-session",
+    jobId: job.jobId,
+    piSessionId: "pi-session-live",
+    now: "2026-08-11T12:00:00.000Z",
+  });
+  manifest.create({ status: "created", description: job.description, subagentType: job.subagentType });
+  manifest.update({ status: "queued", at: "2026-08-11T12:00:01.000Z" });
+
+  await runBackgroundJob(
+    { registry, delivery: coordinator, manifest },
+    job,
+    {
+      parentSessionFile: "parent.jsonl",
+      runChild: async () => {
+        registry.updateJob(job.jobId, { status: "running" });
+        manifest.update({ status: "running", startedAt: "2026-08-11T12:00:02.000Z", at: "2026-08-11T12:00:02.000Z" });
+        return { sessionFile: "transcript.jsonl", output: "done", status: "completed" };
+      },
+    },
+  );
+
+  const expected = {
+    ...manifest.read()!,
+    status: "completed",
+    delivered: true,
+    sessionFile: "transcript.jsonl",
+  };
+  assert.deepEqual(foldAgentEvents(manifest.eventsPath), expected);
+  assert.deepEqual(JSON.parse(readFileSync(manifest.manifestPath, "utf8")), expected);
+  assert.equal(statSync(manifest.manifestPath).mode & 0o777, 0o600);
+  assert.equal(statSync(manifest.eventsPath).mode & 0o777, 0o600);
 });
 
 test("a background job beyond the cap is queued and starts when a slot frees", async () => {

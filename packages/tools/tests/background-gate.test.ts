@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { MAX_CONCURRENCY } from "@xzy-ai/core";
-import { getChildPool, spawnChildSession } from "@xzy-ai/runtime";
+import { encodeProjectId, getChildPool, homeAgentManifestFile, spawnChildSession } from "@xzy-ai/runtime";
 import { registerAgentTool } from "../src/registrations/agent.ts";
 
 /**
@@ -97,6 +97,8 @@ test("new background spawns remain TUI-only", async () => {
 });
 
 test("a gated background agent stays queued until running with a live handle", async () => {
+  const previousHome = process.env.XZY_PI_CODE_HOME;
+  process.env.XZY_PI_CODE_HOME = mkdtempSync(join(tmpdir(), "pi-code-background-gate-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-background-gate-"));
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(
@@ -193,6 +195,13 @@ test("a gated background agent stays queued until running with a live handle", a
     await flush();
     assert.equal(pool.registry.get(jobId)?.status, "completed");
     assert.equal(pool.liveChildren.has(jobId), false);
+    const agentId = jobId!.replace(/^job-/, "");
+    const agentManifest = homeAgentManifestFile(encodeProjectId(cwd), "root-session", agentId);
+    const eventLog = agentManifest.replace("agent.json", "events.jsonl");
+    assert.equal(existsSync(agentManifest), true);
+    assert.equal(JSON.parse(readFileSync(agentManifest, "utf8")).status, "completed");
+    assert.equal(readFileSync(eventLog, "utf8").trim().split("\n").length >= 5, true);
+    assert.equal(statSync(agentManifest).mode & 0o777, 0o600);
   } finally {
     spawnChildSession.__createChild = previousFactory;
     // Release every held slot so no gate waiter is left dangling.
@@ -200,5 +209,7 @@ test("a gated background agent stays queued until running with a live handle", a
     await Promise.allSettled(holdRuns);
     await flush();
     rmSync(cwd, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.XZY_PI_CODE_HOME;
+    else process.env.XZY_PI_CODE_HOME = previousHome;
   }
 });
