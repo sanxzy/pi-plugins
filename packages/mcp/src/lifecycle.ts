@@ -70,26 +70,32 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
             return;
           }
           const agentDir = userAgentDir(options.agentDir);
-          const started = await startRemoteAuth({
-            url: server.url,
-            agentDir,
-            oauth: server.oauth,
-            onRedirect: async (url) => {
-              notify(ctx, `MCP auth \"${name}\": open ${url.toString()}`);
-            },
-          });
-          // When the user completes the browser flow, the loopback callback
-          // resolves the authorization code and finishRemoteAuth commits it.
-          void started.callback.then(
-            async (code) => {
-              if (!code) return;
-              await finishRemoteAuth({ url: server.url, agentDir, oauth: server.oauth, onRedirect: async () => {} }, code);
-              notify(ctx, `MCP auth \"${name}\": authorized.`);
-            },
-            async () => {
-              notify(ctx, `MCP auth \"${name}\": cancelled or expired.`);
-            },
-          );
+          try {
+            const started = await startRemoteAuth({
+              url: server.url,
+              agentDir,
+              oauth: server.oauth,
+              onRedirect: async (url) => {
+                notify(ctx, `MCP auth \"${name}\": open ${url.toString()}`);
+              },
+            });
+            // When the user completes the browser flow, the loopback callback
+            // resolves the authorization code and finishRemoteAuth commits it.
+            void started.callback.then(
+              async (code) => {
+                if (!code) return;
+                await finishRemoteAuth({ url: server.url, agentDir, oauth: server.oauth, onRedirect: async () => {} }, code);
+                notify(ctx, `MCP auth \"${name}\": authorized.`);
+              },
+              async () => {
+                notify(ctx, `MCP auth \"${name}\": cancelled or expired.`);
+              },
+            ).catch((error: unknown) => {
+              notify(ctx, `MCP auth \"${name}\": ${error instanceof Error ? error.message : String(error)}`);
+            });
+          } catch (error) {
+            notify(ctx, `MCP auth \"${name}\": ${error instanceof Error ? error.message : String(error)}`);
+          }
           return;
         }
         case "logout": {

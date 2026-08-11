@@ -12,6 +12,14 @@ import { createDefaultAuthStore, type AuthStore } from "./auth-store.ts";
 export const OAUTH_CALLBACK_PORT = 19876;
 export const OAUTH_CALLBACK_PATH = "/mcp/oauth/callback";
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+/** Injectable expiry for abandoned OAuth flows (tests use milliseconds). */
+export let oauthCallbackTimeoutMs = CALLBACK_TIMEOUT_MS;
+export function setOAuthCallbackTimeout(timeoutMs: number): void {
+  oauthCallbackTimeoutMs = timeoutMs;
+}
+export function resetOAuthCallbackTimeout(): void {
+  oauthCallbackTimeoutMs = CALLBACK_TIMEOUT_MS;
+}
 const CALLBACK_HOST = "127.0.0.1";
 
 /** Parse a redirect URI into a loopback port and path, with safe defaults. */
@@ -369,7 +377,7 @@ export function waitForOAuthCallback(state: string, url: string): Promise<string
         reject(new Error("OAuth callback timeout - authorization took too long"));
         stopIfIdle();
       }
-    }, CALLBACK_TIMEOUT_MS);
+    }, oauthCallbackTimeoutMs);
     pendingAuths.set(state, { resolve, reject, timeout });
   });
 }

@@ -56,6 +56,8 @@ export {
   stopCallbackServer,
   stopCallbackServerIfIdle,
   waitForOAuthCallback,
+  resetOAuthCallbackTimeout,
+  setOAuthCallbackTimeout,
   type OAuthProviderOptions,
   type OAuthStatus,
 } from "./oauth.ts";

@@ -112,4 +112,4 @@ export function createDefaultAuthStore(agentDir: string): AuthStore {
   return createAuthStore(authStorePath(agentDir));
 }
 
-export { AUTH_FILE_NAME, join };
+export { AUTH_FILE_NAME };

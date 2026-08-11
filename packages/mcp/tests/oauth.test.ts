@@ -120,6 +120,20 @@ test("occupied callback ports fail instead of returning an unmanaged endpoint", 
   }
 });
 
+test("abandoned OAuth flows expire by the configurable timeout", async () => {
+  const { port, path } = await ensureCallbackServer("http://127.0.0.1:0/mcp/oauth/callback");
+  const { setOAuthCallbackTimeout, resetOAuthCallbackTimeout } = await import("../src/index.ts");
+  setOAuthCallbackTimeout(60);
+  try {
+    const pending = waitForOAuthCallback("state-expire", "https://server.example/mcp");
+    await assert.rejects(pending, /timeout|authorization took too long/i);
+  } finally {
+    resetOAuthCallbackTimeout();
+    await stopCallbackServer();
+  }
+  assert.equal(port > 0, true);
+});
+
 test("stopping the callback server rejects still-pending flows", async () => {
   const { port } = await ensureCallbackServer("http://127.0.0.1:0/mcp/oauth/callback");
   const pending = waitForOAuthCallback("state-pending", "https://server.example/mcp");
