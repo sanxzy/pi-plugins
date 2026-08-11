@@ -109,6 +109,26 @@ test("masking removes secrets, tokens, credentials, and raw Telegram updates", a
   assert.equal(raw.includes("\"safe\":\"ok\""), true);
 });
 
+test("masking removes common API-key, bearer, authorization, private-key, and error-message secrets", async () => {
+  const paths = scope();
+  const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
+  const rawValues = ["APIKEY_123", "BEARERTOK_456", "cred_abc", "RAW_PRIVATE_KEY"];
+  await assert.rejects(
+    () => processWithLog({
+      operation: "auth.check",
+      parameters: {
+        apiKey: rawValues[0],
+        api_key: rawValues[0],
+        bearer: rawValues[1],
+        authorization: `Bearer ${rawValues[1]}`,
+        nested: { privateKey: rawValues[3], credential: rawValues[2] },
+      },
+    }, () => Promise.reject(new Error(`Bearer ${rawValues[1]} apiKey=${rawValues[0]} credential=${rawValues[2]}`))),
+  );
+  const raw = readFileSync(paths.errorsPath, "utf8") + readFileSync(paths.eventsPath, "utf8");
+  for (const value of rawValues) assert.equal(raw.includes(value), false, `raw value leaked: ${value}`);
+});
+
 test("session logger routes agent errors to its error file and enforces private modes", async () => {
   const paths = scope();
   const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", agentId: "agent-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
@@ -138,4 +158,5 @@ test("persistence failure does not fail business work and reports safe fallback 
   assert.equal(fallback.length >= 1, true);
   assert.equal(fallback.join("\n").includes("raw-secret"), false);
   assert.equal(fallback.join("\n").includes("do-not-leak"), false);
+  assert.equal(fallback.join("\n").includes("token"), false);
 });
