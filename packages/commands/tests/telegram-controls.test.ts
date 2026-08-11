@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   clearTelegramCommandContext,
   clearTelegramControlState,
   dispatchTelegramControl,
+  getTelegramCommandContext,
+  registerTelegramCommandContext,
   setTelegramCommandContext,
   takeTelegramCompactionOrigin,
 } from "../src/registrations/telegram-controls.ts";
@@ -44,6 +46,30 @@ test("non-control commands are not owned by the handler", async () => {
   );
   assert.equal(handled, false);
   assert.deepEqual(messages, []);
+});
+
+test("session_start auto-retains the command context through the SDK seam", async () => {
+  clearTelegramCommandContext("/tmp/auto-project");
+  const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown>();
+  const commandContext = {
+    reload: async () => {},
+  } as unknown as ExtensionCommandContext;
+  const pi = {
+    registerCommand: () => {},
+    createCommandContext: () => commandContext,
+    on: (event: string, handler: unknown) => {
+      handlers.set(event, handler as (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown);
+    },
+  } as unknown as ExtensionAPI;
+  registerTelegramCommandContext(pi);
+  assert.equal(handlers.has("session_start"), true);
+  await handlers.get("session_start")!({ reason: "startup" }, context());
+  assert.equal(
+    getTelegramCommandContext("/tmp/project"),
+    commandContext,
+    "session_start retains the ExtensionCommandContext reference in the registry",
+  );
+  clearTelegramCommandContext("/tmp/project");
 });
 
 test("reload invokes the retained command context", async () => {
@@ -96,7 +122,7 @@ test("reload refuses busy or queued sessions", async () => {
   clearTelegramCommandContext("/tmp/reload-busy");
 });
 
-test("reload reports unavailable until the TUI context is populated", async () => {
+test("reload reports unavailable until a command context is available", async () => {
   clearTelegramCommandContext("/tmp/reload-missing");
   const { messages, send } = collectReplies();
   const handled = await dispatchTelegramControl(command("reload"), {
@@ -106,7 +132,28 @@ test("reload reports unavailable until the TUI context is populated", async () =
     sendMessage: send,
   });
   assert.equal(handled, true);
-  assert.ok(messages[0]?.includes("/telegram_commands"));
+  assert.ok(messages[0]?.includes("unavailable"));
+});
+
+test("reload falls back to a fresh command context created through the SDK seam", async () => {
+  clearTelegramCommandContext("/tmp/reload-seam");
+  let reloadCalled = 0;
+  const { messages, send } = collectReplies();
+  const handled = await dispatchTelegramControl(command("reload"), {
+    projectRoot: "/tmp/reload-seam",
+    chatId: "555",
+    context: context(),
+    sendMessage: send,
+    createCommandContext: () => ({
+      reload: async () => { reloadCalled += 1; },
+    }) as unknown as ExtensionCommandContext,
+  });
+  assert.equal(handled, true);
+  assert.equal(reloadCalled, 1);
+  assert.deepEqual(messages, [
+    "♻️ Reloading the active Pi session...",
+    "✅ Active Pi session reloaded.",
+  ]);
 });
 
 test("reload reports SDK failures without escaping the Telegram handler", async () => {

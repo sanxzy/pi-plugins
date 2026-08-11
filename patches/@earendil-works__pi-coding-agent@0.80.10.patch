@@ -1,0 +1,66 @@
+diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
+index 7b381711789938056cddea92182dadf9cacf9fc6..9155f22a5572739e071a80b883ce0fab2f3e246c 100644
+--- a/dist/core/extensions/loader.js
++++ b/dist/core/extensions/loader.js
+@@ -154,6 +154,8 @@ export function createExtensionRuntime() {
+         setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
+         getThinkingLevel: notInitialized,
+         setThinkingLevel: notInitialized,
++        // Local experiment: command-only APIs become available after the runner binds.
++        createCommandContext: notInitialized,
+         flagValues: new Map(),
+         pendingProviderRegistrations: [],
+         assertActive,
+@@ -287,6 +289,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
+             runtime.assertActive();
+             runtime.setThinkingLevel(level);
+         },
++        // Local experiment: expose command-context creation to extensions so
++        // lifecycle handlers can obtain an ExtensionCommandContext.
++        createCommandContext() {
++            runtime.assertActive();
++            return runtime.createCommandContext();
++        },
+         registerProvider(name, config) {
+             runtime.assertActive();
+             runtime.registerProvider(name, config, extension.path);
+diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
+index 92e796571348fcffebc115845e78c445e12baaf2..5c254c8fccc018f45641beec1a741eddfb935900 100644
+--- a/dist/core/extensions/runner.js
++++ b/dist/core/extensions/runner.js
+@@ -153,6 +153,10 @@ export class ExtensionRunner {
+         this.cwd = cwd;
+         this.sessionManager = sessionManager;
+         this.modelRegistry = modelRegistry;
++        // Local experiment: let extensions create an ExtensionCommandContext
++        // through the shared runtime (used by lifecycle handlers, not only
++        // command dispatch).
++        this.runtime.createCommandContext = () => this.createCommandContext();
+     }
+     bindCore(actions, contextActions, providerActions) {
+         // Copy actions into the shared runtime (all extension APIs reference this)
+diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
+index f1c2e80e67fdbeafeea091483cb4206640cd3e39..3f8c880f205f64ad4280422cb476bd7d76f7d27f 100644
+--- a/dist/core/extensions/types.d.ts
++++ b/dist/core/extensions/types.d.ts
+@@ -927,6 +927,11 @@ export interface ExtensionAPI {
+     getThinkingLevel(): ThinkingLevel;
+     /** Set thinking level (clamped to model capabilities). */
+     setThinkingLevel(level: ThinkingLevel): void;
++    /**
++     * Create a fresh ExtensionCommandContext bound to the current runner.
++     * Local experiment: exposes command-only APIs (e.g. reload()) to lifecycle handlers.
++     */
++    createCommandContext(): ExtensionCommandContext;
+     /**
+      * Register or override a model provider.
+      *
+@@ -1155,6 +1160,8 @@ export interface ExtensionActions {
+     setModel: SetModelHandler;
+     getThinkingLevel: GetThinkingLevelHandler;
+     setThinkingLevel: SetThinkingLevelHandler;
++    /** Create a fresh ExtensionCommandContext bound to the current runner. Local experiment. */
++    createCommandContext: () => ExtensionCommandContext;
+ }
+ /**
+  * Actions for ExtensionContext (ctx.* in event handlers).

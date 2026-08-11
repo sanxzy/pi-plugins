@@ -23,6 +23,8 @@ export interface TelegramControlDispatchOptions {
   sendMessage?: (projectRoot: string, chatId: string, text: string) => Promise<unknown>;
   /** Development-mode gate used by /system_prompt. Defaults to a real env read. */
   isDevMode?: () => boolean;
+  /** Local experiment: seam to create a fresh ExtensionCommandContext for command-only controls. */
+  createCommandContext?: () => ExtensionCommandContext;
 }
 
 /**
@@ -69,6 +71,25 @@ export function registerTelegramCommandContext(pi: ExtensionAPI): void {
       setTelegramCommandContext(context.cwd, context);
       context.ui.notify("Telegram command context populated. Send /reload in Telegram to reload the Pi session.", "info");
     },
+  });
+
+  // Local experiment: auto-populate the command context at session_start so
+  // Telegram /reload works without a preceding /telegram_commands in the TUI.
+  pi.on("session_start", (_event, ctx) => {
+    const projectRoot = canonicalProjectRoot(ctx.cwd);
+    const existing = getTelegramCommandContext(projectRoot);
+    if (existing) return;
+    try {
+      // Local experiment: create the second context (ExtensionCommandContext)
+      // through the SDK seam and pass its reference through the registry so
+      // Telegram native controls (e.g. /reload) can call command-only APIs.
+      const commandContext = pi.createCommandContext();
+      setTelegramCommandContext(projectRoot, commandContext);
+    } catch {
+      // createCommandContext requires a bound runner. During the very first
+      // extension load the runner may not be available, but session_start
+      // after startup always has one. Silently skip if unavailable.
+    }
   });
 }
 
@@ -219,19 +240,25 @@ export async function dispatchTelegramControl(
         await reply("Cannot reload while Pi is busy or has pending messages. Send /abort first.");
         return true;
       }
-      const commandContext = getTelegramCommandContext(options.projectRoot);
+      const doReload = async (commandContext: ExtensionCommandContext): Promise<void> => {
+        await reply("♻️ Reloading the active Pi session...");
+        try {
+          await commandContext.reload();
+          await reply("✅ Active Pi session reloaded.");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          await reply(`Pi session reload failed: ${message}`);
+        }
+      };
+      // Prefer the retained context reference; fall back to a fresh command
+      // context created through the SDK seam so /reload does not depend on a
+      // preceding /telegram_commands in the TUI.
+      const commandContext = getTelegramCommandContext(options.projectRoot) ?? options.createCommandContext?.();
       if (!commandContext) {
-        await reply("Pi session reload is unavailable. Run /telegram_commands in the TUI first, then send /reload again.");
+        await reply("Pi session reload is unavailable in the current Pi runtime. Restart the active Pi session and try again.");
         return true;
       }
-      await reply("♻️ Reloading the active Pi session...");
-      try {
-        await commandContext.reload();
-        await reply("✅ Active Pi session reloaded.");
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await reply(`Pi session reload failed: ${message}`);
-      }
+      await doReload(commandContext);
       return true;
     }
 

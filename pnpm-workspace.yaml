@@ -5,3 +5,5 @@ allowBuilds:
   '@google/genai': false
   esbuild: false
   protobufjs: false
+patchedDependencies:
+  '@earendil-works/pi-coding-agent@0.80.10': patches/@earendil-works__pi-coding-agent@0.80.10.patch
