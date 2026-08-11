@@ -324,6 +324,7 @@ test("repeated remote session expiration stays an explicit failed result", async
     await assert.rejects(manager.callTool("failrec", "doomed", {}), /session expired/i);
     assert.ok(callCount >= 2, "recovery retried once before surfacing the failure");
     assert.equal(manager.status("failrec")?.status, "failed");
+    assert.deepEqual(manager.serverNames(), [], "failed replacement transport is closed and untracked");
   } finally {
     await manager.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
