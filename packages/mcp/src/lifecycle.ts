@@ -45,7 +45,12 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       ...options,
       projectRoot: ctx.cwd,
       agentDir: userAgentDir(options.agentDir),
-      onCatalogChanged: () => reconcile?.(),
+      onCatalogChanged: (serverName) => {
+        void manager.refreshCatalog(serverName).then(
+          () => reconcile?.(),
+          () => reconcile?.(),
+        );
+      },
     });
     managers.set(key, manager);
     const exposer = new McpToolExposer(pi);

@@ -37,6 +37,7 @@ const PROMPT_COMMAND_PREFIX = "mcp_prompt_";
 export class McpPromptsResourcesExposer {
   private readonly promptCommands = new Map<string, string>(); // commandName -> identity
   private readonly identityNames = new Map<string, string>();
+  private readonly promptRegistry = new NameRegistry();
   private resourcesRegistered = false;
 
   constructor(
@@ -58,12 +59,12 @@ export class McpPromptsResourcesExposer {
   }
 
   syncPrompts(manager: McpManagerLike, readPrompt: McpReadPrompt): void {
-    const registry = new NameRegistry();
     const next = new Map<string, string>();
     for (const serverName of manager.serverNames()) {
       for (const prompt of manager.promptsFor(serverName) ?? []) {
         const identity = identityKey(serverName, prompt.name);
-        const commandName = `${PROMPT_COMMAND_PREFIX}${registry.resolve(serverName, prompt.name)}`;
+        const commandName = this.identityNames.get(identity)
+          ?? `${PROMPT_COMMAND_PREFIX}${this.promptRegistry.resolve(serverName, prompt.name)}`;
         next.set(identity, commandName);
         if (!this.identityNames.has(identity)) {
           this.identityNames.set(identity, commandName);
@@ -95,7 +96,7 @@ export class McpPromptsResourcesExposer {
       this.output(ctx, "Error: MCP prompt denied by policy.");
       return;
     }
-    const result = await readPrompt(serverName, nativeName, parsePromptArgs(args), undefined);
+    const result = await readPrompt(serverName, nativeName, parsePromptArgs(args), ctx.signal);
     this.output(ctx, promptResultToText(result));
   }
 
@@ -133,14 +134,16 @@ export class McpPromptsResourcesExposer {
           return { content: [{ type: "text", text: "Error: MCP resource read denied by policy" }], details: { server, uri, denied: true } };
         }
         const result = await readResource(server, uri, signal);
-        const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> =
-          (result.content ?? []).map((block) =>
-            block.type === "image"
-              ? { type: "image", data: block.data ?? "", mimeType: block.mimeType ?? "image/png" }
-              : { type: "text", text: block.text ?? "" },
-          );
-        if (content.length === 0) {
-          content.push({ type: "text", text: resourceResultToText(result) });
+        // The normalizer's `text` is the aggregate-bounded stream and includes
+        // every omission message. Keep it as one model-facing text block, then
+        // append only supported, size-bounded image attachments.
+        const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
+          { type: "text", text: resourceResultToText(result) },
+        ];
+        for (const block of result.content ?? []) {
+          if (block.type === "image" && block.data && block.mimeType) {
+            content.push({ type: "image", data: block.data, mimeType: block.mimeType });
+          }
         }
         return { content, details: result };
       },
