@@ -3,6 +3,9 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { mkdirSync } from "node:fs";
+
+process.env.XZY_PI_CODE_HOME = mkdtempSync(join(tmpdir(), "pi-code-channel-state-home-"));
 import {
   channelConfigFile,
   channelRuntimeFile,

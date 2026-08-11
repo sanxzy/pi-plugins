@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+process.env.XZY_PI_CODE_HOME = mkdtempSync(join(tmpdir(), "pi-code-channel-test-home-"));
 import {
   createTelegramInbound,
   decodeAcceptedText,
