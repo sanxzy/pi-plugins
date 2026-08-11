@@ -157,6 +157,15 @@ async function readReferenceCatalog(
       diagnostics.push(`Reference '${name}' is invalid`);
       continue;
     }
+    if (!source.ok && fallback?.type === "git") {
+      entries.push({
+        ...referenceEntryMetadata(name, fallback),
+        status: "unavailable",
+        diagnostic: "Git reference is invalid",
+      });
+      diagnostics.push(`Reference '${name}' is unavailable`);
+      continue;
+    }
     const resolved = await resolveCatalogEntry(name, source.ok ? source.value : fallback!, homeDir, reposDir, refresh, materializer);
     entries.push(resolved.entry);
     if (resolved.diagnostic) diagnostics.push(resolved.diagnostic);

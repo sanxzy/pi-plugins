@@ -1,14 +1,12 @@
 /**
  * System-Git materialization for the references catalog.
  *
- * Mirrors the OpenCode repository-cache contract without Effect or a Git
- * library: a child-process adapter with safe argument boundaries, a
- * branch-isolated cache layout derived from the core cache path, crash-
- * recoverable per-checkout locking with heartbeat liveness and owner-token
- * release, and best-effort runtime degradation.
+ * Uses the Git executable through a bounded child-process adapter. Checkouts
+ * are isolated by normalized repository and branch identity, and operations
+ * are serialized by a heartbeat-backed per-checkout lease.
  */
 import { execFile } from "node:child_process";
-import { mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   cacheIdentity,
@@ -77,42 +75,58 @@ export function createGitMaterializer(options: GitMaterializerOptions = {}): Git
       const branchOk = validateBranch(input.branch);
       if (!branchOk.ok) throw new Error(branchOk.error);
     }
+    throwIfAborted(input.signal);
+
     const localPath = cachePath(input.cacheRoot, input.reference, input.branch);
     const token = lockToken();
     try {
-      return await withLock(`${localPath}.lock`, lockStaleMs, token, lockAcquireTimeoutMs, async () => {
-      await mkdir(dirname(localPath), { recursive: true });
+      return await withLock(
+        `${localPath}.lock`,
+        lockStaleMs,
+        token,
+        lockAcquireTimeoutMs,
+        input.signal,
+        async () => {
+          await mkdir(dirname(localPath), { recursive: true });
 
-      const existing = await discoverWorktree(localPath, run, timeoutMs, input.signal);
-      const origin = existing ? await remoteOrigin(existing.path, run, timeoutMs, input.signal) : undefined;
-      const actualBranch = existing ? await currentBranch(existing.path, run, timeoutMs, input.signal) : undefined;
-      const originReference = origin ? parseRepository(stripGitCredentials(origin)) : undefined;
-      const reuse = Boolean(
-        existing &&
-          existing.topLevel === existing.path &&
-          originReference &&
-          cacheIdentity(originReference) === cacheIdentity(input.reference) &&
-          (input.branch === undefined || actualBranch === input.branch),
+          const existing = await discoverWorktree(localPath, run, timeoutMs, input.signal);
+          const origin = existing ? await remoteOrigin(existing.path, run, timeoutMs, input.signal) : undefined;
+          const actualBranch = existing ? await currentBranch(existing.path, run, timeoutMs, input.signal) : undefined;
+          const defaultBranch = existing ? await defaultRemoteBranch(existing.path, run, timeoutMs, input.signal) : undefined;
+          const expectedBranch = input.branch ?? defaultBranch;
+          const originReference = origin ? parseRepository(stripGitCredentials(origin)) : undefined;
+          const reuse = Boolean(
+            existing &&
+              existing.topLevel === existing.path &&
+              originReference &&
+              cacheIdentity(originReference) === cacheIdentity(input.reference) &&
+              (expectedBranch === undefined || actualBranch === expectedBranch),
+          );
+
+          if (!reuse) await removeCheckout(localPath, input.signal);
+
+          const status: GitMaterializeStatus = !reuse ? "cloned" : input.refresh ? "refreshed" : "cached";
+          try {
+            if (status === "cloned") {
+              await clone(input.reference, localPath, input.branch, run, timeoutMs, input.signal);
+            } else if (status === "refreshed") {
+              await refresh(localPath, input.branch, run, timeoutMs, input.signal);
+            }
+
+            const branch = await currentBranch(localPath, run, timeoutMs, input.signal);
+            const expectedAfterMaterialization =
+              input.branch ?? (await defaultRemoteBranch(localPath, run, timeoutMs, input.signal));
+            if (expectedAfterMaterialization !== undefined && branch !== expectedAfterMaterialization) {
+              throw new Error("Git checkout branch did not match the requested branch");
+            }
+            const head = await headAt(localPath, run, timeoutMs, input.signal);
+            return { localPath, status, head, branch };
+          } catch (error) {
+            if (status !== "cached") await removeCheckout(localPath, input.signal).catch(() => undefined);
+            throw error;
+          }
+        },
       );
-
-      if (!reuse) {
-        await rm(localPath, { recursive: true, force: true });
-      }
-
-      const status: GitMaterializeStatus = !reuse ? "cloned" : input.refresh ? "refreshed" : "cached";
-
-      if (status === "cloned") {
-        await clone(input.reference, localPath, input.branch, run, timeoutMs, input.signal);
-      } else if (status === "refreshed") {
-        await refresh(localPath, input.reference, input.branch, run, timeoutMs, input.signal);
-      }
-
-      const [head, branch] = await Promise.all([
-        headAt(localPath, run, timeoutMs, input.signal),
-        currentBranch(localPath, run, timeoutMs, input.signal),
-      ]);
-        return { localPath, status, head, branch };
-      });
     } catch (error) {
       throw new Error(sanitizeError(error), { cause: error });
     }
@@ -128,11 +142,14 @@ export function createGitMaterializer(options: GitMaterializerOptions = {}): Git
       if (!branchOk.ok) return { ok: false, error: branchOk.error };
     }
     try {
+      throwIfAborted(input.signal);
       const args = ["git", "ls-remote", input.reference.remote];
       if (input.branch) args.push(`refs/heads/${input.branch}`);
       const result = await run(args, process.cwd(), { timeoutMs, signal: input.signal });
-      if (input.branch && !result.stdout.includes(`refs/heads/${input.branch}`)) {
-        return { ok: false, error: "Repository branch is not available" };
+      if (input.branch) {
+        const expected = `refs/heads/${input.branch}`;
+        const found = result.stdout.split(/\r?\n/u).some((line) => line.trim().split(/\s+/u)[1] === expected);
+        if (!found) return { ok: false, error: "Repository branch is not available" };
       }
       return { ok: true };
     } catch {
@@ -159,7 +176,6 @@ async function clone(
 
 async function refresh(
   localPath: string,
-  reference: RepositoryReference,
   branch: string | undefined,
   run: GitCommandRunner,
   timeoutMs: number,
@@ -184,7 +200,7 @@ async function defaultRemoteBranch(
       timeoutMs,
       signal,
     });
-    return (result.stdout.trim() || undefined)?.replace(/^origin\//, "");
+    return (result.stdout.trim() || undefined)?.replace(/^origin\//u, "");
   } catch {
     return undefined;
   }
@@ -215,22 +231,20 @@ async function remoteOrigin(localPath: string, run: GitCommandRunner, timeoutMs:
 }
 
 async function headAt(localPath: string, run: GitCommandRunner, timeoutMs: number, signal: AbortSignal | undefined): Promise<string | undefined> {
-  try {
-    const result = await run(["git", "-C", localPath, "rev-parse", "HEAD"], localPath, { timeoutMs, signal });
-    return result.stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
+  const result = await run(["git", "-C", localPath, "rev-parse", "HEAD"], localPath, { timeoutMs, signal });
+  return result.stdout.trim() || undefined;
 }
 
 async function currentBranch(localPath: string, run: GitCommandRunner, timeoutMs: number, signal: AbortSignal | undefined): Promise<string | undefined> {
-  try {
-    const result = await run(["git", "-C", localPath, "rev-parse", "--abbrev-ref", "HEAD"], localPath, { timeoutMs, signal });
-    const value = result.stdout.trim();
-    return value === "HEAD" ? undefined : value;
-  } catch {
-    return undefined;
-  }
+  const result = await run(["git", "-C", localPath, "rev-parse", "--abbrev-ref", "HEAD"], localPath, { timeoutMs, signal });
+  const value = result.stdout.trim();
+  return value === "HEAD" ? undefined : value;
+}
+
+async function removeCheckout(localPath: string, signal: AbortSignal | undefined): Promise<void> {
+  throwIfAborted(signal);
+  await rm(localPath, { recursive: true, force: true });
+  throwIfAborted(signal);
 }
 
 async function withLock<T>(
@@ -238,9 +252,10 @@ async function withLock<T>(
   staleMs: number,
   token: string,
   acquireTimeoutMs: number,
+  signal: AbortSignal | undefined,
   operation: () => Promise<T>,
 ): Promise<T> {
-  await acquireLock(lockPath, staleMs, token, acquireTimeoutMs);
+  await acquireLock(lockPath, staleMs, token, acquireTimeoutMs, signal);
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   try {
     heartbeat = setInterval(() => {
@@ -259,10 +274,12 @@ async function acquireLock(
   staleMs: number,
   token: string,
   acquireTimeoutMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
   await mkdir(dirname(lockPath), { recursive: true });
   const deadline = Date.now() + acquireTimeoutMs;
   for (;;) {
+    throwIfAborted(signal);
     try {
       await mkdir(lockPath);
       await writeFile(`${lockPath}/owner`, token, "utf8");
@@ -271,26 +288,38 @@ async function acquireLock(
     } catch (error) {
       if (!isErrno(error) || error.code !== "EEXIST") throw error;
       if (await isLockStale(lockPath, staleMs)) {
-        await rm(lockPath, { recursive: true, force: true });
+        await reclaimLock(lockPath, token);
         continue;
       }
       if (Date.now() > deadline) throw new Error("Timed out acquiring the repository cache lock");
-      await sleep(50);
+      await sleep(50, signal);
     }
   }
 }
 
-async function releaseLock(lockPath: string, token: string): Promise<void> {
+async function reclaimLock(lockPath: string, token: string): Promise<void> {
+  const graveyard = `${lockPath}~stale-${token}`;
   try {
-    const owner = await stat(lockPath);
-    if (owner.isDirectory()) {
-      const recorded = await readOwner(lockPath);
-      if (recorded === token) {
-        await rm(lockPath, { recursive: true, force: true });
-      }
-    }
-  } catch {
-    // Lock already removed or being replaced; nothing to release.
+    await rename(lockPath, graveyard);
+    await rm(graveyard, { recursive: true, force: true });
+  } catch (error) {
+    if (isErrno(error) && (error.code === "ENOENT" || error.code === "EEXIST")) return;
+    throw error;
+  }
+}
+
+async function releaseLock(lockPath: string, token: string): Promise<void> {
+  const graveyard = `${lockPath}~release-${token}`;
+  try {
+    const recorded = await readOwner(lockPath);
+    if (recorded !== token) return;
+    // Atomic reclaim: rename the lease directory to a unique graveyard before
+    // removing it, so a contender that recreates the lease is never clobbered.
+    await rename(lockPath, graveyard);
+    await rm(graveyard, { recursive: true, force: true });
+  } catch (error) {
+    if (isErrno(error) && (error.code === "ENOENT" || error.code === "EEXIST")) return;
+    throw error;
   }
 }
 
@@ -306,11 +335,23 @@ async function readOwner(lockPath: string): Promise<string | undefined> {
 async function isLockStale(lockPath: string, staleMs: number): Promise<boolean> {
   try {
     const dirInfo = await stat(lockPath);
-    const ownerInfo = await stat(`${lockPath}/heartbeat`).catch(() => undefined);
-    const reference = ownerInfo ? ownerInfo.mtimeMs : dirInfo.mtimeMs;
-    return Date.now() - reference > staleMs;
+    const heartbeatInfo = await stat(`${lockPath}/heartbeat`).catch(() => undefined);
+    const reference = heartbeatInfo ? heartbeatInfo.mtimeMs : dirInfo.mtimeMs;
+    if (Date.now() - reference <= staleMs) return false;
+    const owner = await readOwner(lockPath);
+    const pid = owner ? Number.parseInt(owner.split("-", 1)[0] ?? "", 10) : Number.NaN;
+    return !Number.isInteger(pid) || !processAlive(pid);
   } catch {
     return false;
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return isErrno(error) && error.code === "EPERM";
   }
 }
 
@@ -325,19 +366,18 @@ async function runGitProcess(
   gitExecutable = "git",
 ): Promise<{ readonly stdout: string; readonly stderr: string }> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => child.kill();
     const child = execFile(
       gitExecutable,
       args.slice(1),
       { cwd, timeout: options.timeoutMs, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
       (error, stdout, stderr) => {
+        settled = true;
+        options.signal?.removeEventListener("abort", onAbort);
         if (error) {
           const exitCode = typeof (error as { code?: unknown }).code === "number" ? (error as { code?: number }).code : undefined;
-          reject(
-            Object.assign(new Error(sanitizeOutput(stderr) || "Git command failed"), {
-              gitExitCode: exitCode,
-              code: (error as { code?: unknown }).code,
-            }),
-          );
+          reject(Object.assign(new Error(sanitizeOutput(stderr) || "Git command failed"), { gitExitCode: exitCode, code: (error as { code?: unknown }).code }));
           return;
         }
         resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
@@ -345,20 +385,21 @@ async function runGitProcess(
     );
     if (options.signal) {
       if (options.signal.aborted) child.kill();
-      else options.signal.addEventListener("abort", () => child.kill(), { once: true });
+      else options.signal.addEventListener("abort", onAbort, { once: true });
     }
+    void settled;
   });
 }
 
 function sanitizeOutput(value: string): string {
-  const sanitized = value.replace(/([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s/@]+@/g, "$1<redacted>@");
-  const message = sanitized.trim().slice(0, 500);
+  const uriSafe = value.replace(/([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\s/@]+@/gu, "$1<redacted>@");
+  const scpSafe = uriSafe.replace(/(^|[\s"'(])[^@\s/:]+(?::[^@\s]*)?@(?=[^/\s:]+:)/gu, "$1<redacted>@");
+  const message = scpSafe.trim().slice(0, 500);
   return message.length > 0 ? message : "Git command failed";
 }
 
 function sanitizeError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return sanitizeOutput(message);
+  return sanitizeOutput(error instanceof Error ? error.message : String(error));
 }
 
 function stripGitCredentials(remote: string): string {
@@ -368,14 +409,29 @@ function stripGitCredentials(remote: string): string {
     if (url.password) url.password = "";
     return url.toString();
   } catch {
-    return remote;
+    return remote.replace(/^[^@\s]+@(?=[^/\s:]+:)/u, "");
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error("Git materialization aborted");
 }
 
 function isErrno(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("Git materialization aborted"));
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
