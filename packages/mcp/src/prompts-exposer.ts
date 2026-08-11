@@ -12,15 +12,15 @@ export type McpAuthorize = (
 ) => Promise<boolean> | boolean;
 
 export interface McpReadPrompt {
-  (serverName: string, nativeName: string, args: Record<string, string>, signal: AbortSignal | undefined): Promise<McpPromptResult>;
+  (serverName: string, nativeName: string, args: Record<string, string>, signal: AbortSignal | undefined, ctx?: ExtensionContext): Promise<McpPromptResult>;
 }
 
 export interface McpResourceAccess {
-  (serverName: string, uri: string, signal: AbortSignal | undefined): Promise<McpResourceResult>;
+  (serverName: string, uri: string, signal: AbortSignal | undefined, ctx?: ExtensionContext): Promise<McpResourceResult>;
 }
 
 export interface McpResourceLister {
-  (serverName: string): Array<{ uri: string; name: string; description?: string; mimeType?: string }> | undefined;
+  (serverName: string, ctx?: ExtensionContext): Array<{ uri: string; name: string; description?: string; mimeType?: string }> | undefined;
 }
 
 export interface McpPromptsResourcesOptions {
@@ -32,17 +32,30 @@ export interface McpManagerLike {
   promptsFor(name: string): Prompt[] | undefined;
 }
 
+export interface McpSessionBinding {
+  manager: McpManagerLike;
+  readPrompt: McpReadPrompt;
+  readResource: McpResourceAccess;
+  listResources: McpResourceLister;
+}
+
 const PROMPT_COMMAND_PREFIX = "mcp_prompt_";
 
 /**
  * Exposes MCP prompts as Pi slash commands and resources as model-facing
  * list/read tools. Removed commands remain registered but dispatch through a
  * live mapping and become unavailable without calling stale MCP clients.
+ *
+ * In a multi-session host the same model-facing names are shared; invocation
+ * routes through the session that invoked the command/tool via the Pi context,
+ * so one session's manager never executes another session's catalog.
  */
 export class McpPromptsResourcesExposer {
   private readonly promptCommands = new Map<string, string>(); // commandName -> identity
   private readonly identityNames = new Map<string, string>();
   private readonly promptRegistry = new NameRegistry();
+  private readonly sessions = new Map<string, McpSessionBinding>();
+  private legacyBinding?: McpSessionBinding;
   private resourcesRegistered = false;
 
   constructor(
@@ -56,32 +69,64 @@ export class McpPromptsResourcesExposer {
     readResource: McpResourceAccess,
     listResources: McpResourceLister,
   ): void {
-    this.syncPrompts(manager, readPrompt);
+    this.legacyBinding = { manager, readPrompt, readResource, listResources };
+    this.syncAllPrompts();
     if (!this.resourcesRegistered) {
       this.registerResourceTools(readResource, listResources);
       this.resourcesRegistered = true;
     }
   }
 
-  syncPrompts(manager: McpManagerLike, readPrompt: McpReadPrompt): void {
+  registerSession(sessionKey: string, binding: McpSessionBinding): void {
+    this.sessions.set(sessionKey, binding);
+    this.syncAllPrompts();
+    if (!this.resourcesRegistered) {
+      this.registerResourceTools(
+        (server, uri, signal, ctx) => this.sessionFor(ctx)?.readResource(server, uri, signal, ctx) ?? Promise.resolve({ server, uri, text: "", isError: true, failure: "unavailable" }),
+        (server, ctx) => this.sessionFor(ctx)?.listResources(server, ctx),
+      );
+      this.resourcesRegistered = true;
+    }
+  }
+
+  removeSession(sessionKey: string): void {
+    this.sessions.delete(sessionKey);
+    this.syncAllPrompts();
+  }
+
+  syncSession(sessionKey: string): void {
+    if (this.sessions.has(sessionKey)) this.syncAllPrompts();
+  }
+
+  private sessionFor(ctx?: ExtensionContext): McpSessionBinding | undefined {
+    if (!ctx) return this.legacyBinding;
+    return this.sessions.get(`${ctx.cwd}\u0000${ctx.sessionManager.getSessionId()}`) ?? this.legacyBinding;
+  }
+
+  private syncAllPrompts(): void {
     const next = new Map<string, string>();
-    for (const serverName of manager.serverNames()) {
-      for (const prompt of manager.promptsFor(serverName) ?? []) {
-        const identity = identityKey(serverName, prompt.name);
-        const commandName = this.identityNames.get(identity)
-          ?? `${PROMPT_COMMAND_PREFIX}${this.promptRegistry.resolve(serverName, prompt.name)}`;
-        next.set(identity, commandName);
-        if (!this.identityNames.has(identity)) {
-          this.identityNames.set(identity, commandName);
-          this.pi.registerCommand(commandName, {
-            description: buildPromptDescription(prompt, serverName),
-            handler: async (args: string, ctx: ExtensionContext): Promise<void> => {
-              await this.handlePrompt(commandName, args, readPrompt, ctx);
-            },
-          });
+    const managers = [
+      ...(this.legacyBinding ? [this.legacyBinding.manager] : []),
+      ...[...this.sessions.values()].map((session) => session.manager),
+    ];
+    for (const manager of managers) {
+      for (const serverName of manager.serverNames()) {
+        for (const prompt of manager.promptsFor(serverName) ?? []) {
+          const identity = identityKey(serverName, prompt.name);
+          const commandName = this.identityNames.get(identity)
+            ?? `${PROMPT_COMMAND_PREFIX}${this.promptRegistry.resolve(serverName, prompt.name)}`;
+          next.set(identity, commandName);
+          if (!this.identityNames.has(identity)) {
+            this.identityNames.set(identity, commandName);
+            this.pi.registerCommand(commandName, {
+              description: buildPromptDescription(prompt, serverName),
+              handler: async (args: string, ctx: ExtensionContext): Promise<void> => {
+                await this.handlePrompt(commandName, args, ctx);
+              },
+            });
+          }
+          this.promptCommands.set(commandName, identity);
         }
-        // Re-add a prompt's live dispatch mapping after a refresh.
-        this.promptCommands.set(commandName, identity);
       }
     }
     for (const [identity, commandName] of this.identityNames) {
@@ -89,7 +134,14 @@ export class McpPromptsResourcesExposer {
     }
   }
 
-  private async handlePrompt(commandName: string, args: string, readPrompt: McpReadPrompt, ctx: ExtensionContext): Promise<void> {
+  syncPrompts(manager: McpManagerLike, readPrompt: McpReadPrompt): void {
+    if (this.legacyBinding) {
+      this.legacyBinding = { manager, readPrompt, readResource: this.legacyBinding.readResource, listResources: this.legacyBinding.listResources };
+    }
+    this.syncAllPrompts();
+  }
+
+  private async handlePrompt(commandName: string, args: string, ctx: ExtensionContext): Promise<void> {
     const identity = this.promptCommands.get(commandName);
     if (!identity) {
       this.output(ctx, "Error: MCP prompt is no longer available.");
@@ -101,7 +153,12 @@ export class McpPromptsResourcesExposer {
       this.output(ctx, "Error: MCP prompt denied by policy.");
       return;
     }
-    const result = await readPrompt(serverName, nativeName, parsePromptArgs(args), ctx.signal);
+    const reader = this.sessionFor(ctx)?.readPrompt;
+    if (!reader) {
+      this.output(ctx, "Error: MCP prompt session is unavailable.");
+      return;
+    }
+    const result = await reader(serverName, nativeName, parsePromptArgs(args), ctx.signal, ctx);
     this.output(ctx, promptResultToText(result));
   }
 
@@ -116,7 +173,7 @@ export class McpPromptsResourcesExposer {
         if (this.options.authorize && !(await this.options.authorize("resource", server, "", ctx))) {
           return { content: [{ type: "text", text: "Error: MCP resource listing denied by policy" }], details: { server, denied: true } };
         }
-        const available = listResources(server);
+        const available = listResources(server, ctx);
         if (available === undefined) {
           return { content: [{ type: "text", text: `Error: unknown MCP server "${server}"` }], details: { server, denied: false, unknown: true } };
         }
@@ -142,7 +199,7 @@ export class McpPromptsResourcesExposer {
         if (this.options.authorize && !(await this.options.authorize("resource", server, uri, ctx))) {
           return { content: [{ type: "text", text: "Error: MCP resource read denied by policy" }], details: { server, uri, denied: true } };
         }
-        const result = await readResource(server, uri, signal);
+        const result = await readResource(server, uri, signal, ctx);
         // The normalizer's `text` is the aggregate-bounded stream and includes
         // every omission message. Keep it as one model-facing text block, then
         // append only supported, size-bounded image attachments.

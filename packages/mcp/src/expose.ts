@@ -82,12 +82,16 @@ export class McpToolExposer {
   private readonly registry: NameRegistry;
   private readonly mappings = new Map<string, McpToolMapping>();
   private readonly byIdentity = new Map<string, string>();
+  private readonly sessionSnapshots = new Map<string, McpToolSnapshotEntry[]>();
   private invokeHandler: McpToolInvokeHandler | undefined;
+
+  private readonly manageActiveTools: boolean;
 
   constructor(
     private readonly pi: ExtensionAPI,
-    options: { reservedToolNames?: Iterable<string> } = {},
+    options: { reservedToolNames?: Iterable<string>; manageActiveTools?: boolean } = {},
   ) {
+    this.manageActiveTools = options.manageActiveTools ?? true;
     const reserved = new Set(options.reservedToolNames ?? DEFAULT_RESERVED_TOOL_NAMES);
     // Reserve every tool the host currently has registered (built-ins plus
     // extension tools) so MCP names never clobber an existing definition.
@@ -120,6 +124,38 @@ export class McpToolExposer {
    * were added or removed relative to the previous snapshot.
    */
   sync(
+    snapshot: McpToolSnapshotEntry[],
+    revision: number,
+  ): { added: string[]; updated: string[]; removed: string[] } {
+    this.sessionSnapshots.clear();
+    return this.syncSnapshot(snapshot, revision);
+  }
+
+  /** Sync one session into the shared model-facing catalog. */
+  syncSession(
+    sessionKey: string,
+    snapshot: McpToolSnapshotEntry[],
+    revision: number,
+  ): { added: string[]; updated: string[]; removed: string[] } {
+    this.sessionSnapshots.set(sessionKey, [...snapshot]);
+    const merged = new Map<string, McpToolSnapshotEntry>();
+    for (const entries of this.sessionSnapshots.values()) {
+      for (const entry of entries) merged.set(identityKey(entry.serverName, entry.nativeName), entry);
+    }
+    return this.syncSnapshot([...merged.values()], revision);
+  }
+
+  /** Remove a session's catalog without unregistering its Pi definitions. */
+  removeSession(sessionKey: string, revision: number): { added: string[]; updated: string[]; removed: string[] } {
+    this.sessionSnapshots.delete(sessionKey);
+    const merged = new Map<string, McpToolSnapshotEntry>();
+    for (const entries of this.sessionSnapshots.values()) {
+      for (const entry of entries) merged.set(identityKey(entry.serverName, entry.nativeName), entry);
+    }
+    return this.syncSnapshot([...merged.values()], revision);
+  }
+
+  private syncSnapshot(
     snapshot: McpToolSnapshotEntry[],
     revision: number,
   ): { added: string[]; updated: string[]; removed: string[] } {
@@ -161,6 +197,7 @@ export class McpToolExposer {
     // active: Pi cannot unregister definitions, so removed tools are excluded
     // by deactivation, and tools that return after a removal are reactivated
     // (hosts only auto-activate names on their first registration).
+    if (!this.manageActiveTools) return { added, updated, removed };
     try {
       const active = new Set(this.pi.getActiveTools());
       let changed = false;

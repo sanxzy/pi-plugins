@@ -30,15 +30,55 @@ export interface McpLifecycleRegistrationOptions extends Omit<McpManagerOptions,
  */
 export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegistrationOptions = {}): void {
   const managers = new Map<string, McpManager>();
-  const exposers = new Map<string, McpToolExposer>();
+  const authorizers = new Map<string, McpAuthorize>();
   const reconciles = new Map<string, () => void>();
   const disposed = new Set<string>();
+  const knownMcpToolNames = new Set<string>();
+  const sharedExposer = new McpToolExposer(pi, { manageActiveTools: false });
+  const sharedPromptResourceExposer = new McpPromptsResourcesExposer(pi, {
+    authorize: async (kind, serverName, itemName, ctx) => {
+      const authorize = ctx ? authorizers.get(managerKey(ctx)) : undefined;
+      return authorize ? authorize(kind, serverName, itemName, ctx) : false;
+    },
+  });
+  let sharedRevision = 1;
 
   const managerKey = (ctx: ExtensionContext): string => `${ctx.cwd}\u0000${ctx.sessionManager.getSessionId()}`;
   const notify = (ctx: ExtensionContext, message: string): void => {
     if (ctx.hasUI) ctx.ui.notify(message, "info");
     else pi.sendUserMessage(message, { deliverAs: "steer" });
   };
+  const reconcileActiveTools = (): void => {
+    try {
+      const active = new Set(pi.getActiveTools());
+      for (const name of knownMcpToolNames) active.delete(name);
+      for (const mapping of sharedExposer.mappingsSnapshot()) {
+        knownMcpToolNames.add(mapping.piName);
+        active.add(mapping.piName);
+      }
+      pi.setActiveTools([...active]);
+    } catch {
+      // Hosts without dynamic active-tool control remain registration-only.
+    }
+  };
+
+  sharedExposer.setInvokeHandler(async (mapping, args, signal, invokeCtx): Promise<AgentToolResult<NormalizedDetails>> => {
+    const key = managerKey(invokeCtx);
+    const manager = managers.get(key);
+    const authorize = authorizers.get(key);
+    if (!manager || !authorize) {
+      return normalizeCallToolResult(undefined, { server: mapping.serverName, tool: mapping.nativeName, transportError: "MCP session is no longer available" });
+    }
+    if (!(await authorize("tool", mapping.serverName, mapping.nativeName, invokeCtx))) {
+      return normalizeCallToolResult(undefined, { server: mapping.serverName, tool: mapping.nativeName, policyDenied: true });
+    }
+    try {
+      const raw = await manager.callTool(mapping.serverName, mapping.nativeName, args, signal);
+      return normalizeCallToolResult(raw, { server: mapping.serverName, tool: mapping.nativeName });
+    } catch (error) {
+      return normalizeCallToolResult(undefined, { server: mapping.serverName, tool: mapping.nativeName, cancelled: signal?.aborted, transportError: error instanceof Error ? error.message : String(error) });
+    }
+  });
 
   pi.on("session_start", async (_event, ctx) => {
     const key = managerKey(ctx);
@@ -86,30 +126,9 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
         return false;
       }
     };
-    const exposer = new McpToolExposer(pi);
-    exposer.setInvokeHandler(async (mapping, args, signal, invokeCtx): Promise<AgentToolResult<NormalizedDetails>> => {
-      if (!(await authorize("tool", mapping.serverName, mapping.nativeName, invokeCtx))) {
-        return normalizeCallToolResult(undefined, {
-          server: mapping.serverName,
-          tool: mapping.nativeName,
-          policyDenied: true,
-        });
-      }
-      try {
-        const raw = await manager.callTool(mapping.serverName, mapping.nativeName, args, signal);
-        return normalizeCallToolResult(raw, { server: mapping.serverName, tool: mapping.nativeName });
-      } catch (error) {
-        return normalizeCallToolResult(undefined, {
-          server: mapping.serverName,
-          tool: mapping.nativeName,
-          cancelled: signal?.aborted,
-          transportError: error instanceof Error ? error.message : String(error),
-        });
-      }
-    });
-    exposers.set(key, exposer);
+    authorizers.set(key, authorize);
 
-    const promptResourceExposer = new McpPromptsResourcesExposer(pi, { authorize });
+    authorizers.set(key, authorize);
     const readPrompt = async (serverName: string, nativeName: string, args: Record<string, string>, signal?: AbortSignal) => {
       try {
         return normalizePromptResult(serverName, nativeName, await manager.getPrompt(serverName, nativeName, args, signal));
@@ -135,7 +154,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       }
     };
     await manager.start();
-    promptResourceExposer.register(manager, readPrompt, readResource, (serverName) => {
+    sharedPromptResourceExposer.registerSession(key, { manager, readPrompt, readResource, listResources: (serverName) => {
       if (!manager.state().servers[serverName]) return undefined;
       return (manager.resourcesFor(serverName) ?? []).map((resource) => ({
         uri: resource.uri,
@@ -143,7 +162,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
         description: resource.description,
         mimeType: resource.mimeType,
       }));
-    });
+    } });
     let revision = 1;
     reconcile = () => {
       const snapshot: McpToolSnapshotEntry[] = [];
@@ -152,8 +171,9 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
           snapshot.push({ serverName, nativeName: tool.name, description: tool.description, inputSchema: tool.inputSchema });
         }
       }
-      exposer.sync(snapshot, revision++);
-      promptResourceExposer.syncPrompts(manager, readPrompt);
+      sharedExposer.syncSession(key, snapshot, sharedRevision++);
+      sharedPromptResourceExposer.syncSession(key);
+      reconcileActiveTools();
     };
     reconcile();
     reconciles.set(key, reconcile);
@@ -165,9 +185,12 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     if (!manager) return;
     disposed.add(key);
     managers.delete(key);
-    exposers.delete(key);
+    authorizers.delete(key);
+    sharedExposer.removeSession(key, sharedRevision++);
+    sharedPromptResourceExposer.removeSession(key);
     reconciles.delete(key);
     await manager.stop();
+    reconcileActiveTools();
   });
 
   // Control-plane commands operate on the manager for the invoking session.
@@ -237,7 +260,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
             const tools = manager.toolsFor(serverName)?.length ?? 0;
             const prompts = manager.promptsFor(serverName)?.length ?? 0;
             const resources = manager.resourcesFor(serverName)?.length ?? 0;
-            const mappings = (exposers.get(managerKey(ctx))?.mappingsSnapshot() ?? [])
+            const mappings = sharedExposer.mappingsSnapshot()
               .filter((mapping) => mapping.serverName === serverName)
               .map((mapping) => `${mapping.piName}->${mapping.nativeName}`)
               .join(",") || "-";

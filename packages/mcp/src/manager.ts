@@ -246,7 +246,6 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const reloadDebounceMs = options.reloadDebounceMs ?? 500;
   const reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 2_000;
   const reconnectMaxAttempts = options.reconnectMaxAttempts ?? 5;
-  const configFingerprints = new Map<string, string>();
 
   const serialize = <T>(task: () => Promise<T>): Promise<T> => {
     const next = operation.then(task, task);
@@ -477,12 +476,6 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     reconnectAttempts.clear();
     if (reloadTimer) clearTimeout(reloadTimer);
     reloadTimer = undefined;
-  };
-
-  const shutdown = async (): Promise<void> => {
-    beginShutdown();
-    await closeInternal();
-    state = { ...state, running: false };
   };
 
   const disconnectInternal = async (name: string): Promise<void> => {
