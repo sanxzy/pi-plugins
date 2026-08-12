@@ -54,6 +54,8 @@ export const REGISTRY_OPERATIONS = {
 export const TELEGRAM_OPERATIONS = {
   TRANSPORT_START: "telegram.transportStart",
   TRANSPORT_STOP: "telegram.transportStop",
+  LIFECYCLE_START: "telegram.lifecycleStart",
+  LIFECYCLE_STOP: "telegram.lifecycleStop",
   INBOUND: "telegram.inbound",
   CONTROLS_DISPATCH: "telegram.controlsDispatch",
   SEND: "telegram.send",

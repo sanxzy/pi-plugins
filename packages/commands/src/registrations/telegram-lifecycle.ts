@@ -5,6 +5,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getChildPool } from "@xzy-ai/runtime";
+import { TELEGRAM_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   canonicalProjectRoot,
   createTelegramChannelLifecycle,
@@ -67,6 +68,7 @@ export function registerTelegramLifecycle(
   deps: TelegramLifecycleRegistrationDeps = {},
 ): void {
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
+    return processWithLog({ operation: TELEGRAM_OPERATIONS.LIFECYCLE_START, parameters: { cwd: ctx.cwd } }, async () => {
     if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     // Retain a fresh command context per project so Telegram native controls
@@ -79,19 +81,22 @@ export function registerTelegramLifecycle(
     if (!started.ok && started.code !== "missing") {
       ctx.ui.notify(started.message, "warning");
     }
+    });
   });
 
   pi.on("session_shutdown", async (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
-    if (!isRootSession(ctx)) return;
-    const projectRoot = canonicalProjectRoot(ctx.cwd);
-    clearTelegramCommandContext(projectRoot);
-    const lifecycle = lifecyclesByProject.get(projectRoot);
-    if (!lifecycle) return;
-    await lifecycle.stop();
-    lifecyclesByProject.delete(projectRoot);
-    // Clear only the shut-down project's manager so another project in the same
-    // process keeps its active connection and lifecycle identity.
-    clearTelegramProjectManager(projectRoot);
+    return processWithLog({ operation: TELEGRAM_OPERATIONS.LIFECYCLE_STOP, parameters: { cwd: ctx.cwd } }, async () => {
+      if (!isRootSession(ctx)) return;
+      const projectRoot = canonicalProjectRoot(ctx.cwd);
+      clearTelegramCommandContext(projectRoot);
+      const lifecycle = lifecyclesByProject.get(projectRoot);
+      if (!lifecycle) return;
+      await lifecycle.stop();
+      lifecyclesByProject.delete(projectRoot);
+      // Clear only the shut-down project's manager so another project in the same
+      // process keeps its active connection and lifecycle identity.
+      clearTelegramProjectManager(projectRoot);
+    });
   });
 }
 
