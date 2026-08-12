@@ -12,6 +12,7 @@ import {
 } from "../wiki.ts";
 
 const commonQuery = Type.Optional(Type.String({ description: "Search query, or \"*\" for deterministic discovery. Not required for page/root selection." }));
+const discoveryQuery = Type.Optional(Type.String({ description: "Grouped discovery/search query; omitted or \"*\" discovers both configured references and wiki topics." }));
 const maxResults = Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum results or topics to return" }));
 const llmWikisSearchParams = Type.Union([
   Type.Object({
@@ -25,6 +26,10 @@ const llmWikisSearchParams = Type.Union([
     type: Type.Literal("references", { description: "Discover configured reference aliases or select a readable root" }),
     query: commonQuery,
     alias: Type.Optional(Type.String({ description: "Configured reference alias to select a readable root; omit it with query=\"*\" to discover non-hidden aliases" })),
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Optional(Type.Null()),
+    query: discoveryQuery,
   }, { additionalProperties: false }),
 ]);
 
@@ -43,6 +48,14 @@ type LlmWikisSearchParams =
       type: "references";
       query?: string;
       alias?: string;
+      topic?: never;
+      page?: never;
+      maxResults?: never;
+    }
+  | {
+      type?: null;
+      query?: string;
+      alias?: never;
       topic?: never;
       page?: never;
       maxResults?: never;
@@ -73,57 +86,67 @@ export interface ReferenceCatalogReader {
   listChildren?: (root: string) => Promise<readonly ReferenceChild[]>;
 }
 
-export type LlmWikisSearchDetails =
-  | {
-      mode: "wikis";
-      query?: string;
-      topic?: string;
-      results: LlmWikisSearchResultItem[];
-      page?: {
+type WikiSearchDetails = {
+  mode: "wikis";
+  query?: string;
+  topic?: string;
+  results: LlmWikisSearchResultItem[];
+  page?: {
+    file: string;
+    topic: string;
+    page: number;
+    totalPages: number;
+    previous?: string;
+    next?: string;
+  };
+  discovery?: {
+    topics: Array<{
+      topic: string;
+      pages: Array<{
         file: string;
-        topic: string;
         page: number;
         totalPages: number;
         previous?: string;
         next?: string;
-      };
-      discovery?: {
-        topics: Array<{
-          topic: string;
-          pages: Array<{
-            file: string;
-            page: number;
-            totalPages: number;
-            previous?: string;
-            next?: string;
-          }>;
-          truncated?: boolean;
-        }>;
-      };
-    }
-  | {
-      mode: "references";
-      query?: string;
-      aliases: Array<{
-        alias: string;
-        type: "local" | "git";
-        description?: string;
-        status: string;
-        diagnostic?: string;
       }>;
-      selection?: {
-        alias: string;
-        type: "local" | "git";
-        description?: string;
-        hidden?: boolean;
-        root: string;
-        children: ReferenceChild[];
-        truncated?: boolean;
-        total?: number;
-        excluded: number;
-        handoff: string;
-      };
-      diagnostics?: string[];
+      truncated?: boolean;
+    }>;
+  };
+};
+
+type ReferenceSearchDetails = {
+  mode: "references";
+  query?: string;
+  aliases: Array<{
+    alias: string;
+    type: "local" | "git";
+    description?: string;
+    status: string;
+    diagnostic?: string;
+  }>;
+  selection?: {
+    alias: string;
+    type: "local" | "git";
+    description?: string;
+    hidden?: boolean;
+    root: string;
+    children: ReferenceChild[];
+    truncated?: boolean;
+    total?: number;
+    excluded: number;
+    handoff: string;
+  };
+  diagnostics?: string[];
+};
+
+export type LlmWikisSearchDetails =
+  | WikiSearchDetails
+  | ReferenceSearchDetails
+  | {
+      mode: "discovery";
+      query: string;
+      references: ReferenceSearchDetails;
+      wikis: WikiSearchDetails;
     }
   | {
       mode: "error";
@@ -142,7 +165,7 @@ export function registerLlmWikisSearchTool(pi: ExtensionAPI): void {
     name: "llm_wikis_search",
     label: "LLM wiki search",
     description:
-      "Search the local LLM wiki cache or configured references for reusable research. Use type=\"wikis\" to search the local wiki cache with a broad-to-specific workflow: first run a broad query without topic/page (for example, query=\"pi\") to discover available topics and page identifiers; use query=\"*\" to list available wiki topics and pages; then use the returned topic and page values with a narrower query or direct topic/page lookup to retrieve targeted evidence. Use type=\"references\" to work with configured reference aliases: use query=\"*\" to list discoverable aliases (descriptions and source kinds included), then call again with the chosen alias to select its readable root; after a root is selected, inspect the referenced content with normal filesystem tools such as read, grep, and find rather than searching it here. This tool searches the local cache only; when information is absent, insufficient, or time-sensitive, use web_search for discovery and web_fetch for primary-source details. Successful web results are saved automatically for future wiki searches. Treat cached content as potentially stale and verify version-sensitive claims against current web sources.",
+      "Search the local LLM wiki cache or configured references for reusable research. Call with {} (or just query=\"*\", no type) for grouped discovery: the response renders a --references-- section first and a --wikis-- section second, so you can see available reference aliases and wiki topics in one call. Use type=\"wikis\" to search the local wiki cache with a broad-to-specific workflow: first run a broad query without topic/page (for example, query=\"pi\") to discover available topics and page identifiers; use query=\"*\" to list available wiki topics and pages; then use the returned topic and page values with a narrower query or direct topic/page lookup to retrieve targeted evidence. Use type=\"references\" to work with configured reference aliases: use query=\"*\" to list discoverable aliases (descriptions and source kinds included), then call again with the chosen alias to select its readable root; after a root is selected, inspect the referenced content with normal filesystem tools such as read, grep, and find rather than searching it here. This tool searches the local cache only; when information is absent, insufficient, or time-sensitive, use web_search for discovery and web_fetch for primary-source details. Successful web results are saved automatically for future wiki searches. Treat cached content as potentially stale and verify version-sensitive claims against current web sources.",
     parameters: llmWikisSearchParams,
     async execute(
       _toolCallId: string,
@@ -164,6 +187,39 @@ export async function executeLlmWikisSearch(
   params: LlmWikisSearchParams,
   options?: LlmWikisSearchExecutionOptions,
 ): Promise<AgentToolResult<LlmWikisSearchDetails>> {
+  if (params.type === undefined || params.type === null) {
+    const rawParams = params as Record<string, unknown>;
+    if (rawParams.alias !== undefined || rawParams.topic !== undefined || rawParams.page !== undefined || rawParams.maxResults !== undefined) {
+      return errorResult("Only query may be used without a type.", {
+        mode: "error",
+        message: "Only query may be used without a type.",
+      });
+    }
+    const query = typeof rawParams.query === "string" && rawParams.query.length > 0 ? rawParams.query : "*";
+    const references = await executeLlmWikisSearch({ type: "references", query: "*" }, options);
+    if (references.details.mode === "error") return references;
+    const wikis = await executeLlmWikisSearch({ type: "wikis", query }, options);
+    if (wikis.details.mode === "error") return wikis;
+    const referenceDetails = references.details as ReferenceSearchDetails;
+    const wikiDetails = wikis.details as WikiSearchDetails;
+    const referenceText = references.content.find((item) => item.type === "text")?.text ?? "";
+    const wikiText = wikis.content.find((item) => item.type === "text")?.text ?? "";
+    return textResult(
+      [
+        "--references--",
+        referenceText,
+        "---",
+        "--wikis--",
+        wikiText,
+      ].join("\n"),
+      {
+        mode: "discovery",
+        query,
+        references: referenceDetails,
+        wikis: wikiDetails,
+      },
+    );
+  }
   if (params.type !== "wikis" && params.type !== "references") {
     return errorResult("Unsupported llm_wikis_search type.", { mode: "error", message: "Unsupported llm_wikis_search type." });
   }
