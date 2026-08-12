@@ -8,7 +8,16 @@ export { registerLifecycleGates } from "./registrations/lifecycle-gates.ts";
 export { registerGoalCommand, expandTelegramGoalCommand, GOAL_WORKFLOW_PROMPT } from "./registrations/goal-command.ts";
 export { registerTelegramSetup, type TelegramSetupRegistrationDeps } from "./registrations/telegram-setup.ts";
 export { registerReferencesSetup } from "./registrations/references-setup-command.ts";
-export { createReferencesSetupController, type ReferencesSetupController, type ReferencesSetupItem, type ReferencesLocalInput, type ReferencesMutationResult, type ReferencesSetupControllerOptions } from "./registrations/references-setup.ts";
+export {
+  createReferencesSetupController,
+  type ReferencesSetupController,
+  type ReferencesSetupItem,
+  type ReferencesLocalInput,
+  type ReferencesGitInput,
+  type ReferencesMutationResult,
+  type ReferencesOperationResult,
+  type ReferencesSetupControllerOptions,
+} from "./registrations/references-setup.ts";
 export { registerTelegramClear } from "./registrations/telegram-clear.ts";
 export {
   clearTelegramProjectManager,

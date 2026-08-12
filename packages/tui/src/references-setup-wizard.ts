@@ -21,8 +21,10 @@ export interface ReferencesSetupItem {
 /** A single field editor, driven sequentially by the wizard. */
 type WizardStep =
   | { kind: "menu" }
+  | { kind: "select"; purpose: "edit" | "remove" | "test" | "refresh" }
   | { kind: "select-edit" }
   | { kind: "select-operation"; name: string; isGit: boolean }
+  | { kind: "confirm-remove"; name: string; label: string }
   | { kind: "alias"; form: "local" | "git" }
   | { kind: "path" }
   | { kind: "repository" }
@@ -137,7 +139,7 @@ export class ReferencesSetupWizard implements Component {
       case "menu": {
         add(" ", this.theme.fg("accent", "References setup"));
         if (this.statusMessage) add(" ", this.theme.fg("success", this.statusMessage));
-        const options = ["Add local reference", "Add Git reference", "Edit", "Remove", "Done"];
+        const options = ["Add local reference", "Add Git reference", "Edit", "Remove", "Test", "Refresh", "Done"];
         if (this.items.length === 0) {
           add(" ", this.theme.fg("muted", "No references configured yet."));
         }
@@ -160,6 +162,39 @@ export class ReferencesSetupWizard implements Component {
             const selected = i === this.optionIndex;
             add(selected ? this.theme.fg("accent", "> ") : "  ", this.theme.fg(selected ? "accent" : "text", `${i + 1}. ${badge} ${item.name} — ${item.label}`));
           }
+        }
+        add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc back"));
+        break;
+      }
+      case "select": {
+        const purposeTitle = { edit: "edit", remove: "remove", test: "test", refresh: "refresh" }[this.step.purpose];
+        add(" ", this.theme.fg("accent", `References setup · ${purposeTitle}`));
+        const items = this.selectable(this.step.purpose);
+        const emptyMessage = this.step.purpose === "remove"
+          ? "No references configured yet."
+          : this.step.purpose === "edit"
+            ? "No references to edit."
+            : "No Git references defined.";
+        if (items.length === 0) {
+          add(" ", this.theme.fg("muted", emptyMessage));
+        } else {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i]!;
+            const badge = item.local ? "local" : "git";
+            const selected = i === this.optionIndex;
+            add(selected ? this.theme.fg("accent", "> ") : "  ", this.theme.fg(selected ? "accent" : "text", `${i + 1}. ${badge} ${item.name} — ${item.label}`));
+          }
+        }
+        add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc back"));
+        break;
+      }
+      case "confirm-remove": {
+        add(" ", this.theme.fg("accent", "References setup · remove"));
+        add(" ", this.theme.fg("text", `Remove ${this.step.name} — ${this.step.label}?`));
+        const options = ["Remove", "Cancel"];
+        for (let i = 0; i < options.length; i++) {
+          const selected = i === this.optionIndex;
+          add(selected ? this.theme.fg("accent", "> ") : "  ", this.theme.fg(selected ? "accent" : "text", `${i + 1}. ${options[i]}`));
         }
         add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc back"));
         break;
@@ -262,15 +297,16 @@ export class ReferencesSetupWizard implements Component {
 
   handleInput(data: string): void {
     if (this.settled || this.busy) return;
-    if (this.step.kind === "select-edit") {
-      const editable = this.editableItems();
+    if (this.step.kind === "select") {
+      const purpose = this.step.purpose;
+      const items = this.selectable(purpose);
       if (matchesKey(data, Key.up)) {
         this.optionIndex = Math.max(0, this.optionIndex - 1);
         this.refresh();
         return;
       }
       if (matchesKey(data, Key.down)) {
-        this.optionIndex = Math.min(editable.length - 1, this.optionIndex + 1);
+        this.optionIndex = Math.min(items.length - 1, this.optionIndex + 1);
         this.refresh();
         return;
       }
@@ -280,15 +316,47 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        const item = editable[this.optionIndex];
-        if (item) {
+        const item = items[this.optionIndex];
+        if (!item) return;
+        if (purpose === "edit") {
           this.optionIndex = 0;
-          if (item.git) {
-            this.step = { kind: "select-operation", name: item.name, isGit: true };
-            this.refresh();
-          } else {
-            this.startEdit(item);
-          }
+          if (item.git) this.step = { kind: "select-operation", name: item.name, isGit: true };
+          else this.startEdit(item);
+          this.refresh();
+        } else if (purpose === "test") {
+          void this.runOperation(item.name, false);
+        } else if (purpose === "refresh") {
+          void this.runOperation(item.name, true);
+        } else {
+          this.optionIndex = 0;
+          this.step = { kind: "confirm-remove", name: item.name, label: item.label };
+          this.refresh();
+        }
+      }
+      return;
+    }
+    if (this.step.kind === "confirm-remove") {
+      if (matchesKey(data, Key.up)) {
+        this.optionIndex = Math.max(0, this.optionIndex - 1);
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.down)) {
+        this.optionIndex = Math.min(1, this.optionIndex + 1);
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.escape)) {
+        this.step = { kind: "select", purpose: "remove" };
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.enter)) {
+        if (this.optionIndex === 0) void this.runRemove(this.step.name);
+        else {
+          this.optionIndex = 0;
+          this.step = { kind: "select", purpose: "remove" };
+          this.refresh();
         }
       }
       return;
@@ -460,7 +528,7 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.down)) {
-        this.optionIndex = Math.min(4, this.optionIndex + 1);
+        this.optionIndex = Math.min(6, this.optionIndex + 1);
         this.refresh();
         return;
       }
@@ -476,20 +544,10 @@ export class ReferencesSetupWizard implements Component {
           if (this.controller.addGit) this.startGitAdd();
           else this.statusMessage = "Git references are not available here.";
           this.refresh();
-        } else if (option === 2) {
-          const editable = this.editableItems();
-          if (editable.length === 0) {
-            this.statusMessage = "No references configured yet.";
-            this.refresh();
-          } else {
-            this.statusMessage = "";
-            this.optionIndex = 0;
-            this.step = { kind: "select-edit" };
-            this.refresh();
-          }
-        } else if (option === 3) {
-          this.startRemove();
-        } else if (option === 4) {
+        } else if (option === 2 || option === 3 || option === 4 || option === 5) {
+          const purpose = option === 2 ? "edit" : option === 3 ? "remove" : option === 4 ? "test" : "refresh";
+          this.startSelect(purpose);
+        } else if (option === 6) {
           this.finish({ status: "saved", message: "References setup complete." });
         }
       }
@@ -525,6 +583,12 @@ export class ReferencesSetupWizard implements Component {
 
   private editableItems(): readonly ReferencesSetupItem[] {
     return this.items.filter((item) => item.local !== undefined || item.git !== undefined);
+  }
+
+  private selectable(purpose: "edit" | "remove" | "test" | "refresh"): readonly ReferencesSetupItem[] {
+    if (purpose === "edit") return this.editableItems();
+    if (purpose === "test" || purpose === "refresh") return this.items.filter((item) => item.git !== undefined);
+    return this.items;
   }
 
   private startEdit(item: ReferencesSetupItem): void {
@@ -563,9 +627,35 @@ export class ReferencesSetupWizard implements Component {
     this.refresh();
   }
 
-  private startRemove(): void {
-    const alias = this.items[this.optionIndex]?.name ?? "";
-    this.step = { kind: "error", message: `Remove "${alias}" will be available in a later build.` };
+  private startSelect(purpose: "edit" | "remove" | "test" | "refresh"): void {
+    const items = this.selectable(purpose);
+    if (items.length === 0) {
+      this.statusMessage = purpose === "remove"
+        ? "No references configured yet."
+        : purpose === "edit"
+          ? "No references to edit."
+          : "No Git references defined.";
+      this.refresh();
+      return;
+    }
+    this.statusMessage = "";
+    this.optionIndex = 0;
+    this.step = { kind: "select", purpose };
+    this.refresh();
+  }
+
+  private async runRemove(name: string): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.step = { kind: "busy", message: "Removing reference…" };
+    this.refresh();
+    const result = await this.controller.remove(name, this.signal);
+    if (this.settled) return;
+    this.busy = false;
+    if (result.ok) this.statusMessage = result.message;
+    this.step = { kind: "result", ok: result.ok, message: result.message };
+    this.optionIndex = 0;
+    if (result.ok) void this.load();
     this.refresh();
   }
 

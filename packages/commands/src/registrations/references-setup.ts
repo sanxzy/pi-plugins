@@ -154,7 +154,7 @@ export function createReferencesSetupController(
       }
       const rawExisting = typeof existing === "string" ? { repository: existing } : existing && typeof existing === "object" && "repository" in existing ? existing as Record<string, unknown> : undefined;
       if (!rawExisting) return { ok: false, message: "Only Git references can be edited here" };
-      if (typeof existing === "string" && input.branch === undefined && input.description === undefined && input.hidden === undefined) {
+      if (typeof existing === "string" && (input.branch === undefined || input.branch === "") && input.description === undefined && input.hidden === undefined) {
         return persist({ ...document, references: { ...document.references, [alias]: input.repository } }, input.signal);
       }
       const git: Record<string, unknown> = { ...rawExisting, repository: input.repository };
