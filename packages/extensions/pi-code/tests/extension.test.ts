@@ -55,6 +55,11 @@ test("pi-code extension registers Telegram setup and goal workflow alongside exi
     1,
     "setup command registered exactly once",
   );
+  assert.equal(
+    commands.filter((name) => name === "setup-references").length,
+    1,
+    "references setup command registered exactly once",
+  );
   assert.equal(commands.filter((name) => name === "goal").length, 1, "goal command registered exactly once");
   assert.ok(events.includes("session_start"), "session_start lifecycle handler registered");
   assert.ok(events.includes("session_shutdown"), "session_shutdown lifecycle handler registered");
@@ -183,7 +188,7 @@ test("research tool descriptions direct local-first lookup and automatic fallbac
 test("extension re-exports the web and wiki search details types", () => {
   const searchDetails: WebSearchDetails = { query: "typescript", provider: "exa" };
   const fetchDetails: WebFetchDetails = {};
-  const wikiDetails: LlmWikisSearchDetails = { query: "typescript", results: [] };
+  const wikiDetails: LlmWikisSearchDetails = { mode: "wikis", query: "typescript", results: [] };
   assert.equal(searchDetails.provider, "exa");
   assert.deepEqual(fetchDetails, {});
   assert.deepEqual(wikiDetails.results, []);

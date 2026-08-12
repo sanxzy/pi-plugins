@@ -18,7 +18,6 @@ import { registerAgentTool } from "../src/registrations/agent.ts";
  */
 
 type RegisteredAgent = {
-  description: string;
   execute: (
     toolCallId: string,
     params: {
@@ -67,8 +66,8 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-test("agent schema removes the redundant background parameter and explains resume context", () => {
-  let registered: { description: string; parameters: { properties?: Record<string, unknown> } } | undefined;
+test("agent schema removes the redundant background parameter", () => {
+  let registered: { parameters: { properties?: Record<string, unknown> }; description: string } | undefined;
   registerAgentTool({
     registerTool(tool: typeof registered) {
       registered = tool;

@@ -17,6 +17,7 @@ import {
   registerSessionEvents,
   registerLifecycleGates,
   registerTelegramSetup,
+  registerReferencesSetup,
   registerTelegramClear,
   registerTelegramLifecycle,
   registerTelegramInbound,
@@ -58,6 +59,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
 
   const getMenuCommands = () => expander.menuSources();
   registerTelegramSetup(pi, { getCommands: getMenuCommands });
+  registerReferencesSetup(pi);
   registerTelegramClear(pi);
   // Inbound registration precedes the connection lifecycle so its message
   // middleware is attached before the shared manager starts polling.

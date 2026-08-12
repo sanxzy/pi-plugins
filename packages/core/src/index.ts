@@ -9,4 +9,5 @@ export * from "./domain/ports/agent-discovery.ts";
 export * from "./domain/ports/child-session.ts";
 export * from "./application/control/control.ts";
 export * from "./shared/constants.ts";
-export { sessionMcpDefinitions, sessionMcpNames, sessionMcpBridge, publishSessionMcpBridge, clearSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames, allMcpNames } from "./shared/session-mcp.ts";
+export * from "./domain/references/index.ts";
+export * from "./shared/session-mcp.ts";

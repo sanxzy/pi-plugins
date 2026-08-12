@@ -1,8 +1,8 @@
 diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
-index 7b38171..9155f22 100644
+index 324d30ad5708b842f1a536f8d14950469a5ed707..50a312a8e8362769945054c99c628a800ab69d63 100644
 --- a/dist/core/extensions/loader.js
 +++ b/dist/core/extensions/loader.js
-@@ -154,6 +154,8 @@ export function createExtensionRuntime() {
+@@ -157,6 +157,8 @@ export function createExtensionRuntime() {
          setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
          getThinkingLevel: notInitialized,
          setThinkingLevel: notInitialized,
@@ -10,8 +10,8 @@ index 7b38171..9155f22 100644
 +        createCommandContext: notInitialized,
          flagValues: new Map(),
          pendingProviderRegistrations: [],
-         assertActive,
-@@ -287,6 +289,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
+         pendingNativeProviderRegistrations: [],
+@@ -316,6 +318,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
              runtime.assertActive();
              runtime.setThinkingLevel(level);
          },
@@ -21,29 +21,29 @@ index 7b38171..9155f22 100644
 +            runtime.assertActive();
 +            return runtime.createCommandContext();
 +        },
-         registerProvider(name, config) {
+         registerProvider(providerOrName, config) {
              runtime.assertActive();
-             runtime.registerProvider(name, config, extension.path);
+             if (typeof providerOrName === "string") {
 diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
-index 92e7965..5c254c8 100644
+index 418865ad891951e3fb7e2a65f4dca4d7d87e3895..513c356b16804becbbea5142940681e747f3cae2 100644
 --- a/dist/core/extensions/runner.js
 +++ b/dist/core/extensions/runner.js
-@@ -153,6 +153,10 @@ export class ExtensionRunner {
-         this.cwd = cwd;
-         this.sessionManager = sessionManager;
-         this.modelRegistry = modelRegistry;
+@@ -171,6 +171,10 @@ export class ExtensionRunner {
+         this.runtime.setModel = actions.setModel;
+         this.runtime.getThinkingLevel = actions.getThinkingLevel;
+         this.runtime.setThinkingLevel = actions.setThinkingLevel;
 +        // Local experiment: let extensions create an ExtensionCommandContext
 +        // through the shared runtime (used by lifecycle handlers, not only
 +        // command dispatch).
 +        this.runtime.createCommandContext = () => this.createCommandContext();
-     }
-     bindCore(actions, contextActions, providerActions) {
-         // Copy actions into the shared runtime (all extension APIs reference this)
+         // Context actions (required)
+         this.getModel = contextActions.getModel;
+         this.getScopedModels = contextActions.getScopedModels;
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
-index f1c2e80..3f8c880 100644
+index cb7b8e7cfb9d1fb07f4f8c3161d25927b3186e94..a11ae550189bc3d4d3dc395bae588f823561d2e6 100644
 --- a/dist/core/extensions/types.d.ts
 +++ b/dist/core/extensions/types.d.ts
-@@ -927,6 +927,11 @@ export interface ExtensionAPI {
+@@ -956,6 +956,11 @@ export interface ExtensionAPI {
      getThinkingLevel(): ThinkingLevel;
      /** Set thinking level (clamped to model capabilities). */
      setThinkingLevel(level: ThinkingLevel): void;
@@ -55,7 +55,7 @@ index f1c2e80..3f8c880 100644
      /**
       * Register or override a model provider.
       *
-@@ -1155,6 +1160,8 @@ export interface ExtensionActions {
+@@ -1202,6 +1207,8 @@ export interface ExtensionActions {
      setModel: SetModelHandler;
      getThinkingLevel: GetThinkingLevelHandler;
      setThinkingLevel: SetThinkingLevelHandler;
@@ -65,7 +65,7 @@ index f1c2e80..3f8c880 100644
  /**
   * Actions for ExtensionContext (ctx.* in event handlers).
 diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index 00c4b5b..2fd2902 100644
+index 8cdfbdec42f696b8cd6b762a92180a81ec142433..0ff5ec7eb0ce6e7c32b0dc516780c979f3852fbf 100644
 --- a/dist/core/session-manager.d.ts
 +++ b/dist/core/session-manager.d.ts
 @@ -13,6 +13,10 @@ export interface SessionHeader {
@@ -80,11 +80,11 @@ index 00c4b5b..2fd2902 100644
  export interface SessionEntryBase {
      type: string;
 diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index 249d106..85c03bb 100644
+index e69e4d7f2dadbd68982feddfae45432fa197a286..d4b8cda9b2eed38d7f2caf2a6013008589e1b54c 100644
 --- a/dist/core/session-manager.js
 +++ b/dist/core/session-manager.js
-@@ -1,14 +1,33 @@
- import { uuidv7 } from "@earendil-works/pi-agent-core";
+@@ -1,14 +1,34 @@
+ import { uuidv7 } from "@earendil-works/pi-ai";
  import { randomUUID } from "crypto";
 -import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
 +import { appendFileSync, chmodSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
@@ -97,6 +97,7 @@ index 249d106..85c03bb 100644
  import { normalizePath, resolvePath } from "../utils/paths.js";
  import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage, } from "./messages.js";
  export const CURRENT_SESSION_VERSION = 3;
++
 +/** pi-code patch: enforce owner-only modes on the session directory and file. */
 +function ensurePrivateSessionDir(dir, boundary) {
 +    if (!dir) return;
@@ -119,7 +120,7 @@ index 249d106..85c03bb 100644
  function createSessionId() {
      return uuidv7();
  }
-@@ -539,8 +558,8 @@ export class SessionManager {
+@@ -597,8 +617,8 @@ export class SessionManager {
          this.cwd = resolvePath(cwd);
          this.sessionDir = normalizePath(sessionDir);
          this.persist = persist;
@@ -129,19 +130,19 @@ index 249d106..85c03bb 100644
 +            ensurePrivateSessionDir(this.sessionDir, newSessionOptions?.privateRoot);
          }
          if (sessionFile) {
-             this.setSessionFile(sessionFile);
-@@ -552,6 +571,10 @@ export class SessionManager {
-     /** Switch to a different session file (used for resume and branching) */
-     setSessionFile(sessionFile) {
+             this._setSessionFile(sessionFile, preloadedFileEntries);
+@@ -613,6 +633,10 @@ export class SessionManager {
+     }
+     _setSessionFile(sessionFile, preloadedFileEntries) {
          this.sessionFile = resolvePath(sessionFile);
 +        if (this.persist) {
 +            ensurePrivateSessionDir(this.getSessionDir(), undefined);
 +            ensurePrivateSessionFile(this.sessionFile);
 +        }
          if (existsSync(this.sessionFile)) {
-             this.fileEntries = loadEntriesFromFile(this.sessionFile);
+             this.fileEntries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
              // If file was empty, initialize it with a valid session header. If it was
-@@ -602,11 +625,19 @@ export class SessionManager {
+@@ -663,11 +687,19 @@ export class SessionManager {
          this.leafId = null;
          this.flushed = false;
          if (this.persist) {
@@ -163,7 +164,7 @@ index 249d106..85c03bb 100644
      _buildIndex() {
          this.byId.clear();
          this.labelsById.clear();
-@@ -641,6 +672,7 @@ export class SessionManager {
+@@ -702,6 +734,7 @@ export class SessionManager {
          finally {
              closeSync(fd);
          }
@@ -171,7 +172,7 @@ index 249d106..85c03bb 100644
      }
      isPersisted() {
          return this.persist;
-@@ -675,7 +707,7 @@ export class SessionManager {
+@@ -736,7 +769,7 @@ export class SessionManager {
              return;
          }
          if (!this.flushed) {
@@ -180,7 +181,7 @@ index 249d106..85c03bb 100644
              try {
                  for (const e of this.fileEntries) {
                      writeFileSync(fd, `${JSON.stringify(e)}\n`);
-@@ -684,10 +716,12 @@ export class SessionManager {
+@@ -745,10 +778,12 @@ export class SessionManager {
              finally {
                  closeSync(fd);
              }
@@ -193,30 +194,3 @@ index 249d106..85c03bb 100644
          }
      }
      _appendEntry(entry) {
-@@ -1176,8 +1210,9 @@ export class SessionManager {
-         }
-         const newSessionId = options?.id ?? createSessionId();
-         const timestamp = new Date().toISOString();
-+        const fixedName = options?.sessionFilename;
-         const fileTimestamp = timestamp.replace(/[:.]/g, "-");
--        const newSessionFile = join(dir, `${fileTimestamp}_${newSessionId}.jsonl`);
-+        const newSessionFile = join(dir, (typeof fixedName === "string" && fixedName.length > 0) ? fixedName : `${fileTimestamp}_${newSessionId}.jsonl`);
-         // Write new header pointing to source as parent, with updated cwd
-         const newHeader = {
-             type: "session",
-@@ -1187,6 +1222,7 @@ export class SessionManager {
-             cwd: resolvedTargetCwd,
-             parentSession: resolvedSourcePath,
-         };
-+        ensurePrivateSessionDir(dir);
-         writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
-         // Copy all non-header entries from source
-         for (const entry of sourceEntries) {
-@@ -1194,6 +1230,7 @@ export class SessionManager {
-                 appendFileSync(newSessionFile, `${JSON.stringify(entry)}\n`);
-             }
-         }
-+        ensurePrivateSessionFile(newSessionFile);
-         return new SessionManager(resolvedTargetCwd, dir, newSessionFile, true);
-     }
-     /**

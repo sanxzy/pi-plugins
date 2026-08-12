@@ -10,6 +10,7 @@
     "test": "node --test --import ../../test-setup.mjs --import tsx tests/state.test.ts tests/logger.test.ts tests/ownership.test.ts tests/manager.test.ts tests/transport.test.ts tests/setup.test.ts tests/inbound.test.ts tests/inbound-pairing.test.ts tests/outbound.test.ts tests/pairing.test.ts tests/menu.test.ts tests/expansion.test.ts tests/choices.test.ts tests/media.test.ts tests/chat.test.ts tests/session-cleanup.test.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.1",
     "@grammyjs/runner": "2.0.3",
     "@xzy-ai/runtime": "workspace:*",
     "grammy": "1.45.1",

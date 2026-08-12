@@ -21,6 +21,20 @@ export {
   type StartRootSessionResult,
 } from "./infrastructure/manifests/manifests.ts";
 export { currentProcessIdentity, processStartTime, type ProcessIdentity } from "./infrastructure/manifests/process-identity.ts";
+export {
+  createReferenceCatalog,
+  type ReferenceCatalogOperation,
+  type ReferenceCatalogOperationError,
+  type ReferenceCatalogOperationOptions,
+  type ReferenceCatalogOperationResult,
+  type ReferenceGitOperationInput,
+  type ReferenceAvailability,
+  type ReferenceMaterializationStatus,
+  type ReferenceCatalog,
+  type ReferenceCatalogEntry,
+  type ReferenceCatalogOptions,
+  type ReferenceCatalogReadResult,
+} from "./infrastructure/references/catalog.ts";
 export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
 export { createChildSessionManager, resolveChildTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";

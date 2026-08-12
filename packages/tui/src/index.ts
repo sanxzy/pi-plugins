@@ -23,3 +23,10 @@ export type {
   TelegramSetupController,
   TelegramSetupResult,
 } from "./telegram-setup-wizard.ts";
+export { ReferencesSetupWizard } from "./references-setup-wizard.ts";
+export type {
+  ReferencesSetupController,
+  ReferencesSetupItem,
+  ReferencesSetupResult,
+  ReferencesSetupWizardOptions,
+} from "./references-setup-wizard.ts";
