@@ -49,6 +49,32 @@ test("controller rejects invalid local candidates before preflight", async () =>
   assert.equal(preflighted, false);
 });
 
+test("updateLocal preserves shorthand form and omitted metadata losslessly", async () => {
+  let document = {
+    references: {
+      notes: "~/notes" as string | Record<string, unknown>,
+      docs: { path: "/tmp/docs", description: "Local docs", hidden: true } as Record<string, unknown>,
+    },
+  };
+  const controller = createReferencesSetupController({
+    catalog: {
+      filePath: "/tmp/references.json",
+      readDocument: async () => document,
+      preflight: async () => ({ ok: true as const }),
+      save: async (candidate: unknown) => {
+        document = candidate as typeof document;
+        return { ok: true as const };
+      },
+    },
+  });
+  await controller.updateLocal("notes", { path: "~/scratch" });
+  assert.equal(document.references.notes, "~/scratch");
+  await controller.updateLocal("notes", { path: "~/scratch", description: "Notes" });
+  assert.deepEqual(document.references.notes, { path: "~/scratch", description: "Notes" });
+  await controller.updateLocal("docs", { path: "/tmp/docs2" });
+  assert.deepEqual(document.references.docs, { path: "/tmp/docs2", description: "Local docs", hidden: true });
+});
+
 test("registers /setup-references and gates it to interactive TUI", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: string[] = [];
