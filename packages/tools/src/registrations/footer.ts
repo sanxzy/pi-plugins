@@ -12,6 +12,7 @@ import {
   type AgentFooterInfo,
   type FooterTreeRow,
 } from "@xzy-ai/tui";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { getChildPool, scopeDescendants } from "@xzy-ai/runtime";
 
 /** Debounce job-status and live-leaf repaints so bursty child activity coalesces. */
@@ -20,6 +21,7 @@ const REPAINT_DEBOUNCE_MS = 250;
 /** Install the permanent native-information footer for TUI sessions. */
 export function registerAgentFooter(pi: ExtensionAPI): void {
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
+    processWithLog({ operation: TOOL_OPERATIONS.FOOTER_START, parameters: { cwd: ctx.cwd } }, () => {
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
     // The root session id scopes the descendant projection; the pool is created
     // with it so the root (which is not a job) is the tree root.
@@ -80,12 +82,15 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       };
       return footer;
     });
+    });
   });
 
   pi.on("session_shutdown", (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    processWithLog({ operation: TOOL_OPERATIONS.FOOTER_STOP, parameters: { cwd: ctx.cwd } }, () => {
     const pool = getChildPool(ctx.cwd);
     if (!pool.isRootSession(ctx.sessionManager.getSessionId()) && !pool.shouldBootstrapRootSession(ctx.sessionManager.getSessionId())) return;
     ctx.ui.setFooter(undefined);
+    });
   });
 }
 

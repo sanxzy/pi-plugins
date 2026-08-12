@@ -8,7 +8,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getChildPool } from "@xzy-ai/runtime";
-import { TELEGRAM_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { AGENT_OPERATIONS, SESSION_OPERATIONS, TELEGRAM_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   canonicalProjectRoot,
   createChannelLogger,
@@ -116,6 +116,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   let acknowledgedRun = false;
 
   pi.on("before_agent_start", (event: BeforeAgentStartEvent, ctx: ExtensionContext) => {
+    processWithLog({ operation: AGENT_OPERATIONS.BEFORE_START, parameters: { cwd: ctx.cwd } }, () => {
     if (!isRootSession(ctx)) {
       pendingReactionOrigin = undefined;
       observedBeforeStart = false;
@@ -125,6 +126,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     observedBeforeStart = true;
     pendingReactionOrigin = event.prompt ? extractTelegramMessageOrigin(event.prompt) : undefined;
     acknowledgedRun = false;
+    });
   });
 
   async function acknowledgeReaction(projectRoot: string, sessionId: string, origin: TelegramMessageOrigin): Promise<void> {
@@ -147,13 +149,16 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   // before_agent_start when available; the branch fallback supports hosts that
   // emit agent_start without the preceding extension event.
   pi.on("session_compact", (event: SessionCompactEvent, ctx: ExtensionContext) => {
+    processWithLog({ operation: SESSION_OPERATIONS.COMPACT, parameters: { reason: event.reason } }, () => {
     if (!isRootSession(ctx) || event.reason !== "manual") return;
     const origin = takeTelegramCompactionOrigin(canonicalProjectRoot(ctx.cwd), ctx.sessionManager.getSessionId());
     if (!origin) return;
     void acknowledgeReaction(canonicalProjectRoot(ctx.cwd), ctx.sessionManager.getSessionId(), origin);
+    });
   });
 
   pi.on("agent_start", (_event: AgentStartEvent, ctx: ExtensionContext) => {
+    processWithLog({ operation: AGENT_OPERATIONS.START, parameters: { cwd: ctx.cwd } }, () => {
     if (!isRootSession(ctx)) {
       pendingReactionOrigin = undefined;
       observedBeforeStart = false;
@@ -171,6 +176,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     observedBeforeStart = false;
     if (!origin) return;
     void acknowledgeReaction(projectRoot, ctx.sessionManager.getSessionId(), origin);
+    });
   });
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {

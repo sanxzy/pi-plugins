@@ -15,12 +15,16 @@
 export const SESSION_OPERATIONS = {
   START: "session.start",
   STOP: "session.stop",
+  TURN_START: "session.turnStart",
   BEFORE_SWITCH: "session.beforeSwitch",
+  COMPACT: "session.compact",
   CLEANUP: "session.cleanup",
 } as const;
 
 export const AGENT_OPERATIONS = {
   LIFECYCLE: "agent.lifecycle",
+  BEFORE_START: "agent.beforeStart",
+  START: "agent.start",
   RUN_BACKGROUND: "agent.runBackground",
   STATUS: "agent.status",
   LIST: "agent.list",
@@ -70,6 +74,8 @@ export const COMMAND_OPERATIONS = {
 } as const;
 
 export const TOOL_OPERATIONS = {
+  FOOTER_START: "tool.footerStart",
+  FOOTER_STOP: "tool.footerStop",
   AGENT_EXECUTE: "tool.agentExecute",
   CANCEL_EXECUTE: "tool.cancelExecute",
   TELEGRAM_EXECUTE: "tool.telegramExecute",

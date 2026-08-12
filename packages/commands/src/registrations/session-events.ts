@@ -71,10 +71,12 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext): GoalDeliveryBindi
  */
 export function registerSessionEvents(pi: ExtensionAPI): void {
   pi.on("turn_start", (_event: TurnStartEvent, ctx: ExtensionContext) => {
-    // A turn is one model response and its tool batch. Resetting here means
-    // separate responses get independent MAX_PARALLEL_AGENTS budgets while the
-    // pool still shares the counter across all agent calls in this response.
-    getChildPool(ctx.cwd, ctx.sessionManager.getSessionId()).resetParallelAgents();
+    processWithLog({ operation: SESSION_OPERATIONS.TURN_START, parameters: { cwd: ctx.cwd } }, () => {
+      // A turn is one model response and its tool batch. Resetting here means
+      // separate responses get independent MAX_PARALLEL_AGENTS budgets while the
+      // pool still shares the counter across all agent calls in this response.
+      getChildPool(ctx.cwd, ctx.sessionManager.getSessionId()).resetParallelAgents();
+    });
   });
 
   pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
