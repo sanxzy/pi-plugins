@@ -766,6 +766,22 @@ test("reference selection excludes node_modules and .git and caps the immediate 
   assert.doesNotMatch(text(result), /\.git/);
 });
 
+test("wiki discovery output stays bounded even when one topic has oversized page metadata", async () => {
+  const root = tempRoot();
+  const longFile = `${"very-long-topic-".repeat(5000)}.md`;
+  writeFileSync(
+    join(root, longFile),
+    `<!-- pi-code-wiki-page -->\ntopic: huge\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->`,
+  );
+  try {
+    const result = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
+    assert.ok(Buffer.byteLength(text(result), "utf8") <= MAX_WIKI_DISCOVERY_OUTPUT_BYTES);
+    assert.match(text(result), /discovery output truncated|Topic:/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("wiki discovery output is bounded to the documented byte budget", async () => {
   const root = tempRoot();
   for (let index = 0; index < 60; index++) {
