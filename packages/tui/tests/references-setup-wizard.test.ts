@@ -186,6 +186,114 @@ test("failed update stays in wizard and retry succeeds through the edit form", a
   assert.ok(lines(wizard).some((line) => line.includes("Saved")));
 });
 
+test("Git add flow collects alias, repository, branch, metadata and submits addGit", async () => {
+  const calls: unknown[] = [];
+  const ctl = controller({
+    addGit: async (input) => {
+      calls.push(input);
+      return { ok: true as const, message: "Git reference saved." };
+    },
+  });
+  const wizard = new ReferencesSetupWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+  wizard.handleInput("\x1b[B"); // down to Add Git reference
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("Add Git reference · alias")));
+  for (const char of "react") wizard.handleInput(char);
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("Add Git reference · repository")));
+  for (const char of "facebook/react") wizard.handleInput(char);
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("Add Git reference · branch")));
+  for (const char of "main") wizard.handleInput(char);
+  wizard.handleInput("\r");
+  for (const char of "React source") wizard.handleInput(char);
+  wizard.handleInput("\r");
+  wizard.handleInput("\x1b[B"); // Hide
+  wizard.handleInput("\r");
+  await flush();
+  assert.equal(calls.length, 1);
+  assert.equal((calls[0] as { alias: string }).alias, "react");
+  assert.equal((calls[0] as { repository: string }).repository, "facebook/react");
+  assert.equal((calls[0] as { branch: string }).branch, "main");
+  assert.equal((calls[0] as { description: string }).description, "React source");
+  assert.equal((calls[0] as { hidden: boolean }).hidden, true);
+  assert.ok(lines(wizard).some((line) => line.includes("Git reference saved.")));
+});
+
+test("Git edit prefills raw values and submits updateGit preserving metadata", async () => {
+  const calls: Array<{ alias: string; input: unknown }> = [];
+  const ctl = controller({
+    list: async () => ({ items: [
+      { name: "react", label: "facebook/react", git: { repository: "facebook/react", description: "React", hidden: true } },
+    ] }),
+    updateGit: async (alias, input) => {
+      calls.push({ alias, input });
+      return { ok: true as const, message: "Updated" };
+    },
+  });
+  const wizard = new ReferencesSetupWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+  wizard.handleInput("\x1b[B"); // Add Git
+  wizard.handleInput("\x1b[B"); // Edit
+  wizard.handleInput("\r"); // select-edit
+  wizard.handleInput("\r"); // select react -> operation chooser (git)
+  assert.ok(lines(wizard).some((line) => line.includes("References setup · react")));
+  wizard.handleInput("\r"); // Edit
+  assert.ok(lines(wizard).some((line) => line.includes("Edit Git reference · repository")));
+  assert.ok(lines(wizard).some((line) => line.includes("facebook/react"))); // prefilled
+  wizard.handleInput("\r"); // keep repo
+  assert.ok(lines(wizard).some((line) => line.includes("Edit Git reference · branch")));
+  wizard.handleInput("\r"); // keep empty branch
+  assert.ok(lines(wizard).some((line) => line.includes("Edit Git reference · description")));
+  assert.ok(lines(wizard).some((line) => line.includes("React"))); // prefilled
+  wizard.handleInput("\r"); // keep description
+  wizard.handleInput("\r"); // Continue -> hidden stays true (untouched)
+  await flush();
+  assert.deepEqual(calls, [{ alias: "react", input: { repository: "facebook/react", description: "React" } }]);
+  assert.ok(lines(wizard).some((line) => line.includes("Updated")));
+});
+
+test("Test and Refresh run observationally from the operation chooser", async () => {
+  const testCalls: string[] = [];
+  const refreshCalls: string[] = [];
+  const ctl = controller({
+    list: async () => ({ items: [
+      { name: "react", label: "facebook/react", git: { repository: "facebook/react", branch: "main" } },
+    ] }),
+    testGit: async (alias) => {
+      testCalls.push(alias);
+      return { ok: true as const, message: "Reference available.", materialization: "cached", branch: "main" };
+    },
+    refreshGit: async (alias) => {
+      refreshCalls.push(alias);
+      return { ok: true as const, message: "Reference refreshed (cloned).", materialization: "cloned" };
+    },
+  });
+  const wizard = new ReferencesSetupWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  wizard.handleInput("\r"); // react -> operation chooser
+  wizard.handleInput("\x1b[B"); // Test
+  wizard.handleInput("\r");
+  await flush();
+  assert.deepEqual(testCalls, ["react"]);
+  assert.ok(lines(wizard).some((line) => line.includes("Reference available.")));
+  wizard.handleInput("\r"); // to menu
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  wizard.handleInput("\r");
+  wizard.handleInput("\x1b[B"); // Test
+  wizard.handleInput("\x1b[B"); // Refresh
+  wizard.handleInput("\r");
+  await flush();
+  assert.deepEqual(refreshCalls, ["react"]);
+  assert.ok(lines(wizard).some((line) => line.includes("Reference refreshed (cloned).")));
+});
+
 test("busy state renders while the local save is in flight", async () => {
   let release!: (result: { ok: boolean; message: string }) => void;
   const pending = new Promise<{ ok: boolean; message: string }>((resolve) => { release = resolve; });

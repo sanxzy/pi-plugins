@@ -75,6 +75,71 @@ test("updateLocal preserves shorthand form and omitted metadata losslessly", asy
   assert.deepEqual(document.references.docs, { path: "/tmp/docs2", description: "Local docs", hidden: true });
 });
 
+test("controller adds a validated Git entry through the runtime catalog", async () => {
+  const saved: unknown[] = [];
+  let document = { references: {} as Record<string, unknown> };
+  const controller = createReferencesSetupController({
+    catalog: {
+      filePath: "/tmp/references.json",
+      readDocument: async () => document,
+      preflight: async (candidate: unknown) => {
+        saved.push(candidate);
+        return { ok: true as const };
+      },
+      save: async (candidate: unknown) => {
+        document = candidate as typeof document;
+        return { ok: true as const };
+      },
+    },
+  });
+  const result = await controller.addGit({ alias: "react", repository: "facebook/react", branch: "main", description: "React", hidden: true });
+  assert.deepEqual(result, { ok: true, message: "Reference saved." });
+  assert.deepEqual(document, { references: { react: { repository: "facebook/react", branch: "main", description: "React", hidden: true } } });
+  assert.equal(saved.length, 1);
+});
+
+test("controller rejects unsafe Git values before preflight", async () => {
+  let preflighted = false;
+  const controller = createReferencesSetupController({
+    catalog: {
+      filePath: "/tmp/references.json",
+      readDocument: async () => ({ references: {} }),
+      preflight: async () => {
+        preflighted = true;
+        return { ok: true as const };
+      },
+      save: async () => ({ ok: true as const }),
+    },
+  });
+  assert.equal((await controller.addGit({ alias: "x", repository: "evil; rm -rf" })).ok, false);
+  assert.equal((await controller.addGit({ alias: "x", repository: "a/b", branch: "-bad" })).ok, false);
+  assert.equal(preflighted, false);
+});
+
+test("controller preserves Git raw metadata when editing branch only", async () => {
+  let document = {
+    references: {
+      react: { repository: "facebook/react", description: "React", hidden: true } as Record<string, unknown>,
+      scp: "user@host:repo" as string | Record<string, unknown>,
+    },
+  };
+  const controller = createReferencesSetupController({
+    catalog: {
+      filePath: "/tmp/references.json",
+      readDocument: async () => document,
+      preflight: async () => ({ ok: true as const }),
+      save: async (candidate: unknown) => {
+        document = candidate as typeof document;
+        return { ok: true as const };
+      },
+    },
+  });
+  await controller.updateGit("react", { repository: "facebook/react", branch: "dev" });
+  assert.deepEqual(document.references.react, { repository: "facebook/react", branch: "dev", description: "React", hidden: true });
+  await controller.updateGit("scp", { repository: "user@host:repo", branch: "dev" });
+  assert.deepEqual(document.references.scp, { repository: "user@host:repo", branch: "dev" });
+});
+
 test("Git shorthand entries are not classified as editable local references", async () => {
   const controller = createReferencesSetupController({
     catalog: {
