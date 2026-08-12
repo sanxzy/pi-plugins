@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { parseJobEvent, serializeJobEvent, type JobEvent } from "@xzy-ai/core";
 import { createJob, updateJob, type Job, type JobUpdate } from "@xzy-ai/core";
 import { canTransition, isTerminal } from "@xzy-ai/core";
+import { processWithLog } from "@xzy-ai/observability";
 
 /** Maximum number of terminal (settled) jobs retained per per-parent registry. */
 export const MAX_RETAINED_TERMINAL_JOBS = 25;
@@ -110,26 +111,28 @@ export function createRegistry(filePath: string): Registry {
   };
 
   const prune = (): void => {
-    const jobs = foldLog(filePath);
-    const terminal = [...jobs.values()].filter((job) => isTerminal(job.status));
-    if (terminal.length <= MAX_RETAINED_TERMINAL_JOBS) return;
+    processWithLog({ operation: "registry.prune" }, () => {
+      const jobs = foldLog(filePath);
+      const terminal = [...jobs.values()].filter((job) => isTerminal(job.status));
+      if (terminal.length <= MAX_RETAINED_TERMINAL_JOBS) return;
 
-    // Keep the newest terminal jobs, then all non-terminal jobs, then any
-    // ancestor of a retained job so a retained lineage stays intact.
-    const newest = [...terminal]
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.updatedAt.localeCompare(b.updatedAt) || a.jobId.localeCompare(b.jobId))
-      .slice(-MAX_RETAINED_TERMINAL_JOBS);
-    const retainedIds = new Set<string>(newest.map((job) => job.jobId));
-    for (const job of jobs.values()) {
-      if (!isTerminal(job.status)) retainedIds.add(job.jobId);
-    }
-    for (const job of jobs.values()) {
-      if (!retainedIds.has(job.jobId)) continue;
-      for (const ancestorId of ancestorsOf(job)) retainedIds.add(ancestorId);
-    }
+      // Keep the newest terminal jobs, then all non-terminal jobs, then any
+      // ancestor of a retained job so a retained lineage stays intact.
+      const newest = [...terminal]
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.updatedAt.localeCompare(b.updatedAt) || a.jobId.localeCompare(b.jobId))
+        .slice(-MAX_RETAINED_TERMINAL_JOBS);
+      const retainedIds = new Set<string>(newest.map((job) => job.jobId));
+      for (const job of jobs.values()) {
+        if (!isTerminal(job.status)) retainedIds.add(job.jobId);
+      }
+      for (const job of jobs.values()) {
+        if (!retainedIds.has(job.jobId)) continue;
+        for (const ancestorId of ancestorsOf(job)) retainedIds.add(ancestorId);
+      }
 
-    rewriteLog(filePath, retainedIds);
-    index = foldLog(filePath);
+      rewriteLog(filePath, retainedIds);
+      index = foldLog(filePath);
+    });
   };
 
   // Bound history that was written by an earlier runtime before exposing the
@@ -140,19 +143,23 @@ export function createRegistry(filePath: string): Registry {
     filePath,
     append,
     createJob(job: Job): void {
-      append({ type: "created", job, at: job.createdAt });
-      index.set(job.jobId, job);
-      prune();
+      processWithLog({ operation: "registry.createJob", parameters: { jobId: job.jobId } }, () => {
+        append({ type: "created", job, at: job.createdAt });
+        index.set(job.jobId, job);
+        prune();
+      });
     },
     updateJob(jobId: string, update: JobUpdate): void {
-      const current = index.get(jobId);
-      if (!current) return;
-      const to = update.status;
-      if (to !== undefined && !canTransition(current.status, to)) return;
-      const next = updateJob(current, update);
-      append({ type: "updated", jobId, update, at: next.updatedAt });
-      index.set(jobId, next);
-      prune();
+      processWithLog({ operation: "registry.updateJob", parameters: { jobId, status: update.status } }, () => {
+        const current = index.get(jobId);
+        if (!current) return;
+        const to = update.status;
+        if (to !== undefined && !canTransition(current.status, to)) return;
+        const next = updateJob(current, update);
+        append({ type: "updated", jobId, update, at: next.updatedAt });
+        index.set(jobId, next);
+        prune();
+      });
     },
     fold(): Map<string, Job> {
       index = foldLog(filePath);
