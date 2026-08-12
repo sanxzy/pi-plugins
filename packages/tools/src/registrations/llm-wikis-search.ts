@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { createReferenceCatalog, type ReferenceCatalogReadResult } from "@xzy-ai/runtime";
 import { errorResult, textResult } from "../results.ts";
 import { discoverWikiTopics, retrieveWikiPage, searchWikis, wikiRoot } from "../wiki.ts";
 
@@ -40,6 +41,11 @@ export interface LlmWikisSearchResultItem {
   excerpt: string;
 }
 
+/** Model-safe view over the runtime references catalog for discovery and selection. */
+export interface ReferenceCatalogReader {
+  read: () => Promise<ReferenceCatalogReadResult>;
+}
+
 export type LlmWikisSearchDetails =
   | {
       mode: "wikis";
@@ -75,7 +81,9 @@ export type LlmWikisSearchDetails =
         type: "local" | "git";
         description?: string;
         status: string;
+        diagnostic?: string;
       }>;
+      diagnostics?: string[];
     }
   | {
       mode: "error";
@@ -84,6 +92,7 @@ export type LlmWikisSearchDetails =
 
 export interface LlmWikisSearchExecutionOptions {
   wikiRoot?: string;
+  referenceCatalog?: ReferenceCatalogReader;
   signal?: AbortSignal;
 }
 
@@ -107,6 +116,10 @@ export function registerLlmWikisSearchTool(pi: ExtensionAPI): void {
   });
 }
 
+function signalAborted(options?: LlmWikisSearchExecutionOptions): boolean {
+  return Boolean(options?.signal?.aborted);
+}
+
 export async function executeLlmWikisSearch(
   params: LlmWikisSearchParams,
   options?: LlmWikisSearchExecutionOptions,
@@ -115,7 +128,56 @@ export async function executeLlmWikisSearch(
     return errorResult("Unsupported llm_wikis_search type.", { mode: "error", message: "Unsupported llm_wikis_search type." });
   }
   if (params.type === "references") {
-    return textResult("Reference alias support is not yet available.", { mode: "references", aliases: [], query: params.query });
+    if (signalAborted(options)) {
+      return errorResult("Reference research aborted.", { mode: "error", message: "Reference research aborted." });
+    }
+    const reader = options?.referenceCatalog ?? createReferenceCatalog();
+    let read: ReferenceCatalogReadResult;
+    try {
+      read = await reader.read();
+    } catch {
+      return textResult("No configured references are available right now.", {
+        mode: "references",
+        ...(params.query === undefined ? {} : { query: params.query }),
+        aliases: [],
+        diagnostics: ["Reference discovery is temporarily unavailable"],
+      });
+    }
+    const aliases = read.entries
+      .filter((entry) => !entry.hidden)
+      .map((entry) => ({
+        alias: entry.name,
+        type: entry.source.type,
+        ...(entry.description ? { description: entry.description } : {}),
+        status: entry.status,
+        ...(entry.status === "unavailable" && entry.diagnostic ? { diagnostic: entry.diagnostic } : {}),
+      }))
+      .sort((left, right) => left.alias.localeCompare(right.alias));
+    const diagnostics = read.diagnostics.filter((message) => typeof message === "string");
+    if (aliases.length === 0) {
+      return textResult("No configured references found.", {
+        mode: "references",
+        ...(params.query === undefined ? {} : { query: params.query }),
+        aliases: [],
+        diagnostics,
+      });
+    }
+    const rendered = aliases
+      .map((alias) =>
+        [
+          `- ${alias.alias} (${alias.type}) ${alias.description ?? ""}`.trimEnd(),
+          alias.status === "unavailable" ? `  status: unavailable${alias.diagnostic ? ` (${alias.diagnostic})` : ""}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      )
+      .join("\n");
+    return textResult(rendered, {
+      mode: "references",
+      ...(params.query === undefined ? {} : { query: params.query }),
+      aliases,
+      diagnostics,
+    });
   }
   const root = options?.wikiRoot ?? wikiRoot();
   if (params.topic !== undefined && params.page !== undefined) {

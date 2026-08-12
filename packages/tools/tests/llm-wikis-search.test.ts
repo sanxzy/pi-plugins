@@ -7,6 +7,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   executeLlmWikisSearch,
   registerLlmWikisSearchTool,
+  type ReferenceCatalogReader,
 } from "../src/registrations/llm-wikis-search.ts";
 import { formatWikiEntry, saveWikiEntry } from "../src/wiki.ts";
 
@@ -364,15 +365,13 @@ type FakeReferenceSource =
   | { type: "local"; description?: string; hidden?: boolean; path?: string }
   | { type: "git"; description?: string; hidden?: boolean; repository?: string };
 
-type FakeReferenceEntry = { name: string; source: FakeReferenceSource; status: string; diagnostic?: string };
+type FakeReferenceEntry = { name: string; source: FakeReferenceSource; status: string; description?: string; diagnostic?: string; hidden?: boolean };
 
-type ReferenceCatalogLike = { read: () => Promise<{ entries: FakeReferenceEntry[]; diagnostics: string[] }> };
-
-function fakeCatalog(reads: Array<{ entries: FakeReferenceEntry[]; diagnostics: string[] }>): ReferenceCatalogLike {
+function fakeCatalog(reads: Array<{ entries: FakeReferenceEntry[]; diagnostics: string[] }>): ReferenceCatalogReader {
   let index = 0;
   return {
     read: async () => reads[Math.min(index++, reads.length - 1)] ?? { entries: [], diagnostics: [] },
-  };
+  } as unknown as ReferenceCatalogReader;
 }
 
 test("llm_wikis_search references wildcard lists non-hidden aliases with safe metadata in stable order", async () => {
@@ -380,9 +379,9 @@ test("llm_wikis_search references wildcard lists non-hidden aliases with safe me
     {
       diagnostics: [],
       entries: [
-        { name: "zeta", source: { type: "local", description: "Zeta docs", path: "/tmp/secret/zeta-path" }, status: "available" },
-        { name: "alpha", source: { type: "git", repository: "owner/repo", hidden: false }, status: "available" },
-        { name: "hiddenOne", source: { type: "local", hidden: true, path: "/tmp/secret/hidden" }, status: "available" },
+        { name: "zeta", source: { type: "local", path: "/tmp/secret/zeta-path" }, description: "Zeta docs", status: "available" },
+        { name: "alpha", source: { type: "git", repository: "owner/repo" }, status: "available" },
+        { name: "hiddenOne", source: { type: "local", path: "/tmp/secret/hidden" }, hidden: true, status: "available" },
       ],
     },
   ]);
@@ -423,14 +422,13 @@ test("llm_wikis_search references discovery surfaces unavailable entries with sa
       diagnostics: ["Reference 'broken' is unavailable"],
       entries: [
         { name: "ok", source: { type: "local" }, status: "available" },
-        { name: "broken", source: { type: "git", repository: "secret-org/token-repo" }, status: "unavailable", diagnostic: "Git reference is unavailable" },
-      ],
+        { name: "broken", source: { type: "git", repository: "secret-org/token-repo" }, status: "unavailable", diagnostic: "Git reference is unavailable" },      ],
     },
   ]);
   const result = await executeLlmWikisSearch({ type: "references", query: "*" }, { referenceCatalog: catalog });
   const details = result.details as unknown as { aliases: Array<Record<string, unknown>>; diagnostics?: unknown };
-  assert.deepEqual(details.aliases.map((alias) => alias.status), ["available", "unavailable"]);
-  assert.equal(details.aliases[1]?.diagnostic, "Git reference is unavailable");
+  assert.deepEqual(details.aliases.map((alias) => alias.status), ["unavailable", "available"]);
+  assert.equal(details.aliases[0]?.diagnostic, "Git reference is unavailable");
   assert.match(text(result), /broken/);
   assert.doesNotMatch(text(result), /secret-org|token-repo/);
 });
