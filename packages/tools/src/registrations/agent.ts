@@ -10,6 +10,7 @@ import {
 } from "../agent-execution.ts";
 import { isInSessionScope, resumeDisposition, type Job } from "@xzy-ai/core";
 import { MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { backgroundModeError, createAgentDiscovery, getChildPool, prepareResumeSessionFile, recordNewJob, runBackgroundJob } from "@xzy-ai/runtime";
 import { agentParams, type AgentParams } from "../tools.ts";
 import type { AgentDetails, AgentErrorDetails } from "../types.ts";
@@ -153,6 +154,17 @@ export function registerAgentTool(pi: ExtensionAPI): void {
  * place, preserving identity and transcript.
  */
 async function startAgent(
+  params: AgentParams,
+  ctx: ExtensionContext,
+  resume: { existingJob?: Job } = {},
+  parentSignal?: AbortSignal,
+): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
+  return processWithLog({ operation: TOOL_OPERATIONS.AGENT_EXECUTE, parameters: { subagentType: params.subagent_type, prompt: params.prompt } }, async () =>
+    startAgentInner(params, ctx, resume, parentSignal),
+  );
+}
+
+async function startAgentInner(
   params: AgentParams,
   ctx: ExtensionContext,
   resume: { existingJob?: Job } = {},

@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { canCancel, isInSessionScope } from "@xzy-ai/core";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { abortJobTree, getChildPool } from "@xzy-ai/runtime";
 import { cancelParams, type CancelParams } from "../tools.ts";
 import type { CancelDetails } from "../types.ts";
@@ -19,6 +20,7 @@ export function registerCancelTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<CancelDetails>> {
+      return processWithLog({ operation: TOOL_OPERATIONS.CANCEL_EXECUTE, parameters: { jobId: params.job_id } }, async () => {
       const pool = getChildPool(ctx.cwd);
       const caller = callerFor(ctx, pool);
       const job = pool.registry.get(params.job_id);
@@ -75,6 +77,7 @@ export function registerCancelTool(pi: ExtensionAPI): void {
         jobId: params.job_id,
         success: true,
         status: "cancelled",
+      });
       });
     },
   });
