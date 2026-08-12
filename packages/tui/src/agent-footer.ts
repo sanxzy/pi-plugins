@@ -108,21 +108,24 @@ export class AgentFooter implements Component {
     const lastByDepth = computeLastByDepth(rows);
     const lines = [pathLine, statsLine, this.theme.fg("dim", "-- current active subagents --")];
     if (this.hint) lines.push(this.theme.fg("warning", this.hint));
+    // The heading gets its own visual separation from the tree. Do not add a
+    // second spacer after `main`: doing so only when multiple level-1 children
+    // exist makes the root-to-child distance depend on branching factor.
+    if (!this.management) lines.push("");
 
     const visible = this.management
       ? rows.slice(this.scrollTop, this.scrollTop + MAX_VISIBLE_MANAGEMENT_ROWS)
       : rows;
     for (let index = 0; index < visible.length; index++) {
-      if (!this.management) {
-        lines.push(renderTreeRow(visible[index]!, index, rows, lastByDepth, renderWidth, this.theme));
-        continue;
-      }
-      const rowIndex = this.scrollTop + index;
+      const rowIndex = this.management ? this.scrollTop + index : index;
+      const available = this.management ? Math.max(1, renderWidth - 2) : renderWidth;
+      const bodyText = renderTreeRow(visible[index]!, rowIndex, rows, lastByDepth, available, this.theme);
       const selected = rowIndex === this.selectedIndex;
       const cursor = selected ? this.theme.fg("accent", "❯ ") : "  ";
-      const bodyText = renderTreeRow(visible[index]!, rowIndex, rows, lastByDepth, renderWidth, this.theme);
-      const available = Math.max(1, renderWidth - 2);
-      lines.push(cursor + truncateToWidth(bodyText, available));
+      const rendered = this.management
+        ? truncateToWidth(cursor + bodyText, renderWidth, this.theme.fg("dim", "..."))
+        : bodyText;
+      lines.push(rendered);
     }
     return lines;
   }
@@ -265,8 +268,7 @@ function renderTreeRow(
       : treePrefix(row.depth, lastByDepth, rows, index);
   const status = statusGlyph(row.status, theme);
   const leaf = row.leaf ? ` · ${sanitizeLeaf(row.leaf)}` : "";
-  const text = `${prefix}${status} ${row.description} ${formatDuration(row.durationMs)}${leaf}`;
-  return truncateToWidth(text, width, theme.fg("dim", "..."));
+  return truncateToWidth(`${prefix}${status} ${row.description} ${formatDuration(row.durationMs)}${leaf}`, width, theme.fg("dim", "..."));
 }
 
 function treePrefix(
@@ -276,7 +278,10 @@ function treePrefix(
   index: number,
 ): string {
   const chars: string[] = [];
-  for (let level = 0; level < depth - 1; level++) {
+  // The synthetic root is not a visible branch level. A depth-1 descendant
+  // starts at the left edge; deeper rows add one segment for each visible
+  // ancestor branch (depth 1 through depth - 1).
+  for (let level = 1; level < depth; level++) {
     const ancestorIndex = findAncestorIndex(rows, index, level);
     chars.push(ancestorIndex >= 0 && !lastByDepth[ancestorIndex] ? "│  " : "   ");
   }

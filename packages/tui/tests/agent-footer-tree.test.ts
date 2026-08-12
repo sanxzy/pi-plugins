@@ -101,6 +101,59 @@ test("renders a depth-first tree with status glyphs, time, and latest leaf", () 
   for (const line of lines) assert.ok(line.length <= 100, `line fits: ${line}`);
 });
 
+test("does not add a spacer between main and its only child", () => {
+  const footer = new AgentFooter({
+    tui: fakeTUI(),
+    theme,
+    getInfo: () => info(),
+    getRows: () => [
+      row({ rowId: "main", root: true, status: "active", description: "main", depth: 0, durationMs: 0, enterable: false }),
+      row({ rowId: "child", status: "queued", description: "Run parallel recursive descendant", depth: 1 }),
+    ],
+  });
+
+  assert.deepEqual(renderRows(footer).slice(3), [
+    "",
+    "⏺ main 0s",
+    "└─ ◯ Run parallel recursive descendant 2m 56s",
+  ]);
+});
+
+test("renders every descendant on one uniformly spaced tree row", () => {
+  const footer = new AgentFooter({
+    tui: fakeTUI(),
+    theme,
+    getInfo: () => info(),
+    getRows: () => [
+      row({ rowId: "main", root: true, status: "active", description: "main", depth: 0, durationMs: 0, enterable: false }),
+      row({ rowId: "post", status: "completed", description: "post", depth: 1 }),
+      row({ rowId: "parallel", status: "queued", description: "parallel", depth: 1 }),
+      row({ rowId: "branch-a", status: "queued", description: "branch A", depth: 2 }),
+      row({ rowId: "branch-a1", status: "queued", description: "branch A1", depth: 3 }),
+      row({ rowId: "branch-a2", status: "queued", description: "branch A2", depth: 3 }),
+      row({ rowId: "branch-b", status: "queued", description: "branch B", depth: 2 }),
+      row({ rowId: "branch-b1", status: "queued", description: "branch B1", depth: 3 }),
+      row({ rowId: "branch-b1-child", status: "queued", description: "branch B1 child", depth: 4 }),
+      row({ rowId: "branch-b2", status: "queued", description: "branch B2", depth: 3 }),
+    ],
+  });
+
+  assert.deepEqual(renderRows(footer).slice(3), [
+    "",
+    "⏺ main 0s",
+    "├─ ✓ post 2m 56s",
+    "└─ ◯ parallel 2m 56s",
+    "   ├─ ◯ branch A 2m 56s",
+    "   │  ├─ ◯ branch A1 2m 56s",
+    "   │  └─ ◯ branch A2 2m 56s",
+    "   └─ ◯ branch B 2m 56s",
+    "      ├─ ◯ branch B1 2m 56s",
+    "      │  └─ ◯ branch B1 child 2m 56s",
+    "      └─ ◯ branch B2 2m 56s",
+  ]);
+  assert.equal(renderRows(footer).some((line) => line.trim() === "│"), false, "no depth-specific spacer rows");
+});
+
 test("terminal rows are filtered out after two minutes by filterFooterRows", () => {
   const updatedAt = "2026-01-01T12:00:00.000Z";
   const rows: FooterTreeRow[] = [
