@@ -743,6 +743,7 @@ test("llm_wikis_search description distinguishes wiki and reference modes and ha
   assert.match(tool.description, /type=\"references\"/);
   assert.match(tool.description, /read, grep, and find/);
   assert.match(tool.description, /query=\"\*\"/);
+  assert.match(tool.description, /codebase|repository|source code/);
 });
 
 test("the tools barrel exposes only the model-facing llm_wikis_search surface", async () => {
