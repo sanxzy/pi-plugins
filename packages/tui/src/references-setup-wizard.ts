@@ -605,7 +605,6 @@ export class ReferencesSetupWizard implements Component {
     if (this.branch) input.branch = this.branch;
     else if (this.editing()) input.branch = ""; // explicit empty marker clears a stored branch
     if (this.description) input.description = this.description;
-    if (this.description) input.description = this.description;
     if (this.hiddenTouched) input.hidden = this.hidden;
     if (this.signal) input.signal = this.signal;
     return input;
