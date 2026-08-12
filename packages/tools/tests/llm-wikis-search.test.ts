@@ -666,3 +666,61 @@ test("registered llm_wikis_search accepts the fixed type-discriminated parameter
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("llm_wikis_search description distinguishes wiki and reference modes and hands off to filesystem tools", () => {
+  const tool = captureTool();
+  assert.match(tool.description, /type=\"wikis\"/);
+  assert.match(tool.description, /type=\"references\"/);
+  assert.match(tool.description, /read, grep, and find/);
+  assert.match(tool.description, /query=\"\*\"/);
+});
+
+test("the tools barrel exposes only the model-facing llm_wikis_search surface", async () => {
+  const barrel = (await import("../src/index.ts")) as unknown as Record<string, unknown>;
+  assert.equal(typeof barrel.executeLlmWikisSearch, "function");
+  assert.equal(typeof barrel.registerLlmWikisSearchTool, "function");
+  assert.equal(barrel.createReferenceCatalog, undefined);
+  assert.equal(barrel.listReferenceChildren, undefined);
+  assert.equal(barrel.referenceReposDir, undefined);
+  assert.equal(barrel.referenceConfigFile, undefined);
+  assert.equal(barrel.gitMaterializer, undefined);
+});
+
+test("both wiki and reference modes dispatch through the captured registration safely", async () => {
+  const tool = captureTool();
+  const root = tempRoot();
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+  mkdirSync(join(root, "wikis"), { recursive: true });
+  writeFileSync(
+    join(root, "wikis", "topic.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: topic\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nbody`,
+  );
+  try {
+    const wiki = await tool.execute("call", { type: "wikis", query: "*" }, undefined, undefined, context);
+    assert.match(text(wiki), /topic\.md/);
+    const refs = await tool.execute("call", { type: "references", query: "*" }, undefined, undefined, context);
+    assert.match(text(refs), /no configured references/i);
+    assert.deepEqual((refs.details as unknown as { aliases?: unknown }).aliases, []);
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search short-circuits reference research on an aborted signal", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const result = await executeLlmWikisSearch({ type: "references", query: "*" }, { signal: controller.signal });
+  assert.match(text(result), /Error/);
+  assert.doesNotMatch(text(result), /no configured references/i);
+});
+
+test("llm_wikis_search short-circuits wiki research on an aborted signal", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const result = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { signal: controller.signal });
+  assert.match(text(result), /Error/);
+  assert.doesNotMatch(text(result), /no local wiki pages/i);
+});
