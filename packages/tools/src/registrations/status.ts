@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isInSessionScope, statusFor } from "@xzy-ai/core";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { getChildPool } from "@xzy-ai/runtime";
 import { statusParams, type StatusParams } from "../tools.ts";
 import type { StatusDetails } from "../types.ts";
@@ -28,6 +29,7 @@ export function registerStatusTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<StatusDetails>> {
+      return processWithLog({ operation: TOOL_OPERATIONS.STATUS_EXECUTE, parameters: { jobId: params.job_id } }, async () => {
       const pool = getChildPool(ctx.cwd);
       const caller = callerFor(ctx, pool);
       const job = pool.registry.get(params.job_id);
@@ -52,6 +54,7 @@ export function registerStatusTool(pi: ExtensionAPI): void {
         status: job.status,
         job: toJobSummary(job),
         controllable: result.controllable,
+      });
       });
     },
   });

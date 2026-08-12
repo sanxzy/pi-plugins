@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Goal } from "@xzy-ai/core";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { getChildPool, getGoalPool } from "@xzy-ai/runtime";
 import {
   goalCreateParams,
@@ -61,11 +62,13 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     promptSnippet: "Create a persistent goal for the current working directory.",
     parameters: goalCreateParams,
     async execute(_toolCallId: string, params: GoalCreateParams, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
+      return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "create" } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
       const result = target.pool.create({ cwd: target.cwd, prompt: params.prompt, interval: params.interval });
       if (!result.ok) return errorResult(result.error, { reason: result.error });
       return success(`Goal created: ${result.goal.prompt}\n${formatGoal(result.goal)}`, { goal: result.goal });
+      });
     },
   });
 
@@ -75,11 +78,13 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     description: "Pause the current goal with an exact non-empty reason.",
     parameters: goalPauseParams,
     async execute(_toolCallId: string, params: GoalPauseParams, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
+      return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "pause" } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
       const result = target.pool.pause(target.cwd, params.reason);
       if (!result.ok) return errorResult(result.error, { reason: result.error });
       return success(`Goal paused: ${params.reason}`, { goal: result.goal });
+      });
     },
   });
 
@@ -89,11 +94,13 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     description: "Resume the current paused goal and restore active delivery.",
     parameters: goalNoArgsParams,
     async execute(_toolCallId: string, _params: unknown, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
+      return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "resume" } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
       const result = target.pool.resume(target.cwd);
       if (!result.ok) return errorResult(result.error, { reason: result.error });
       return success(`Goal resumed: ${result.goal.status}`, { goal: result.goal });
+      });
     },
   });
 
@@ -103,11 +110,13 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     description: "Show the complete current goal record for this working directory.",
     parameters: goalNoArgsParams,
     async execute(_toolCallId: string, _params: unknown, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
+      return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "status" } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
       const goal = target.pool.get(target.cwd);
       if (!goal) return errorResult("no goal exists for this cwd", { reason: "no goal exists for this cwd" });
       return success(formatGoal(goal), { goal });
+      });
     },
   });
 
@@ -117,12 +126,14 @@ export function registerGoalTools(pi: ExtensionAPI): void {
     description: "Clear my current goal when I decide it is complete.",
     parameters: goalNoArgsParams,
     async execute(_toolCallId: string, _params: unknown, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
+      return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "clear" } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
       const goal = target.pool.get(target.cwd);
       if (!goal) return errorResult("no goal exists to clear for this cwd", { reason: "no goal exists to clear for this cwd" });
       if (!target.pool.clear(target.cwd)) return errorResult("no goal exists to clear for this cwd", { reason: "no goal exists to clear for this cwd" });
       return success("Congratulations, the goal was completed and cleared.", { goal });
+      });
     },
   });
 }

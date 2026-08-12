@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { visibleJobs } from "@xzy-ai/core";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { getChildPool } from "@xzy-ai/runtime";
 import { jobsParams } from "../tools.ts";
 import type { JobsDetails } from "../types.ts";
@@ -20,6 +21,7 @@ export function registerJobsTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<JobsDetails>> {
+      return processWithLog({ operation: TOOL_OPERATIONS.JOBS_EXECUTE }, async () => {
       const pool = getChildPool(ctx.cwd);
       const caller = callerFor(ctx, pool);
       const jobs = visibleJobs(caller, pool.registry.all().values(), (jobId) => pool.registry.get(jobId)).map(toJobSummary);
@@ -33,6 +35,7 @@ export function registerJobsTool(pi: ExtensionAPI): void {
           ? `\n\n${active.length} subagent job(s) are still ${active.map((j) => j.status).join("/")}. Take a rest while they work. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they settle.`
           : "";
       return textResult(`Subagent jobs:\n${lines}${guidance}`, { jobs });
+      });
     },
   });
 }
