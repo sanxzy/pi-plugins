@@ -14,7 +14,7 @@ import { formatWikiEntry, saveWikiEntry } from "../src/wiki.ts";
 type Tool = {
   name: string;
   description: string;
-  parameters: { type?: string; properties?: Record<string, { type?: string; anyOf?: unknown[] }> };
+  parameters: { type?: string; properties?: Record<string, { type?: string; anyOf?: unknown[] }>; anyOf?: unknown[] };
   execute: (...args: unknown[]) => Promise<{
     content: Array<{ type: string; text?: string }>;
     details: Record<string, unknown>;
@@ -47,10 +47,12 @@ function tempRoot(): string {
 test("llm_wikis_search is registered with an explicit type discriminator and a local-first description", () => {
   const tool = captureTool();
   assert.equal(tool.name, "llm_wikis_search");
-  const props = tool.parameters.properties ?? {};
-  const typeField = props.type;
-  assert.ok(Array.isArray(typeField?.anyOf));
-  const literals = (typeField?.anyOf ?? []).map((variant) => (variant as { const?: string }).const);
+  const variants = tool.parameters.anyOf ?? [];
+  assert.equal(variants.length, 2);
+  const literals = variants.map((variant) => {
+    const typeField = (variant as { properties?: { type?: { const?: string } } }).properties?.type;
+    return typeField?.const;
+  });
   assert.deepEqual(literals, ["wikis", "references"]);
   assert.match(tool.description, /wikis/i);
   assert.match(tool.description, /references/i);
@@ -715,6 +717,13 @@ test("llm_wikis_search short-circuits reference research on an aborted signal", 
   const result = await executeLlmWikisSearch({ type: "references", query: "*" }, { signal: controller.signal });
   assert.match(text(result), /Error/);
   assert.doesNotMatch(text(result), /no configured references/i);
+});
+
+test("llm_wikis_search rejects mode-inconsistent fields with safe errors", async () => {
+  const wikiWithAlias = await executeLlmWikisSearch({ type: "wikis", query: "typescript", alias: "docs" } as never);
+  assert.match(text(wikiWithAlias), /Error/);
+  const referenceWithTopic = await executeLlmWikisSearch({ type: "references", query: "*", topic: "docs" } as never);
+  assert.match(text(referenceWithTopic), /Error/);
 });
 
 test("llm_wikis_search short-circuits wiki research on an aborted signal", async () => {

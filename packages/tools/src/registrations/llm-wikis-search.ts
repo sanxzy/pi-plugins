@@ -5,31 +5,42 @@ import { createReferenceCatalog, type ReferenceCatalogReadResult } from "@xzy-ai
 import { errorResult, textResult } from "../results.ts";
 import { discoverWikiTopics, retrieveWikiPage, searchWikis, wikiRoot } from "../wiki.ts";
 
-const llmWikisSearchParams = Type.Object({
-  type: Type.Union(
-    [
-      Type.Literal("wikis", { description: "Search the local LLM wiki corpus with ranking, wildcard discovery, or page retrieval" }),
-      Type.Literal("references", { description: "Discover and select configured reference aliases as readable roots" }),
-    ],
-    { description: "Which local research surface to use" },
-  ),
-  query: Type.Optional(Type.String({ description: "Search query for local wikis, or \"*\" to discover available topics/pages or reference aliases. Not required for wiki page retrieval." })),
-  topic: Type.Optional(Type.String({ description: "Optional wiki topic filter" })),
-  page: Type.Optional(Type.String({ description: "Optional wiki page selector" })),
-  maxResults: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum local wiki excerpts to return" })),
-  alias: Type.Optional(Type.String({ description: "Configured reference alias to select, when type is references" })),
-});
+const commonQuery = Type.Optional(Type.String({ description: "Search query, or \"*\" for deterministic discovery. Not required for page/root selection." }));
+const maxResults = Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum results or topics to return" }));
+const llmWikisSearchParams = Type.Union([
+  Type.Object({
+    type: Type.Literal("wikis", { description: "Search, discover, or retrieve pages from the local LLM wiki corpus" }),
+    query: commonQuery,
+    topic: Type.Optional(Type.String({ description: "Optional wiki topic filter" })),
+    page: Type.Optional(Type.String({ description: "Optional wiki page selector" })),
+    maxResults,
+  }, { additionalProperties: false }),
+  Type.Object({
+    type: Type.Literal("references", { description: "Discover configured reference aliases or select a readable root" }),
+    query: commonQuery,
+    alias: Type.Optional(Type.String({ description: "Configured reference alias to select a readable root; omit it with query=\"*\" to discover non-hidden aliases" })),
+  }, { additionalProperties: false }),
+]);
 
 export type LlmWikisSearchType = "wikis" | "references";
 
-type LlmWikisSearchParams = {
-  type: LlmWikisSearchType;
-  query?: string;
-  topic?: string;
-  page?: string;
-  maxResults?: number;
-  alias?: string;
-};
+type LlmWikisSearchParams =
+  | {
+      type: "wikis";
+      query?: string;
+      topic?: string;
+      page?: string;
+      maxResults?: number;
+      alias?: never;
+    }
+  | {
+      type: "references";
+      query?: string;
+      alias?: string;
+      topic?: never;
+      page?: never;
+      maxResults?: never;
+    };
 
 export interface LlmWikisSearchResultItem {
   file: string;
@@ -143,6 +154,18 @@ export async function executeLlmWikisSearch(
   if (params.type !== "wikis" && params.type !== "references") {
     return errorResult("Unsupported llm_wikis_search type.", { mode: "error", message: "Unsupported llm_wikis_search type." });
   }
+  if (params.type === "wikis" && params.alias !== undefined) {
+    return errorResult("The 'alias' field is only valid for type=references.", {
+      mode: "error",
+      message: "The 'alias' field is only valid for type=references.",
+    });
+  }
+  if (params.type === "references" && (params.topic !== undefined || params.page !== undefined)) {
+    return errorResult("The 'topic' and 'page' fields are only valid for type=wikis.", {
+      mode: "error",
+      message: "The 'topic' and 'page' fields are only valid for type=wikis.",
+    });
+  }
   if (params.type === "references") {
     if (signalAborted(options)) {
       return errorResult("Reference research aborted.", { mode: "error", message: "Reference research aborted." });
@@ -250,6 +273,9 @@ export async function executeLlmWikisSearch(
       aliases,
       diagnostics,
     });
+  }
+  if (signalAborted(options)) {
+    return errorResult("Wiki research aborted.", { mode: "error", message: "Wiki research aborted." });
   }
   const root = options?.wikiRoot ?? wikiRoot();
   if (params.topic !== undefined && params.page !== undefined) {
