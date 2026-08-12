@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext, ThemeColor } from "@earendil-works/pi-coding-agent";
+import { COMMAND_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { ReferencesSetupWizard, type ReferencesSetupResult, type ReferencesSetupWizardOptions } from "@xzy-ai/tui";
 import { createReferenceCatalog } from "@xzy-ai/runtime";
 import { createReferencesSetupController } from "./references-setup.ts";
@@ -12,6 +13,7 @@ export function registerReferencesSetup(pi: ExtensionAPI): void {
   pi.registerCommand("setup-references", {
     description: "Configure global local and Git references",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
+      return processWithLog({ operation: COMMAND_OPERATIONS.SETUP_REFERENCES }, async () => {
       if (ctx.mode !== "tui" || !ctx.hasUI) {
         ctx.ui.notify("References setup requires an interactive TUI session", "warning");
         return;
@@ -30,6 +32,7 @@ export function registerReferencesSetup(pi: ExtensionAPI): void {
       if (result.status === "saved") ctx.ui.notify(result.message, "info");
       else if (result.status === "error") ctx.ui.notify(result.message, "error");
       else ctx.ui.notify("References setup cancelled", "info");
+      });
     },
   });
 }

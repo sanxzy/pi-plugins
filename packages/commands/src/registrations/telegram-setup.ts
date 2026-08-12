@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext, ThemeColor } from "@earendil-works/pi-coding-agent";
+import { COMMAND_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   createTelegramSetupController,
   canonicalProjectRoot,
@@ -34,6 +35,7 @@ export function registerTelegramSetup(
   pi.registerCommand("setup-channel-telegram", {
     description: "Configure and connect a Telegram bot for this project",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
+      return processWithLog({ operation: COMMAND_OPERATIONS.SETUP_CHANNEL }, async () => {
       if (ctx.mode !== "tui" || !ctx.hasUI) {
         ctx.ui.notify("Telegram setup requires an interactive TUI session", "warning");
         return;
@@ -70,6 +72,7 @@ export function registerTelegramSetup(
       } else {
         ctx.ui.notify("Telegram setup cancelled", "info");
       }
+      });
     },
   });
 }

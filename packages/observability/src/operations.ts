@@ -65,6 +65,7 @@ export const COMMAND_OPERATIONS = {
   GOAL_COMMAND: "command.goal",
   SETUP_CHANNEL: "command.setupChannel",
   CLEAR_CHANNEL: "command.clearChannel",
+  SETUP_REFERENCES: "command.setupReferences",
   CONTROLS: "command.controls",
 } as const;
 

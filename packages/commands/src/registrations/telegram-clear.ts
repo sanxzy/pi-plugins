@@ -8,6 +8,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { COMMAND_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   canonicalProjectRoot,
   clearChannelConfig,
@@ -30,6 +31,7 @@ export function registerTelegramClear(
   pi.registerCommand("clear-channel-telegram", {
     description: "Disconnect and remove the Telegram channel setup for this project",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
+      return processWithLog({ operation: COMMAND_OPERATIONS.CLEAR_CHANNEL }, async () => {
       if (ctx.mode !== "tui" || !ctx.hasUI) {
         ctx.ui.notify("Telegram channel clearing requires an interactive TUI session", "warning");
         return;
@@ -60,6 +62,7 @@ export function registerTelegramClear(
         return;
       }
       ctx.ui.notify("Telegram channel setup cleared; the bot is disconnected", "info");
+      });
     },
   });
 }
