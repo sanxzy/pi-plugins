@@ -124,16 +124,20 @@ export function cleanupRootSessions(
     }
 
     const refreshed = discoverSessions(projectRoot);
-    const active = refreshed.filter((session) => session.active);
     const inactive = refreshed
       .filter((session) => !session.active)
       .sort((a, b) => a.lastSeenAt.localeCompare(b.lastSeenAt) || a.sessionId.localeCompare(b.sessionId));
     const removeCount = Math.max(0, refreshed.length - MAX_ROOT_SESSIONS);
-    const removable = active.length > MAX_ROOT_SESSIONS ? 0 : removeCount;
-    for (const session of inactive.slice(0, removable)) {
+    // Prune oldest inactive sessions whenever the total exceeds the cap.
+    // Active sessions are never removed, so when only active sessions remain
+    // beyond the cap the count legitimately stays above 200 until some become
+    // inactive (Q57: "if all sessions are active, the count may temporarily
+    // exceed 200"). Inactive sessions are not shielded by active overshoot.
+    for (const session of inactive.slice(0, removeCount)) {
       rmSync(session.path, { recursive: true, force: true });
     }
-    return { ok: true, reconciled, interruptedAgents, removed: Math.min(removable, inactive.length), remaining: refreshed.length - Math.min(removable, inactive.length) };
+    const removed = Math.min(removeCount, inactive.length);
+    return { ok: true, reconciled, interruptedAgents, removed, remaining: refreshed.length - removed };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Unable to clean root sessions" };
   } finally {
