@@ -1,8 +1,8 @@
 diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
-index 7b381711789938056cddea92182dadf9cacf9fc6..9155f22a5572739e071a80b883ce0fab2f3e246c 100644
+index 324d30ad5708b842f1a536f8d14950469a5ed707..50a312a8e8362769945054c99c628a800ab69d63 100644
 --- a/dist/core/extensions/loader.js
 +++ b/dist/core/extensions/loader.js
-@@ -154,6 +154,8 @@ export function createExtensionRuntime() {
+@@ -157,6 +157,8 @@ export function createExtensionRuntime() {
          setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
          getThinkingLevel: notInitialized,
          setThinkingLevel: notInitialized,
@@ -10,8 +10,8 @@ index 7b381711789938056cddea92182dadf9cacf9fc6..9155f22a5572739e071a80b883ce0fab
 +        createCommandContext: notInitialized,
          flagValues: new Map(),
          pendingProviderRegistrations: [],
-         assertActive,
-@@ -287,6 +289,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
+         pendingNativeProviderRegistrations: [],
+@@ -316,6 +318,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
              runtime.assertActive();
              runtime.setThinkingLevel(level);
          },
@@ -21,29 +21,29 @@ index 7b381711789938056cddea92182dadf9cacf9fc6..9155f22a5572739e071a80b883ce0fab
 +            runtime.assertActive();
 +            return runtime.createCommandContext();
 +        },
-         registerProvider(name, config) {
+         registerProvider(providerOrName, config) {
              runtime.assertActive();
-             runtime.registerProvider(name, config, extension.path);
+             if (typeof providerOrName === "string") {
 diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
-index 92e796571348fcffebc115845e78c445e12baaf2..5c254c8fccc018f45641beec1a741eddfb935900 100644
+index 418865ad891951e3fb7e2a65f4dca4d7d87e3895..513c356b16804becbbea5142940681e747f3cae2 100644
 --- a/dist/core/extensions/runner.js
 +++ b/dist/core/extensions/runner.js
-@@ -153,6 +153,10 @@ export class ExtensionRunner {
-         this.cwd = cwd;
-         this.sessionManager = sessionManager;
-         this.modelRegistry = modelRegistry;
+@@ -171,6 +171,10 @@ export class ExtensionRunner {
+         this.runtime.setModel = actions.setModel;
+         this.runtime.getThinkingLevel = actions.getThinkingLevel;
+         this.runtime.setThinkingLevel = actions.setThinkingLevel;
 +        // Local experiment: let extensions create an ExtensionCommandContext
 +        // through the shared runtime (used by lifecycle handlers, not only
 +        // command dispatch).
 +        this.runtime.createCommandContext = () => this.createCommandContext();
-     }
-     bindCore(actions, contextActions, providerActions) {
-         // Copy actions into the shared runtime (all extension APIs reference this)
+         // Context actions (required)
+         this.getModel = contextActions.getModel;
+         this.getScopedModels = contextActions.getScopedModels;
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
-index f1c2e80e67fdbeafeea091483cb4206640cd3e39..3f8c880f205f64ad4280422cb476bd7d76f7d27f 100644
+index cb7b8e7cfb9d1fb07f4f8c3161d25927b3186e94..a11ae550189bc3d4d3dc395bae588f823561d2e6 100644
 --- a/dist/core/extensions/types.d.ts
 +++ b/dist/core/extensions/types.d.ts
-@@ -927,6 +927,11 @@ export interface ExtensionAPI {
+@@ -956,6 +956,11 @@ export interface ExtensionAPI {
      getThinkingLevel(): ThinkingLevel;
      /** Set thinking level (clamped to model capabilities). */
      setThinkingLevel(level: ThinkingLevel): void;
@@ -55,7 +55,7 @@ index f1c2e80e67fdbeafeea091483cb4206640cd3e39..3f8c880f205f64ad4280422cb476bd7d
      /**
       * Register or override a model provider.
       *
-@@ -1155,6 +1160,8 @@ export interface ExtensionActions {
+@@ -1202,6 +1207,8 @@ export interface ExtensionActions {
      setModel: SetModelHandler;
      getThinkingLevel: GetThinkingLevelHandler;
      setThinkingLevel: SetThinkingLevelHandler;

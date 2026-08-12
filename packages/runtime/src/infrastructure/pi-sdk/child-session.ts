@@ -88,7 +88,7 @@ function toErrorMessage(error: unknown): string {
  * Resolve the model/auth runtime service for the child.
  *
  * The installed `@earendil-works/pi-coding-agent` exposes either a `ModelRuntime`
- * (0.80.10+) or a `ModelRegistry`/`AuthStorage` pair (0.80.2). Both are created
+ * (0.84.1+) or a `ModelRegistry`/`AuthStorage` pair from older releases. Both are created
  * fresh for the child so isolation holds; the active service is passed to
  * `createAgentSession` under its native option name. The statics are accessed
  * through a record cast because the local type declarations only model one API

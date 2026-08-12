@@ -18,7 +18,7 @@
     "@xzy-ai/mcp": "workspace:*",
     "@xzy-ai/runtime": "workspace:*",
     "@xzy-ai/tools": "workspace:*",
-    "@earendil-works/pi-coding-agent": "^0.80.2"
+    "@earendil-works/pi-coding-agent": "^0.84.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
