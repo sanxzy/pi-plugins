@@ -46,7 +46,11 @@ export function createReferencesSetupController(
   let cancelled = false;
   const itemsFrom = options.itemsFrom ?? ((document: ReferenceCatalogDocument) =>
     Object.entries(document.references).map(([name, entry]) => {
-      if (typeof entry === "string") return { name, label: entry, local: { path: entry } };
+      if (typeof entry === "string") {
+        return validateLocalPath(entry).ok
+          ? { name, label: entry, local: { path: entry } }
+          : { name, label: entry };
+      }
       if (entry && typeof entry === "object" && "path" in entry) {
         const raw = entry as { path: unknown; description?: unknown; hidden?: unknown };
         const local: { path: string; description?: string; hidden?: boolean } = { path: String(raw.path) };

@@ -51,6 +51,7 @@ export class ReferencesSetupWizard implements Component {
   private readonly theme: NonNullable<ReferencesSetupWizardOptions["theme"]>;
   private readonly controller: ReferencesSetupController;
   private readonly done: (result: ReferencesSetupResult) => void;
+  private readonly signal?: AbortSignal;
   private readonly editor: Editor;
 
   private step: WizardStep = { kind: "menu" };
@@ -72,6 +73,7 @@ export class ReferencesSetupWizard implements Component {
     this.theme = options.theme;
     this.controller = options.controller;
     this.done = options.done;
+    this.signal = options.signal;
     this.editor = new Editor(this.tui, {
       borderColor: (text: string) => this.theme.fg("accent", text),
       selectList: {
@@ -420,9 +422,10 @@ export class ReferencesSetupWizard implements Component {
     this.refresh();
     const description = this.description || undefined;
     const hidden = this.hiddenTouched ? this.hidden : undefined;
-    const input: { path: string; description?: string; hidden?: boolean } = { path: this.path };
+    const input: { path: string; description?: string; hidden?: boolean; signal?: AbortSignal } = { path: this.path };
     if (description !== undefined) input.description = description;
     if (hidden !== undefined) input.hidden = hidden;
+    if (this.signal) input.signal = this.signal;
     const result = this.editAlias
       ? await this.controller.updateLocal(this.editAlias, input)
       : await this.controller.addLocal({ alias: this.alias, ...input });
