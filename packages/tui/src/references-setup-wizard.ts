@@ -375,7 +375,8 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.escape)) {
-        this.step = { kind: "select-edit" };
+        this.optionIndex = 0;
+        this.step = { kind: "select", purpose: "edit" };
         this.refresh();
         return;
       }
