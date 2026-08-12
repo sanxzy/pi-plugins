@@ -23,7 +23,7 @@ export {
 export { currentProcessIdentity, processStartTime, type ProcessIdentity } from "./infrastructure/manifests/process-identity.ts";
 export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
-export { createChildSessionManager, resolveChildTools, spawnChildSession, copySessionFile } from "./infrastructure/pi-sdk/child-session.ts";
+export { createChildSessionManager, resolveChildTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 export {
   attachAgentSessionLiveFeed,
   liveStatusForSession,
@@ -76,6 +76,7 @@ export {
   EVENTS_FILE_NAME,
   ERRORS_FILE_NAME,
   GOALS_FILE_NAME,
+  PENDING_DELIVERY_FILE_NAME,
   PROJECT_MANIFEST_FILE_NAME,
   SESSION_MANIFEST_FILE_NAME,
   TRANSCRIPT_FILE_NAME,
@@ -83,6 +84,7 @@ export {
   childTranscriptDir,
   childTranscriptFile,
   goalsFile,
+  pendingDeliveryFile,
   rootSessionDir,
   runtimeDir,
   scopedRegistryFile,

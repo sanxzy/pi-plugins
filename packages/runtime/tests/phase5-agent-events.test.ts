@@ -215,14 +215,14 @@ test("malformed parent lineage values are skipped by fresh readers", () => {
   assert.doesNotThrow(() => createAgentEventRegistry(root, "root-session"));
 });
 
-test("nested resume copies the transcript into the resolved nested agent directory", async () => {
+test("nested resume trims the existing transcript in its resolved nested agent directory", async () => {
   setupHome();
   const root = project();
-  const source = join(root, "source.jsonl");
-  writeFileSync(source, '{"type":"session","id":"source"}\n', "utf8");
-  const { copySessionFile, homeAgentTranscriptFile } = await import("@xzy-ai/runtime");
-  const copied = copySessionFile(source, "grandchild-2", root, "grandchild", "root-session", ["parent", "grandchild"]);
-  assert.equal(copied, homeAgentTranscriptFile(encodeProjectId(root), "root-session", "grandchild-2", ["parent", "grandchild"]));
+  const { homeAgentTranscriptFile, prepareResumeSessionFile } = await import("@xzy-ai/runtime");
+  const target = homeAgentTranscriptFile(encodeProjectId(root), "root-session", "grandchild-2", ["parent", "grandchild"]);
+  mkdirSync(join(target, ".."), { recursive: true });
+  writeFileSync(target, '{"type":"session","id":"grandchild-2"}\n', "utf8");
+  assert.equal(prepareResumeSessionFile(target, "grandchild-2"), target);
 });
 
 test("prefixed job ids are canonicalized at event-registry admission", () => {

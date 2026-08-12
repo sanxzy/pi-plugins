@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -11,7 +11,7 @@ import {
   formatBackgroundResult,
   runBackgroundJob,
 } from "@xzy-ai/runtime";
-import { createDeliveryCoordinator } from "@xzy-ai/runtime";
+import { createDeliveryCoordinator, pendingDeliveryFile } from "@xzy-ai/runtime";
 import { createConcurrencyGate } from "@xzy-ai/runtime";
 import { MAX_CONCURRENCY } from "@xzy-ai/core";
 import { createAgentEventRegistry } from "@xzy-ai/runtime";
@@ -100,6 +100,29 @@ test("delivery coordinator defers results until the parent session re-registers"
   coordinator.register("parent-a.jsonl", (content) => delivered.push(content));
   assert.deepEqual(delivered, ["result-a"]);
   assert.equal(coordinator.pendingCount, 0);
+});
+
+test("deferred results survive a coordinator restart through the durable queue", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-durable-"));
+  const pendingFile = pendingDeliveryFile(root, "root-a");
+  try {
+    // First coordinator instance (e.g. a parent session that is unavailable).
+    const first = createDeliveryCoordinator({ projectRoot: root, rootSessionId: "root-a" });
+    const sent = first.deliverResult("job-a", "parent-a.jsonl", "result-a");
+    assert.equal(sent, false);
+    assert.equal(first.pendingCount, 1);
+    assert.equal(existsSync(pendingFile), true);
+
+    // A fresh coordinator (process restart / reload) replays the queued result.
+    const second = createDeliveryCoordinator({ projectRoot: root, rootSessionId: "root-a" });
+    assert.equal(second.pendingCount, 1);
+    const delivered: string[] = [];
+    second.register("parent-a.jsonl", (content) => delivered.push(content));
+    assert.deepEqual(delivered, ["result-a"]);
+    assert.equal(second.pendingCount, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("delivery coordinator drops a stale sink on unregister", () => {

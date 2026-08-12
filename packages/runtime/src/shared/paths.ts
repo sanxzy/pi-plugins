@@ -19,6 +19,7 @@ export const ERRORS_FILE_NAME = "errors.jsonl";
 export const TRANSCRIPT_FILE_NAME = "transcript.jsonl";
 export const SCOPED_REGISTRY_PREFIX = "jobs-";
 export const SCOPED_REGISTRY_SUFFIX = ".jsonl";
+export const PENDING_DELIVERY_FILE_NAME = "pending-delivery.json";
 
 /** Canonical storage id for a job/agent; legacy-looking `job-` is not stored. */
 export function canonicalStorageJobId(jobId: string): string {
@@ -323,6 +324,11 @@ export function runtimeDir(projectRoot: string): string {
 
 export function goalsFile(projectRoot: string): string {
   return join(runtimeDir(projectRoot), GOALS_FILE_NAME);
+}
+
+/** Durable queue for child results awaiting a parent sink, scoped to one root session under home storage. */
+export function pendingDeliveryFile(projectRoot: string, sessionId: string): string {
+  return join(homeSessionDir(encodeProjectId(projectRoot), sessionId), PENDING_DELIVERY_FILE_NAME);
 }
 
 export function scopedSessionsDir(projectRoot: string): string {

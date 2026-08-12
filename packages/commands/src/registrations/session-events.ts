@@ -150,9 +150,9 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     if (event.reason === "fork" && event.previousSessionFile) {
       // Fork creates the descendant before this event. Pending results that
       // were addressed to the replaced parent must follow that descendant.
-      pool.delivery.rebind(event.previousSessionFile, sessionFile);
+      pool.deliveryFor(pool.rootSessionIdFor(sessionId)).rebind(event.previousSessionFile, sessionFile);
     }
-    pool.delivery.register(sessionFile, (content) => {
+    pool.deliveryFor(pool.rootSessionIdFor(sessionId)).register(sessionFile, (content) => {
       // Steer the active parent session immediately. The SDK host owns the
       // actual parent session.
       pi.sendUserMessage(content, { deliverAs: "steer" });
@@ -178,7 +178,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const pool = getChildPool(ctx.cwd, rootSessionId);
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (sessionFile) {
-      pool.delivery.unregister(sessionFile);
+      pool.deliveryFor(pool.rootSessionIdFor(rootSessionId)).unregister(sessionFile);
     }
     // Child sessions also emit `quit` when they are disposed after settling.
     // Only the root orchestrator may sweep its own session tree; a child must

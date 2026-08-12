@@ -7,6 +7,7 @@ import { createDeliveryCoordinator, type DeliveryCoordinator } from "./delivery.
 import { createConcurrencyGate, type ConcurrencyGate } from "./concurrency-gate.ts";
 import { createInterruptionSweep } from "./interruption.ts";
 
+
 /**
  * Shared per-project runtime state.
  *
@@ -26,12 +27,18 @@ export interface ChildPool {
   readonly isRootSession: (sessionId: string) => boolean;
   /** Explicit startup/replacement bootstrap check before a root manifest exists. */
   readonly shouldBootstrapRootSession: (sessionId: string) => boolean;
+  /** Resolve the live root session id that owns a caller/job session. */
+  readonly rootSessionIdFor: (sessionId: string) => string;
   /** Live root session id registered by the current host session, if known. */
   readonly rootSessionId?: string;
   /** Global child-run gate: at most MAX_CONCURRENCY children run at once. */
   readonly concurrency: ConcurrencyGate;
-  /** Delivers finished background results to each result's direct parent session. */
-  readonly delivery: DeliveryCoordinator;
+  /**
+   * Delivery coordinator for one root session, lazily created. Each root
+   * session owns its own durable pending queue under its session directory,
+   * so results addressed to one session's descendants stay isolated.
+   */
+  readonly deliveryFor: (rootSessionId: string) => DeliveryCoordinator;
   /** Live child handles keyed by job id; populated while a child runs. */
   readonly liveChildren: Map<string, ChildSessionControl>;
   /**
@@ -69,6 +76,35 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
   // id and route to their parent's folder on append.
   const registry = createAgentEventRegistry(projectRoot, rootSessionId);
   const liveChildren = new Map<string, ChildSessionControl>();
+  const deliveries = new Map<string, DeliveryCoordinator>();
+  const rootSessionIdFor = (sessionId: string): string => {
+    // Walk a caller/job session up to its root: a job records its parent
+    // session, and the parent session that has no own job is the live root.
+    let current = registry.getBySessionId(sessionId);
+    let root = sessionId;
+    const seen = new Set<string>();
+    while (current && !seen.has(current.sessionId ?? current.jobId)) {
+      const parentSessionId = current.parentSessionId;
+      if (parentSessionId === undefined) break;
+      seen.add(current.sessionId ?? current.jobId);
+      root = parentSessionId;
+      const parent = registry.getBySessionId(parentSessionId);
+      if (parent) current = parent;
+      else break;
+    }
+    return root;
+  };
+  const deliveryFor = (sessionId: string): DeliveryCoordinator => {
+    const existing = deliveries.get(sessionId);
+    if (existing) return existing;
+    const coordinator = createDeliveryCoordinator({
+      projectRoot,
+      rootSessionId: sessionId,
+      onDelivered: (jobId) => registry.updateJob(jobId, { delivered: true }),
+    });
+    deliveries.set(sessionId, coordinator);
+    return coordinator;
+  };
 
   const pool: ChildPool = {
     projectRoot,
@@ -92,7 +128,8 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
       return registry.getBySessionId(sessionId) === undefined;
     },
     concurrency: createConcurrencyGate(MAX_CONCURRENCY),
-    delivery: createDeliveryCoordinator(),
+    deliveryFor,
+    rootSessionIdFor,
     liveChildren,
     interruptRunningJobs: createInterruptionSweep({ registry, liveChildren, rootSessionId }),
     resetParallelAgents(): void {

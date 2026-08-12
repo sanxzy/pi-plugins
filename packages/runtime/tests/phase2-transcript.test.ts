@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -47,18 +47,18 @@ test("production child storage paths use the home project and nested agent layou
   assert.equal(paths.transcriptFile, join(expectedDir, "transcript.jsonl"));
 });
 
-test("resume copy writes the new agent transcript directly with private permissions", () => {
+test("prepareResumeSessionFile trims in place and preserves private permissions", () => {
   const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-resume-"));
-  const sourceDir = join(root, "source");
-  const source = join(sourceDir, "transcript.jsonl");
-  const sourceManager = SessionManager.create(root, sourceDir, { id: "source-1", parentSession: "root-1", sessionFilename: "transcript.jsonl" });
-  flushTranscript(sourceManager);
-  // Copy the source to a new canonical agent identity under the home layout.
-  const destination = prepareResumeSessionFile(source, "resumed-1", root, "root-1", "root-1", ["parent-1"]);
-  const expected = homeAgentTranscriptFile(encodeProjectId(root), "root-1", "resumed-1", ["parent-1"]);
-  assert.equal(destination, expected);
-  assert.equal(readFileSync(destination, "utf8").includes('"id":"resumed-1"'), true);
-  assert.equal(mode(destination), PRIVATE_FILE);
+  const target = homeAgentTranscriptFile(encodeProjectId(root), "root-1", "resumed-1", ["parent-1"]);
+  mkdirSync(dirname(target), { recursive: true, mode: PRIVATE_DIR });
+  chmodSync(dirname(target), PRIVATE_DIR);
+  writeFileSync(target, '{"type":"session","id":"resumed-1"}\n', { mode: PRIVATE_FILE });
+  chmodSync(target, PRIVATE_FILE);
+  // In-place resume keeps the same job id and transcript path.
+  const result = prepareResumeSessionFile(target, "resumed-1");
+  assert.equal(result, target);
+  assert.equal(readFileSync(target, "utf8").includes('"id":"resumed-1"'), true);
+  assert.equal(mode(target), PRIVATE_FILE);
   assert.equal(mode(homeAgentDir(encodeProjectId(root), "root-1", "resumed-1", ["parent-1"])), PRIVATE_DIR);
 });
 
@@ -71,9 +71,10 @@ test("production child-session manager creates and resumes the home transcript",
   assert.equal(fresh.getSessionFile(), expectedFresh);
   assert.equal(mode(expectedFresh), PRIVATE_FILE);
 
-  const resumedPath = prepareResumeSessionFile(expectedFresh, "resumed-1", root, "root-1", "root-1", ["parent-1"]);
-  const resumed = createChildSessionManager({ ...context, jobId: "resumed-1", sessionFile: resumedPath });
-  assert.equal(resumed.getSessionFile(), resumedPath);
+  const resumedPath = prepareResumeSessionFile(expectedFresh, "fresh-1");
+  // In-place resume reopens the original transcript under its stable identity.
+  const resumed = createChildSessionManager({ ...context, jobId: "fresh-1", sessionFile: resumedPath });
+  assert.equal(resumed.getSessionFile(), expectedFresh);
   assert.equal(mode(resumed.getSessionFile()!), PRIVATE_FILE);
   assert.equal(mode(join(testHome, "pi-code")), PRIVATE_DIR);
 });

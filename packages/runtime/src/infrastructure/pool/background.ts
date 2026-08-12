@@ -60,26 +60,23 @@ export async function runBackgroundJob(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.registry.updateJob(job.jobId, { status: "failed" });
-    deps.manifest?.update({ status: "failed", endedAt: new Date().toISOString() });
-    deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
+    const delivered = deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
       sessionFile: "",
       output: message,
       status: "failed",
     }));
-    deps.registry.updateJob(job.jobId, { delivered: true });
-    deps.manifest?.update({ status: "failed", delivered: true });
+    if (delivered) deps.registry.updateJob(job.jobId, { delivered: true });
     return;
   }
 
   if (!result) {
     deps.registry.updateJob(job.jobId, { status: "failed" });
-    deps.manifest?.update({ status: "failed", endedAt: new Date().toISOString() });
-    deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
+    const delivered = deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
       sessionFile: "",
       output: "could not spawn child",
       status: "failed",
     }));
-    deps.registry.updateJob(job.jobId, { delivered: true });
+    if (delivered) deps.registry.updateJob(job.jobId, { delivered: true });
     return;
   }
 
@@ -91,7 +88,9 @@ export async function runBackgroundJob(
   deps.registry.updateJob(job.jobId, { status: terminalStatus });
   deps.manifest?.update({ status: terminalStatus, endedAt, sessionFile: result.sessionFile });
   deps.registry.updateJob(job.jobId, { sessionFile: result.sessionFile });
-  deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, result));
-  deps.registry.updateJob(job.jobId, { delivered: true });
-  deps.manifest?.update({ status: terminalStatus, delivered: true });
+  // Delivery owns the delivered flag: it is set immediately only when the
+  // parent sink accepts the result, or later when a durable pending result is
+  // drained after the parent session registers again.
+  const delivered = deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, result));
+  if (delivered) deps.registry.updateJob(job.jobId, { delivered: true });
 }

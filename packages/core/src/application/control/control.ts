@@ -137,7 +137,6 @@ export function visibleJobs(caller: ControlCaller, jobs: Iterable<Job>, getJob: 
 export type ResumeDisposition =
   | { kind: "steer"; job: Job }
   | { kind: "resume"; job: Job }
-  | { kind: "fresh-spawn"; job: Job }
   | { kind: "reject"; reason: RejectReason; job: Job };
 
 /**
@@ -145,13 +144,11 @@ export type ResumeDisposition =
  *
  * - A running job is steered: the live child gets the new prompt and the call
  *   returns immediately without creating a duplicate job.
- * - A completed, cancelled, or interrupted job is resumed from its stored
- *   session file.
- * - A `created` job has no transcript yet (the child never produced a first
- *   assistant message), so it is re-spawned fresh with the same prompt.
- *   Re-spawning is non-destructive: the original job record is left untouched.
- * - A queued job follows the resume path, allowing the composition root to
- *   reopen a transcript if one has already been persisted.
+ * - A completed, failed, cancelled, interrupted, or queued job is resumed in
+ *   place from its stored session file. The job id and transcript remain
+ *   stable, so no duplicate record or copied transcript is created.
+ * - A `created` job has no transcript yet; it is rejected because there is no
+ *   existing agent context to resume.
  * - Anything outside the caller's lineage is rejected.
  */
 export function resumeDisposition(
@@ -162,7 +159,7 @@ export function resumeDisposition(
   const scope = checkControlScope(caller, job, getJob);
   if (!scope.allowed) return { kind: "reject", reason: scope.reason, job };
   if (job.status === "running") return { kind: "steer", job };
-  if (job.status === "created") return { kind: "fresh-spawn", job };
+  if (job.status === "created") return { kind: "reject", reason: "not running", job };
   if (isTerminal(job.status) || job.status === "queued") return { kind: "resume", job };
   return { kind: "reject", reason: "not running", job };
 }
