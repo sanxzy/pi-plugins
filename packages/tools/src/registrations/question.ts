@@ -5,6 +5,7 @@ import type {
   ThemeColor,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { DISMISSED, QuestionDialog, type QuestionDialogResult, type QuestionDialogTheme } from "@xzy-ai/tui";
 import { questionParams, type QuestionParams } from "../tools.ts";
 import type { QuestionDetails } from "../types.ts";
@@ -32,6 +33,7 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<QuestionDetails>> {
+      return processWithLog({ operation: TOOL_OPERATIONS.QUESTION_EXECUTE, parameters: { question: params.question } }, async () => {
       // The dialog owns the `@earendil-works/pi-tui` dependency inside
       // `@xzy-ai/tui`; the host Theme only needs to satisfy the `fg` surface
       // the dialog consumes here. The dialog passes a handful of fixed color
@@ -101,6 +103,7 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
         answer: result.answer,
         wasCustom: false,
         index: result.index,
+      });
       });
     },
 

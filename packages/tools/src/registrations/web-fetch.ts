@@ -2,6 +2,7 @@ import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-
 import { Parser } from "htmlparser2";
 import TurndownService from "turndown";
 import { Type } from "typebox";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { errorResult, textResult } from "../results.ts";
 import { saveWikiEntry, slugifyUrl, type WikiSaveResult, wikiRoot } from "../wiki.ts";
 
@@ -68,6 +69,14 @@ export function registerWebFetchTool(pi: ExtensionAPI): void {
 }
 
 export async function executeWebFetch(
+  params: WebFetchParams,
+  signal?: AbortSignal,
+  options?: WebFetchExecutionOptions,
+): Promise<AgentToolResult<WebFetchDetails>> {
+  return processWithLog({ operation: TOOL_OPERATIONS.WEB_FETCH_EXECUTE, parameters: { url: params.url } }, async () => executeWebFetchInner(params, signal, options));
+}
+
+async function executeWebFetchInner(
   params: WebFetchParams,
   signal?: AbortSignal,
   options?: WebFetchExecutionOptions,

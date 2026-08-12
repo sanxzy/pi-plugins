@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { readBoundedResponseBody } from "../http-body.ts";
 import { errorResult, textResult } from "../results.ts";
 import { saveWikiEntry, slugifyQuery, type WikiSaveResult, wikiRoot } from "../wiki.ts";
@@ -65,6 +66,15 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 }
 
 export async function executeWebSearch(
+  params: WebSearchParams,
+  signal?: AbortSignal,
+  timeoutMs = SEARCH_TIMEOUT_MS,
+  options?: WebSearchExecutionOptions,
+): Promise<AgentToolResult<WebSearchDetails>> {
+  return processWithLog({ operation: TOOL_OPERATIONS.WEB_SEARCH_EXECUTE, parameters: { query: params.query } }, async () => executeWebSearchInner(params, signal, timeoutMs, options));
+}
+
+async function executeWebSearchInner(
   params: WebSearchParams,
   signal?: AbortSignal,
   timeoutMs = SEARCH_TIMEOUT_MS,

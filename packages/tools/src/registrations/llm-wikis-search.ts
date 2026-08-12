@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { createReferenceCatalog, type ReferenceCatalogReadResult } from "@xzy-ai/runtime";
 import { errorResult, textResult } from "../results.ts";
 import {
@@ -174,7 +175,9 @@ export function registerLlmWikisSearchTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<AgentToolResult<LlmWikisSearchDetails>> {
-      return executeLlmWikisSearch(params, { signal });
+      return processWithLog({ operation: TOOL_OPERATIONS.LLM_WIKIS_EXECUTE, parameters: { type: params.type, query: (params as { query?: unknown }).query } }, async () =>
+        executeLlmWikisSearch(params, { signal }),
+      );
     },
   });
 }
