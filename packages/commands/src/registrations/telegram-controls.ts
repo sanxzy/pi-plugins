@@ -8,6 +8,7 @@ import {
   sendTelegramMessage,
   type TelegramCommand,
 } from "@xzy-ai/channels";
+import { TELEGRAM_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { clearSessionReload, markSessionReload } from "./session-events.ts";
 
 export interface TelegramControlDispatchOptions {
@@ -123,6 +124,7 @@ export async function dispatchTelegramControl(
   command: TelegramCommand,
   options: TelegramControlDispatchOptions,
 ): Promise<boolean> {
+  return processWithLog({ operation: TELEGRAM_OPERATIONS.CONTROLS_DISPATCH, parameters: { command: command.name } }, async () => {
   const owned = new Set([
     "compact",
     "abort",
@@ -312,6 +314,7 @@ export async function dispatchTelegramControl(
     default:
       return false;
   }
+  });
 }
 
 /** Test isolation seam for the process-local compaction guard. */
