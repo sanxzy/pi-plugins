@@ -1,6 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { canCancel, isInSessionScope } from "@xzy-ai/core";
-import { getChildPool } from "@xzy-ai/runtime";
+import { abortJobTree, getChildPool } from "@xzy-ai/runtime";
 import { cancelParams, type CancelParams } from "../tools.ts";
 import type { CancelDetails } from "../types.ts";
 import { callerFor } from "../caller.ts";
@@ -48,7 +48,8 @@ export function registerCancelTool(pi: ExtensionAPI): void {
       }
 
       const control = pool.liveChildren.get(job.jobId);
-      if (!control) {
+      const abortController = pool.jobAbortControllers?.get(job.jobId);
+      if (!control && !abortController && pool.registry.get(job.jobId)?.status === "running") {
         return textResult(`Agent ${params.job_id} is running but has no live child to abort.`, {
           jobId: params.job_id,
           success: false,
@@ -58,11 +59,18 @@ export function registerCancelTool(pi: ExtensionAPI): void {
         });
       }
 
-      // Abort the child run; the abort resolves the child's own prompt() and its
-      // result handler maps the aborted status to cancelled. Marking the job
-      // cancelled here stays idempotent when the handler follows up.
-      await control.abort();
-      pool.registry.updateJob(job.jobId, { status: "cancelled" });
+      // Cancel the target and its entire recursive descendant subtree.
+      // A parent foreground call can be blocked awaiting its own child; abort
+      // descendants first so the parent reaches idle instead of hanging.
+      await abortJobTree(
+        {
+          registry: pool.registry,
+          liveChildren: pool.liveChildren,
+          jobAbortControllers: pool.jobAbortControllers,
+        },
+        job.jobId,
+        "cancelled",
+      );
       return textResult(`Agent ${params.job_id} was cancelled.`, {
         jobId: params.job_id,
         success: true,

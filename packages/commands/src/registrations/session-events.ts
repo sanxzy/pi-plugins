@@ -180,17 +180,19 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     if (sessionFile) {
       pool.deliveryFor(pool.rootSessionIdFor(rootSessionId)).unregister(sessionFile);
     }
+    // Every session owns a recursive descendant tree. A parent shutdown must
+    // terminate that entire tree before the parent disappears; this applies to
+    // root and child sessions and to every SDK shutdown reason (quit, new,
+    // reload, fork, resume, ...). The scoped sweep prevents a child from ever
+    // aborting its siblings or its parent.
+    await pool.interruptRunningJobs(rootSessionId);
+
     // Child sessions also emit `quit` when they are disposed after settling.
-    // Only the root orchestrator may sweep its own session tree; a child must
-    // never abort its siblings or its parent while it is being cleaned up.
+    // Their descendant sweep above is the only lifecycle work they own; a child
+    // must not finish root-session manifests or clear root goals.
     const isChildSession = !pool.isRootSession(rootSessionId) && !pool.shouldBootstrapRootSession(rootSessionId);
     if (isChildSession) return;
 
-    // Process quit and a confirmed `/new` both terminate the current host
-    // session's background work. Reload/resume/fork preserve live children.
-    if (event.reason === "quit" || event.reason === "new") {
-      await pool.interruptRunningJobs(rootSessionId);
-    }
     // Only sessions that were actually started as a root session carry a home
     // session manifest. Tests and legacy callers that fire `session_shutdown`
     // without a matching `session_start` must not fail closed here.

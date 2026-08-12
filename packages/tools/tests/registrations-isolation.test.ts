@@ -150,6 +150,20 @@ test("agent_cancel treats another parent session's job id as unknown without abo
   });
 });
 
+test("agent_cancel aborts a running job that has a job-level controller but no live child", async () => {
+  await withIsolationPool(async (cwd) => {
+    const pool = getChildPool(cwd);
+    const controller = new AbortController();
+    pool.jobAbortControllers?.set("a-running", controller);
+    const tool = register(registerCancelTool);
+    const result = await tool.execute("call", { job_id: "a-running" }, undefined, undefined, context(cwd, "root-a"));
+    assert.equal(result.content[0]?.text, "Agent a-running was cancelled.");
+    assert.deepEqual(result.details, { jobId: "a-running", success: true, status: "cancelled" });
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(pool.registry.get("a-running")?.status, "cancelled");
+  });
+});
+
 test("agent rejects an unknown subagent type, including the removed default", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-unknown-agent-"));
   try {

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { createJob, type Job, type JobUpdate } from "@xzy-ai/core";
 import { canTransition } from "@xzy-ai/core";
 import {
+  abortJobTree,
   createInterruptionSweep,
   interruptRunningJobs,
 } from "@xzy-ai/runtime";
@@ -47,6 +48,14 @@ function control(abort: () => Promise<void>): ChildSessionControl {
   };
 }
 
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 test("interruptRunningJobs marks every running job interrupted and aborts live children", async () => {
   const registry = createFakeRegistry([
     makeJob("running-a", "running", "/sessions/a.jsonl"),
@@ -69,20 +78,28 @@ test("interruptRunningJobs marks every running job interrupted and aborts live c
   assert.deepEqual(aborted.sort(), ["running-a", "running-b"]);
 });
 
-test("a session-scoped sweep interrupts only the active parent session's tree", async () => {
+test("a session-scoped sweep interrupts and cancels every active job in the parent session's tree", async () => {
   const registry = createFakeRegistry([
     makeJob("a-running", "running"),
     makeJob("a-child", "running"),
+    makeJob("a-queued", "queued"),
+    makeJob("a-done", "completed"),
     makeJob("b-running", "running"),
+    makeJob("b-queued", "queued"),
   ]);
   // Wire the parent-session lineage so the tree projection can walk it.
   const a = registry.get("a-running")!;
-  registry.updateJob("a-running", {});
   registry.jobs.set("a-running", { ...a, parentSessionId: "root-a" });
   const ac = registry.get("a-child")!;
   registry.jobs.set("a-child", { ...ac, parentSessionId: "a-running", parentJobId: "a-running" });
+  const aq = registry.get("a-queued")!;
+  registry.jobs.set("a-queued", { ...aq, parentSessionId: "a-running", parentJobId: "a-running" });
+  const ad = registry.get("a-done")!;
+  registry.jobs.set("a-done", { ...ad, parentSessionId: "a-running", parentJobId: "a-running" });
   const b = registry.get("b-running")!;
   registry.jobs.set("b-running", { ...b, parentSessionId: "root-b" });
+  const bq = registry.get("b-queued")!;
+  registry.jobs.set("b-queued", { ...bq, parentSessionId: "root-b" });
 
   const aborted: string[] = [];
   const liveChildren = new Map<string, ChildSessionControl>([
@@ -95,8 +112,28 @@ test("a session-scoped sweep interrupts only the active parent session's tree", 
 
   assert.equal(registry.get("a-running")?.status, "interrupted");
   assert.equal(registry.get("a-child")?.status, "interrupted");
+  assert.equal(registry.get("a-queued")?.status, "cancelled");
+  assert.equal(registry.get("a-done")?.status, "completed");
   assert.equal(registry.get("b-running")?.status, "running");
+  assert.equal(registry.get("b-queued")?.status, "queued");
   assert.deepEqual(aborted.sort(), ["a-child", "a-running"]);
+});
+
+test("a session-scoped sweep cancels queued descendants so they never start", async () => {
+  const registry = createFakeRegistry([
+    makeJob("running", "running"),
+    makeJob("queued", "queued"),
+  ]);
+  registry.jobs.set("running", { ...registry.get("running")!, parentSessionId: "root-a" });
+  registry.jobs.set("queued", { ...registry.get("queued")!, parentSessionId: "running", parentJobId: "running" });
+
+  const controllers = new Map<string, AbortController>([["queued", new AbortController()]]);
+  const liveChildren = new Map<string, ChildSessionControl>([["running", control(async () => {})]]);
+
+  await interruptRunningJobs({ registry, liveChildren, jobAbortControllers: controllers, rootSessionId: "root-a" });
+
+  assert.equal(registry.get("queued")?.status, "cancelled");
+  assert.equal(controllers.get("queued")!.signal.aborted, true, "the queued gate waiter must be aborted");
 });
 
 test("the interruption sweep tolerates a running job without a transcript or live control", async () => {
@@ -133,6 +170,60 @@ test("an overlapping interruption sweep aborts each child once and is idempotent
   await sweep();
   assert.equal(abortCount, 1);
   assert.equal(registry.jobs.get("running")?.status, "interrupted");
+});
+
+test("aborting a parent aborts its descendants deepest-first", async () => {
+  const registry = createFakeRegistry([
+    makeJob("parent", "running"),
+    makeJob("child", "running"),
+    makeJob("grandchild", "running"),
+  ]);
+  registry.jobs.set("parent", { ...registry.get("parent")!, sessionId: "parent-session", parentSessionId: "root" });
+  registry.jobs.set("child", { ...registry.get("child")!, sessionId: "child-session", parentSessionId: "parent-session", parentJobId: "parent" });
+  registry.jobs.set("grandchild", { ...registry.get("grandchild")!, sessionId: "grandchild-session", parentSessionId: "child-session", parentJobId: "child" });
+  const aborted: string[] = [];
+  const liveChildren = new Map<string, ChildSessionControl>([
+    ["parent", control(async () => { aborted.push("parent"); })],
+    ["child", control(async () => { aborted.push("child"); })],
+    ["grandchild", control(async () => { aborted.push("grandchild"); })],
+  ]);
+
+  await abortJobTree({ registry, liveChildren }, "parent");
+
+  assert.deepEqual(aborted, ["grandchild", "child", "parent"]);
+  assert.equal(registry.get("parent")?.status, "interrupted");
+  assert.equal(registry.get("child")?.status, "interrupted");
+  assert.equal(registry.get("grandchild")?.status, "interrupted");
+});
+
+test("aborting a parent and descendant control concurrently avoids a nested abort deadlock", async () => {
+  const registry = createFakeRegistry([
+    makeJob("parent", "running"),
+    makeJob("child", "running"),
+  ]);
+  registry.jobs.set("parent", { ...registry.get("parent")!, sessionId: "parent-session", parentSessionId: "root" });
+  registry.jobs.set("child", { ...registry.get("child")!, sessionId: "child-session", parentSessionId: "parent-session", parentJobId: "parent" });
+
+  const parentAbortStarted = deferred<void>();
+  const childAbortFinished = deferred<void>();
+  const liveChildren = new Map<string, ChildSessionControl>([
+    ["parent", control(async () => {
+      parentAbortStarted.resolve();
+      await childAbortFinished.promise;
+    })],
+    ["child", control(async () => {
+      await parentAbortStarted.promise;
+      childAbortFinished.resolve();
+    })],
+  ]);
+
+  const result = await Promise.race([
+    abortJobTree({ registry, liveChildren }, "parent").then(() => "completed" as const),
+    new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 250)),
+  ]);
+  assert.equal(result, "completed");
+  assert.equal(registry.get("parent")?.status, "interrupted");
+  assert.equal(registry.get("child")?.status, "interrupted");
 });
 
 test("delivery rebind follows pending results into a fork descendant", () => {

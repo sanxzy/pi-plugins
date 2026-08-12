@@ -122,7 +122,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
             reason: "no stored transcript",
           });
         }
-        return startAgent(params, ctx, { existingJob: job });
+        return startAgent(params, ctx, { existingJob: job }, _signal);
       }
 
       // Root-host calls are background; child and descendant calls are
@@ -138,7 +138,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       }
       const budgetError = countAgentCall();
       if (budgetError) return budgetError;
-      return startAgent(params, ctx);
+      return startAgent(params, ctx, {}, _signal);
     },
   });
 }
@@ -156,6 +156,7 @@ async function startAgent(
   params: AgentParams,
   ctx: ExtensionContext,
   resume: { existingJob?: Job } = {},
+  parentSignal?: AbortSignal,
 ): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
   const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
 
@@ -221,7 +222,7 @@ async function startAgent(
   // A child/descendant caller runs the descendant foreground and receives its
   // result inline; only the root host uses fire-and-forget background delivery.
   if (isChildCaller) {
-    const result = await runForegroundAgent(pool, params, ctx, job, agent, spawnOptions);
+    const result = await runForegroundAgent(pool, params, ctx, job, agent, { ...spawnOptions, parentSignal });
     const status: AgentDetails["status"] =
       result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed";
     const prefix = existingJob ? "Resumed" : "Agent";

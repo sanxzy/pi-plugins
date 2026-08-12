@@ -98,3 +98,30 @@ test("shutdown interrupts only running jobs rooted at the active parent session"
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test("child session shutdown interrupts its recursive descendants without touching the parent or siblings", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-lifecycle-child-shutdown-"));
+  try {
+    addRunningJob(cwd, "root-a", "a-parent");
+    addRunningJob(cwd, "a-parent", "a-grandchild", "a-parent");
+    addRunningJob(cwd, "a-grandchild", "a-great-grandchild", "a-grandchild");
+    addRunningJob(cwd, "root-a", "a-sibling");
+    const pool = getChildPool(cwd, "root-a");
+    const aborted: string[] = [];
+    pool.liveChildren.set("a-grandchild", control(async () => { aborted.push("a-grandchild"); }));
+    pool.liveChildren.set("a-great-grandchild", control(async () => { aborted.push("a-great-grandchild"); }));
+    pool.liveChildren.set("a-sibling", control(async () => { aborted.push("a-sibling"); }));
+
+    const d = registrations();
+    registerSessionEvents(d.pi);
+    await d.handlers.get("session_shutdown")!({ reason: "reload" }, context(cwd, "a-parent", async () => true));
+
+    assert.equal(pool.registry.get("a-parent")?.status, "running", "the shutting-down parent job is owned by its caller");
+    assert.equal(pool.registry.get("a-grandchild")?.status, "interrupted");
+    assert.equal(pool.registry.get("a-great-grandchild")?.status, "interrupted");
+    assert.equal(pool.registry.get("a-sibling")?.status, "running");
+    assert.deepEqual(aborted.sort(), ["a-grandchild", "a-great-grandchild"]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

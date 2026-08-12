@@ -41,6 +41,8 @@ export interface ChildPool {
   readonly deliveryFor: (rootSessionId: string) => DeliveryCoordinator;
   /** Live child handles keyed by job id; populated while a child runs. */
   readonly liveChildren: Map<string, ChildSessionControl>;
+  /** Abort controllers for queued/running jobs, including jobs not yet admitted. */
+  readonly jobAbortControllers?: Map<string, AbortController>;
   /**
    * Mark running jobs interrupted and abort their children.
    *
@@ -94,6 +96,7 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
   // id and route to their parent's folder on append.
   const registry = createAgentEventRegistry(projectRoot, rootSessionId);
   const liveChildren = new Map<string, ChildSessionControl>();
+  const jobAbortControllers = new Map<string, AbortController>();
   const deliveries = new Map<string, DeliveryCoordinator>();
   const rootSessionIdFor = (sessionId: string): string => {
     // Walk a caller/job session up to its root: a job records its parent
@@ -149,7 +152,8 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
     deliveryFor,
     rootSessionIdFor,
     liveChildren,
-    interruptRunningJobs: createInterruptionSweep({ registry, liveChildren, rootSessionId }),
+    jobAbortControllers,
+    interruptRunningJobs: createInterruptionSweep({ registry, liveChildren, jobAbortControllers, rootSessionId }),
     resetParallelAgents(): void {
       pool.concurrency.resetParallelCount();
     },
@@ -236,9 +240,12 @@ function upgradePool(pool: ChildPool, projectRoot: string, rootSessionId?: strin
   if (typeof pool.shouldBootstrapRootSession !== "function") {
     patch("shouldBootstrapRootSession", (sessionId: string): boolean => registry.getBySessionId(sessionId) === undefined);
   }
-  if (typeof pool.interruptRunningJobs !== "function") {
-    patch("interruptRunningJobs", createInterruptionSweep({ registry, liveChildren: pool.liveChildren, rootSessionId }));
+  if (pool.jobAbortControllers === undefined) {
+    patch("jobAbortControllers", new Map<string, AbortController>());
   }
+  // Always rebuild the sweep after upgrading so it closes over the current
+  // registry and controller map, while preserving the stable pool identity.
+  patch("interruptRunningJobs", createInterruptionSweep({ registry, liveChildren: pool.liveChildren, jobAbortControllers: pool.jobAbortControllers, rootSessionId }));
   if (typeof pool.resetParallelAgents !== "function" && pool.concurrency) {
     patch("resetParallelAgents", (): void => pool.concurrency.resetParallelCount());
   }

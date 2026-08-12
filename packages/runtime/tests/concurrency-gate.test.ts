@@ -133,6 +133,29 @@ test("per-response counter rejects more than MAX_PARALLEL_AGENTS agent calls", (
   assert.equal(gate.countAgentCall(MAX_PARALLEL_AGENTS), true);
 });
 
+test("gate rejects a queued operation when its signal aborts before admission", async () => {
+  const gate = createConcurrencyGate(1);
+  const hold = deferred<void>();
+  const holdRun = gate.run(async () => hold.promise);
+  await flush();
+  assert.equal(gate.activeCount, 1, "holder occupies the single slot");
+
+  const controller = new AbortController();
+  const queued = gate.runWithSignal(async () => { throw new Error("must never run"); }, controller.signal).catch((error) => error);
+  await flush();
+  assert.equal(gate.queuedCount, 1);
+
+  controller.abort();
+  await flush();
+  assert.equal(gate.queuedCount, 0, "aborted waiter is dropped from the queue");
+  const result = await queued;
+  assert.ok(result instanceof DOMException && result.name === "AbortError");
+
+  hold.resolve();
+  await holdRun;
+  assert.equal(gate.activeCount, 0);
+});
+
 test("gate clamps a pathological max concurrency to at least one slot", async () => {
   const gate = createConcurrencyGate(0);
   assert.equal(gate.activeCount, 0);
