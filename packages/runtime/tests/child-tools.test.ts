@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DiscoveredAgent } from "@xzy-ai/core";
-import { resolveChildTools } from "@xzy-ai/runtime";
+import { getChildExtensionFactories, registerChildExtensionFactory, resolveChildTools } from "@xzy-ai/runtime";
 
 const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 const ALL_AGENT_TOOLS = ["agent", "agent_list", "agent_jobs", "agent_status", "agent_cancel"];
@@ -17,6 +17,13 @@ function discoveredAgent(tools?: string[]): DiscoveredAgent {
     filePath: "/tmp/test-agent.md",
   };
 }
+
+test("child extension factories are retained for isolated child loaders", () => {
+  const factory = (() => {}) as Parameters<typeof registerChildExtensionFactory>[0];
+  registerChildExtensionFactory(factory);
+  assert.ok(getChildExtensionFactories().includes(factory));
+  assert.equal(getChildExtensionFactories().filter((candidate) => candidate === factory).length, 1);
+});
 
 test("an explicit non-empty tools list keeps the allowlist and appends the agent + web tools", () => {
   const tools = ["read", "grep"];

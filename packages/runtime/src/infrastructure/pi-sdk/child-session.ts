@@ -19,6 +19,7 @@ import type {
 } from "@xzy-ai/core";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
+import { getChildExtensionFactories } from "./child-extensions.ts";
 
 /**
  * In-process child-session adapter.
@@ -171,6 +172,12 @@ async function createIsolatedChild(options: {
     agentDir,
     settingsManager,
     systemPromptOverride,
+    // Isolated child loaders inherit the inline extension factories that the
+    // host loaded (e.g. `pi -e packages/extensions/pi-code/index.ts`), so the
+    // agent-family and research tools registered by the pi-code composition
+    // root are constructible in the child. The allowlist still decides which
+    // of those tools are active; goal/MCP capabilities remain root-only.
+    extensionFactories: getChildExtensionFactories(),
   });
   await resourceLoader.reload();
 

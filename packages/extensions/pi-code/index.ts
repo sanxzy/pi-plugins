@@ -24,6 +24,7 @@ import {
   createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
+import { registerChildExtensionFactory } from "@xzy-ai/runtime";
 import { registerMcpLifecycle } from "@xzy-ai/mcp";
 import type {
   AgentDetails,
@@ -43,6 +44,12 @@ const extensionName = "pi-code";
 
 /** PI extension entry point. */
 export default function piCodeExtension(pi: ExtensionAPI): void {
+  // Child sessions create an isolated SDK resource loader. Register this same
+  // inline factory process-wide before composing tools so those loaders can
+  // construct the agent-family/web registrations; their child allowlists still
+  // exclude goal and MCP root-only tools.
+  registerChildExtensionFactory(piCodeExtension);
+
   // The Telegram bridge dispatches extension commands with explicit expanders
   // (goal) plus prompt/skill files discovered from the Pi command catalog, and
   // publishes the same catalog as the Telegram bot menu on every start.
