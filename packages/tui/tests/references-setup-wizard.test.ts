@@ -87,6 +87,35 @@ test("Escape cancels from every step and abort settles once", async () => {
   assert.deepEqual(cancelled, ["cancel"]);
 });
 
+test("abort during a busy save settles once and passes the signal to the controller", async () => {
+  const abort = new AbortController();
+  let release!: (result: { ok: boolean; message: string }) => void;
+  const pending = new Promise<{ ok: boolean; message: string }>((resolve) => { release = resolve; });
+  let receivedSignal: AbortSignal | undefined;
+  let doneCount = 0;
+  const ctl = controller({
+    addLocal: async (input) => {
+      receivedSignal = input.signal;
+      return pending;
+    },
+  });
+  const wizard = new ReferencesSetupWizard({ tui: tui(), theme, controller: ctl, done: () => { doneCount++; }, signal: abort.signal });
+  await flush();
+  wizard.handleInput("\r");
+  for (const char of "docs") wizard.handleInput(char);
+  wizard.handleInput("\r");
+  for (const char of "/tmp/docs") wizard.handleInput(char);
+  wizard.handleInput("\r");
+  wizard.handleInput("\r");
+  wizard.handleInput("\r");
+  assert.equal(receivedSignal, abort.signal);
+  abort.abort();
+  await flush();
+  release({ ok: true, message: "Reference saved." });
+  await flush();
+  assert.equal(doneCount, 1);
+});
+
 test("narrow render stays safe", () => {
   const wizard = new ReferencesSetupWizard({ tui: tui(), theme, controller: controller(), done: () => {} });
   assert.ok(wizard.render(8).length > 0);

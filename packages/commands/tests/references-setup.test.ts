@@ -75,6 +75,47 @@ test("updateLocal preserves shorthand form and omitted metadata losslessly", asy
   assert.deepEqual(document.references.docs, { path: "/tmp/docs2", description: "Local docs", hidden: true });
 });
 
+test("Git shorthand entries are not classified as editable local references", async () => {
+  const controller = createReferencesSetupController({
+    catalog: {
+      filePath: "/tmp/references.json",
+      readDocument: async () => ({ references: { remote: "owner/repo", local: "~/docs" } }),
+      preflight: async () => ({ ok: true as const }),
+      save: async () => ({ ok: true as const }),
+    },
+  });
+  const items = (await controller.list()).items;
+  assert.equal(items.find((item) => item.name === "remote")?.local, undefined);
+  assert.deepEqual(items.find((item) => item.name === "local")?.local, { path: "~/docs" });
+});
+
+test("an aborted in-flight local save does not publish the candidate", async () => {
+  const abort = new AbortController();
+  let document: { references: Record<string, unknown> } = { references: {} };
+  let releasePreflight!: () => void;
+  const preflightPending = new Promise<void>((resolve) => { releasePreflight = resolve; });
+  const controller = createReferencesSetupController({
+    catalog: {
+      filePath: "/tmp/references.json",
+      readDocument: async () => document,
+      preflight: async () => {
+        await preflightPending;
+        return { ok: true as const };
+      },
+      save: async (candidate: unknown) => {
+        document = candidate as typeof document;
+        return { ok: true as const };
+      },
+    },
+  });
+  const pending = controller.addLocal({ alias: "docs", path: "/tmp/docs", signal: abort.signal });
+  abort.abort();
+  releasePreflight();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.deepEqual(document, { references: {} });
+});
+
 test("registers /setup-references and gates it to interactive TUI", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: string[] = [];
