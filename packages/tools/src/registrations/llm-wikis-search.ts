@@ -3,7 +3,13 @@ import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 import { createReferenceCatalog, type ReferenceCatalogReadResult } from "@xzy-ai/runtime";
 import { errorResult, textResult } from "../results.ts";
-import { discoverWikiTopics, retrieveWikiPage, searchWikis, wikiRoot } from "../wiki.ts";
+import {
+  discoverWikiTopics,
+  MAX_WIKI_DISCOVERY_OUTPUT_BYTES,
+  retrieveWikiPage,
+  searchWikis,
+  wikiRoot,
+} from "../wiki.ts";
 
 const commonQuery = Type.Optional(Type.String({ description: "Search query, or \"*\" for deterministic discovery. Not required for page/root selection." }));
 const maxResults = Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum results or topics to return" }));
@@ -59,6 +65,9 @@ export interface ReferenceChild {
   readonly kind: "file" | "directory";
 }
 
+export const MAX_REFERENCE_CHILDREN = 300;
+const EXCLUDED_REFERENCE_CHILD_NAMES = new Set(["node_modules", ".git"]);
+
 export interface ReferenceCatalogReader {
   read: () => Promise<ReferenceCatalogReadResult>;
   listChildren?: (root: string) => Promise<readonly ReferenceChild[]>;
@@ -88,6 +97,7 @@ export type LlmWikisSearchDetails =
             previous?: string;
             next?: string;
           }>;
+          truncated?: boolean;
         }>;
       };
     }
@@ -108,6 +118,9 @@ export type LlmWikisSearchDetails =
         hidden?: boolean;
         root: string;
         children: ReferenceChild[];
+        truncated?: boolean;
+        total?: number;
+        excluded: number;
         handoff: string;
       };
       diagnostics?: string[];
@@ -216,20 +229,28 @@ export async function executeLlmWikisSearch(
           diagnostics: ["Unable to list the reference root"],
         });
       }
+      const canonical = normalizeReferenceChildren(children);
+      const excluded = canonical.filter((child) => EXCLUDED_REFERENCE_CHILD_NAMES.has(child.name)).length;
+      const visible = canonical.filter((child) => !EXCLUDED_REFERENCE_CHILD_NAMES.has(child.name));
+      const truncated = visible.length > MAX_REFERENCE_CHILDREN;
+      const selectionChildren = truncated ? visible.slice(0, MAX_REFERENCE_CHILDREN) : visible;
       const selection = {
         alias: entry.name,
         type: entry.source.type,
         ...(entry.description ? { description: entry.description } : {}),
         ...(entry.hidden === undefined ? {} : { hidden: entry.hidden }),
         root: entry.path,
-        children: normalizeReferenceChildren(children),
+        children: selectionChildren,
+        ...(truncated ? { truncated: true, total: visible.length } : {}),
+        excluded,
         handoff: "Use normal filesystem tools such as read, grep, and find for focused inspection of this root.",
       };
       const renderedChildren = selection.children.length === 0
         ? "  (empty root)"
         : selection.children.map((child) => `  - ${child.name} (${child.kind})`).join("\n");
+      const truncatedNote = truncated ? `\n  ... and ${visible.length - MAX_REFERENCE_CHILDREN} more entries omitted` : "";
       return textResult(
-        [`Reference: ${selection.alias} (${selection.type})`, `Root: ${selection.root}`, "Immediate children:", renderedChildren, selection.handoff].join("\n"),
+        [`Reference: ${selection.alias} (${selection.type})`, `Root: ${selection.root}`, "Immediate children:", renderedChildren + truncatedNote, selection.handoff].join("\n"),
         {
           mode: "references",
           ...(params.query === undefined ? {} : { query: params.query }),
@@ -318,10 +339,41 @@ export async function executeLlmWikisSearch(
         discovery: { topics: [] },
       });
     }
-    const rendered = topics
-      .map((topic) => [`Topic: ${topic.topic}`, ...topic.pages.map((page) => `  - ${page.file}`)].join("\n"))
-      .join("\n");
-    return textResult(rendered, {
+    const lines: string[] = [];
+    let renderedBytes = 0;
+    let truncated = false;
+    const appendLine = (line: string): boolean => {
+      const separatorBytes = lines.length === 0 ? 0 : 1;
+      const available = MAX_WIKI_DISCOVERY_OUTPUT_BYTES - renderedBytes - separatorBytes;
+      if (available <= 0) {
+        truncated = true;
+        return false;
+      }
+      const bounded = truncateUtf8(line, available);
+      lines.push(bounded);
+      renderedBytes += separatorBytes + Buffer.byteLength(bounded, "utf8");
+      if (bounded.length !== line.length) truncated = true;
+      return bounded.length === line.length;
+    };
+    outer: {
+      for (const topic of topics) {
+        if (!appendLine(`Topic: ${topic.topic}`)) break outer;
+        for (const page of topic.pages) {
+          if (!appendLine(`  - ${page.file}`)) break outer;
+        }
+      }
+    }
+    let textRendered = lines.join("\n");
+    if (truncated) {
+      const suffix = "... discovery output truncated";
+      const separatorBytes = textRendered.length === 0 ? 0 : 1;
+      const available = MAX_WIKI_DISCOVERY_OUTPUT_BYTES - Buffer.byteLength(textRendered, "utf8") - separatorBytes;
+      if (available > 0) {
+        const boundedSuffix = truncateUtf8(suffix, available);
+        textRendered = textRendered.length === 0 ? boundedSuffix : `${textRendered}\n${boundedSuffix}`;
+      }
+    }
+    return textResult(textRendered, {
       mode: "wikis",
       query,
       ...(params.topic === undefined ? {} : { topic: params.topic }),
@@ -358,6 +410,13 @@ async function listReferenceChildren(root: string): Promise<ReferenceChild[]> {
     name: entry.name,
     kind: entry.isDirectory() ? "directory" : "file",
   }));
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+  let end = Math.min(value.length, maxBytes);
+  while (end > 0 && Buffer.byteLength(value.slice(0, end), "utf8") > maxBytes) end--;
+  return value.slice(0, end);
 }
 
 function normalizeReferenceChildren(children: readonly ReferenceChild[]): ReferenceChild[] {

@@ -18,6 +18,8 @@ export const WIKI_PAGE_START = "<!-- pi-code-wiki-page -->";
 export const WIKI_PAGE_END = "<!-- pi-code-wiki-page-end -->";
 export const WIKI_MAX_SLUG_LENGTH = 80;
 export const WIKI_PAGE_SIZE = 256 * 1024;
+export const MAX_WIKI_DISCOVERY_PAGES = 500;
+export const MAX_WIKI_DISCOVERY_OUTPUT_BYTES = 64 * 1024;
 
 export interface WikiPageHeader {
   topic: string;
@@ -35,6 +37,7 @@ export interface WikiPageResult extends WikiPageHeader {
 export interface WikiTopicDiscovery {
   topic: string;
   pages: Array<Omit<WikiPageHeader, "topic"> & { file: string }>;
+  truncated?: boolean;
 }
 
 /** Discover wiki topics and page metadata without parsing or ranking entry content. */
@@ -78,10 +81,15 @@ export async function discoverWikiTopics(
   return [...topics.values()]
     .sort((left, right) => left.topic.localeCompare(right.topic))
     .slice(0, maxTopics)
-    .map((topic) => ({
-      ...topic,
-      pages: topic.pages.sort((left, right) => pageNumber(left.file) - pageNumber(right.file) || left.file.localeCompare(right.file)),
-    }));
+    .map((topic) => {
+      const pages = topic.pages.sort((left, right) => pageNumber(left.file) - pageNumber(right.file) || left.file.localeCompare(right.file));
+      if (pages.length <= MAX_WIKI_DISCOVERY_PAGES) return { ...topic, pages };
+      return {
+        ...topic,
+        pages: pages.slice(0, MAX_WIKI_DISCOVERY_PAGES),
+        truncated: true,
+      };
+    });
 }
 
 export interface WikiEntryInput {

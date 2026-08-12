@@ -768,11 +768,14 @@ test("reference selection excludes node_modules and .git and caps the immediate 
 
 test("wiki discovery output stays bounded even when one topic has oversized page metadata", async () => {
   const root = tempRoot();
-  const longFile = `${"very-long-topic-".repeat(5000)}.md`;
-  writeFileSync(
-    join(root, longFile),
-    `<!-- pi-code-wiki-page -->\ntopic: huge\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->`,
-  );
+  const topic = "very-long-topic-".repeat(12).slice(0, 190);
+  for (let index = 0; index <= MAX_WIKI_DISCOVERY_PAGES; index++) {
+    const file = index === 0 ? `${topic}.md` : `${topic}.part-${String(index).padStart(3, "0")}.md`;
+    writeFileSync(
+      join(root, file),
+      `<!-- pi-code-wiki-page -->\ntopic: ${topic}\npage: ${index + 1}\ntotalPages: ${MAX_WIKI_DISCOVERY_PAGES + 1}\n\n<!-- pi-code-wiki-page-end -->`,
+    );
+  }
   try {
     const result = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
     assert.ok(Buffer.byteLength(text(result), "utf8") <= MAX_WIKI_DISCOVERY_OUTPUT_BYTES);
