@@ -73,6 +73,27 @@ export const COMMAND_OPERATIONS = {
   CONTROLS: "command.controls",
 } as const;
 
+export const MCP_OPERATIONS = {
+  LIFECYCLE_START: "mcp.lifecycleStart",
+  LIFECYCLE_STOP: "mcp.lifecycleStop",
+  MANAGER_START: "mcp.managerStart",
+  MANAGER_STOP: "mcp.managerStop",
+  RECONCILE: "mcp.reconcile",
+  CONNECT: "mcp.connect",
+  CONNECT_REMOTE: "mcp.connectRemote",
+  DISCONNECT: "mcp.disconnect",
+  REFRESH_CATALOG: "mcp.refreshCatalog",
+  CALL_TOOL: "mcp.callTool",
+  GET_PROMPT: "mcp.getPrompt",
+  READ_RESOURCE: "mcp.readResource",
+  INVOKE_TOOL: "mcp.invokeTool",
+  HANDLE_PROMPT: "mcp.handlePrompt",
+  RESOURCE_LIST: "mcp.resourceList",
+  RESOURCE_READ: "mcp.resourceRead",
+  COMMAND: "mcp.command",
+  AUTH_STORE: "mcp.authStore",
+} as const;
+
 export const TOOL_OPERATIONS = {
   FOOTER_START: "tool.footerStart",
   FOOTER_STOP: "tool.footerStop",
@@ -101,6 +122,7 @@ export const ALL_OPERATIONS = {
   ...REGISTRY_OPERATIONS,
   ...TELEGRAM_OPERATIONS,
   ...COMMAND_OPERATIONS,
+  ...MCP_OPERATIONS,
   ...TOOL_OPERATIONS,
 } as const;
 

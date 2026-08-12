@@ -122,6 +122,9 @@ importers:
       '@xzy-ai/core':
         specifier: workspace:*
         version: link:../core
+      '@xzy-ai/observability':
+        specifier: workspace:*
+        version: link:../observability
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1

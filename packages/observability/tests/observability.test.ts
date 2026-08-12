@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   createSessionLogger,
   getPersistenceFailureCount,
+  mask,
   processWithLog,
   resetPersistenceFailureCount,
   runWithLogContext,
@@ -165,6 +166,12 @@ test("session logger routes agent errors to its error file and enforces private 
   assert.equal(records(paths.eventsPath).length, 1);
   assert.equal(records(paths.errorsPath)[0]?.agentId, "agent-a");
   assert.equal(logger.projectId, "project-a");
+});
+
+test("masking safely bounds cyclic values instead of recursing forever", () => {
+  const cyclic: Record<string, unknown> = { name: "cycle" };
+  cyclic.self = cyclic;
+  assert.deepEqual(mask(cyclic), { name: "cycle", self: "[Circular]" });
 });
 
 test("persistence failure does not fail business work and reports safe fallback metadata", () => {

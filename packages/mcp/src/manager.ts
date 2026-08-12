@@ -2,6 +2,7 @@ import { existsSync, statSync, watch as fsWatch, type FSWatcher } from "node:fs"
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   ListRootsRequestSchema,
   type CallToolResult,
@@ -404,7 +405,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     name: string,
     server: McpLocalServerConfig,
     signal?: AbortSignal,
-  ): Promise<McpConnectionResult> => serialize(() => connectLocalInternal(name, server, signal));
+  ): Promise<McpConnectionResult> => processWithLog({ operation: MCP_OPERATIONS.CONNECT, parameters: { server: name } }, () => serialize(() => connectLocalInternal(name, server, signal)));
 
   const connectRemoteInternal = async (
     name: string,
@@ -454,7 +455,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     name: string,
     server: McpRemoteServerConfig,
     signal?: AbortSignal,
-  ): Promise<McpConnectionResult> => serialize(() => connectRemoteInternal(name, server, signal));
+  ): Promise<McpConnectionResult> => processWithLog({ operation: MCP_OPERATIONS.CONNECT_REMOTE, parameters: { server: name } }, () => serialize(() => connectRemoteInternal(name, server, signal)));
 
   const closeInternal = async (): Promise<void> => {
     const active = [...connections.entries()];
@@ -495,7 +496,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     }
   };
 
-  const disconnect = (name: string): Promise<void> => serialize(() => disconnectInternal(name));
+  const disconnect = (name: string): Promise<void> => processWithLog({ operation: MCP_OPERATIONS.DISCONNECT, parameters: { server: name } }, () => serialize(() => disconnectInternal(name)));
   const close = (): Promise<void> => {
     beginShutdown();
     return serialize(async () => {
@@ -573,7 +574,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     nativeName: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
-  ): Promise<CallToolResult> => serialize(() => callToolInternal(name, nativeName, args, signal));
+  ): Promise<CallToolResult> => processWithLog({ operation: MCP_OPERATIONS.CALL_TOOL, parameters: { server: name, tool: nativeName } }, () => serialize(() => callToolInternal(name, nativeName, args, signal)));
 
   const requestOptionsFor = (name: string, signal?: AbortSignal) => ({
     timeout: resolveTimeout(
@@ -609,7 +610,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     nativeName: string,
     args: Record<string, string>,
     signal?: AbortSignal,
-  ): Promise<GetPromptResult> => serialize(() => getPromptInternal(name, nativeName, args, signal));
+  ): Promise<GetPromptResult> => processWithLog({ operation: MCP_OPERATIONS.GET_PROMPT, parameters: { server: name, prompt: nativeName } }, () => serialize(() => getPromptInternal(name, nativeName, args, signal)));
 
   const readResourceInternal = async (
     name: string,
@@ -625,7 +626,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   };
 
   const readResource = (name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> =>
-    serialize(() => readResourceInternal(name, uri, signal));
+    processWithLog({ operation: MCP_OPERATIONS.READ_RESOURCE, parameters: { server: name, uri } }, () => serialize(() => readResourceInternal(name, uri, signal)));
 
   const refreshCatalogInternal = async (name: string, signal?: AbortSignal): Promise<ServerCatalog | undefined> => {
     const connection = connections.get(name);
@@ -649,7 +650,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   };
 
   const refreshCatalog = (name: string, signal?: AbortSignal): Promise<ServerCatalog | undefined> =>
-    serialize(() => refreshCatalogInternal(name, signal));
+    processWithLog({ operation: MCP_OPERATIONS.REFRESH_CATALOG, parameters: { server: name } }, () => serialize(() => refreshCatalogInternal(name, signal)));
 
   const reconcileInternal = async (names?: string[]): Promise<McpManagerState> => {
     const configured = state.config?.servers ?? {};
@@ -665,10 +666,11 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     return state;
   };
 
-  const reconcile = (names?: string[]): Promise<McpManagerState> => serialize(() => reconcileInternal(names));
+  const reconcile = (names?: string[]): Promise<McpManagerState> =>
+    processWithLog({ operation: MCP_OPERATIONS.RECONCILE, parameters: { servers: names } }, () => serialize(() => reconcileInternal(names)));
 
   const start = (): Promise<McpManagerState> =>
-    serialize(async () => {
+    processWithLog({ operation: MCP_OPERATIONS.MANAGER_START }, () => serialize(async () => {
       stopped = false;
       managerAbortController = new AbortController();
       reload();
@@ -680,14 +682,14 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
         });
       }
       return reconcileInternal();
-    });
+    }));
 
   const stop = (): Promise<void> => {
     beginShutdown();
-    return serialize(async () => {
+    return processWithLog({ operation: MCP_OPERATIONS.MANAGER_STOP }, () => serialize(async () => {
       await closeInternal();
       state = { ...state, running: false };
-    });
+    }));
   };
 
   return {

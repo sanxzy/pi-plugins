@@ -13,6 +13,7 @@
     "@earendil-works/pi-coding-agent": "^0.84.1",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@xzy-ai/core": "workspace:*",
+    "@xzy-ai/observability": "workspace:*",
     "typebox": "^1.3.7",
     "jsonc-parser": "^3.3.1"
   },

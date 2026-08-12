@@ -73,20 +73,33 @@ function isTelegramUpdate(value: Record<string, unknown>): boolean {
 
 /** Mask recursively at the persistence boundary. */
 export function mask(value: unknown, key?: string): unknown {
+  return maskWithSeen(value, key, new WeakSet<object>());
+}
+
+function maskWithSeen(value: unknown, key: string | undefined, seen: WeakSet<object>): unknown {
   if (typeof value === "string") return value.replace(TOKEN_PATTERN, "[Redacted]").replace(SECRET_VALUE_PATTERN, "[Redacted]");
   if (value === null || typeof value !== "object") return value;
-  if (isRecord(value)) {
-    if (isTelegramUpdate(value) || (key !== undefined && isUpdateKey(key))) return "[Omitted]";
-    const output: Record<string, unknown> = {};
-    for (const [entryKey, entryValue] of Object.entries(value)) {
-      if (isSecretKey(entryKey)) output[entryKey] = "[Redacted]";
-      else if (isUpdateKey(entryKey)) output[entryKey] = "[Omitted]";
-      else output[entryKey] = mask(entryValue, entryKey);
+  // Same object already on the current recursion path: a true cycle. Break it
+  // instead of recursing forever. Shared references elsewhere (DAG sharing)
+  // are still rendered because the marker is removed when the branch unwinds.
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  try {
+    if (isRecord(value)) {
+      if (isTelegramUpdate(value) || (key !== undefined && isUpdateKey(key))) return "[Omitted]";
+      const output: Record<string, unknown> = {};
+      for (const [entryKey, entryValue] of Object.entries(value)) {
+        if (isSecretKey(entryKey)) output[entryKey] = "[Redacted]";
+        else if (isUpdateKey(entryKey)) output[entryKey] = "[Omitted]";
+        else output[entryKey] = maskWithSeen(entryValue, entryKey, seen);
+      }
+      return output;
     }
-    return output;
+    if (Array.isArray(value)) return value.map((item) => maskWithSeen(item, key, seen));
+    return "[Omitted]";
+  } finally {
+    seen.delete(value);
   }
-  if (Array.isArray(value)) return value.map((item) => mask(item));
-  return "[Omitted]";
 }
 
 function safeError(error: unknown): Record<string, unknown> {

@@ -8,6 +8,7 @@ import { PiOAuthProvider, ensureCallbackServer, waitForOAuthCallback, cancelOAut
 import type { McpRemoteServerConfig, McpTimeoutConfig } from "./config.ts";
 import { pathToFileURL } from "node:url";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 const DEFAULT_TIMEOUT = 30_000;
 
@@ -162,6 +163,7 @@ async function connectTransport(
  * credentials; ordinary transport errors permit the legacy SSE attempt.
  */
 export async function connectRemote(options: ConnectRemoteOptions): Promise<RemoteConnectionResult> {
+  return processWithLog({ operation: MCP_OPERATIONS.CONNECT_REMOTE, parameters: { url: options.url } }, async () => {
   let url: URL;
   try {
     url = new URL(options.url);
@@ -221,12 +223,14 @@ export async function connectRemote(options: ConnectRemoteOptions): Promise<Remo
     }
   }
   return { status: { status: "failed", error: lastError }, catalog: emptyCatalog() };
+  });
 }
 
 /** Begin OAuth discovery and capture the authorization URL for a remote server. */
 export async function startRemoteAuth(
   options: ConnectRemoteOptions,
 ): Promise<{ authorizationUrl: string; provider: PiOAuthProvider; state: string; callback: Promise<string> }> {
+  return processWithLog({ operation: MCP_OPERATIONS.CONNECT_REMOTE, parameters: { url: options.url, auth: true } }, async () => {
   const provider = makeProvider(options);
   if (!provider) throw new Error("OAuth is disabled for this remote server");
   const key = authKey(options.ownerKey, options.url);
@@ -305,6 +309,7 @@ export async function startRemoteAuth(
     }
   });
   return { authorizationUrl: redirect.toString(), provider: redirecting, state, callback };
+  });
 }
 
 /** Finish a pending OAuth flow and commit credentials only after success. */

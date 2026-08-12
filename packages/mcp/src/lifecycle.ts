@@ -7,6 +7,7 @@ import { evaluatePolicy, policyFromConfig, type PolicyTarget } from "./policy.ts
 import { redactDiagnostic } from "./diagnostics.ts";
 import { userAgentDir } from "./config.ts";
 import { publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames, clearSessionMcpBridge, sessionMcpBridge } from "@xzy-ai/core";
+import { MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
 import {
   startRemoteAuth,
@@ -73,6 +74,15 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
   };
 
   sharedExposer.setInvokeHandler(async (mapping, args, signal, invokeCtx): Promise<AgentToolResult<NormalizedDetails>> => {
+    return processWithLog({ operation: MCP_OPERATIONS.INVOKE_TOOL, parameters: { server: mapping.serverName, tool: mapping.nativeName } }, async () => invokeExposedTool(mapping, args, signal, invokeCtx));
+  });
+
+  async function invokeExposedTool(
+    mapping: McpToolSnapshotEntry & { piName: string },
+    args: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    invokeCtx: ExtensionContext,
+  ): Promise<AgentToolResult<NormalizedDetails>> {
     const key = managerKey(invokeCtx);
     const manager = managers.get(key);
     const authorize = authorizers.get(key);
@@ -88,9 +98,10 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     } catch (error) {
       return normalizeCallToolResult(undefined, { server: mapping.serverName, tool: mapping.nativeName, cancelled: signal?.aborted, transportError: error instanceof Error ? error.message : String(error) });
     }
-  });
+  }
 
   pi.on("session_start", async (_event, ctx) => {
+    return processWithLog({ operation: MCP_OPERATIONS.LIFECYCLE_START, parameters: { cwd: ctx.cwd } }, async () => {
     const key = managerKey(ctx);
     const existing = managers.get(key);
     if (existing) return;
@@ -141,6 +152,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
 
     authorizers.set(key, authorize);
     const readPrompt = async (serverName: string, nativeName: string, args: Record<string, string>, signal?: AbortSignal) => {
+      return processWithLog({ operation: MCP_OPERATIONS.GET_PROMPT, parameters: { server: serverName, prompt: nativeName } }, async () => {
       try {
         return normalizePromptResult(serverName, nativeName, await manager.getPrompt(serverName, nativeName, args, signal));
       } catch (error) {
@@ -151,8 +163,10 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
           transportError: /not connected/i.test(message) ? undefined : message,
         });
       }
+      });
     };
     const readResource = async (serverName: string, uri: string, signal?: AbortSignal) => {
+      return processWithLog({ operation: MCP_OPERATIONS.READ_RESOURCE, parameters: { server: serverName, uri } }, async () => {
       try {
         return normalizeResourceResult(serverName, uri, await manager.readResource(serverName, uri, signal));
       } catch (error) {
@@ -163,6 +177,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
           transportError: /not connected/i.test(message) ? undefined : message,
         });
       }
+      });
     };
     await manager.start();
     sharedPromptResourceExposer.registerSession(key, { manager, readPrompt, readResource, listResources: (serverName) => {
@@ -204,9 +219,11 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     });
     reconcile();
     reconciles.set(key, reconcile);
+    });
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    return processWithLog({ operation: MCP_OPERATIONS.LIFECYCLE_STOP, parameters: { cwd: ctx.cwd } }, async () => {
     const key = managerKey(ctx);
     const manager = managers.get(key);
     if (!manager) return;
@@ -220,12 +237,14 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     reconciles.delete(key);
     await manager.stop();
     reconcileActiveTools();
+    });
   });
 
   // Control-plane commands operate on the manager for the invoking session.
   pi.registerCommand("mcp", {
     description: "Manage MCP servers: auth, logout, status, reload, connect, disconnect.",
     async handler(args: string, ctx: ExtensionCommandContext): Promise<void> {
+      return processWithLog({ operation: MCP_OPERATIONS.COMMAND, parameters: { args } }, async () => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const sub = parts[0] ?? "status";
       const name = parts[1];
@@ -344,6 +363,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
         default:
           notify(ctx, `MCP: unknown subcommand \"${sub}\".`);
       }
+      });
     },
   });
 }
