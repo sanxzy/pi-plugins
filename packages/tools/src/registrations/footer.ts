@@ -37,11 +37,24 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         );
       };
       const branchUnsubscribe = footerData.onBranchChange(() => tui.requestRender());
+      // Footer info is re-derived lazily from `ctx.sessionManager.getEntries()`
+      // on every repaint. Memoize it per leaf id: the entries list is append-only
+      // and the leaf id is the cache key that advances on every new message, so a
+      // repaint between messages reuses the prior work instead of scanning the
+      // whole transcript again (the main remaining per-keystroke cost).
+      let infoCache: { leaf: string; info: AgentFooterInfo } | undefined;
+      const getCachedInfo = (): AgentFooterInfo => {
+        const leaf = ctx.sessionManager.getLeafId() ?? "";
+        if (infoCache?.leaf === leaf) return infoCache.info;
+        const info = footerInfo(ctx, footerData);
+        infoCache = { leaf, info };
+        return info;
+      };
       const subscribeTree = subscribeFooterTree(pool, requestRepaint);
       const footer = new AgentFooter({
         tui,
         theme: footerTheme(theme),
-        getInfo: () => footerInfo(ctx, footerData),
+        getInfo: () => getCachedInfo(),
         getRows: () => footerRows(ctx, pool),
         onEnter: (row) => openChildLiveView(ctx, pool, footer, row),
         dispose: () => {
@@ -117,9 +130,14 @@ function subscribeFooterTree(
 /** Project the root session's descendant scope into footer tree rows. */
 function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>): FooterTreeRow[] {
   const rootSessionId = ctx.sessionManager.getSessionId();
+  // Consume the in-memory registry snapshot: `pool.registry.all()`/`get()`
+  // rescan and re-parse every home event log synchronously, which made every
+  // footer repaint O(all logs). Lifecycle writes and explicit `refresh()`
+  // publish a fresh snapshot reference, so this stays authoritative over time.
+  const jobs = pool.registry.snapshot();
   const descendants = scopeDescendants(
-    (jobId) => pool.registry.get(jobId),
-    pool.registry.all(),
+    (jobId) => jobs.get(jobId),
+    jobs,
     rootSessionId,
     pool.liveChildren,
     new Date(),
@@ -145,7 +163,7 @@ function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>
       durationMs: row.durationMs,
       leaf: latestLeaf(liveChildFor(pool, row.jobId)),
       enterable: row.enterable,
-      updatedAtMs: isTerminal(row.status) ? settledMs(pool.registry.get(row.jobId)) : undefined,
+      updatedAtMs: isTerminal(row.status) ? settledMs(jobs.get(row.jobId)) : undefined,
     })),
   ];
 }

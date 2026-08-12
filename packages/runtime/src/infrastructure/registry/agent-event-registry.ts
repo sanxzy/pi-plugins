@@ -18,6 +18,8 @@ export interface AgentEventRegistry {
   get(jobId: string): Job | undefined;
   getBySessionId(sessionId: string): Job | undefined;
   all(): Map<string, Job>;
+  /** Return the current in-memory read model without touching home storage. */
+  snapshot(): ReadonlyMap<string, Job>;
   prune(): void;
   ensureSession(sessionId: string): void;
   fileForJob(jobId: string): string | undefined;
@@ -78,6 +80,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
   const byJob = new Map<string, Entry>();
   const stores = new Map<string, AgentManifestStore>();
   let nextSequence = 0;
+  let snapshot = new Map<string, Job>() as ReadonlyMap<string, Job>;
   const projectId = encodeProjectId(projectRoot);
 
   const load = (): void => {
@@ -110,6 +113,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       nextSequence = Math.max(nextSequence, (manifest.sequence ?? nextSequence) + 1);
       void agentDir;
     }
+    snapshot = new Map([...byJob].map(([id, entry]) => [id, entry.job]));
   };
 
   const storeFor = (job: Job): AgentManifestStore => {
@@ -234,6 +238,15 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
     all(): Map<string, Job> {
       load();
       return new Map([...byJob].sort(([, a], [, b]) => (a.store.read()?.sequence ?? 0) - (b.store.read()?.sequence ?? 0)).map(([id, entry]) => [id, entry.job]));
+    },
+    snapshot(): ReadonlyMap<string, Job> {
+      // UI hot path: reads only the already-loaded in-memory model. Every
+      // authoritative `get()`/`all()` triggers a synchronous rescan+parse of
+      // home event logs, which made every footer repaint O(all logs). Render
+      // consumes this stable snapshot; explicit `refresh()` and lifecycle
+      // transitions rebuild it. The returned map is the shared snapshot, not a
+      // per-call copy, so rendering allocates nothing.
+      return snapshot;
     },
     prune,
     ensureSession(sessionId): void { ensurePrivateDirectory(homeSessionDirFromRoot(projectRoot, sessionId)); },
