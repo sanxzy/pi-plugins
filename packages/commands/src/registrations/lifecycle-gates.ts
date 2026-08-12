@@ -3,6 +3,7 @@ import type {
   ExtensionContext,
   SessionBeforeSwitchEvent,
 } from "@earendil-works/pi-coding-agent";
+import { SESSION_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { getChildPool, getGoalPool, sessionTreeJobs } from "@xzy-ai/runtime";
 
 /**
@@ -58,6 +59,7 @@ async function confirmGoalOnSwitch(
 
 export function registerLifecycleGates(pi: ExtensionAPI): void {
   pi.on("session_before_switch", async (event: SessionBeforeSwitchEvent, ctx: ExtensionContext) => {
+    return processWithLog({ operation: SESSION_OPERATIONS.BEFORE_SWITCH, parameters: { reason: event.reason } }, async () => {
     // Both switch reasons replace the current host session. `/resume` moves to a
     // previously-persisted session; `/new` starts a fresh one. Either way a
     // persisted goal must be decided (continue or clear) and delivery suspended
@@ -69,5 +71,6 @@ export function registerLifecycleGates(pi: ExtensionAPI): void {
     const jobsResult = event.reason === "new" ? await confirmNewWithRunningJobs(event, ctx) : {};
     if (jobsResult.cancel) return jobsResult;
     return confirmGoalOnSwitch(event, ctx);
+    });
   });
 }
