@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { GOAL_DELIVERY_FOOTER } from "@xzy-ai/core";
+import { createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import { createGoalPool, getGoalPool, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
 function projectRoot(): string {
@@ -166,4 +167,23 @@ test("clearing confirmed active goals removes them and prevents stale callbacks"
   assert.equal(pool.get("/project"), undefined);
   callbacks[0]!();
   assert.deepEqual(sent, []);
+});
+test("goal mutations emit correlated processWithLog records under a log context", () => {
+  const pool = createGoalPool(projectRoot());
+  pool.setScheduler(() => ({ clear() {} }));
+  const lines: Array<Record<string, unknown>> = [];
+  const active = createSessionLogger({
+    projectId: "project-a",
+    rootSessionId: "root-a",
+    eventsPath: "/dev/stdout",
+    errorsPath: "/dev/stdout",
+    write: (_path, line) => lines.push(JSON.parse(line)),
+  });
+  const created = runWithLogContext(active, () => pool.create({ cwd: "/project", prompt: "p", interval: "1m" }));
+  assert.equal(created.ok, true);
+  const before = lines.filter((l) => l.operation === "goal.create" && l.phase === "before");
+  const after = lines.filter((l) => l.operation === "goal.create" && l.phase === "after");
+  assert.ok(before.length >= 1);
+  assert.ok(after.length >= 1);
+  assert.equal(before[0].correlationId, after[0].correlationId);
 });
