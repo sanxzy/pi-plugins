@@ -819,8 +819,11 @@ test("wiki discovery caps pages per topic", async () => {
     };
     const long = details.discovery.topics.find((topic) => topic.topic === "long");
     assert.ok(long);
+    assert.equal(long.pages.length, MAX_WIKI_DISCOVERY_PAGES);
+    assert.equal(long.truncated, true);
+    assert.equal((long.pages[0] as { file: string }).file, "long.md");
+    assert.equal((long.pages.at(-1) as { file: string }).file, "long.part-499.md");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
-
