@@ -117,6 +117,22 @@ test("terminal lifecycle transitions cannot be overwritten by later completion",
   assert.equal(registry.get("race")?.sessionFile, undefined);
 });
 
+test("live singleton registry drops a job removed from home storage", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(job({ id: "removed", parentSessionId: "root-session", status: "queued" }));
+  const events = registry.fileForJob("removed");
+  assert.ok(events);
+  assert.equal(registry.get("removed")?.status, "queued");
+
+  // Simulate home-root cleanup of an orphaned queued job while the process
+  // singleton survives a Pi extension reload.
+  rmSync(join(events, ".."), { recursive: true, force: true });
+  assert.equal(registry.get("removed"), undefined);
+  assert.equal(registry.all().has("removed"), false);
+});
+
 test("malformed or incomplete agent events do not break fresh readers", () => {
   setupHome();
   const root = project();

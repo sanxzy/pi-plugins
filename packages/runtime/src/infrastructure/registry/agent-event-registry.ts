@@ -143,6 +143,10 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
   load();
 
   const prune = (): void => {
+    // The home event logs are authoritative even while the process singleton
+    // survives an extension reload. Refresh before pruning so externally
+    // removed agent directories cannot remain visible in memory.
+    load();
     const jobs = [...byJob.values()].map((entry) => entry.job);
     const byParent = new Map<string, Job[]>();
     for (const job of jobs) {
@@ -207,6 +211,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       prune();
     },
     updateJob(jobId, update): void {
+      load();
       const entry = byJob.get(jobId) ?? byJob.get(canonicalAgentId(jobId)) ?? [...byJob.values()].find((e) => canonicalAgentId(e.job.jobId) === canonicalAgentId(jobId));
       if (!entry) return;
       const nextStatus = update.status ?? entry.job.status;
@@ -217,18 +222,26 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
     },
     fold(): Map<string, Job> { load(); return new Map([...byJob].sort(([, a], [, b]) => (a.store.read()?.sequence ?? 0) - (b.store.read()?.sequence ?? 0)).map(([id, entry]) => [id, entry.job])); },
     get(jobId): Job | undefined {
+      load();
       return byJob.get(jobId)?.job ?? byJob.get(canonicalAgentId(jobId))?.job ?? [...byJob.values()].find((e) => canonicalAgentId(e.job.jobId) === canonicalAgentId(jobId))?.job;
     },
     getBySessionId(sessionId): Job | undefined {
+      load();
       return [...byJob.values()].find((entry) => entry.job.sessionId === sessionId || canonicalAgentId(entry.job.sessionId ?? "") === canonicalAgentId(sessionId))?.job;
     },
-    all(): Map<string, Job> { return new Map([...byJob].sort(([, a], [, b]) => (a.store.read()?.sequence ?? 0) - (b.store.read()?.sequence ?? 0)).map(([id, entry]) => [id, entry.job])); },
+    all(): Map<string, Job> {
+      load();
+      return new Map([...byJob].sort(([, a], [, b]) => (a.store.read()?.sequence ?? 0) - (b.store.read()?.sequence ?? 0)).map(([id, entry]) => [id, entry.job]));
+    },
     prune,
     ensureSession(sessionId): void { ensurePrivateDirectory(homeSessionDirFromRoot(projectRoot, sessionId)); },
     fileForJob(jobId): string | undefined {
       const job = byJob.get(jobId)?.job ?? byJob.get(canonicalAgentId(jobId))?.job ?? [...byJob.values()].find((e) => canonicalAgentId(e.job.jobId) === canonicalAgentId(jobId))?.job;
       return job ? byJob.get(job.jobId)?.store.eventsPath : undefined;
     },
-    registries(): ReadonlyMap<string, AgentManifestStore> { return stores; },
+    registries(): ReadonlyMap<string, AgentManifestStore> {
+      load();
+      return stores;
+    },
   };
 }
