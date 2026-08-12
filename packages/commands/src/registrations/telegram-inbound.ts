@@ -8,6 +8,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getChildPool } from "@xzy-ai/runtime";
+import { TELEGRAM_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   canonicalProjectRoot,
   createChannelLogger,
@@ -173,6 +174,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
   });
 
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
+    processWithLog({ operation: TELEGRAM_OPERATIONS.INBOUND, parameters: { cwd: ctx.cwd } }, () => {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     if (!isRootSession(ctx)) return;
 
@@ -285,9 +287,11 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     runningByProject.set(projectRoot, listener);
     listenersByProject.set(projectRoot, listener);
     listener.setBusy(false);
+    });
   });
 
   pi.on("session_shutdown", async (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    return processWithLog({ operation: TELEGRAM_OPERATIONS.INBOUND, parameters: { cwd: ctx.cwd, phase: "stop" } }, async () => {
     if (!isRootSession(ctx)) return;
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     const sessionId = ctx.sessionManager.getSessionId();
@@ -298,5 +302,6 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     listenersByProject.delete(projectRoot);
     activeListener = undefined;
     listener?.stop();
+    });
   });
 }
