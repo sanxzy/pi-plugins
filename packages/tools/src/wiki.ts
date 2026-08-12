@@ -32,6 +32,58 @@ export interface WikiPageResult extends WikiPageHeader {
   content: string;
 }
 
+export interface WikiTopicDiscovery {
+  topic: string;
+  pages: Array<Omit<WikiPageHeader, "topic"> & { file: string }>;
+}
+
+/** Discover wiki topics and page metadata without parsing or ranking entry content. */
+export async function discoverWikiTopics(
+  root: string,
+  options: { topic?: string; maxTopics?: number } = {},
+): Promise<WikiTopicDiscovery[]> {
+  let names: string[];
+  try {
+    names = (await readdir(root)).filter((name) => name.endsWith(".md"));
+  } catch {
+    return [];
+  }
+  const topicFilter = options.topic === undefined ? undefined : slugify(options.topic);
+  const topics = new Map<string, WikiTopicDiscovery>();
+  for (const file of names.sort((left, right) => left.localeCompare(right))) {
+    const topic = file.replace(/\.part-\d{3}\.md$/, "").replace(/\.md$/, "");
+    if (topicFilter !== undefined && topic !== topicFilter) continue;
+    let document: string;
+    try {
+      document = await readFile(join(root, file), "utf8");
+    } catch {
+      continue;
+    }
+    if (!document.includes(WIKI_PAGE_START) || !document.includes(WIKI_PAGE_END)) continue;
+    const header = parsePageHeader(document);
+    let discovery = topics.get(topic);
+    if (!discovery) {
+      discovery = { topic, pages: [] };
+      topics.set(topic, discovery);
+    }
+    discovery.pages.push({
+      file,
+      page: header.page,
+      totalPages: header.totalPages,
+      ...(header.previous ? { previous: header.previous } : {}),
+      ...(header.next ? { next: header.next } : {}),
+    });
+  }
+  const maxTopics = Math.min(Math.max(options.maxTopics ?? Number.MAX_SAFE_INTEGER, 0), 50);
+  return [...topics.values()]
+    .sort((left, right) => left.topic.localeCompare(right.topic))
+    .slice(0, maxTopics)
+    .map((topic) => ({
+      ...topic,
+      pages: topic.pages.sort((left, right) => pageNumber(left.file) - pageNumber(right.file) || left.file.localeCompare(right.file)),
+    }));
+}
+
 export interface WikiEntryInput {
   topic: string;
   source: "web_search" | "web_fetch";

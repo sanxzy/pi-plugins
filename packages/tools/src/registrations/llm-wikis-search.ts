@@ -1,7 +1,7 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { errorResult, textResult } from "../results.ts";
-import { retrieveWikiPage, searchWikis, wikiRoot } from "../wiki.ts";
+import { discoverWikiTopics, retrieveWikiPage, searchWikis, wikiRoot } from "../wiki.ts";
 
 const llmWikisSearchParams = Type.Object({
   type: Type.Union(
@@ -53,6 +53,18 @@ export type LlmWikisSearchDetails =
         totalPages: number;
         previous?: string;
         next?: string;
+      };
+      discovery?: {
+        topics: Array<{
+          topic: string;
+          pages: Array<{
+            file: string;
+            page: number;
+            totalPages: number;
+            previous?: string;
+            next?: string;
+          }>;
+        }>;
       };
     }
   | {
@@ -132,6 +144,31 @@ export async function executeLlmWikisSearch(
     });
   }
   const query = params.query ?? "";
+  if (query === "*") {
+    const topics = await discoverWikiTopics(root, {
+      topic: params.topic,
+      maxTopics: params.maxResults,
+    });
+    if (topics.length === 0) {
+      return textResult("No local wiki pages found.", {
+        mode: "wikis",
+        query,
+        ...(params.topic === undefined ? {} : { topic: params.topic }),
+        results: [],
+        discovery: { topics: [] },
+      });
+    }
+    const rendered = topics
+      .map((topic) => [`Topic: ${topic.topic}`, ...topic.pages.map((page) => `  - ${page.file}`)].join("\n"))
+      .join("\n");
+    return textResult(rendered, {
+      mode: "wikis",
+      query,
+      ...(params.topic === undefined ? {} : { topic: params.topic }),
+      results: [],
+      discovery: { topics },
+    });
+  }
   const results = await searchWikis(root, query, {
     topic: params.topic,
     max: params.maxResults,
