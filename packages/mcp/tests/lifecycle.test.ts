@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { registerMcpLifecycle } from "../src/index.ts";
 import { userConfigPath, projectConfigPath, createDefaultAuthStore } from "../src/index.ts";
+import { publishSessionMcpBridge, clearSessionMcpBridge } from "@xzy-ai/core";
 import { dirname } from "node:path";
 
 const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
@@ -436,4 +437,51 @@ test("logout removes committed credentials for a remote server", async () => {
   logoutRemote({ url: "https://server.example/mcp", agentDir, onRedirect: () => {} });
   assert.equal(store.getForUrl("https://server.example/mcp"), undefined);
   rmSync(agentDir, { recursive: true, force: true });
+});
+
+test("child sessions inherit MCP resource access through the bridge without their own authorizer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-child-resource-"));
+  const projectRoot = join(root, "project");
+  const agentDir = join(root, "agent");
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    policy: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_MODE: "policy" } },
+  } } }));
+  mkdirSync(join(projectRoot, ".pi"), { recursive: true });
+
+  const pi = fakePi();
+  registerMcpLifecycle(pi as never, { agentDir });
+  const start = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  const rootCtx = { ...context(projectRoot, "root-session"), signal: undefined, hasUI: false, ui: {} };
+  const childCtx = { ...context(projectRoot, "child-session"), signal: undefined, hasUI: false, ui: {} };
+  const orphanCtx = { ...context(projectRoot, "orphan-session"), signal: undefined, hasUI: false, ui: {} };
+  try {
+    await start({ reason: "startup" }, rootCtx);
+    // An isolated child publishes an inherited bridge (as createIsolatedChild does).
+    const childBridgeCtx = childCtx as unknown as Parameters<typeof publishSessionMcpBridge>[0];
+    publishSessionMcpBridge(childBridgeCtx, {
+      invokeTool: async () => ({ content: [{ type: "text", text: "bridged" }] }),
+      listResources: () => [{ uri: "file:///allowed", name: "allowed" }],
+      readResource: async (_s, uri) => ({ uri, text: `resource:${uri}` }),
+    });
+
+    const list = pi.tools.get("mcp_resources_list")!;
+    const read = pi.tools.get("mcp_resources_read")!;
+
+    // Child with a bridge: resource list/read are authorized, not denied by policy.
+    const childListed = await list.execute("id", { server: "policy" }, undefined, undefined, childCtx) as { content: Array<{ text: string }>; details: { denied?: boolean } };
+    assert.equal(childListed.details.denied, undefined, "child list is not denied");
+    assert.match(childListed.content[0]?.text ?? "", /file:\/\/\/allowed/);
+    const childRead = await read.execute("id", { server: "policy", uri: "file:///allowed" }, undefined, undefined, childCtx) as { content: Array<{ text: string }> };
+    assert.match(childRead.content[0]?.text ?? "", /resource:file:\/\/\/allowed/);
+
+    // An orphan session with neither an authorizer nor a bridge fails closed.
+    const orphanListed = await list.execute("id", { server: "policy" }, undefined, undefined, orphanCtx) as { details: { denied?: boolean } };
+    assert.equal(orphanListed.details.denied, true, "orphan child list is denied by policy");
+  } finally {
+    await shutdown({ reason: "quit" }, rootCtx);
+    clearSessionMcpBridge(childCtx as unknown as Parameters<typeof clearSessionMcpBridge>[0]);
+    rmSync(root, { recursive: true, force: true });
+  }
 });

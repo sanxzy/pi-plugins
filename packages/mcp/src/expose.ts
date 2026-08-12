@@ -123,6 +123,24 @@ export class McpToolExposer {
     return [...this.mappings.values()];
   }
 
+  /** Invoke a mapped MCP tool through the currently configured handler. */
+  invokeForSession(
+    mapping: McpToolMapping,
+    args: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    ctx: ExtensionContext,
+  ): Promise<AgentToolResult<NormalizedDetails>> {
+    const current = this.mappings.get(mapping.piName);
+    if (!current || !this.invokeHandler) {
+      return Promise.resolve(normalizeCallToolResult(undefined, {
+        server: mapping.serverName,
+        tool: mapping.nativeName,
+        transportError: !current ? "MCP tool is no longer available" : "MCP invocation is not wired",
+      }));
+    }
+    return this.invokeHandler(current, args, signal, ctx);
+  }
+
   /**
    * Sync a session snapshot of discovered tools. Registers new tools, updates
    * existing registrations with the newest binding, and returns which Pi names

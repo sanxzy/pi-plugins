@@ -182,6 +182,8 @@ export type SpawnChildSession = (options: {
   cwd: string;
   /** Resolved agent definition loaded from an agent file. */
   agent: ResolvedAgent;
+  /** Lineage depth of this child; depth 4 is the terminal recursive leaf. */
+  depth?: number;
   /** Instruction to run in the child session. */
   prompt: string;
   /** Parent session id, preserved in the child session header. */
@@ -194,6 +196,14 @@ export type SpawnChildSession = (options: {
   sessionFile?: string;
   /** Model-facing MCP names discovered by the owning parent session. */
   mcpToolNames?: readonly string[];
+  /** MCP tool definitions registered by the parent's MCP lifecycle, for child inheritance. */
+  mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>;
+  /** Process-local bridge used by inherited dynamic MCP tools/resources. */
+  mcpBridge?: {
+    invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
+    listResources(server: string): unknown;
+    readResource(server: string, uri: string, signal?: AbortSignal): Promise<unknown>;
+  };
   /** Abort signal forwarded to the child's run and concurrency wait. */
   signal?: AbortSignal;
   /** Called once the isolated child exists and can be controlled. */

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import * as PiSdk from "@earendil-works/pi-coding-agent";
+import { maxAgentDepth } from "../../shared/pi-code-config.ts";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -12,6 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
+import { publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
 import { childSessionPaths, ensurePrivateDirectory, sessionDir } from "../../shared/paths.ts";
 import type {
   ChildSessionControl,
@@ -46,44 +48,60 @@ interface ChildSessionServices {
   dispose(): void;
 }
 
-/** All seven Pi built-in tools; the allowlist when an agent omits `tools`. */
-const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
+/** All Pi built-in tools allowed to children; `ls` is excluded by policy (the model must list files via `find`/`grep`). */
+const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find"] as const;
 
 /**
- * pi-code extension tools appended to every child allowlist so subagents can
- * recurse: the web tools for research and the agent-family tools so a child
- * can spawn its own descendants, list them, and cancel them within the same
- * scoped pool. Goal and MCP capabilities stay root-only.
+ * pi-code extension tools appended to child allowlists. Depths below the
+ * configured max receive the agent-family and web tools so they can recurse;
+ * the terminal leaf keeps the web/wiki family but cannot spawn or manage
+ * another agent. Goal and Telegram capabilities stay root-only; MCP resource
+ * tools are allowed so every descendant can inspect the inherited MCP catalog.
  */
-const EXTENSION_TOOLS = [
+const AGENT_FAMILY_TOOLS = [
   "agent",
   "agent_list",
   "agent_jobs",
   "agent_status",
   "agent_cancel",
-  "web_search",
-  "web_fetch",
-  "llm_wikis_search",
+] as const;
+const WEB_FAMILY_TOOLS = ["web_search", "web_fetch", "llm_wikis_search"] as const;
+const EXTENSION_TOOLS = [...AGENT_FAMILY_TOOLS, ...WEB_FAMILY_TOOLS] as const;
+
+/** MCP resource/prompt tools every child may expose so subagents can manage MCP. */
+const MCP_RESOURCE_TOOLS = [
+  "mcp_resources_list",
+  "mcp_resources_read",
 ] as const;
 
 /**
  * Map a resolved agent to its child tool allowlist.
  *
- * An explicit non-empty frontmatter `tools` list wins, except that goal and MCP
- * capabilities are always removed because they belong to the main host. An
- * absent/empty list enables the full built-in set so the read-only Pi tools
- * (grep, find, ls) are active by default. The pi-code web tools, local wiki
- * search, and agent-family tools are appended in every case so subagents stay
- * able to research and to recurse through the shared scoped pool.
+ * An explicit non-empty frontmatter `tools` list wins, except that goal and
+ * Telegram capabilities are always stripped because they belong to the main
+ * host. An absent/empty list enables the full built-in set (minus `ls`) plus
+ * the session-scoped MCP catalog. Depths below the configured max depth receive
+ * the pi-code agent-family and web tools so they can recurse; the terminal
+ * leaf keeps only the web/wiki family. MCP resource tools and the discovered
+ * MCP catalog remain available at every depth. The `mcp` slash command is not
+ * a model tool and is excluded from the allowlist.
  */
 const ROOT_ONLY_TOOLS = new Set([
   "goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear",
-  "mcp_resources_list", "mcp_resources_read", "mcp",
+  "telegram_chat",
+  // `/mcp` is a host command, not an MCP model tool; discovered MCP tools and
+  // the two resource tools above remain available to children.
+  "mcp",
 ]);
 
 /** Resolve child tools against the session-local discovered MCP catalog. */
-export function resolveChildTools(agent: ResolvedAgent, mcpToolNames: readonly string[] = []): readonly string[] {
-  const requested = agent.tools && agent.tools.length > 0 ? [...agent.tools] : [...ALL_BUILTIN_TOOLS, ...mcpToolNames];
+export function resolveChildTools(
+  agent: ResolvedAgent,
+  mcpToolNames: readonly string[] = [],
+  depth = 0,
+  cwd?: string,
+): readonly string[] {
+  const requested = agent.tools && agent.tools.length > 0 ? [...agent.tools] : [...ALL_BUILTIN_TOOLS];
   const extensionNames = EXTENSION_TOOLS as readonly string[];
   const builtinNames = new Set<string>(ALL_BUILTIN_TOOLS);
   const mcpNames = new Set(mcpToolNames);
@@ -92,7 +110,16 @@ export function resolveChildTools(agent: ResolvedAgent, mcpToolNames: readonly s
     !ROOT_ONLY_TOOLS.has(name) &&
     (builtinNames.has(name) || extensionNames.includes(name) || mcpNames.has(name)),
   );
-  return [...new Set([...filtered.filter((name) => !extensionNames.includes(name)), ...EXTENSION_TOOLS])];
+  // The configured max depth is the final recursive leaf. It keeps research
+  // and MCP access, but cannot create another descendant or inspect/cancel
+  // the agent family.
+  const extensionTools = depth >= maxAgentDepth(cwd) ? WEB_FAMILY_TOOLS : EXTENSION_TOOLS;
+  return [...new Set([
+    ...filtered.filter((name) => !extensionNames.includes(name)),
+    ...extensionTools,
+    ...MCP_RESOURCE_TOOLS,
+    ...mcpToolNames,
+  ])];
 }
 
 /** Convert an unknown thrown value into a stable message string. */
@@ -151,11 +178,18 @@ async function createIsolatedChild(options: {
   cwd: string;
   model: unknown;
   agent: ResolvedAgent;
+  depth?: number;
   parentSessionId: string;
   rootSessionId?: string;
   parentAgentIds?: readonly string[];
   sessionFile?: string;
   mcpToolNames?: readonly string[];
+  mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>;
+  mcpBridge?: {
+    invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
+    listResources(server: string): unknown;
+    readResource(server: string, uri: string, signal?: AbortSignal): Promise<unknown>;
+  };
 }): Promise<ChildSessionServices> {
   const agentDir = getAgentDir();
   const settingsManager = SettingsManager.create(options.cwd, agentDir);
@@ -190,6 +224,12 @@ async function createIsolatedChild(options: {
     parentAgentIds: options.parentAgentIds,
     sessionFile: options.sessionFile,
   });
+  const childContext = { cwd: options.cwd, sessionManager };
+  // Publish the inherited MCP catalog under this child session id so its own
+  // foreground descendants can inherit it recursively.
+  publishSessionMcpNames(childContext, options.mcpToolNames ?? []);
+  publishSessionMcpDefinitions(childContext, options.mcpToolDefs ?? []);
+  if (options.mcpBridge) publishSessionMcpBridge(childContext, options.mcpBridge);
 
   // Model mapping: an explicit frontmatter model is resolved against the child
   // runtime and falls back to the inherited parent model when resolution fails
@@ -207,16 +247,32 @@ async function createIsolatedChild(options: {
     resourceLoader,
   };
   // Tool mapping: an explicit non-empty `tools` list becomes the child
-  // allowlist; an absent/empty list enables the full built-in set so the
-  // read-only Pi tools (grep, find, ls) are active by default.
-  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames);
+  // allowlist; an absent/empty list enables the full built-in set (excluding
+  // `ls`) plus the depth-aware extension/MCP policy.
+  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames, options.depth, options.cwd);
   sessionOptions.mcpToolNames = options.mcpToolNames ?? [];
+  // Dynamic MCP definitions are supplied by the parent composition root. The
+  // child loader cannot discover the parent's MCP manager, so register the
+  // inherited definitions as isolated local tools whose execution is routed
+  // through the parent's stable MCP tool bridge.
+  if (options.mcpToolDefs?.length) {
+    sessionOptions.customTools = options.mcpToolDefs.map((definition) => ({
+      name: definition.name,
+      label: definition.name,
+      description: definition.description,
+      parameters: definition.parameters,
+      execute: async (_id: string, args: Record<string, unknown>, signal: AbortSignal | undefined) => options.mcpBridge
+        ? await options.mcpBridge.invokeTool(definition.name, args, signal)
+        : { content: [{ type: "text", text: "Inherited MCP execution bridge is unavailable" }], details: { error: "mcp bridge unavailable" } },
+    }));
+  }
 
   const { session } = await (createAgentSession as unknown as (options: Record<string, unknown>) => Promise<{ session: AgentSession }>)(sessionOptions);
 
   return {
     session,
     dispose() {
+      clearMcpNames(childContext);
       session.dispose();
     },
   };
@@ -315,7 +371,7 @@ function findLastAssistantMessage(session: AgentSession): {
 export const spawnChildSession: SpawnChildSession & {
   /** Test seam: override isolated child construction without AI credentials. */
   __createChild?: (
-    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[] },
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; depth?: number; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[]; mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>; mcpBridge?: { invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>; listResources(server: string): unknown; readResource(server: string, uri: string, signal?: AbortSignal): Promise<unknown> }; },
   ) => Promise<ChildSessionServices>;
 } = (async (options) => {
   // A cancelled parent run must not start a child at all.
@@ -336,11 +392,14 @@ export const spawnChildSession: SpawnChildSession & {
         cwd: options.cwd,
         model: options.model,
         agent: options.agent,
+        depth: options.depth,
         parentSessionId,
         rootSessionId: options.rootSessionId,
         parentAgentIds: options.parentAgentIds,
         sessionFile: options.sessionFile,
         mcpToolNames: options.mcpToolNames,
+        mcpToolDefs: options.mcpToolDefs,
+        mcpBridge: options.mcpBridge,
       });
       const live = attachAgentSessionLiveFeed(child.session);
       options.onControl?.({
@@ -410,10 +469,10 @@ export const spawnChildSession: SpawnChildSession & {
       child.liveUnsubscribe?.();
       child.dispose();
     }
-  });
+  }, options.signal);
 }) as SpawnChildSession & {
   __createChild?: (
-    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[] },
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; depth?: number; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[] },
   ) => Promise<ChildSessionServices>;
 };
 

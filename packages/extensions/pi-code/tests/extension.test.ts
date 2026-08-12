@@ -82,6 +82,8 @@ test("question registration is main-agent-only (no child tool registrations)", (
   // registers anything scoped to child sessions, so the question tool (like the
   // other pi-code tools) is structurally main-agent-only.
   assert.deepEqual(names, [
+    "mcp_resources_list",
+    "mcp_resources_read",
     "question",
     "agent",
     "agent_cancel",

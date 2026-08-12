@@ -6,7 +6,7 @@ import { normalizePromptResult, normalizeResourceResult } from "./prompts-resour
 import { evaluatePolicy, policyFromConfig, type PolicyTarget } from "./policy.ts";
 import { redactDiagnostic } from "./diagnostics.ts";
 import { userAgentDir } from "./config.ts";
-import { publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
+import { publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames, clearSessionMcpBridge, sessionMcpBridge } from "@xzy-ai/core";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
 import {
   startRemoteAuth,
@@ -38,8 +38,17 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
   const sharedExposer = new McpToolExposer(pi, { manageActiveTools: false });
   const sharedPromptResourceExposer = new McpPromptsResourcesExposer(pi, {
     authorize: async (kind, serverName, itemName, ctx) => {
-      const authorize = ctx ? authorizers.get(managerKey(ctx)) : undefined;
-      return authorize ? authorize(kind, serverName, itemName, ctx) : false;
+      if (!ctx) return false;
+      const key = managerKey(ctx);
+      const authorize = authorizers.get(key);
+      if (authorize) return authorize(kind, serverName, itemName, ctx);
+      // Isolated child sessions never emit session_start, so no authorizer is
+      // registered for them. They inherit MCP through a parent-published bridge;
+      // the parent already authorized the servers it exposes and a child can only
+      // reach resources the parent explicitly bridged. Authorize resource access
+      // by bridge presence; the read/list path still rejects unknown servers.
+      if (kind === "resource") return sessionMcpBridge(ctx.cwd, ctx.sessionManager.getSessionId()) !== undefined;
+      return false;
     },
   });
   let sharedRevision = 1;
@@ -174,13 +183,25 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
         }
       }
       sharedExposer.syncSession(key, snapshot, sharedRevision++);
-      const childNames = snapshot
-        .map((entry) => sharedExposer.mappingForIdentity(entry.serverName, entry.nativeName)?.piName)
-        .filter((name): name is string => Boolean(name));
+      const definitions = snapshot.map((entry) => {
+        const mapping = sharedExposer.mappingForIdentity(entry.serverName, entry.nativeName);
+        return mapping ? { name: mapping.piName, description: mapping.description, parameters: mapping.parameters as unknown } : undefined;
+      }).filter((definition): definition is { name: string; description: string; parameters: unknown } => definition !== undefined);
+      const childNames = definitions.map((definition) => definition.name);
       publishSessionMcpNames(ctx, childNames);
+      publishSessionMcpDefinitions(ctx, definitions);
       sharedPromptResourceExposer.syncSession(key);
       reconcileActiveTools();
     };
+    publishSessionMcpBridge(ctx, {
+      invokeTool: async (name, args, signal) => {
+        const mapping = sharedExposer.mapping(name);
+        if (!mapping) return normalizeCallToolResult(undefined, { server: "unknown", tool: name, transportError: "MCP tool is no longer available" });
+        return sharedExposer.invokeForSession(mapping, args, signal, ctx);
+      },
+      listResources: (server) => manager.resourcesFor(server),
+      readResource: async (server, uri, signal) => readResource(server, uri, signal),
+    });
     reconcile();
     reconciles.set(key, reconcile);
   });
@@ -195,6 +216,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     sharedExposer.removeSession(key, sharedRevision++);
     sharedPromptResourceExposer.removeSession(key);
     clearMcpNames(ctx);
+    clearSessionMcpBridge(ctx);
     reconciles.delete(key);
     await manager.stop();
     reconcileActiveTools();

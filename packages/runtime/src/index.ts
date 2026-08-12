@@ -24,6 +24,7 @@ export { currentProcessIdentity, processStartTime, type ProcessIdentity } from "
 export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
 export { createChildSessionManager, resolveChildTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
+export { maxAgentDepth } from "./shared/pi-code-config.ts";
 export { getChildExtensionFactories, registerChildExtensionFactory } from "./infrastructure/pi-sdk/child-extensions.ts";
 export {
   attachAgentSessionLiveFeed,
@@ -35,7 +36,7 @@ export { backgroundModeError, formatBackgroundResult, runBackgroundJob } from ".
 export { getChildPool, type ChildPool } from "./infrastructure/pool/child-pool.ts";
 export { createConcurrencyGate, type ConcurrencyGate } from "./infrastructure/pool/concurrency-gate.ts";
 export { createDeliveryCoordinator, type DeliveryCoordinator } from "./infrastructure/pool/delivery.ts";
-export { createInterruptionSweep, interruptRunningJobs } from "./infrastructure/pool/interruption.ts";
+export { abortJobTree, createInterruptionSweep, interruptRunningJobs } from "./infrastructure/pool/interruption.ts";
 export { createRegistry, foldLog, recordNewJob, type Registry } from "./infrastructure/registry/registry.ts";
 export { createScopedRegistry, scopedRegistryForSession, type ScopedRegistry } from "./infrastructure/registry/scoped-registry.ts";
 export { createAgentEventRegistry, canonicalJobId, MAX_RETAINED_TERMINAL_AGENTS, type AgentEventRegistry } from "./infrastructure/registry/agent-event-registry.ts";

@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Prompt } from "@modelcontextprotocol/sdk/types.js";
+import { sessionMcpBridge } from "@xzy-ai/core";
 import { NameRegistry } from "./naming.ts";
 import { promptResultToText, resourceResultToText, type McpPromptResult, type McpResourceResult } from "./prompts-resources.ts";
 
@@ -61,7 +62,22 @@ export class McpPromptsResourcesExposer {
   constructor(
     private readonly pi: ExtensionAPI,
     private readonly options: McpPromptsResourcesOptions = {},
-  ) {}
+  ) {
+    // Resource list/read tools are stateless: they route through the invoking
+    // session's binding via the Pi context. Register them eagerly so isolated
+    // child sessions, which never emit a session_start extension event, still
+    // expose the model-facing resource tools that their allowlist grants.
+    this.ensureResourcesRegistered();
+  }
+
+  private ensureResourcesRegistered(): void {
+    if (this.resourcesRegistered) return;
+    this.registerResourceTools(
+      (server, uri, signal, ctx) => this.sessionFor(ctx)?.readResource(server, uri, signal, ctx) ?? Promise.resolve({ server, uri, text: "", isError: true, failure: "unavailable" }),
+      (server, ctx) => this.sessionFor(ctx)?.listResources(server, ctx),
+    );
+    this.resourcesRegistered = true;
+  }
 
   register(
     manager: McpManagerLike,
@@ -71,22 +87,13 @@ export class McpPromptsResourcesExposer {
   ): void {
     this.legacyBinding = { manager, readPrompt, readResource, listResources };
     this.syncAllPrompts();
-    if (!this.resourcesRegistered) {
-      this.registerResourceTools(readResource, listResources);
-      this.resourcesRegistered = true;
-    }
+    this.ensureResourcesRegistered();
   }
 
   registerSession(sessionKey: string, binding: McpSessionBinding): void {
     this.sessions.set(sessionKey, binding);
     this.syncAllPrompts();
-    if (!this.resourcesRegistered) {
-      this.registerResourceTools(
-        (server, uri, signal, ctx) => this.sessionFor(ctx)?.readResource(server, uri, signal, ctx) ?? Promise.resolve({ server, uri, text: "", isError: true, failure: "unavailable" }),
-        (server, ctx) => this.sessionFor(ctx)?.listResources(server, ctx),
-      );
-      this.resourcesRegistered = true;
-    }
+    this.ensureResourcesRegistered();
   }
 
   removeSession(sessionKey: string): void {
@@ -100,7 +107,21 @@ export class McpPromptsResourcesExposer {
 
   private sessionFor(ctx?: ExtensionContext): McpSessionBinding | undefined {
     if (!ctx) return this.legacyBinding;
-    return this.sessions.get(`${ctx.cwd}\u0000${ctx.sessionManager.getSessionId()}`) ?? this.legacyBinding;
+    const sm = (ctx as unknown as { sessionManager?: { getSessionId?: () => string } }).sessionManager;
+    const sessionId = sm?.getSessionId ? sm.getSessionId() : undefined;
+    if (sessionId === undefined) return this.legacyBinding;
+    const bound = this.sessions.get(`${ctx.cwd}\u0000${sessionId}`) ?? this.legacyBinding;
+    if (bound) return bound;
+    const bridge = sessionMcpBridge(ctx.cwd, sessionId);
+    if (!bridge) return undefined;
+    // Isolated child sessions inherit a bridge but do not own a local MCP
+    // manager. Present the same resource surface through that bridge.
+    return {
+      manager: { serverNames: () => [], promptsFor: () => [] },
+      readPrompt: async (server, prompt) => ({ server, prompt, messages: [], isError: true, failure: "unavailable" }),
+      readResource: (server, uri, signal) => Promise.resolve(bridge.readResource(server, uri, signal)) as Promise<McpResourceResult>,
+      listResources: (server) => bridge.listResources(server) as Array<{ uri: string; name: string; description?: string; mimeType?: string }> | undefined,
+    };
   }
 
   private syncAllPrompts(): void {

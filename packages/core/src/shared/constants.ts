@@ -10,6 +10,16 @@ export const MAX_CONCURRENCY = 2;
 export const MAX_PARALLEL_AGENTS = 3;
 
 /**
+ * Default maximum recursive agent depth.
+ *
+ * The depth-`MAX_AGENT_DEPTH` descendant is the terminal leaf: it keeps
+ * research/MCP/built-in tools but loses the agent-family tools, so it cannot
+ * spawn or manage another agent. It can be overridden per-process through
+ * `PI_CODE_MAX_AGENT_DEPTH`.
+ */
+export const DEFAULT_MAX_AGENT_DEPTH = 4;
+
+/**
  * Fixed footer appended to every active-goal delivery.
  *
  * The goal system persists only the exact user prompt and appends this footer
