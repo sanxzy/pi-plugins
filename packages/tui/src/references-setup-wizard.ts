@@ -12,11 +12,14 @@ import {
 export interface ReferencesSetupItem {
   readonly name: string;
   readonly label: string;
+  /** Raw local details when the entry is a local reference (object or shorthand). */
+  readonly local?: { path: string; description?: string; hidden?: boolean };
 }
 
 /** A single field editor, driven sequentially by the wizard. */
 type WizardStep =
   | { kind: "menu" }
+  | { kind: "select-edit" }
   | { kind: "alias" }
   | { kind: "path" }
   | { kind: "description" }
@@ -55,6 +58,8 @@ export class ReferencesSetupWizard implements Component {
   private path = "";
   private description = "";
   private hidden = false;
+  private hiddenTouched = false;
+  private editAlias: string | null = null;
   private items: readonly ReferencesSetupItem[] = [];
   private optionIndex = 0;
   private statusMessage = "";
@@ -121,6 +126,20 @@ export class ReferencesSetupWizard implements Component {
         add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc cancel"));
         break;
       }
+      case "select-edit": {
+        add(" ", this.theme.fg("accent", "References setup · edit"));
+        const editable = this.editableItems();
+        if (editable.length === 0) {
+          add(" ", this.theme.fg("muted", "No local references to edit."));
+        } else {
+          for (let i = 0; i < editable.length; i++) {
+            const selected = i === this.optionIndex;
+            add(selected ? this.theme.fg("accent", "> ") : "  ", this.theme.fg(selected ? "accent" : "text", `${i + 1}. ${editable[i]!.name} — ${editable[i]!.label}`));
+          }
+        }
+        add(" ", this.theme.fg("dim", "↑↓ navigate • Enter edit • Esc back"));
+        break;
+      }
       case "alias": {
         add(" ", this.theme.fg("accent", `Add local reference · alias`));
         add(" ", this.theme.fg("muted", "Unique alias to identify this reference."));
@@ -130,7 +149,7 @@ export class ReferencesSetupWizard implements Component {
         break;
       }
       case "path": {
-        add(" ", this.theme.fg("accent", `Add local reference · path`));
+        add(" ", this.theme.fg("accent", `${this.editAlias ? "Edit" : "Add"} local reference · path`));
         add(" ", this.theme.fg("muted", "Absolute path or ~/ relative path."));
         add(" ", this.theme.fg("text", this.promptText("Path:")));
         for (const line of this.editor.render(Math.max(1, renderWidth - 2))) add(" ", line);
@@ -138,7 +157,7 @@ export class ReferencesSetupWizard implements Component {
         break;
       }
       case "description": {
-        add(" ", this.theme.fg("accent", `Add local reference · description`));
+        add(" ", this.theme.fg("accent", `${this.editAlias ? "Edit" : "Add"} local reference · description`));
         add(" ", this.theme.fg("muted", "Optional description."));
         add(" ", this.theme.fg("text", this.promptText("Description (optional):")));
         for (const line of this.editor.render(Math.max(1, renderWidth - 2))) add(" ", line);
@@ -146,7 +165,7 @@ export class ReferencesSetupWizard implements Component {
         break;
       }
       case "hidden": {
-        add(" ", this.theme.fg("accent", `Add local reference · hidden`));
+        add(" ", this.theme.fg("accent", `${this.editAlias ? "Edit" : "Add"} local reference · hidden`));
         const option = this.hidden ? "Hide from discovery" : "Show in discovery";
         add(" ", this.theme.fg(this.hidden ? "accent" : "text", `Current: ${option}`));
         const options = ["Show", "Hide", "Continue"];
@@ -185,6 +204,29 @@ export class ReferencesSetupWizard implements Component {
 
   handleInput(data: string): void {
     if (this.settled || this.busy) return;
+    if (this.step.kind === "select-edit") {
+      const editable = this.editableItems();
+      if (matchesKey(data, Key.up)) {
+        this.optionIndex = Math.max(0, this.optionIndex - 1);
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.down)) {
+        this.optionIndex = Math.min(editable.length - 1, this.optionIndex + 1);
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.escape)) {
+        this.step = { kind: "menu" };
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.enter)) {
+        const item = editable[this.optionIndex];
+        if (item) this.startEdit(item);
+      }
+      return;
+    }
     if (this.step.kind === "hidden") {
       if (matchesKey(data, Key.up)) {
         this.optionIndex = Math.max(0, this.optionIndex - 1);
@@ -197,20 +239,27 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        if (this.optionIndex === 0) this.hidden = false;
-        else if (this.optionIndex === 1) this.hidden = true;
-        void this.submitAdd();
+        if (this.optionIndex === 0) {
+          this.hidden = false;
+          this.hiddenTouched = true;
+        } else if (this.optionIndex === 1) {
+          this.hidden = true;
+          this.hiddenTouched = true;
+        }
+        void this.submitLocal();
         return;
       }
       if (matchesKey(data, Key.escape)) {
-        this.setIdentification();
+        this.step = { kind: "description" };
+        this.editor.setText(this.description);
+        this.refresh();
         return;
       }
       return;
     }
     if (this.step.kind === "result" || this.step.kind === "error") {
       if (matchesKey(data, Key.enter)) {
-        if (this.step.kind === "result" && !this.step.ok) this.setIdentification();
+        if (this.step.kind === "result" && !this.step.ok) this.retryFromResult();
         else this.returnToMenu();
       } else if (matchesKey(data, Key.escape)) {
         this.returnToMenu();
@@ -236,6 +285,7 @@ export class ReferencesSetupWizard implements Component {
     if (this.step.kind === "path") {
       if (matchesKey(data, Key.escape)) {
         this.step = { kind: "alias" };
+        this.editor.setText(this.alias);
         this.refresh();
         return;
       }
@@ -243,6 +293,7 @@ export class ReferencesSetupWizard implements Component {
         this.path = this.editor.getText();
         this.editor.setText("");
         this.step = { kind: "description" };
+        this.editor.setText(this.description);
         this.refresh();
         return;
       }
@@ -253,13 +304,14 @@ export class ReferencesSetupWizard implements Component {
     if (this.step.kind === "description") {
       if (matchesKey(data, Key.escape)) {
         this.step = { kind: "path" };
+        this.editor.setText(this.path);
         this.refresh();
         return;
       }
       if (matchesKey(data, Key.enter)) {
         this.description = this.editor.getText();
         this.editor.setText("");
-        this.optionIndex = 0;
+        this.optionIndex = this.editAlias ? 2 : 0;
         this.step = { kind: "hidden" };
         this.refresh();
         return;
@@ -287,6 +339,17 @@ export class ReferencesSetupWizard implements Component {
         const option = this.optionIndex;
         if (option === 0) {
           this.setIdentification();
+        } else if (option === 2) {
+          const editable = this.editableItems();
+          if (editable.length === 0) {
+            this.statusMessage = "No local references to edit.";
+            this.refresh();
+          } else {
+            this.statusMessage = "";
+            this.optionIndex = 0;
+            this.step = { kind: "select-edit" };
+            this.refresh();
+          }
         } else if (option === 4) {
           this.finish({ status: "saved", message: "References setup complete." });
         } else if (option === 3) {
@@ -305,8 +368,40 @@ export class ReferencesSetupWizard implements Component {
     this.path = "";
     this.description = "";
     this.hidden = false;
+    this.hiddenTouched = false;
+    this.editAlias = null;
+    this.statusMessage = "";
     this.editor.setText("");
     this.step = { kind: "alias" };
+    this.refresh();
+  }
+
+  private editableItems(): readonly ReferencesSetupItem[] {
+    return this.items.filter((item) => item.local !== undefined);
+  }
+
+  private startEdit(item: ReferencesSetupItem): void {
+    this.editAlias = item.name;
+    this.path = item.local!.path;
+    this.description = item.local!.description ?? "";
+    this.hidden = item.local!.hidden ?? false;
+    this.hiddenTouched = false;
+    this.optionIndex = 2; // Continue keeps raw hidden metadata unchanged.
+    this.statusMessage = "";
+    this.editor.setText(this.path);
+    this.step = { kind: "path" };
+    this.refresh();
+  }
+
+  private retryFromResult(): void {
+    if (this.editAlias) {
+      this.editor.setText(this.path);
+      this.optionIndex = 2;
+      this.step = { kind: "path" };
+    } else {
+      this.editor.setText(this.alias);
+      this.step = { kind: "alias" };
+    }
     this.refresh();
   }
 
@@ -318,26 +413,32 @@ export class ReferencesSetupWizard implements Component {
     this.refresh();
   }
 
-  private async submitAdd(): Promise<void> {
+  private async submitLocal(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.step = { kind: "busy", message: "Saving reference…" };
     this.refresh();
-    const result = await this.controller.addLocal({
-      alias: this.alias,
-      path: this.path,
-      description: this.description || undefined,
-      hidden: this.hidden || undefined,
-    });
+    const description = this.description || undefined;
+    const hidden = this.hiddenTouched ? this.hidden : undefined;
+    const input: { path: string; description?: string; hidden?: boolean } = { path: this.path };
+    if (description !== undefined) input.description = description;
+    if (hidden !== undefined) input.hidden = hidden;
+    const result = this.editAlias
+      ? await this.controller.updateLocal(this.editAlias, input)
+      : await this.controller.addLocal({ alias: this.alias, ...input });
     if (this.settled) return;
     this.busy = false;
-    this.step = result.ok ? { kind: "result", ok: true, message: result.message } : { kind: "result", ok: false, message: result.message };
+    if (result.ok) this.statusMessage = result.message;
+    this.step = { kind: "result", ok: result.ok, message: result.message };
     this.optionIndex = 0;
+    if (result.ok) void this.load();
     this.refresh();
   }
 
   private returnToMenu(): void {
     this.editor.setText("");
+    this.editAlias = null;
+    this.hiddenTouched = false;
     this.step = { kind: "menu" };
     this.refresh();
   }

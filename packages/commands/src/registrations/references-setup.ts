@@ -13,6 +13,8 @@ export interface ReferencesSetupController {
 export interface ReferencesSetupItem {
   readonly name: string;
   readonly label: string;
+  /** Raw local details when the entry is a local reference (object or shorthand). */
+  readonly local?: { path: string; description?: string; hidden?: boolean };
 }
 
 export interface ReferencesLocalInput {
@@ -43,10 +45,17 @@ export function createReferencesSetupController(
   const catalog = options.catalog ?? (options.catalogFactory ?? (() => createReferenceCatalog()))();
   let cancelled = false;
   const itemsFrom = options.itemsFrom ?? ((document: ReferenceCatalogDocument) =>
-    Object.entries(document.references).map(([name, entry]) => ({
-      name,
-      label: typeof entry === "string" ? entry : "repository" in entry ? String(entry.repository) : String(entry.path ?? ""),
-    })));
+    Object.entries(document.references).map(([name, entry]) => {
+      if (typeof entry === "string") return { name, label: entry, local: { path: entry } };
+      if (entry && typeof entry === "object" && "path" in entry) {
+        const raw = entry as { path: unknown; description?: unknown; hidden?: unknown };
+        const local: { path: string; description?: string; hidden?: boolean } = { path: String(raw.path) };
+        if (raw.description !== undefined) local.description = String(raw.description);
+        if (raw.hidden !== undefined) local.hidden = Boolean(raw.hidden);
+        return { name, label: local.path, local };
+      }
+      return { name, label: entry && typeof entry === "object" && "repository" in entry ? String((entry as { repository: unknown }).repository) : name };
+    }));
 
   async function load(): Promise<ReferenceCatalogDocument> {
     cancelled = false;
@@ -84,11 +93,34 @@ export function createReferencesSetupController(
       const document = await load();
       const pathOk = validateLocalPath(input.path);
       if (!pathOk.ok) return { ok: false, message: pathOk.error };
-      if (!(alias in document.references)) return { ok: false, message: "Reference not found" };
-      const local: { path: string; description?: string; hidden?: boolean } = { path: input.path };
-      if (input.description !== undefined) local.description = input.description;
-      if (input.hidden !== undefined) local.hidden = input.hidden;
-      return persist({ ...document, references: { ...document.references, [alias]: local } }, input.signal);
+      const existing = document.references[alias];
+      if (existing === undefined) return { ok: false, message: "Reference not found" };
+      let next: unknown;
+      if (typeof existing === "string") {
+        if (input.description === undefined && input.hidden === undefined) {
+          next = input.path; // keep shorthand form
+        } else {
+          const local: { path: string; description?: string; hidden?: boolean } = { path: input.path };
+          if (input.description !== undefined) local.description = input.description;
+          if (input.hidden !== undefined) local.hidden = input.hidden;
+          next = local;
+        }
+      } else if (existing && typeof existing === "object" && !("repository" in existing)) {
+        const raw = existing as Record<string, unknown>;
+        const local: Record<string, unknown> = { ...raw, path: input.path };
+        if (input.description !== undefined) local.description = input.description;
+        if (input.hidden !== undefined) local.hidden = input.hidden;
+        next = local;
+      } else {
+        return { ok: false, message: "Only local references can be edited here" };
+      }
+      return persist({
+        ...document,
+        references: {
+          ...document.references,
+          [alias]: next as ReferenceCatalogDocument["references"][string],
+        },
+      }, input.signal);
     },
     async remove(alias, signal) {
       const document = await load();
