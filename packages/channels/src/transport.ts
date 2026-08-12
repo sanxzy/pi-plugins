@@ -1,6 +1,7 @@
 import { Bot } from "grammy";
 import { run } from "@grammyjs/runner";
 import type { ChannelLogger } from "./logger.ts";
+import { TELEGRAM_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import type { ChannelPoller } from "./manager.ts";
 import type { ChannelConfig, StateResult } from "./state.ts";
 import type { TelegramBotCommand } from "./menu.ts";
@@ -128,6 +129,7 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
     onError: undefined,
 
     async start(config: ChannelConfig): Promise<StateResult<void>> {
+      return processWithLog({ operation: TELEGRAM_OPERATIONS.TRANSPORT_START, parameters: { approvedUsers: config.approvedUserIds.length } }, async () => {
       if (!stopped) {
         return { ok: false, code: "invalid", message: "Telegram connection is already running" };
       }
@@ -223,9 +225,11 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
 
       deps.logger.info("telegram_connected", {});
       return { ok: true, value: undefined };
+      });
     },
 
     async stop(): Promise<void> {
+      return processWithLog({ operation: TELEGRAM_OPERATIONS.TRANSPORT_STOP }, async () => {
       if (stopped) return;
       stopped = true;
 
@@ -254,6 +258,7 @@ export function createTelegramTransport(deps: TelegramTransportDeps): ChannelPol
         fingerprint = undefined;
       }
       deps.logger.info("telegram_stopped", {});
+      });
     },
   };
 

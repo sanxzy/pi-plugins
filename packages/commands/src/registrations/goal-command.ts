@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { COMMAND_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 export const GOAL_WORKFLOW_PROMPT = [
   "You are managing your own persistent goal for the current session.",
@@ -30,7 +31,9 @@ export function registerGoalCommand(pi: ExtensionAPI): void {
   pi.registerCommand("goal", {
     description: "Teach the current session the persistent goal workflow.",
     async handler(args: string, _ctx: ExtensionCommandContext): Promise<void> {
-      pi.sendUserMessage(expandTelegramGoalCommand(args), { deliverAs: "steer" });
+      processWithLog({ operation: COMMAND_OPERATIONS.GOAL_COMMAND, parameters: { hasArgs: args.length > 0 } }, async () => {
+        pi.sendUserMessage(expandTelegramGoalCommand(args), { deliverAs: "steer" });
+      });
     },
   });
 }
