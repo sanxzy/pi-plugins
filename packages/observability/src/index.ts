@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import pino from "pino";
+export * from "./operations.ts";
 
 const PRIVATE_DIR = 0o700;
 const PRIVATE_FILE = 0o600;

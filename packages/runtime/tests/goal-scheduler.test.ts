@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { GOAL_DELIVERY_FOOTER } from "@xzy-ai/core";
-import { createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
+import { GOAL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import { createGoalPool, getGoalPool, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
 function projectRoot(): string {
@@ -181,8 +181,8 @@ test("goal mutations emit correlated processWithLog records under a log context"
   });
   const created = runWithLogContext(active, () => pool.create({ cwd: "/project", prompt: "p", interval: "1m" }));
   assert.equal(created.ok, true);
-  const before = lines.filter((l) => l.operation === "goal.create" && l.phase === "before");
-  const after = lines.filter((l) => l.operation === "goal.create" && l.phase === "after");
+  const before = lines.filter((l) => l.operation === GOAL_OPERATIONS.CREATE && l.phase === "before");
+  const after = lines.filter((l) => l.operation === GOAL_OPERATIONS.CREATE && l.phase === "after");
   assert.ok(before.length >= 1);
   assert.ok(after.length >= 1);
   assert.equal(before[0].correlationId, after[0].correlationId);

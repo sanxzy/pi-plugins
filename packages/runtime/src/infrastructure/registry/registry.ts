@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { parseJobEvent, serializeJobEvent, type JobEvent } from "@xzy-ai/core";
 import { createJob, updateJob, type Job, type JobUpdate } from "@xzy-ai/core";
 import { canTransition, isTerminal } from "@xzy-ai/core";
-import { processWithLog } from "@xzy-ai/observability";
+import { REGISTRY_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 /** Maximum number of terminal (settled) jobs retained per per-parent registry. */
 export const MAX_RETAINED_TERMINAL_JOBS = 25;
@@ -111,7 +111,7 @@ export function createRegistry(filePath: string): Registry {
   };
 
   const prune = (): void => {
-    processWithLog({ operation: "registry.prune" }, () => {
+    processWithLog({ operation: REGISTRY_OPERATIONS.PRUNE }, () => {
       const jobs = foldLog(filePath);
       const terminal = [...jobs.values()].filter((job) => isTerminal(job.status));
       if (terminal.length <= MAX_RETAINED_TERMINAL_JOBS) return;
@@ -143,14 +143,14 @@ export function createRegistry(filePath: string): Registry {
     filePath,
     append,
     createJob(job: Job): void {
-      processWithLog({ operation: "registry.createJob", parameters: { jobId: job.jobId } }, () => {
+      processWithLog({ operation: REGISTRY_OPERATIONS.CREATE_JOB, parameters: { jobId: job.jobId } }, () => {
         append({ type: "created", job, at: job.createdAt });
         index.set(job.jobId, job);
         prune();
       });
     },
     updateJob(jobId: string, update: JobUpdate): void {
-      processWithLog({ operation: "registry.updateJob", parameters: { jobId, status: update.status } }, () => {
+      processWithLog({ operation: REGISTRY_OPERATIONS.UPDATE_JOB, parameters: { jobId, status: update.status } }, () => {
         const current = index.get(jobId);
         if (!current) return;
         const to = update.status;

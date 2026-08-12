@@ -8,7 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
-import { createSessionLogger, processWithLog, runWithLogContext } from "@xzy-ai/observability";
+import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext } from "@xzy-ai/observability";
 import { currentProcessIdentity, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
@@ -82,7 +82,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     const logger = sessionLogger(projectRoot, sessionId);
     return runWithLogContext(logger, () => processWithLog(
-      { operation: "session.start", parameters: { reason: event.reason } },
+      { operation: SESSION_OPERATIONS.START, parameters: { reason: event.reason } },
       async () => {
         await startSession(event, ctx, pi, projectRoot, sessionId);
       },
@@ -167,7 +167,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const rootSessionId = ctx.sessionManager.getSessionId();
     const logger = sessionLogger(projectRoot, rootSessionId);
     return runWithLogContext(logger, () => processWithLog(
-      { operation: "session.stop", parameters: { reason: event.reason } },
+      { operation: SESSION_OPERATIONS.STOP, parameters: { reason: event.reason } },
       async () => {
         await stopSession(event, ctx, projectRoot, rootSessionId);
       },

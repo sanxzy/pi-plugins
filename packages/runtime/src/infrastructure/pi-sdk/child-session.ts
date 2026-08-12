@@ -19,7 +19,7 @@ import type {
   ChildSessionControl,
   SpawnChildSession,
 } from "@xzy-ai/core";
-import { processWithLog } from "@xzy-ai/observability";
+import { AGENT_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
 import { getChildExtensionFactories } from "./child-extensions.ts";
@@ -376,7 +376,7 @@ export const spawnChildSession: SpawnChildSession & {
   ) => Promise<ChildSessionServices>;
 } = (async (options) => {
   // Wrap the whole foreground child lifecycle as one correlated boundary.
-  return processWithLog({ operation: "agent.lifecycle", parameters: { jobId: options.jobId } }, async () => {
+  return processWithLog({ operation: AGENT_OPERATIONS.LIFECYCLE, parameters: { jobId: options.jobId } }, async () => {
   // A cancelled parent run must not start a child at all.
   if (options.signal?.aborted) {
     return { sessionFile: "", output: "(aborted before start)", status: "aborted" };

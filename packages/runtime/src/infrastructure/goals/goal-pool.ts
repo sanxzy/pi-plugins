@@ -6,7 +6,7 @@ import {
   validateGoalInput,
   type Goal,
 } from "@xzy-ai/core";
-import { processWithLog } from "@xzy-ai/observability";
+import { GOAL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { encodeProjectId, homeGoalFile } from "../../shared/paths.ts";
 import { createGoalStore, type GoalStore } from "./goal-store.ts";
 
@@ -112,7 +112,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
   };
 
   const tick = (cwd: string): void => {
-    processWithLog({ operation: "goal.tick", parameters: { cwd } }, () => {
+    processWithLog({ operation: GOAL_OPERATIONS.TICK, parameters: { cwd } }, () => {
       if (deliverySuspended) return;
       const normalizedCwd = normalizeGoalCwd(cwd);
       const goals = store.fold();
@@ -170,7 +170,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     store,
     create(input) {
       const cwd = normalizeGoalCwd(input.cwd);
-      return processWithLog({ operation: "goal.create", parameters: { cwd, prompt: input.prompt, interval: input.interval ?? input.intervalMs } }, () => {
+      return processWithLog({ operation: GOAL_OPERATIONS.CREATE, parameters: { cwd, prompt: input.prompt, interval: input.interval ?? input.intervalMs } }, () => {
         const result = withCwdMutation(cwd, () => {
         // A request such as "2m testing goal" carries interval metadata before
         // the exact prompt. Split that leading duration into the scheduling
@@ -194,7 +194,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     },
     pause(cwd, reason) {
       const normalized = normalizeGoalCwd(cwd);
-      return processWithLog({ operation: "goal.pause", parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => {
+      return processWithLog({ operation: GOAL_OPERATIONS.PAUSE, parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => {
         if (reason.trim().length === 0) {
           return { ok: false, error: "pause reason must contain non-whitespace text" } as const;
         }
@@ -203,7 +203,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     },
     resume(cwd) {
       const normalized = normalizeGoalCwd(cwd);
-      const result = processWithLog({ operation: "goal.resume", parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => store.resume(normalized)));
+      const result = processWithLog({ operation: GOAL_OPERATIONS.RESUME, parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => store.resume(normalized)));
       if (result.ok) ensureScheduler(normalized);
       return result;
     },
@@ -212,7 +212,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     },
     clear(cwd) {
       const normalized = normalizeGoalCwd(cwd);
-      const cleared = processWithLog({ operation: "goal.clear", parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => store.clear(normalized)));
+      const cleared = processWithLog({ operation: GOAL_OPERATIONS.CLEAR, parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => store.clear(normalized)));
       if (cleared) clearScheduler(normalized);
       return cleared;
     },
@@ -223,14 +223,14 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
       const normalized = { ...binding, cwd: normalizeGoalCwd(binding.cwd) };
       bindings.set(normalized.cwd, normalized);
       currentBinding = normalized;
-      processWithLog({ operation: "goal.bind", parameters: { cwd: normalized.cwd } }, () => {
+      processWithLog({ operation: GOAL_OPERATIONS.BIND, parameters: { cwd: normalized.cwd } }, () => {
         if (!deliverySuspended) {
           for (const cwd of store.fold().keys()) ensureScheduler(cwd);
         }
       });
     },
     shutdown() {
-      processWithLog({ operation: "goal.shutdown" }, () => {
+      processWithLog({ operation: GOAL_OPERATIONS.SHUTDOWN }, () => {
         clearAllSchedulers();
         bindings.clear();
         currentBinding = undefined;
@@ -238,7 +238,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
       });
     },
     clearStore() {
-      processWithLog({ operation: "goal.clearStore" }, () => {
+      processWithLog({ operation: GOAL_OPERATIONS.CLEAR_STORE }, () => {
         clearAllSchedulers();
         bindings.clear();
         currentBinding = undefined;
@@ -265,7 +265,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     },
     clearActiveGoals() {
       const activeGoals = Array.from(store.fold().values()).filter((goal) => goal.status === "active");
-      processWithLog({ operation: "goal.clearActive", parameters: { count: activeGoals.length } }, () => {
+      processWithLog({ operation: GOAL_OPERATIONS.CLEAR_ACTIVE, parameters: { count: activeGoals.length } }, () => {
         for (const goal of activeGoals) {
           clearScheduler(goal.cwd);
           store.clear(goal.cwd);
@@ -280,7 +280,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     tick,
     resumeDelivery() {
       deliverySuspended = false;
-      processWithLog({ operation: "goal.resumeDelivery" }, () => {
+      processWithLog({ operation: GOAL_OPERATIONS.RESUME_DELIVERY }, () => {
         for (const cwd of store.fold().keys()) ensureScheduler(cwd);
       });
     },

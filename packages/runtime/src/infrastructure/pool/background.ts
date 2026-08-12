@@ -1,6 +1,6 @@
 import type { Job, JobUpdate } from "@xzy-ai/core";
 import type { ChildRunResult } from "@xzy-ai/core";
-import { processWithLog } from "@xzy-ai/observability";
+import { AGENT_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import type { DeliveryCoordinator } from "./delivery.ts";
 import type { AgentManifestStore } from "../manifests/manifests.ts";
 /**
@@ -60,7 +60,7 @@ export function runBackgroundJob(
   job: Job,
   options: RunBackgroundJobOptions,
 ): Promise<void> {
-  return processWithLog({ operation: "agent.runBackground", parameters: { jobId: job.jobId, subagentType: job.subagentType } }, async () => {
+  return processWithLog({ operation: AGENT_OPERATIONS.RUN_BACKGROUND, parameters: { jobId: job.jobId, subagentType: job.subagentType } }, async () => {
     await runBackgroundJobInner(deps, job, options);
   });
 }
