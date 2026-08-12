@@ -186,7 +186,7 @@ test("research tool descriptions direct local-first lookup and automatic fallbac
 test("extension re-exports the web and wiki search details types", () => {
   const searchDetails: WebSearchDetails = { query: "typescript", provider: "exa" };
   const fetchDetails: WebFetchDetails = {};
-  const wikiDetails: LlmWikisSearchDetails = { query: "typescript", results: [] };
+  const wikiDetails: LlmWikisSearchDetails = { mode: "wikis", query: "typescript", results: [] };
   assert.equal(searchDetails.provider, "exa");
   assert.deepEqual(fetchDetails, {});
   assert.deepEqual(wikiDetails.results, []);
