@@ -250,8 +250,36 @@ test("Git edit prefills raw values and submits updateGit preserving metadata", a
   wizard.handleInput("\r"); // keep description
   wizard.handleInput("\r"); // Continue -> hidden stays true (untouched)
   await flush();
-  assert.deepEqual(calls, [{ alias: "react", input: { repository: "facebook/react", description: "React" } }]);
+  assert.deepEqual(calls, [{ alias: "react", input: { repository: "facebook/react", branch: "", description: "React" } }]);
   assert.ok(lines(wizard).some((line) => line.includes("Updated")));
+});
+
+test("Git edit sends an empty branch marker when clearing a stored branch", async () => {
+  let submitted: { repository: string; branch?: string } | undefined;
+  const ctl = controller({
+    list: async () => ({ items: [{ name: "react", label: "facebook/react", git: { repository: "facebook/react", branch: "main" } }] }),
+    updateGit: async (_alias, input) => {
+      submitted = input;
+      return { ok: true as const, message: "Branch cleared" };
+    },
+  });
+  const wizard = new ReferencesSetupWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  wizard.handleInput("\r"); // select Git entry -> operation chooser
+  wizard.handleInput("\r"); // Edit
+  wizard.handleInput("\r"); // keep repository
+  // Clear the prefilled branch value and submit it as an explicit empty marker.
+  for (let i = 0; i < "main".length; i++) wizard.handleInput("\x7f");
+  wizard.handleInput("\r");
+  wizard.handleInput("\r"); // empty description
+  wizard.handleInput("\r"); // open hidden choices
+  wizard.handleInput("\r"); // Continue
+  await flush();
+  assert.deepEqual(submitted, { repository: "facebook/react", branch: "" });
+  assert.ok(lines(wizard).some((line) => line.includes("Branch cleared")));
 });
 
 test("Test and Refresh run observationally from the operation chooser", async () => {
