@@ -253,6 +253,113 @@ test("llm_wikis_search retrieves a complete page with metadata without requiring
   }
 });
 
+test("llm_wikis_search wildcard discovers topics and continuation pages without matching content", async () => {
+  const root = tempRoot();
+  writeFileSync(
+    join(root, "alpha.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: alpha\npage: 1\ntotalPages: 2\nnext: alpha.part-002.md\n\n<!-- pi-code-wiki-page-end -->\n\nsecret-token-never-returned`,
+  );
+  writeFileSync(
+    join(root, "alpha.part-002.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: alpha\npage: 2\ntotalPages: 2\nprevious: alpha.md\n\n<!-- pi-code-wiki-page-end -->\n\nmore-secret-content`,
+  );
+  writeFileSync(
+    join(root, "beta.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: beta\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nbody without a search token`,
+  );
+  try {
+    const result = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
+    const details = result.details as unknown as { discovery: { topics: Array<{ topic: string; pages: Array<Record<string, unknown>> }> } };
+    assert.deepEqual(details.discovery.topics.map((topic) => topic.topic), ["alpha", "beta"]);
+    assert.deepEqual(details.discovery.topics[0]?.pages.map((page) => page.file), ["alpha.md", "alpha.part-002.md"]);
+    assert.deepEqual(details.discovery.topics[0]?.pages[0], {
+      file: "alpha.md",
+      page: 1,
+      totalPages: 2,
+      next: "alpha.part-002.md",
+    });
+    assert.deepEqual(details.discovery.topics[0]?.pages[1], {
+      file: "alpha.part-002.md",
+      page: 2,
+      totalPages: 2,
+      previous: "alpha.md",
+    });
+    assert.match(text(result), /alpha\.part-002\.md/);
+    assert.doesNotMatch(text(result), /secret-token|more-secret-content/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search wildcard applies a topic filter without tokenizing or ranking pages", async () => {
+  const root = tempRoot();
+  writeFileSync(
+    join(root, "react.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: react\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nno matching query terms`,
+  );
+  writeFileSync(
+    join(root, "vue.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: vue\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nno matching query terms`,
+  );
+  try {
+    const result = await executeLlmWikisSearch({ type: "wikis", query: "*", topic: "React" }, { wikiRoot: root });
+    const details = result.details as unknown as { discovery: { topics: Array<{ topic: string }> } };
+    assert.deepEqual(details.discovery.topics.map((topic) => topic.topic), ["react"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search wildcard has deterministic bounded discovery output", async () => {
+  const root = tempRoot();
+  for (let index = 55; index >= 1; index--) {
+    writeFileSync(
+      join(root, `topic-${String(index).padStart(2, "0")}.md`),
+      `<!-- pi-code-wiki-page -->\ntopic: topic-${String(index).padStart(2, "0")}\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->`,
+    );
+  }
+  try {
+    const result = await executeLlmWikisSearch({ type: "wikis", query: "*", maxResults: 20 }, { wikiRoot: root });
+    const details = result.details as unknown as { discovery: { topics: Array<{ topic: string }> } };
+    assert.equal(details.discovery.topics.length, 20);
+    assert.deepEqual(details.discovery.topics.map((topic) => topic.topic), Array.from({ length: 20 }, (_, index) => `topic-${String(index + 1).padStart(2, "0")}`));
+    assert.ok(text(result).length <= 64 * 1024);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search wildcard handles absent, empty, malformed, and unreadable roots safely", async () => {
+  const missing = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: join(tempRoot(), "missing") });
+  assert.equal(text(missing), "No local wiki pages found.");
+  assert.deepEqual((missing.details as unknown as { discovery: unknown }).discovery, { topics: [] });
+
+  const emptyRoot = tempRoot();
+  try {
+    const empty = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: emptyRoot });
+    assert.equal(text(empty), "No local wiki pages found.");
+    assert.deepEqual((empty.details as unknown as { discovery: unknown }).discovery, { topics: [] });
+  } finally {
+    rmSync(emptyRoot, { recursive: true, force: true });
+  }
+
+  const malformedRoot = tempRoot();
+  writeFileSync(join(malformedRoot, "malformed.md"), "not a wiki page");
+  try {
+    const malformed = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: malformedRoot });
+    assert.equal(text(malformed), "No local wiki pages found.");
+    assert.deepEqual((malformed.details as unknown as { discovery: unknown }).discovery, { topics: [] });
+  } finally {
+    rmSync(malformedRoot, { recursive: true, force: true });
+  }
+
+  const fileRoot = join(tempRoot(), "not-a-directory.md");
+  writeFileSync(fileRoot, "not a directory");
+  const unreadable = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: fileRoot });
+  assert.equal(text(unreadable), "No local wiki pages found.");
+  assert.deepEqual((unreadable.details as unknown as { discovery: unknown }).discovery, { topics: [] });
+});
+
 test("llm_wikis_search references mode returns a safe not-yet-available result in this slice", async () => {
   const result = await executeLlmWikisSearch({ type: "references", query: "*" });
   assert.match(text(result), /not yet available/i);
