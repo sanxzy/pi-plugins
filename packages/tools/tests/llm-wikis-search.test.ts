@@ -7,9 +7,15 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   executeLlmWikisSearch,
   registerLlmWikisSearchTool,
+  MAX_REFERENCE_CHILDREN,
   type ReferenceCatalogReader,
 } from "../src/registrations/llm-wikis-search.ts";
-import { formatWikiEntry, saveWikiEntry } from "../src/wiki.ts";
+import {
+  formatWikiEntry,
+  saveWikiEntry,
+  MAX_WIKI_DISCOVERY_OUTPUT_BYTES,
+  MAX_WIKI_DISCOVERY_PAGES,
+} from "../src/wiki.ts";
 
 type Tool = {
   name: string;
@@ -733,3 +739,69 @@ test("llm_wikis_search short-circuits wiki research on an aborted signal", async
   assert.match(text(result), /Error/);
   assert.doesNotMatch(text(result), /no local wiki pages/i);
 });
+
+test("reference selection excludes node_modules and .git and caps the immediate child listing", async () => {
+  const listedRoots: string[] = [];
+  const allChildren: FakeReferenceChild[] = [];
+  for (let index = 0; index < MAX_REFERENCE_CHILDREN + 50; index++) {
+    allChildren.push({ name: `dep-${String(index).padStart(3, "0")}.md`, kind: "file" });
+  }
+  allChildren.push({ name: "node_modules", kind: "directory" }, { name: ".git", kind: "directory" });
+  const catalog = fakeSelectionReader(
+    [{ name: "docs", source: { type: "local" }, status: "available", path: "/real/docs" }],
+    allChildren,
+    { listedRoots },
+  );
+  const result = await executeLlmWikisSearch({ type: "references", alias: "docs" }, { referenceCatalog: catalog });
+  const details = result.details as unknown as {
+    selection: { children: Array<{ name: string; kind: string }>; truncated?: boolean; total?: number; excluded?: number };
+  };
+  assert.equal(details.selection.children.some((child) => child.name === "node_modules"), false);
+  assert.equal(details.selection.children.some((child) => child.name === ".git"), false);
+  assert.equal(details.selection.children.length, MAX_REFERENCE_CHILDREN);
+  assert.equal(details.selection.truncated, true);
+  assert.equal(details.selection.total, MAX_REFERENCE_CHILDREN + 50);
+  assert.ok(details.selection.excluded === 2);
+  assert.doesNotMatch(text(result), /node_modules/);
+  assert.doesNotMatch(text(result), /\.git/);
+});
+
+test("wiki discovery output is bounded to the documented byte budget", async () => {
+  const root = tempRoot();
+  for (let index = 0; index < 60; index++) {
+    const file = `topic-${String(index).padStart(3, "0")}.md`;
+    writeFileSync(
+      join(root, file),
+      `<!-- pi-code-wiki-page -->\ntopic: topic-${String(index).padStart(3, "0")}\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->`,
+    );
+  }
+  try {
+    const result = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
+    assert.ok(Buffer.byteLength(text(result), "utf8") <= MAX_WIKI_DISCOVERY_OUTPUT_BYTES);
+    assert.match(text(result), /Topic: topic-/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wiki discovery caps pages per topic", async () => {
+  const root = tempRoot();
+  for (let index = 0; index < MAX_WIKI_DISCOVERY_PAGES + 5; index++) {
+    const file = index === 0 ? "long.md" : `long.part-${String(index).padStart(3, "0")}.md`;
+    writeFileSync(
+      join(root, file),
+      `<!-- pi-code-wiki-page -->\ntopic: long\npage: ${String(index + 1).padStart(3, "0")}\ntotalPages: ${MAX_WIKI_DISCOVERY_PAGES + 5}\n\n<!-- pi-code-wiki-page-end -->`,
+    );
+  }
+  try {
+    const result = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
+    const details = result.details as unknown as {
+      discovery: { topics: Array<{ topic: string; pages: unknown[]; truncated?: boolean }> };
+    };
+    const long = details.discovery.topics.find((topic) => topic.topic === "long");
+    assert.ok(long);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
