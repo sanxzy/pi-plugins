@@ -137,7 +137,7 @@ export function createReferenceCatalogWithInfrastructure(
       const repository = parseRepository(source.repository);
       if (!repository) return { ok: false, error: "Invalid Git reference" };
       try {
-          const result = await materializer.preflight({
+        const result = await materializer.preflight({
           reference: repository,
           branch: source.branch,
           signal: operationOptions.signal,
