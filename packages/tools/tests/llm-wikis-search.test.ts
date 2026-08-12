@@ -363,14 +363,40 @@ test("llm_wikis_search wildcard handles absent, empty, malformed, and unreadable
 
 type FakeReferenceSource =
   | { type: "local"; description?: string; hidden?: boolean; path?: string }
-  | { type: "git"; description?: string; hidden?: boolean; repository?: string };
+  | { type: "git"; description?: string; hidden?: boolean; repository?: string; branch?: string };
 
-type FakeReferenceEntry = { name: string; source: FakeReferenceSource; status: string; description?: string; diagnostic?: string; hidden?: boolean };
+type FakeReferenceChild = { name: string; kind: "file" | "directory" };
+
+type FakeReferenceEntry = {
+  name: string;
+  source: FakeReferenceSource;
+  status: string;
+  path?: string;
+  description?: string;
+  diagnostic?: string;
+  hidden?: boolean;
+};
 
 function fakeCatalog(reads: Array<{ entries: FakeReferenceEntry[]; diagnostics: string[] }>): ReferenceCatalogReader {
   let index = 0;
   return {
     read: async () => reads[Math.min(index++, reads.length - 1)] ?? { entries: [], diagnostics: [] },
+  } as unknown as ReferenceCatalogReader;
+}
+
+function fakeSelectionReader(
+  entries: FakeReferenceEntry[],
+  children: FakeReferenceChild[],
+  options: { diagnostics?: string[]; listingError?: string; listedRoots?: string[] } = {},
+): ReferenceCatalogReader {
+  const listedRoots = options.listedRoots ?? [];
+  return {
+    read: async () => ({ entries, diagnostics: options.diagnostics ?? [] }),
+    listChildren: async (root: string) => {
+      listedRoots.push(root);
+      if (options.listingError !== undefined) throw new Error(options.listingError);
+      return children;
+    },
   } as unknown as ReferenceCatalogReader;
 }
 
@@ -450,6 +476,110 @@ test("llm_wikis_search references discovery handles missing configuration safely
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("llm_wikis_search selects a known local reference and returns a deterministic shallow listing", async () => {
+  const listedRoots: string[] = [];
+  const catalog = fakeSelectionReader(
+    [{ name: "docs", source: { type: "local", path: "/tmp/docs" }, description: "Local docs", status: "available", path: "/real/docs" }],
+    [
+      { name: "zeta.txt", kind: "file" },
+      { name: "guides", kind: "directory" },
+      { name: "alpha.md", kind: "file" },
+    ],
+    { listedRoots },
+  );
+  const result = await executeLlmWikisSearch({ type: "references", alias: "docs" }, { referenceCatalog: catalog });
+  const details = result.details as unknown as {
+    selection: {
+      alias: string;
+      type: string;
+      description?: string;
+      root: string;
+      children: Array<{ name: string; kind: string }>;
+      handoff: string;
+    };
+  };
+  assert.equal(details.selection.alias, "docs");
+  assert.equal(details.selection.type, "local");
+  assert.equal(details.selection.description, "Local docs");
+  assert.equal(details.selection.root, "/real/docs");
+  assert.deepEqual(details.selection.children, [
+    { name: "alpha.md", kind: "file" },
+    { name: "guides", kind: "directory" },
+    { name: "zeta.txt", kind: "file" },
+  ]);
+  assert.match(details.selection.handoff, /read|grep|find/i);
+  assert.deepEqual(listedRoots, ["/real/docs"]);
+  assert.match(text(result), /\/real\/docs/);
+  assert.match(text(result), /alpha\.md/);
+  assert.doesNotMatch(text(result), /nested|content/);
+});
+
+test("llm_wikis_search selects a known Git reference through its materialized root without exposing repository internals", async () => {
+  const catalog = fakeSelectionReader(
+    [{ name: "opencode", source: { type: "git", repository: "https://user:secret@example.com/acme/opencode.git", branch: "main" }, status: "available", path: "/cache/opencode" }],
+    [{ name: "packages", kind: "directory" }],
+  );
+  const result = await executeLlmWikisSearch({ type: "references", alias: "opencode" }, { referenceCatalog: catalog });
+  const details = result.details as unknown as { selection: Record<string, unknown> };
+  assert.equal(details.selection.alias, "opencode");
+  assert.equal(details.selection.type, "git");
+  assert.equal(details.selection.root, "/cache/opencode");
+  assert.deepEqual(details.selection.children, [{ name: "packages", kind: "directory" }]);
+  assert.equal(details.selection.repository, undefined);
+  assert.equal(details.selection.branch, undefined);
+  assert.doesNotMatch(text(result), /user:secret|acme\/opencode/);
+});
+
+test("llm_wikis_search permits explicit selection of a hidden alias", async () => {
+  const catalog = fakeSelectionReader(
+    [{ name: "private", source: { type: "local", path: "/tmp/private" }, hidden: true, status: "available", path: "/real/private" }],
+    [],
+  );
+  const result = await executeLlmWikisSearch({ type: "references", alias: "private" }, { referenceCatalog: catalog });
+  const details = result.details as unknown as { selection: { alias: string; hidden?: boolean; root: string } };
+  assert.equal(details.selection.alias, "private");
+  assert.equal(details.selection.hidden, true);
+  assert.equal(details.selection.root, "/real/private");
+});
+
+test("llm_wikis_search returns safe diagnostics for unknown and unavailable reference selections", async () => {
+  const unknownCatalog = fakeSelectionReader(
+    [{ name: "docs", source: { type: "local", path: "/tmp/docs" }, status: "available", path: "/real/docs" }],
+    [],
+  );
+  const unknown = await executeLlmWikisSearch({ type: "references", alias: "missing" }, { referenceCatalog: unknownCatalog });
+  assert.match(text(unknown), /unknown|not found/i);
+  assert.equal((unknown.details as unknown as { selection?: unknown }).selection, undefined);
+  assert.doesNotMatch(text(unknown), /real\/docs/);
+
+  const unavailableCatalog = fakeSelectionReader(
+    [{ name: "broken", source: { type: "git", repository: "https://secret.example/token.git" }, status: "unavailable", diagnostic: "Git reference is unavailable" }],
+    [],
+  );
+  const unavailable = await executeLlmWikisSearch({ type: "references", alias: "broken" }, { referenceCatalog: unavailableCatalog });
+  assert.match(text(unavailable), /unavailable/i);
+  assert.doesNotMatch(text(unavailable), /secret\.example|token\.git/);
+});
+
+test("llm_wikis_search maps shallow listing failures to safe diagnostics without recursive inspection", async () => {
+  const catalog = fakeSelectionReader(
+    [{ name: "docs", source: { type: "local", path: "/tmp/docs" }, status: "available", path: "/real/docs" }],
+    [],
+    { listingError: "EACCES /real/docs/private-content" },
+  );
+  const result = await executeLlmWikisSearch({ type: "references", alias: "docs" }, { referenceCatalog: catalog });
+  assert.match(text(result), /unable|list|access/i);
+  assert.doesNotMatch(text(result), /private-content|EACCES/);
+  assert.equal((result.details as unknown as { selection?: unknown }).selection, undefined);
+});
+
+test("llm_wikis_search returns a safe diagnostic when a reference alias is missing", async () => {
+  const catalog = fakeCatalog([{ entries: [], diagnostics: ["Reference configuration is unavailable"] }]);
+  const result = await executeLlmWikisSearch({ type: "references", alias: "docs" }, { referenceCatalog: catalog });
+  assert.match(text(result), /not found|configured|available/i);
+  assert.doesNotMatch(text(result), /\/tmp|repository|head/);
 });
 
 test("llm_wikis_search traverses previous and next cursors sequentially", async () => {
