@@ -11,6 +11,10 @@ export function formatRunningAgentText(subagentType: string, jobId: string): str
   return `Agent ${subagentType} (${jobId}) is running. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.`;
 }
 
+export function formatResumingAgentText(subagentType: string, jobId: string): string {
+  return `Resuming Agent ${subagentType} (${jobId}) is running. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.`;
+}
+
 export function registerStatusTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "agent_status",

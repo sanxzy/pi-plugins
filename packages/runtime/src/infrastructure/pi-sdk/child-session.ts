@@ -19,7 +19,6 @@ import type {
 } from "@xzy-ai/core";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
-import { prepareResumeSessionFile } from "../sessions/resume-file.ts";
 
 /**
  * In-process child-session adapter.
@@ -212,25 +211,6 @@ function resolveChildModel(model: string, modelRuntime: ModelRuntime | undefined
   if (!modelRuntime) return undefined;
   const result = resolveCliModel({ cliModel: model, modelRuntime });
   return result.model;
-}
-
-/**
- * Reopen an existing transcript under the parent live-session folder.
- *
- * A resumed job is a NEW descendant job record whose child session reopens the
- * original job's stored session file. The copy's header id is rewritten to the
- * new job id, so the reopened session's live id matches its storage folder and
- * the original transcript stays stable and untouched. The copy lives under the
- * new job's parent live-session folder (`sessions/<parent-session-id>/`), so it
- * is discoverable and removable alongside the other children of that parent.
- */
-export function copySessionFile(source: string, jobId: string, cwd: string, parentSessionId?: string): string | undefined {
-  if (!source) return undefined;
-  try {
-    return prepareResumeSessionFile(source, jobId, cwd, parentSessionId);
-  } catch {
-    return undefined;
-  }
 }
 
 /** Extract the final assistant text, mirroring the reference `getFinalOutput`. */

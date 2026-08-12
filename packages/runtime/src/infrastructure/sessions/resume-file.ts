@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { sessionDir } from "../../shared/paths.ts";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 type SessionEntry = {
   type?: unknown;
@@ -20,7 +18,7 @@ function isToolCallContent(item: unknown): boolean {
  * Remove tool calls from the tail of an interrupted assistant message.
  *
  * A resumed prompt is run through the normal prompt loop, not the continuation
- * loop. Leaving an unresolved assistant tool call in the copied transcript
+ * loop. Leaving an unresolved assistant tool call in the existing transcript
  * would therefore cause the loop to execute that call again.
  */
 function trimTrailingToolCalls(entries: SessionEntry[]): void {
@@ -53,22 +51,14 @@ function trimTrailingToolCalls(entries: SessionEntry[]): void {
 }
 
 /**
- * Copy a stored session transcript for a new job and make it resumable.
+ * Prepare an existing session transcript for an in-place resume.
  *
- * The source is never modified. The copied session receives the new job id in
- * its header, and a trailing unresolved assistant tool call is removed before
- * the child session manager reopens it.
- *
- * The copy lives under the new job's parent live-session folder
- * (`sessions/<parent-session-id>/`), keyed by the resume job id so the
- * reopened child's session id (== resume job id) matches its storage folder.
+ * The job id and transcript path stay stable. Only the existing file is
+ * rewritten when a trailing unresolved assistant tool call must be removed;
+ * this prevents resume from creating duplicate jobs or accumulating copied
+ * transcript files.
  */
-export function prepareResumeSessionFile(
-  source: string,
-  newJobId: string,
-  cwd: string,
-  parentSessionId?: string,
-): string {
+export function prepareResumeSessionFile(source: string, jobId: string): string {
   if (!existsSync(source)) {
     throw new Error(`session file does not exist: ${source}`);
   }
@@ -82,17 +72,15 @@ export function prepareResumeSessionFile(
   if (!header) {
     throw new Error(`session file has no session header: ${source}`);
   }
-  header.id = newJobId;
-  trimTrailingToolCalls(entries);
-
-  if (!parentSessionId) {
-    throw new Error("A resume transcript requires its parent session id");
+  if (header.id !== jobId) {
+    throw new Error(`session file id does not match job id: ${source}`);
   }
-  // Every transcript belongs to the folder owned by the live session that
-  // spawned it. There is no flat fallback: storage is session-scoped only.
-  const directory = sessionDir(cwd, parentSessionId);
-  mkdirSync(directory, { recursive: true });
-  const destination = join(directory, `${newJobId}.jsonl`);
-  writeFileSync(destination, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
-  return destination;
+
+  const before = JSON.stringify(entries);
+  trimTrailingToolCalls(entries);
+  const after = JSON.stringify(entries);
+  if (before !== after) {
+    writeFileSync(source, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  }
+  return source;
 }

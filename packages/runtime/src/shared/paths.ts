@@ -11,6 +11,7 @@ export const SESSIONS_DIR_NAME = "sessions";
 export const SCOPED_REGISTRY_PREFIX = "jobs-";
 export const SCOPED_REGISTRY_SUFFIX = ".jsonl";
 export const GOALS_FILE_NAME = "goals.jsonl";
+export const PENDING_DELIVERY_FILE_NAME = "pending-delivery.json";
 
 export function runtimeDir(projectRoot: string): string {
   return join(projectRoot, ".pi", RUNTIME_DIR_NAME);
@@ -18,6 +19,11 @@ export function runtimeDir(projectRoot: string): string {
 
 export function goalsFile(projectRoot: string): string {
   return join(runtimeDir(projectRoot), GOALS_FILE_NAME);
+}
+
+/** Durable queue for child results awaiting a parent session sink. */
+export function pendingDeliveryFile(projectRoot: string): string {
+  return join(runtimeDir(projectRoot), PENDING_DELIVERY_FILE_NAME);
 }
 
 export function scopedSessionsDir(projectRoot: string): string {
