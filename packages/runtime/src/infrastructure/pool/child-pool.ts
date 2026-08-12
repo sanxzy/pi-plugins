@@ -68,8 +68,26 @@ function poolSlot(projectRoot: string): string {
 export function getChildPool(projectRoot: string, rootSessionId?: string): ChildPool {
   const slot = poolSlot(projectRoot);
   const shared = globalThis.piCodePool?.[slot];
-  if (shared) return shared;
+  if (shared) {
+    // The pool is a process singleton that must survive extension reloads,
+    // but a reloaded runtime version can need capabilities the previous
+    // module graph did not attach. Upgrade the surviving singleton in place so
+    // identity, live child handles, concurrency accounting, and the durable
+    // registry are preserved while any missing members are patched on.
+    upgradePool(shared, projectRoot, rootSessionId);
+    return shared;
+  }
 
+  const pool = createPool(projectRoot, rootSessionId);
+
+  if (!globalThis.piCodePool) {
+    globalThis.piCodePool = {};
+  }
+  globalThis.piCodePool[slot] = pool;
+  return pool;
+}
+
+function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
   // The scoped registry is the single authoritative job store. It is created
   // with the root live session id so the root session's folder (which is not a
   // job) is scoped correctly; child job records carry their own parent session
@@ -136,11 +154,82 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
       pool.concurrency.resetParallelCount();
     },
   };
-
-
-  if (!globalThis.piCodePool) {
-    globalThis.piCodePool = {};
-  }
-  globalThis.piCodePool[slot] = pool;
   return pool;
+}
+
+/**
+ * Patch capabilities onto a surviving pool that an older runtime left stale.
+ *
+ * The pool object is keyed on `globalThis` and deliberately outlives extension
+ * factory reloads, so the module graph may be replaced while the object is not.
+ * Any interface member the current runtime expects but the object lacks (for
+ * example the per-session `deliveryFor` / `rootSessionIdFor` surface added by
+ * a later merge) is attached in place over the shared durable registry. Live
+ * child handles, the concurrency gate, and the append-only registry survive so
+ * running children keep their steering/cancellation handles.
+ *
+ * Adding a new `ChildPool` member in future commits should attach it here too,
+ * guarded by a `typeof` presence check, so an upgrade never regresses to a
+ * stale object.
+ */
+function upgradePool(pool: ChildPool, projectRoot: string, rootSessionId?: string): void {
+  const registry = pool.registry;
+  const patch = (key: string, value: unknown): void => {
+    Object.defineProperty(pool, key, { value, configurable: true, writable: true });
+  };
+
+  if (typeof pool.rootSessionIdFor !== "function") {
+    patch("rootSessionIdFor", (sessionId: string): string => {
+      let current = registry.getBySessionId(sessionId);
+      let root = sessionId;
+      const seen = new Set<string>();
+      while (current && !seen.has(current.sessionId ?? current.jobId)) {
+        const parentSessionId = current.parentSessionId;
+        if (parentSessionId === undefined) break;
+        seen.add(current.sessionId ?? current.jobId);
+        root = parentSessionId;
+        const parent = registry.getBySessionId(parentSessionId);
+        if (parent) current = parent;
+        else break;
+      }
+      return root;
+    });
+  }
+  if (typeof pool.deliveryFor !== "function") {
+    const deliveries = new Map<string, DeliveryCoordinator>();
+    patch("deliveryFor", (sessionId: string): DeliveryCoordinator => {
+      const existing = deliveries.get(sessionId);
+      if (existing) return existing;
+      const coordinator = createDeliveryCoordinator({
+        projectRoot,
+        rootSessionId: sessionId,
+        onDelivered: (jobId) => registry.updateJob(jobId, { delivered: true }),
+      });
+      deliveries.set(sessionId, coordinator);
+      return coordinator;
+    });
+  }
+  if (pool.scopedRegistry === undefined) {
+    patch("scopedRegistry", registry);
+  }
+  if (typeof pool.isRootSession !== "function") {
+    patch("isRootSession", (sessionId: string): boolean => {
+      if (registry.getBySessionId(sessionId) !== undefined) return false;
+      try {
+        const session = readSessionManifest(canonicalProjectRoot(projectRoot), sessionId);
+        return session.sessionId === sessionId && session.active;
+      } catch {
+        return false;
+      }
+    });
+  }
+  if (typeof pool.shouldBootstrapRootSession !== "function") {
+    patch("shouldBootstrapRootSession", (sessionId: string): boolean => registry.getBySessionId(sessionId) === undefined);
+  }
+  if (typeof pool.interruptRunningJobs !== "function") {
+    patch("interruptRunningJobs", createInterruptionSweep({ registry, liveChildren: pool.liveChildren, rootSessionId }));
+  }
+  if (typeof pool.resetParallelAgents !== "function" && pool.concurrency) {
+    patch("resetParallelAgents", (): void => pool.concurrency.resetParallelCount());
+  }
 }

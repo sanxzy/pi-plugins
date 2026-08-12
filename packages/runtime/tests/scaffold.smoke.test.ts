@@ -34,3 +34,24 @@ test("child pool slot is namespaced by project root", () => {
   a.registry.all().set("j1", undefined as never);
   assert.ok(!c.registry.all().has("j1"));
 });
+
+test("getChildPool upgrades a stale singleton left by an older extension runtime", () => {
+  const root = "/tmp/projects/reload-upgrade";
+  const first = getChildPool(root, "root-a");
+  const stored = globalThis.piCodePool?.[`pi-code:${root}`];
+  assert.ok(stored);
+  // Simulate the pool created by a previous extension runtime (pre-merge):
+  // the singleton keeps its durable registry, live children, and gate, but
+  // the newer per-session delivery surface is missing from the object.
+  delete (stored as { deliveryFor?: unknown }).deliveryFor;
+  delete (stored as { rootSessionIdFor?: unknown }).rootSessionIdFor;
+  const marker = { sessionFile: undefined };
+  stored.liveChildren.set("still-running", marker as never);
+  const upgraded = getChildPool(root, "root-a");
+  assert.equal(upgraded, first, "the singleton identity survives the upgrade");
+  assert.equal(typeof upgraded.deliveryFor, "function");
+  assert.equal(typeof upgraded.rootSessionIdFor, "function");
+  assert.equal(upgraded.liveChildren.get("still-running"), marker, "live child handles survive");
+  const coordinator = upgraded.deliveryFor("root-a");
+  assert.equal(coordinator, upgraded.deliveryFor("root-a"), "one coordinator per root session");
+});
