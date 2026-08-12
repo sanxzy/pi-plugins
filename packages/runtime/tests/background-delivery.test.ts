@@ -11,7 +11,7 @@ import {
   formatBackgroundResult,
   runBackgroundJob,
 } from "@xzy-ai/runtime";
-import { createDeliveryCoordinator, pendingDeliveryFile } from "@xzy-ai/runtime";
+import { createDeliveryCoordinator, encodeProjectId, homeSessionDir, pendingDeliveryFile } from "@xzy-ai/runtime";
 import { createConcurrencyGate } from "@xzy-ai/runtime";
 import { MAX_CONCURRENCY } from "@xzy-ai/core";
 import { createAgentEventRegistry } from "@xzy-ai/runtime";
@@ -112,6 +112,12 @@ test("deferred results survive a coordinator restart through the durable queue",
     assert.equal(sent, false);
     assert.equal(first.pendingCount, 1);
     assert.equal(existsSync(pendingFile), true);
+
+    // Pending delivery is owned by the root session under home storage, not
+    // project-local: its path sits under the session directory and the file is
+    // owner-only, so one session's queue never leaks into the project scope.
+    assert.ok(pendingFile.includes(homeSessionDir(encodeProjectId(root), "root-a")));
+    assert.equal(statSync(pendingFile).mode & 0o777, 0o600);
 
     // A fresh coordinator (process restart / reload) replays the queued result.
     const second = createDeliveryCoordinator({ projectRoot: root, rootSessionId: "root-a" });
