@@ -1,5 +1,6 @@
 import type { Job, JobUpdate } from "@xzy-ai/core";
 import type { ChildRunResult } from "@xzy-ai/core";
+import { processWithLog } from "@xzy-ai/observability";
 import type { DeliveryCoordinator } from "./delivery.ts";
 import type { AgentManifestStore } from "../manifests/manifests.ts";
 /**
@@ -54,7 +55,17 @@ interface RunBackgroundJobOptions {
  * parent. The registry transition is recorded before delivery so the job is
  * always terminal once the parent reads it back.
  */
-export async function runBackgroundJob(
+export function runBackgroundJob(
+  deps: BackgroundJobDeps,
+  job: Job,
+  options: RunBackgroundJobOptions,
+): Promise<void> {
+  return processWithLog({ operation: "agent.runBackground", parameters: { jobId: job.jobId, subagentType: job.subagentType } }, async () => {
+    await runBackgroundJobInner(deps, job, options);
+  });
+}
+
+async function runBackgroundJobInner(
   deps: BackgroundJobDeps,
   job: Job,
   options: RunBackgroundJobOptions,
