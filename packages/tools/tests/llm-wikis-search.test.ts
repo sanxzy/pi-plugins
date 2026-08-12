@@ -360,9 +360,98 @@ test("llm_wikis_search wildcard handles absent, empty, malformed, and unreadable
   assert.deepEqual((unreadable.details as unknown as { discovery: unknown }).discovery, { topics: [] });
 });
 
-test("llm_wikis_search references mode returns a safe not-yet-available result in this slice", async () => {
-  const result = await executeLlmWikisSearch({ type: "references", query: "*" });
-  assert.match(text(result), /not yet available/i);
+type FakeReferenceSource =
+  | { type: "local"; description?: string; hidden?: boolean; path?: string }
+  | { type: "git"; description?: string; hidden?: boolean; repository?: string };
+
+type FakeReferenceEntry = { name: string; source: FakeReferenceSource; status: string; diagnostic?: string };
+
+type ReferenceCatalogLike = { read: () => Promise<{ entries: FakeReferenceEntry[]; diagnostics: string[] }> };
+
+function fakeCatalog(reads: Array<{ entries: FakeReferenceEntry[]; diagnostics: string[] }>): ReferenceCatalogLike {
+  let index = 0;
+  return {
+    read: async () => reads[Math.min(index++, reads.length - 1)] ?? { entries: [], diagnostics: [] },
+  };
+}
+
+test("llm_wikis_search references wildcard lists non-hidden aliases with safe metadata in stable order", async () => {
+  const catalog = fakeCatalog([
+    {
+      diagnostics: [],
+      entries: [
+        { name: "zeta", source: { type: "local", description: "Zeta docs", path: "/tmp/secret/zeta-path" }, status: "available" },
+        { name: "alpha", source: { type: "git", repository: "owner/repo", hidden: false }, status: "available" },
+        { name: "hiddenOne", source: { type: "local", hidden: true, path: "/tmp/secret/hidden" }, status: "available" },
+      ],
+    },
+  ]);
+  const result = await executeLlmWikisSearch({ type: "references", query: "*" }, { referenceCatalog: catalog });
+  const details = result.details as unknown as { mode: string; aliases: Array<Record<string, unknown>>; diagnostics?: unknown };
+  assert.equal(details.mode, "references");
+  assert.deepEqual(details.aliases.map((alias) => alias.alias), ["alpha", "zeta"]);
+  assert.deepEqual(details.aliases.map((alias) => alias.type), ["git", "local"]);
+  assert.equal(details.aliases[1]?.description, "Zeta docs");
+  assert.deepEqual(details.aliases.map((alias) => alias.status), ["available", "available"]);
+  assert.equal((details.aliases[0] as Record<string, unknown>).repository, undefined);
+  assert.equal((details.aliases[1] as Record<string, unknown>).path, undefined);
+  assert.equal((details.aliases[0] as Record<string, unknown>).name, undefined);
+  assert.equal((details.aliases[1] as Record<string, unknown>).head, undefined);
+  assert.match(text(result), /alpha/);
+  assert.match(text(result), /zeta/);
+  assert.doesNotMatch(text(result), /hiddenOne/);
+  assert.doesNotMatch(text(result), /owner\/repo/);
+  assert.doesNotMatch(text(result), /zeta-path|secret/);
+});
+
+test("llm_wikis_search references discovery reads the catalog fresh on every call", async () => {
+  const catalog = fakeCatalog([
+    { entries: [{ name: "first", source: { type: "local" }, status: "available" }], diagnostics: [] },
+    { entries: [{ name: "second", source: { type: "local" }, status: "available" }], diagnostics: [] },
+  ]);
+  const first = await executeLlmWikisSearch({ type: "references", query: "*" }, { referenceCatalog: catalog });
+  const firstAliases = (first.details as unknown as { aliases: Array<{ alias: string }> }).aliases;
+  assert.deepEqual(firstAliases.map((alias) => alias.alias), ["first"]);
+  const second = await executeLlmWikisSearch({ type: "references", query: "*" }, { referenceCatalog: catalog });
+  const secondAliases = (second.details as unknown as { aliases: Array<{ alias: string }> }).aliases;
+  assert.deepEqual(secondAliases.map((alias) => alias.alias), ["second"]);
+});
+
+test("llm_wikis_search references discovery surfaces unavailable entries with safe diagnostics", async () => {
+  const catalog = fakeCatalog([
+    {
+      diagnostics: ["Reference 'broken' is unavailable"],
+      entries: [
+        { name: "ok", source: { type: "local" }, status: "available" },
+        { name: "broken", source: { type: "git", repository: "secret-org/token-repo" }, status: "unavailable", diagnostic: "Git reference is unavailable" },
+      ],
+    },
+  ]);
+  const result = await executeLlmWikisSearch({ type: "references", query: "*" }, { referenceCatalog: catalog });
+  const details = result.details as unknown as { aliases: Array<Record<string, unknown>>; diagnostics?: unknown };
+  assert.deepEqual(details.aliases.map((alias) => alias.status), ["available", "unavailable"]);
+  assert.equal(details.aliases[1]?.diagnostic, "Git reference is unavailable");
+  assert.match(text(result), /broken/);
+  assert.doesNotMatch(text(result), /secret-org|token-repo/);
+});
+
+test("llm_wikis_search references discovery handles missing configuration safely and never affects wiki mode", async () => {
+  const emptyCatalog = fakeCatalog([{ entries: [], diagnostics: [] }]);
+  const result = await executeLlmWikisSearch({ type: "references", query: "*" }, { referenceCatalog: emptyCatalog });
+  assert.match(text(result), /no configured references/i);
+  assert.deepEqual((result.details as unknown as { aliases: unknown }).aliases, []);
+
+  const root = tempRoot();
+  writeFileSync(
+    join(root, "wiki.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: wiki\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nbody`, 
+  );
+  try {
+    const wiki = await executeLlmWikisSearch({ type: "wikis", query: "*" }, { wikiRoot: root, referenceCatalog: emptyCatalog });
+    assert.match(text(wiki), /wiki\.md/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("llm_wikis_search traverses previous and next cursors sequentially", async () => {
