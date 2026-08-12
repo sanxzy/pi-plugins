@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import tsx tests/lifecycle-isolation.test.ts tests/session-events.test.ts tests/goal-command.test.ts tests/goal-lifecycle.test.ts tests/telegram-setup.test.ts tests/telegram-lifecycle.test.ts tests/telegram-inbound.test.ts tests/telegram-commands.test.ts tests/telegram-controls.test.ts"
+    "test": "node --test --import tsx tests/lifecycle-isolation.test.ts tests/session-events.test.ts tests/goal-command.test.ts tests/goal-lifecycle.test.ts tests/telegram-setup.test.ts tests/telegram-lifecycle.test.ts tests/telegram-inbound.test.ts tests/telegram-commands.test.ts tests/telegram-controls.test.ts tests/references-setup.test.ts"
   },
   "dependencies": {
     "@xzy-ai/channels": "workspace:*",

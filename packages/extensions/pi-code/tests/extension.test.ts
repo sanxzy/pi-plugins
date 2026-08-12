@@ -55,6 +55,11 @@ test("pi-code extension registers Telegram setup and goal workflow alongside exi
     1,
     "setup command registered exactly once",
   );
+  assert.equal(
+    commands.filter((name) => name === "setup-references").length,
+    1,
+    "references setup command registered exactly once",
+  );
   assert.equal(commands.filter((name) => name === "goal").length, 1, "goal command registered exactly once");
   assert.ok(events.includes("session_start"), "session_start lifecycle handler registered");
   assert.ok(events.includes("session_shutdown"), "session_shutdown lifecycle handler registered");
