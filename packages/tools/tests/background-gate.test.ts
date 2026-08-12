@@ -77,11 +77,11 @@ test("agent schema removes the redundant background parameter and explains resum
   assert.ok(registered);
   assert.equal(registered.parameters.properties?.background, undefined);
   assert.match(registered.description, /Prefer agent_id/);
-  assert.match(registered.description, /preserves its transcript and working context/);
-  assert.match(registered.description, /starts a fresh agent/);
+  assert.match(registered.description, /preserves transcript and context/);
+  assert.match(registered.description, /foreground/);
 });
 
-test("new background spawns remain TUI-only", async () => {
+test("root background spawns remain TUI-only", async () => {
   let registered: RegisteredAgent | undefined;
   registerAgentTool({
     registerTool(tool: RegisteredAgent) {
@@ -105,7 +105,7 @@ test("new background spawns remain TUI-only", async () => {
   }
 });
 
-test("a running child agent may spawn a descendant even in print mode", async () => {
+test("a running child agent awaits a descendant in print mode", async () => {
   let detailed: RegisteredAgent | undefined;
   registerAgentTool({
     registerTool(tool: RegisteredAgent) {
@@ -122,9 +122,8 @@ test("a running child agent may spawn a descendant even in print mode", async ()
     "---\nname: test-agent\ndescription: Test agent\n---\ntest body",
     "utf8",
   );
-  // The descendant child must not actually create a real SDK session; the gate
-  // admission and job recording are what this test asserts. `runBackgroundJob`
-  // catches a throwing child adapter and marks the job failed.
+  // The descendant child must not actually create a real SDK session; the
+  // foreground admission and terminal job recording are what this test asserts.
   const previousFactory = spawnChildSession.__createChild;
   spawnChildSession.__createChild = async () => {
     throw new Error("not spawning a real session in this regression test");
@@ -141,8 +140,8 @@ test("a running child agent may spawn a descendant even in print mode", async ()
     }));
     const childCtx = context(cwd, "print") as ExtensionContext & { sessionIdForTest: string };
     childCtx.sessionIdForTest = "child-session";
-    // The child is a registered running job; it may recurse even though the SDK
-    // runs child sessions in non-interactive `print` mode.
+    // The child is a registered running job; its descendant runs foreground
+    // even though the SDK runs child sessions in non-interactive `print` mode.
     const result = await detailed!.execute(
       "call",
       { description: "recurse", prompt: "spawn grandchild", subagent_type: "test-agent" },
@@ -151,9 +150,10 @@ test("a running child agent may spawn a descendant even in print mode", async ()
       childCtx,
     );
     assert.ok(result.details.jobId, "descendant gets a job id");
-    assert.ok(result.content[0]?.text.startsWith("Agent test-agent"), "spawn acknowledged");
+    assert.match(result.content[0]?.text ?? "", /^Agent test-agent \(.+\) failed\./, "foreground result returned inline");
     const childJob = pool.registry.get(result.details.jobId!);
     assert.equal(childJob?.parentSessionId, "child-session");
+    assert.equal(childJob?.status, "failed");
   } finally {
     spawnChildSession.__createChild = previousFactory;
     rmSync(cwd, { recursive: true, force: true });
@@ -162,7 +162,7 @@ test("a running child agent may spawn a descendant even in print mode", async ()
   }
 });
 
-test("a gated background agent stays queued until running with a live handle", async () => {
+test("a root background agent stays queued until running with a live handle", async () => {
   const previousHome = process.env.PI_CODE_TEST_HOME;
   process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-background-gate-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-background-gate-"));

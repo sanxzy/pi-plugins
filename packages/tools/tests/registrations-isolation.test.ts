@@ -169,7 +169,7 @@ test("agent rejects an unknown subagent type, including the removed default", as
   }
 });
 
-test("agent resume remains TUI-only because it runs in background", async () => {
+test("root agent resume remains TUI-only because it runs in background", async () => {
   await withIsolationPool(async (cwd) => {
     const tool = register(registerAgentTool);
     const result = await tool.execute(
@@ -212,7 +212,7 @@ test("agent steer output names the targeted subagent type and remains allowed ou
   });
 });
 
-test("a child agent spawn derives parent lineage from the actual caller session", async () => {
+test("a child agent foreground spawn derives parent lineage from the actual caller session", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-nested-agent-"));
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(join(cwd, ".pi", "agents", "test-agent.md"), "---\nname: test-agent\ndescription: Test agent\n---\ntest body", "utf8");
@@ -223,12 +223,13 @@ test("a child agent spawn derives parent lineage from the actual caller session"
   spawnChildSession.__createChild = async () => { throw new Error("stop after record"); };
   try {
     const tool = register(registerAgentTool);
-    const result = await tool.execute("call", { description: "grandchild", prompt: "work", subagent_type: "test-agent" }, undefined, undefined, context(cwd, "parent-session"));
+    const result = await tool.execute("call", { description: "grandchild", prompt: "work", subagent_type: "test-agent" }, undefined, undefined, { ...context(cwd, "parent-session"), mode: "print" } as unknown as ExtensionContext);
     const child = pool.registry.get(result.details.jobId as string);
     assert.equal(child?.parentJobId, "parent");
     assert.equal(child?.rootJobId, "parent");
     assert.equal(child?.depth, 1);
     assert.deepEqual(child?.parentAgentIds, ["parent"]);
+    assert.equal(child?.status, "failed");
   } finally {
     spawnChildSession.__createChild = previousFactory;
     rmSync(cwd, { recursive: true, force: true });

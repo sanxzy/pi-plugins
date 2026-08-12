@@ -356,22 +356,19 @@ test("a background job beyond the cap is queued and starts when a slot frees", a
   assert.equal(gate.queuedCount, 0);
 });
 
-test("backgroundModeError rejects non-TUI modes and allows the TUI", () => {
+test("backgroundModeError rejects non-TUI root modes and allows the TUI", () => {
   assert.equal(backgroundModeError("tui"), undefined);
   assert.equal(backgroundModeError("print"), "background mode is invalid in print mode");
   assert.equal(backgroundModeError("json"), "background mode is invalid in json mode");
   assert.equal(backgroundModeError("rpc"), "background mode is invalid in rpc mode");
 });
 
-test("backgroundModeError lets nested child agents recurse in any mode", () => {
-  // A root host must stay TUI-backed so its delivery sink survives; a child
-  // already runs under that live root, so it may spawn descendants even though
-  // the SDK creates child sessions with the non-interactive `print` mode.
-  assert.equal(backgroundModeError("tui", true), undefined);
-  assert.equal(backgroundModeError("print", true), undefined);
-  assert.equal(backgroundModeError("json", true), undefined);
-  assert.equal(backgroundModeError("rpc", true), undefined);
-  assert.equal(backgroundModeError("print", false), "background mode is invalid in print mode");
+test("backgroundModeError no longer encodes a nested-child bypass (children run foreground)", () => {
+  // Child and descendant calls never use the background path, so the nested
+  // bypass flag is removed entirely; every non-TUI root background request is
+  // rejected.
+  assert.equal(backgroundModeError("print"), "background mode is invalid in print mode");
+  assert.equal(backgroundModeError("json"), "background mode is invalid in json mode");
 });
 
 test("formatBackgroundResult formats each terminal child status", () => {

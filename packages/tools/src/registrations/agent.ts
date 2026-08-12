@@ -5,14 +5,12 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   makeJobId,
+  runForegroundAgent,
   spawnWithControl,
 } from "../agent-execution.ts";
 import { isInSessionScope, resumeDisposition, type Job } from "@xzy-ai/core";
-import { createAgentDiscovery } from "@xzy-ai/runtime";
-import { backgroundModeError, runBackgroundJob } from "@xzy-ai/runtime";
-import { getChildPool } from "@xzy-ai/runtime";
-import { prepareResumeSessionFile, recordNewJob } from "@xzy-ai/runtime";
 import { MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
+import { backgroundModeError, createAgentDiscovery, getChildPool, prepareResumeSessionFile, recordNewJob, runBackgroundJob } from "@xzy-ai/runtime";
 import { agentParams, type AgentParams } from "../tools.ts";
 import type { AgentDetails, AgentErrorDetails } from "../types.ts";
 import { formatResumingAgentText, formatRunningAgentText } from "./status.ts";
@@ -22,19 +20,19 @@ import { errorResult, textResult } from "../results.ts";
 /**
  * Register the `agent` tool.
  *
- * Delegates work to a specialized in-process subagent in the background. A call
- * without `agent_id` spawns a new background job; `agent_id` steers a running
- * job or resumes a finished one in the background. Every result is delivered to
- * the direct parent when the child settles.
+ * The root host delegates to a subagent in the background and delivers the
+ * result asynchronously. A child or descendant call runs the descendant
+ * foreground within the same tool invocation and receives its result inline;
+ * children never use background delivery.
  */
 export function registerAgentTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "agent",
     label: "Agent",
     description: [
-      "Delegate work to a specialized in-process subagent in the background.",
-      "Prefer agent_id when continuing related work: steering or resuming an existing agent preserves its transcript and working context, while omitting agent_id starts a fresh agent with no prior work memory.",
-      "A call without agent_id spawns a new background job; agent_id steers a running job or resumes a finished one.",
+      "Root host: delegate work to a specialized in-process subagent in the background (immediate job id, result delivered later).",
+      "Child/descendant: run the descendant subagent foreground and await its result before returning.",
+      "Prefer agent_id when continuing related work: steering or resuming preserves transcript and context.",
       `A single response may issue at most ${MAX_PARALLEL_AGENTS} agent calls.`,
     ].join(" "),
     promptSnippet: "Delegate a focused task to a specialized subagent.",
@@ -60,6 +58,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       // itself a registered job; the root orchestrator session is not a job, so
       // it controls and views every job in the project.
       const caller = callerFor(ctx, pool);
+      const isChildCaller = caller.jobId !== undefined || pool.registry.getBySessionId(ctx.sessionManager.getSessionId()) !== undefined;
 
       // Address an existing job: a running job is steered, a finished job is
       // resumed in the background, and a job with no transcript yet is
@@ -103,18 +102,18 @@ export function registerAgentTool(pi: ExtensionAPI): void {
             },
           );
         }
-        // Resume (or retry a created job) in place. The TUI gate applies to
-        // every path that launches a child, while steering above remains direct.
-        const backgroundError = backgroundModeError(ctx.mode, caller.jobId !== undefined);
-        if (backgroundError) {
-          return errorResult("background agents are available only in TUI mode", {
-            jobId: job.jobId,
-            reason: backgroundError,
-          });
-        }
-        // Re-queue the existing job in place. Its job id, lineage, and
+        // Resume (or retry a created job) in place. Its job id, lineage, and
         // transcript remain stable, so resuming never creates duplicate
         // registry records or copied session files.
+        if (!isChildCaller) {
+          const backgroundError = backgroundModeError(ctx.mode);
+          if (backgroundError) {
+            return errorResult("background agents are available only in TUI mode", {
+              jobId: job.jobId,
+              reason: backgroundError,
+            });
+          }
+        }
         const budgetError = countAgentCall();
         if (budgetError) return budgetError;
         if (disposition.kind === "resume" && !job.sessionFile) {
@@ -123,40 +122,41 @@ export function registerAgentTool(pi: ExtensionAPI): void {
             reason: "no stored transcript",
           });
         }
-        return startBackgroundAgent(params, ctx, { existingJob: job });
+        return startAgent(params, ctx, { existingJob: job });
       }
 
-      // A new spawn is always background. The TUI gate protects the delivery
-      // contract: in one-shot modes the parent exits before the child settles.
-      const backgroundError = backgroundModeError(ctx.mode, caller.jobId !== undefined);
-      if (backgroundError) {
-        return errorResult("background agents are available only in TUI mode", {
-          jobId: undefined,
-          reason: backgroundError,
-        });
+      // Root-host calls are background; child and descendant calls are
+      // foreground (their SDK mode is `print` but nested spawns await).
+      if (!isChildCaller) {
+        const backgroundError = backgroundModeError(ctx.mode);
+        if (backgroundError) {
+          return errorResult("background agents are available only in TUI mode", {
+            jobId: undefined,
+            reason: backgroundError,
+          });
+        }
       }
-
       const budgetError = countAgentCall();
       if (budgetError) return budgetError;
-      return startBackgroundAgent(params, ctx);
+      return startAgent(params, ctx);
     },
   });
 }
 
 /**
- * Start a background agent job and acknowledge it immediately.
+ * Start an agent job.
  *
- * Validates model availability and the requested `subagent_type` before
- * recording a job so an invalid request never consumes a job id, then runs the
- * child under the shared gate and delivers its result to the direct parent.
- * `existingJob` resumes or retries one job in place, preserving its identity
- * and transcript instead of creating a duplicate record.
+ * Root-host calls record the job, queue it for a background run, and return
+ * immediately with the running-text acknowledgement. A child/descendant call
+ * runs the descendant foreground within this invocation and returns the
+ * descendant's terminal status plus its output. Existing jobs are resumed in
+ * place, preserving identity and transcript.
  */
-function startBackgroundAgent(
+async function startAgent(
   params: AgentParams,
   ctx: ExtensionContext,
   resume: { existingJob?: Job } = {},
-): AgentToolResult<AgentDetails | AgentErrorDetails> {
+): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
   const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
 
   if (!ctx.model) {
@@ -176,8 +176,10 @@ function startBackgroundAgent(
   const existingJob = resume.existingJob;
   const parentSessionId = ctx.sessionManager.getSessionId();
   const caller = callerFor(ctx, pool);
-  const parent = caller.jobId ? pool.registry.get(caller.jobId) : undefined;
+  const parent = caller.jobId ? pool.registry.get(caller.jobId) : pool.registry.getBySessionId(parentSessionId);
+  const isChildCaller = parent !== undefined;
   const allParentAgentIds = parent ? [...(parent.parentAgentIds ?? []), parent.jobId] : [];
+
   let sessionFile: string | undefined;
   if (existingJob?.sessionFile) {
     try {
@@ -204,18 +206,35 @@ function startBackgroundAgent(
     parentAgentIds: allParentAgentIds,
   });
   if (existingJob) {
-    // Terminal and created jobs are explicitly re-queued in place. The
-    // transition is legal for all resumable states and resetting delivered
-    // prevents an earlier terminal result from suppressing the new one.
+    // Terminal and created jobs are explicitly re-queued in place. Resetting
+    // delivered prevents an earlier terminal result from suppressing reuse.
     pool.registry.updateJob(existingJob.jobId, { status: "queued", delivered: false });
   }
 
-  // The direct-parent session file keys result delivery and the parent session
-  // id scopes the job's storage folder. The child lifecycle runs under the
-  // shared concurrency gate, so a call beyond the cap stays `queued` and only
-  // becomes `running` when it actually acquires a slot. `signal: undefined`
-  // deliberately keeps the child alive when the main turn is cancelled; only
-  // quitting the PI process interrupts it.
+  const spawnOptions = {
+    parentSessionId,
+    rootSessionId: pool.rootSessionIdFor(parentSessionId),
+    parentAgentIds: existingJob?.parentAgentIds ?? allParentAgentIds,
+    sessionFile,
+  } as const;
+
+  // A child/descendant caller runs the descendant foreground and receives its
+  // result inline; only the root host uses fire-and-forget background delivery.
+  if (isChildCaller) {
+    const result = await runForegroundAgent(pool, params, ctx, job, agent, spawnOptions);
+    const status: AgentDetails["status"] =
+      result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed";
+    const prefix = existingJob ? "Resumed" : "Agent";
+    return textResult(`${prefix} ${job.subagentType} (${job.jobId}) ${status}.\n${result.output}`, {
+      jobId: job.jobId,
+      status,
+      result: result.output,
+    });
+  }
+
+  // Root host: background delivery. The child lifecycle runs under the shared
+  // concurrency gate, so a call beyond the cap stays `queued` until it acquires
+  // a slot. `signal: undefined` keeps the child alive when the turn is cancelled.
   const parentSessionFile = ctx.sessionManager.getSessionFile() ?? "";
   void runBackgroundJob(
     { registry: pool.registry, delivery: pool.deliveryFor(pool.rootSessionIdFor(parentSessionId)) },
@@ -224,10 +243,7 @@ function startBackgroundAgent(
       parentSessionFile,
       runChild: () =>
         spawnWithControl(pool, params, ctx, job, agent, {
-          parentSessionId,
-          rootSessionId: pool.rootSessionIdFor(parentSessionId),
-          parentAgentIds: existingJob?.parentAgentIds ?? allParentAgentIds,
-          sessionFile,
+          ...spawnOptions,
           signal: undefined,
         }),
     },
