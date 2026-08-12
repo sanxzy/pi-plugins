@@ -7,16 +7,15 @@ import {
   makeJobId,
   spawnWithControl,
 } from "../agent-execution.ts";
-import { isInSessionScope, resumeDisposition } from "@xzy-ai/core";
+import { isInSessionScope, resumeDisposition, type Job } from "@xzy-ai/core";
 import { createAgentDiscovery } from "@xzy-ai/runtime";
 import { backgroundModeError, runBackgroundJob } from "@xzy-ai/runtime";
 import { getChildPool } from "@xzy-ai/runtime";
-import { copySessionFile } from "@xzy-ai/runtime";
-import { recordNewJob } from "@xzy-ai/runtime";
+import { prepareResumeSessionFile, recordNewJob } from "@xzy-ai/runtime";
 import { MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import { agentParams, type AgentParams } from "../tools.ts";
 import type { AgentDetails, AgentErrorDetails } from "../types.ts";
-import { formatRunningAgentText } from "./status.ts";
+import { formatResumingAgentText, formatRunningAgentText } from "./status.ts";
 import { callerFor } from "../caller.ts";
 import { errorResult, textResult } from "../results.ts";
 
@@ -95,12 +94,15 @@ export function registerAgentTool(pi: ExtensionAPI): void {
             });
           }
           await control.steer(params.prompt);
-          return textResult(`Steered agent ${job.subagentType} (${params.agent_id}).`, {
-            jobId: job.jobId,
-            status: "running",
-          });
+          return textResult(
+            `Steered agent ${job.subagentType} (${params.agent_id}). The agent keeps its running context and will notify you when it settles. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.`,
+            {
+              jobId: job.jobId,
+              status: "running",
+            },
+          );
         }
-        // Resume (or fresh-spawn) in the background. The TUI gate applies to
+        // Resume (or retry a created job) in place. The TUI gate applies to
         // every path that launches a child, while steering above remains direct.
         const backgroundError = backgroundModeError(ctx.mode);
         if (backgroundError) {
@@ -109,23 +111,18 @@ export function registerAgentTool(pi: ExtensionAPI): void {
             reason: backgroundError,
           });
         }
-        // A terminal/queued job must be copied to a new transcript before reopening it; the original
-        // job's transcript and session identity remain immutable.
+        // Re-queue the existing job in place. Its job id, lineage, and
+        // transcript remain stable, so resuming never creates duplicate
+        // registry records or copied session files.
         const budgetError = countAgentCall();
         if (budgetError) return budgetError;
-        if (disposition.kind === "fresh-spawn") {
-          return startBackgroundAgent(params, ctx, { parentJobId: job.jobId });
-        }
-        if (!job.sessionFile) {
+        if (disposition.kind === "resume" && !job.sessionFile) {
           return errorResult(`agent ${params.agent_id} has no stored transcript to resume`, {
             jobId: job.jobId,
             reason: "no stored transcript",
           });
         }
-        return startBackgroundAgent(params, ctx, {
-          parentJobId: job.jobId,
-          sourceSessionFile: job.sessionFile,
-        });
+        return startBackgroundAgent(params, ctx, { existingJob: job });
       }
 
       // A new spawn is always background. The TUI gate protects the delivery
@@ -151,18 +148,19 @@ export function registerAgentTool(pi: ExtensionAPI): void {
  * Validates model availability and the requested `subagent_type` before
  * recording a job so an invalid request never consumes a job id, then runs the
  * child under the shared gate and delivers its result to the direct parent.
- * `parentJobId`/`sessionFile` carry a resumed lineage and transcript.
+ * `existingJob` resumes or retries one job in place, preserving its identity
+ * and transcript instead of creating a duplicate record.
  */
 function startBackgroundAgent(
   params: AgentParams,
   ctx: ExtensionContext,
-  resume: { parentJobId?: string; sessionFile?: string; sourceSessionFile?: string } = {},
+  resume: { existingJob?: Job } = {},
 ): AgentToolResult<AgentDetails | AgentErrorDetails> {
   const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
 
   if (!ctx.model) {
     return errorResult("no model available to run the child session", {
-      jobId: resume.parentJobId,
+      jobId: resume.existingJob?.jobId,
       reason: "no model available",
     });
   }
@@ -170,36 +168,36 @@ function startBackgroundAgent(
   if (!agent) {
     return errorResult(
       `unknown subagent_type: ${params.subagent_type}`,
-      { jobId: resume.parentJobId, reason: "unknown subagent_type" },
+      { jobId: resume.existingJob?.jobId, reason: "unknown subagent_type" },
     );
   }
 
-  const parent = resume.parentJobId ? pool.registry.get(resume.parentJobId) : undefined;
+  const existingJob = resume.existingJob;
   const parentSessionId = ctx.sessionManager.getSessionId();
-  let jobId = makeJobId();
-  let sessionFile = resume.sessionFile;
-  if (resume.sourceSessionFile) {
-    jobId = makeJobId();
-    sessionFile = copySessionFile(resume.sourceSessionFile, jobId, ctx.cwd, parentSessionId);
-    if (!sessionFile) {
-      return errorResult(`could not copy the transcript for agent ${resume.parentJobId ?? jobId}`, {
-        jobId: resume.parentJobId,
-        reason: "transcript copy failed",
+  let sessionFile: string | undefined;
+  if (existingJob?.sessionFile) {
+    try {
+      sessionFile = prepareResumeSessionFile(existingJob.sessionFile, existingJob.jobId);
+    } catch {
+      return errorResult(`could not prepare the transcript for agent ${existingJob.jobId}`, {
+        jobId: existingJob.jobId,
+        reason: "transcript preparation failed",
       });
     }
   }
-  const job = recordNewJob(pool.registry, {
-    jobId,
+  const job = existingJob ?? recordNewJob(pool.registry, {
+    jobId: makeJobId(),
     status: "queued",
     description: params.description,
     subagentType: params.subagent_type,
-    parentJobId: parent?.jobId,
-    rootJobId: parent?.rootJobId,
-    depth: parent ? parent.depth + 1 : undefined,
-    sessionFile,
-    sessionId: jobId,
     parentSessionId,
   });
+  if (existingJob) {
+    // Terminal and created jobs are explicitly re-queued in place. The
+    // transition is legal for all resumable states and resetting delivered
+    // prevents an earlier terminal result from suppressing the new one.
+    pool.registry.updateJob(existingJob.jobId, { status: "queued", delivered: false });
+  }
 
   // The direct-parent session file keys result delivery and the parent session
   // id scopes the job's storage folder. The child lifecycle runs under the
@@ -222,8 +220,8 @@ function startBackgroundAgent(
     },
   );
 
-  return textResult(formatRunningAgentText(job.subagentType, job.jobId), {
+  return textResult(existingJob ? formatResumingAgentText(job.subagentType, job.jobId) : formatRunningAgentText(job.subagentType, job.jobId), {
     jobId: job.jobId,
-    status: job.status,
+    status: "queued",
   });
 }

@@ -132,14 +132,16 @@ test("resumeDisposition: terminal jobs resume from their stored transcript", () 
   assert.equal(disposition.kind, "resume");
 });
 
-test("resumeDisposition: a created job re-spawns fresh and a queued job resumes", () => {
+test("resumeDisposition: a created job is rejected and a queued job resumes in place", () => {
   const jobs = new Map<string, Job>([
     ["a", makeJob("a", "running")],
     ["created", makeJob("created", "created", { parentJobId: "a", rootJobId: "a", depth: 1 })],
     ["queued", makeJob("queued", "queued", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
   const caller: ControlCaller = { sessionId: "a", jobId: "a" };
-  assert.equal(resumeDisposition(caller, jobs.get("created")!, getJobFrom(jobs)).kind, "fresh-spawn");
+  const created = resumeDisposition(caller, jobs.get("created")!, getJobFrom(jobs));
+  assert.equal(created.kind, "reject");
+  assert.equal(created.kind === "reject" ? created.reason : "", "not running");
   assert.equal(resumeDisposition(caller, jobs.get("queued")!, getJobFrom(jobs)).kind, "resume");
 });
 
@@ -245,9 +247,9 @@ test("session scope accepts a rehydrated descendant when its parent chain is pre
   ]);
 });
 
-test("prepareResumeSessionFile rewrites the header id and trims a trailing tool call", () => {
+test("prepareResumeSessionFile trims a trailing tool call in the same file", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-code-control-"));
-  const source = join(dir, "source.jsonl");
+  const source = join(dir, "original.jsonl");
   const header = { type: "session", version: 3, id: "original-job", timestamp: "t", cwd: dir };
   const assistant = {
     type: "message",
@@ -264,25 +266,23 @@ test("prepareResumeSessionFile rewrites the header id and trims a trailing tool 
   };
   writeFileSync(source, `${JSON.stringify(header)}\n${JSON.stringify(assistant)}\n`);
 
-  const destination = prepareResumeSessionFile(source, "new-job", dir, "parent-session");
+  const destination = prepareResumeSessionFile(source, "original-job");
 
-  assert.equal(destination, join(dir, ".pi", "pi-code", "sessions", "parent-session", "new-job.jsonl"));
-  // The new session file exists and keeps the original entry count (trim only
-  // drops content, not the whole message here).
+  // The existing transcript is prepared and rewritten in place.
+  assert.equal(destination, source);
   const lines = readFileSync(destination, "utf-8").trim().split("\n");
   assert.equal(lines.length, 2);
-  const copiedHeader = JSON.parse(lines[0]) as { id?: string };
-  assert.equal(copiedHeader.id, "new-job");
+  const reusedHeader = JSON.parse(lines[0]) as { id?: string };
+  assert.equal(reusedHeader.id, "original-job");
 
-  const copiedMessage = JSON.parse(lines[1]) as { message: { content: unknown[] } };
-  assert.deepEqual(copiedMessage.message.content, [{ type: "text", text: "thinking" }]);
-  // The original transcript is untouched.
-  assert.equal(readFileSync(source, "utf-8").includes("toolCall"), true);
+  const message = JSON.parse(lines[1]) as { message: { content: unknown[] } };
+  assert.deepEqual(message.message.content, [{ type: "text", text: "thinking" }]);
+  assert.equal(readFileSync(source, "utf-8").includes("toolCall"), false);
 });
 
 test("prepareResumeSessionFile drops a trailing assistant message whose content empties", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-code-control-"));
-  const source = join(dir, "source.jsonl");
+  const source = join(dir, "original.jsonl");
   const header = { type: "session", version: 3, id: "original-job", timestamp: "t", cwd: dir };
   const assistant = {
     type: "message",
@@ -296,16 +296,16 @@ test("prepareResumeSessionFile drops a trailing assistant message whose content 
   };
   writeFileSync(source, `${JSON.stringify(header)}\n${JSON.stringify(assistant)}\n`);
 
-  const destination = prepareResumeSessionFile(source, "new-job", dir, "parent-session");
+  const destination = prepareResumeSessionFile(source, "original-job");
   const lines = readFileSync(destination, "utf-8").trim().split("\n");
-  // Only the rewritten header remains.
+  // Only the header remains.
   assert.equal(lines.length, 1);
-  assert.equal(existsSync(source), true);
+  assert.ok(existsSync(source));
 });
 
-test("prepareResumeSessionFile preserves a normal completed transcript", () => {
+test("prepareResumeSessionFile preserves a normal completed transcript unchanged", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-code-control-"));
-  const source = join(dir, "source.jsonl");
+  const source = join(dir, "original.jsonl");
   const header = { type: "session", version: 3, id: "original-job", timestamp: "t", cwd: dir };
   const assistant = {
     type: "message",
@@ -326,7 +326,8 @@ test("prepareResumeSessionFile preserves a normal completed transcript", () => {
   };
   writeFileSync(source, `${JSON.stringify(header)}\n${JSON.stringify(assistant)}\n${JSON.stringify(user)}\n`);
 
-  const destination = prepareResumeSessionFile(source, "new-job", dir, "parent-session");
+  const destination = prepareResumeSessionFile(source, "original-job");
+  assert.equal(destination, source);
   const lines = readFileSync(destination, "utf-8").trim().split("\n");
   assert.equal(lines.length, 3);
   const last = JSON.parse(lines[2]) as { message: { role?: string } };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createJob, MAX_CONCURRENCY, type Job } from "@xzy-ai/core";
@@ -202,18 +202,30 @@ test("agent steer output names the targeted subagent type and remains allowed ou
       undefined,
       { ...context(cwd, "root-a"), mode: "print" } as unknown as ExtensionContext,
     );
-    assert.equal(result.content[0]?.text, "Steered agent test-agent (a-running).");
+    assert.equal(
+      result.content[0]?.text,
+      "Steered agent test-agent (a-running). The agent keeps its running context and will notify you when it settles. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.",
+    );
     assert.deepEqual(result.details, { jobId: "a-running", status: "running" });
     assert.equal(steers, 1);
   });
 });
 
-test("agent resumes a terminal job in the background using a copied transcript", async () => {
+test("agent resumes a terminal job in place with the same id and transcript", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-resume-agent-"));
-  const source = join(cwd, "original.jsonl");
+  const sessionFile = join(cwd, ".pi", "pi-code", "sessions", "root-a", "original.jsonl");
+  mkdirSync(dirname(sessionFile), { recursive: true });
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(join(cwd, ".pi", "agents", "test-agent.md"), "---\nname: test-agent\ndescription: Test agent\n---\ntest body", "utf8");
-  writeFileSync(source, '{"type":"session","id":"original"}\n{"type":"message","message":{"role":"user","content":"old"}}\n', "utf8");
+  const header = { type: "session", version: 3, id: "original", timestamp: "t", cwd };
+  const assistant = {
+    type: "message",
+    id: "m1",
+    parentId: null,
+    timestamp: "t",
+    message: { role: "assistant", content: [{ type: "text", text: "old" }] },
+  };
+  writeFileSync(sessionFile, `${JSON.stringify(header)}\n${JSON.stringify(assistant)}\n`, "utf8");
 
   const pool = getChildPool(cwd, "root-a");
   pool.registry.createJob(createJob({
@@ -223,7 +235,7 @@ test("agent resumes a terminal job in the background using a copied transcript",
     status: "completed",
     description: "old work",
     subagentType: "test-agent",
-    sessionFile: source,
+    sessionFile,
   }));
   const held = Array.from({ length: MAX_CONCURRENCY }, () => deferred<void>());
   const holdRuns = held.map((slot) => pool.concurrency.run(() => slot.promise));
@@ -243,17 +255,18 @@ test("agent resumes a terminal job in the background using a copied transcript",
       context(cwd, "root-a"),
     );
     const resumeJobId = result.details.jobId as string;
-    const resumed = pool.registry.get(resumeJobId);
+    const resumed = pool.registry.get("original");
+    // The resumed run keeps the original job id and transcript path.
+    assert.equal(resumeJobId, "original");
+    assert.equal(resumed?.status, "queued");
+    assert.equal(resumed?.sessionFile, sessionFile);
+    assert.equal(existsSync(sessionFile), true);
     assert.equal(
       result.content[0]?.text,
-      "Agent test-agent (" + resumeJobId + ") is running. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.",
+      "Resuming Agent test-agent (original) is running. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.",
     );
-    assert.notEqual(resumeJobId, "original");
-    assert.equal(resumed?.status, "queued");
-    assert.ok(resumed?.sessionFile);
-    assert.notEqual(resumed?.sessionFile, source);
-    assert.equal(readFileSync(source, "utf8"), '{"type":"session","id":"original"}\n{"type":"message","message":{"role":"user","content":"old"}}\n');
-    assert.match(readFileSync(resumed!.sessionFile!, "utf8"), new RegExp(`\\"id\\":\\"${resumeJobId}\\"`));
+    // No duplicate job or transcript copy is created.
+    assert.equal(pool.registry.all().size, 1);
   } finally {
     for (const slot of held) slot.resolve();
     await Promise.allSettled(holdRuns);

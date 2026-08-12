@@ -70,7 +70,10 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
     scopedRegistry: registry,
     rootSessionId,
     concurrency: createConcurrencyGate(MAX_CONCURRENCY),
-    delivery: createDeliveryCoordinator(),
+    delivery: createDeliveryCoordinator({
+      projectRoot,
+      onDelivered: (jobId) => registry.updateJob(jobId, { delivered: true }),
+    }),
     liveChildren,
     interruptRunningJobs: createInterruptionSweep({ registry, liveChildren, rootSessionId }),
     resetParallelAgents(): void {

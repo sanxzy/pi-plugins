@@ -23,11 +23,12 @@ test("status state machine: legal transitions", () => {
   assert.equal(isTerminal("running"), false);
 });
 
-test("status state machine: terminal states do not transition", () => {
+test("status state machine: terminal states only re-enter through queued resume", () => {
   assert.equal(canTransition("completed", "running"), false);
-  assert.equal(canTransition("cancelled", "queued"), false);
+  assert.equal(canTransition("cancelled", "queued"), true);
   assert.equal(canTransition("interrupted", "running"), false);
   assert.equal(canTransition("failed", "completed"), false);
+  assert.equal(canTransition("failed", "queued"), true);
 });
 
 test("createJob defaults to root lineage when no parent", () => {
