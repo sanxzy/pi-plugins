@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createReferenceCatalog, type ReferenceCatalogReadResult } from "@xzy-ai/runtime";
@@ -42,8 +43,14 @@ export interface LlmWikisSearchResultItem {
 }
 
 /** Model-safe view over the runtime references catalog for discovery and selection. */
+export interface ReferenceChild {
+  readonly name: string;
+  readonly kind: "file" | "directory";
+}
+
 export interface ReferenceCatalogReader {
   read: () => Promise<ReferenceCatalogReadResult>;
+  listChildren?: (root: string) => Promise<readonly ReferenceChild[]>;
 }
 
 export type LlmWikisSearchDetails =
@@ -83,6 +90,15 @@ export type LlmWikisSearchDetails =
         status: string;
         diagnostic?: string;
       }>;
+      selection?: {
+        alias: string;
+        type: "local" | "git";
+        description?: string;
+        hidden?: boolean;
+        root: string;
+        children: ReferenceChild[];
+        handoff: string;
+      };
       diagnostics?: string[];
     }
   | {
@@ -142,6 +158,62 @@ export async function executeLlmWikisSearch(
         aliases: [],
         diagnostics: ["Reference discovery is temporarily unavailable"],
       });
+    }
+    if (params.alias !== undefined) {
+      const entry = read.entries.find((candidate) => candidate.name === params.alias);
+      if (!entry) {
+        return textResult(`Reference alias '${params.alias}' was not found in the configured catalog.`, {
+          mode: "references",
+          ...(params.query === undefined ? {} : { query: params.query }),
+          aliases: [],
+          diagnostics: ["Reference alias was not found"],
+        });
+      }
+      if (entry.status !== "available" || !entry.path) {
+        return textResult(`Reference alias '${entry.name}' is unavailable.`, {
+          mode: "references",
+          ...(params.query === undefined ? {} : { query: params.query }),
+          aliases: [],
+          diagnostics: [entry.diagnostic ?? "Reference root is unavailable"],
+        });
+      }
+      if (signalAborted(options)) {
+        return errorResult("Reference research aborted.", { mode: "error", message: "Reference research aborted." });
+      }
+      let children: readonly ReferenceChild[];
+      try {
+        children = options?.referenceCatalog?.listChildren
+          ? await options.referenceCatalog.listChildren(entry.path)
+          : await listReferenceChildren(entry.path);
+      } catch {
+        return textResult(`Unable to list reference alias '${entry.name}'.`, {
+          mode: "references",
+          ...(params.query === undefined ? {} : { query: params.query }),
+          aliases: [],
+          diagnostics: ["Unable to list the reference root"],
+        });
+      }
+      const selection = {
+        alias: entry.name,
+        type: entry.source.type,
+        ...(entry.description ? { description: entry.description } : {}),
+        ...(entry.hidden === undefined ? {} : { hidden: entry.hidden }),
+        root: entry.path,
+        children: normalizeReferenceChildren(children),
+        handoff: "Use normal filesystem tools such as read, grep, and find for focused inspection of this root.",
+      };
+      const renderedChildren = selection.children.length === 0
+        ? "  (empty root)"
+        : selection.children.map((child) => `  - ${child.name} (${child.kind})`).join("\n");
+      return textResult(
+        [`Reference: ${selection.alias} (${selection.type})`, `Root: ${selection.root}`, "Immediate children:", renderedChildren, selection.handoff].join("\n"),
+        {
+          mode: "references",
+          ...(params.query === undefined ? {} : { query: params.query }),
+          aliases: [],
+          selection,
+        },
+      );
     }
     const aliases = read.entries
       .filter((entry) => !entry.hidden)
@@ -252,6 +324,21 @@ export async function executeLlmWikisSearch(
     ...(params.topic === undefined ? {} : { topic: params.topic }),
     results,
   });
+}
+
+async function listReferenceChildren(root: string): Promise<ReferenceChild[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  return entries.map((entry) => ({
+    name: entry.name,
+    kind: entry.isDirectory() ? "directory" : "file",
+  }));
+}
+
+function normalizeReferenceChildren(children: readonly ReferenceChild[]): ReferenceChild[] {
+  return children
+    .filter((child) => child.kind === "file" || child.kind === "directory")
+    .map((child) => ({ name: child.name, kind: child.kind }))
+    .sort((left, right) => left.name.localeCompare(right.name) || left.kind.localeCompare(right.kind));
 }
 
 export { llmWikisSearchParams };
