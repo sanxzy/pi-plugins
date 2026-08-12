@@ -54,12 +54,15 @@ test("llm_wikis_search is registered with an explicit type discriminator and a l
   const tool = captureTool();
   assert.equal(tool.name, "llm_wikis_search");
   const variants = tool.parameters.anyOf ?? [];
-  assert.equal(variants.length, 2);
+  assert.equal(variants.length, 3);
   const literals = variants.map((variant) => {
     const typeField = (variant as { properties?: { type?: { const?: string } } }).properties?.type;
     return typeField?.const;
   });
-  assert.deepEqual(literals, ["wikis", "references"]);
+  assert.deepEqual(literals, ["wikis", "references", undefined]);
+  const grouped = variants[2] as { properties?: Record<string, { const?: string; type?: string; anyOf?: unknown[] }> };
+  assert.equal(grouped.properties?.query?.type, "string");
+  assert.equal(grouped.properties?.type?.type, "null");
   assert.match(tool.description, /wikis/i);
   assert.match(tool.description, /references/i);
   assert.match(tool.description, /local/i);
@@ -407,6 +410,65 @@ function fakeSelectionReader(
     },
   } as unknown as ReferenceCatalogReader;
 }
+
+test("llm_wikis_search default discovery groups references before wikis", async () => {
+  const root = tempRoot();
+  mkdirSync(root, { recursive: true });
+  writeFileSync(
+    join(root, "solid.md"),
+    `<!-- pi-code-wiki-page -->\ntopic: solid\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nSolid reactivity`,
+  );
+  const catalog = fakeCatalog([
+    {
+      diagnostics: [],
+      entries: [{ name: "hermes-agent", source: { type: "git" }, status: "available" }],
+    },
+  ]);
+  try {
+    const result = await executeLlmWikisSearch({} as never, { wikiRoot: root, referenceCatalog: catalog });
+    const details = result.details as unknown as {
+      mode: string;
+      references: { mode: string; aliases: Array<{ alias: string }> };
+      wikis: { mode: string; discovery: { topics: Array<{ topic: string }> } };
+    };
+    assert.equal(details.mode, "discovery");
+    assert.equal(details.references.mode, "references");
+    assert.deepEqual(details.references.aliases.map((alias) => alias.alias), ["hermes-agent"]);
+    assert.equal(details.wikis.mode, "wikis");
+    assert.deepEqual(details.wikis.discovery.topics.map((topic) => topic.topic), ["solid"]);
+    const rendered = text(result);
+    assert.ok(rendered.indexOf("--references--") < rendered.indexOf("--wikis--"));
+    assert.ok(rendered.indexOf("hermes-agent") < rendered.indexOf("solid.md"));
+    assert.match(rendered, /--references--[\s\S]*hermes-agent[\s\S]*---[\s\S]*--wikis--[\s\S]*solid\.md/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("llm_wikis_search accepts wildcard discovery with an omitted or null type", async () => {
+  const catalog = fakeCatalog([{ entries: [], diagnostics: [] }]);
+  const omitted = await executeLlmWikisSearch({ query: "*" } as never, { referenceCatalog: catalog, wikiRoot: join(tempRoot(), "missing") });
+  assert.equal((omitted.details as unknown as { mode: string }).mode, "discovery");
+  const nullable = await executeLlmWikisSearch({ type: null, query: "*" } as never, { referenceCatalog: catalog, wikiRoot: join(tempRoot(), "missing") });
+  assert.equal((nullable.details as unknown as { mode: string }).mode, "discovery");
+});
+
+test("llm_wikis_search accepts any query without a type and still groups references before wiki results", async () => {
+  const root = tempRoot();
+  writeFileSync(
+    join(root, "solid.md"),
+    formatWikiEntry({ topic: "solid", source: "web_search", queryOrUrl: "solid", format: "markdown", title: "Solid", text: "Solid reactivity" }),
+  );
+  const catalog = fakeCatalog([{ entries: [], diagnostics: [] }]);
+  try {
+    const result = await executeLlmWikisSearch({ query: "solid" } as never, { referenceCatalog: catalog, wikiRoot: root });
+    assert.equal((result.details as unknown as { mode: string; query: string }).mode, "discovery");
+    assert.equal((result.details as unknown as { query: string }).query, "solid");
+    assert.match(text(result), /--references--[\s\S]*--wikis--[\s\S]*solid/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("llm_wikis_search references wildcard lists non-hidden aliases with safe metadata in stable order", async () => {
   const catalog = fakeCatalog([
