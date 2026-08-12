@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { MAX_CONCURRENCY } from "@xzy-ai/core";
+import { createJob, MAX_CONCURRENCY } from "@xzy-ai/core";
 import { encodeProjectId, getChildPool, homeAgentManifestFile, spawnChildSession } from "@xzy-ai/runtime";
 import { registerAgentTool } from "../src/registrations/agent.ts";
 
@@ -33,19 +33,24 @@ type RegisteredAgent = {
 };
 
 function context(cwd: string, mode: string = "tui"): ExtensionContext {
+  let sessionId = "root-session";
+  let sessionFile: string | undefined = join(cwd, "sessions", "root-session.jsonl");
   return {
+    set sessionIdForTest(id: string) { sessionId = id; },
+    get sessionManager() {
+      return {
+        getSessionId: () => sessionId,
+        getSessionFile: () => sessionFile,
+      };
+    },
     mode,
-    hasUI: true,
+    hasUI: mode === "tui",
     cwd,
     model: {} as ExtensionContext["model"],
     ui: {
       custom: async () => undefined,
       getEditorText: () => "",
       setEditorText: () => {},
-    },
-    sessionManager: {
-      getSessionId: () => "root-session",
-      getSessionFile: () => join(cwd, "sessions", "root-session.jsonl"),
     },
   } as unknown as ExtensionContext;
 }
@@ -97,6 +102,63 @@ test("new background spawns remain TUI-only", async () => {
     assert.deepEqual(result.details, { jobId: undefined, reason: "background mode is invalid in print mode" });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a running child agent may spawn a descendant even in print mode", async () => {
+  let detailed: RegisteredAgent | undefined;
+  registerAgentTool({
+    registerTool(tool: RegisteredAgent) {
+      detailed = tool;
+    },
+  } as unknown as ExtensionAPI);
+  assert.ok(detailed);
+  const previousHome = process.env.PI_CODE_TEST_HOME;
+  process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-child-recurse-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-child-recurse-"));
+  mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "agents", "test-agent.md"),
+    "---\nname: test-agent\ndescription: Test agent\n---\ntest body",
+    "utf8",
+  );
+  // The descendant child must not actually create a real SDK session; the gate
+  // admission and job recording are what this test asserts. `runBackgroundJob`
+  // catches a throwing child adapter and marks the job failed.
+  const previousFactory = spawnChildSession.__createChild;
+  spawnChildSession.__createChild = async () => {
+    throw new Error("not spawning a real session in this regression test");
+  };
+  try {
+    const pool = getChildPool(cwd, "root-session");
+    pool.registry.createJob(createJob({
+      jobId: "child-session",
+      parentSessionId: "root-session",
+      sessionId: "child-session",
+      status: "running",
+      description: "child",
+      subagentType: "test-agent",
+    }));
+    const childCtx = context(cwd, "print") as ExtensionContext & { sessionIdForTest: string };
+    childCtx.sessionIdForTest = "child-session";
+    // The child is a registered running job; it may recurse even though the SDK
+    // runs child sessions in non-interactive `print` mode.
+    const result = await detailed!.execute(
+      "call",
+      { description: "recurse", prompt: "spawn grandchild", subagent_type: "test-agent" },
+      undefined,
+      undefined,
+      childCtx,
+    );
+    assert.ok(result.details.jobId, "descendant gets a job id");
+    assert.ok(result.content[0]?.text.startsWith("Agent test-agent"), "spawn acknowledged");
+    const childJob = pool.registry.get(result.details.jobId!);
+    assert.equal(childJob?.parentSessionId, "child-session");
+  } finally {
+    spawnChildSession.__createChild = previousFactory;
+    rmSync(cwd, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
+    else process.env.PI_CODE_TEST_HOME = previousHome;
   }
 });
 

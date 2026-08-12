@@ -105,7 +105,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
         }
         // Resume (or retry a created job) in place. The TUI gate applies to
         // every path that launches a child, while steering above remains direct.
-        const backgroundError = backgroundModeError(ctx.mode);
+        const backgroundError = backgroundModeError(ctx.mode, caller.jobId !== undefined);
         if (backgroundError) {
           return errorResult("background agents are available only in TUI mode", {
             jobId: job.jobId,
@@ -128,7 +128,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
 
       // A new spawn is always background. The TUI gate protects the delivery
       // contract: in one-shot modes the parent exits before the child settles.
-      const backgroundError = backgroundModeError(ctx.mode);
+      const backgroundError = backgroundModeError(ctx.mode, caller.jobId !== undefined);
       if (backgroundError) {
         return errorResult("background agents are available only in TUI mode", {
           jobId: undefined,

@@ -13,9 +13,15 @@ import type { AgentManifestStore } from "../manifests/manifests.ts";
  * the result immediately.
  */
 
-/** Reason a background request is invalid in the given extension mode. */
-export function backgroundModeError(mode: string): string | undefined {
-  if (mode === "tui") return undefined;
+/**
+ * Reason a background request is invalid in the given extension mode.
+ *
+ * A root host must be TUI-backed so its background delivery sink remains alive.
+ * A child session is already owned by that live root, so it may recurse even
+ * though the SDK creates child sessions with its non-interactive `print` mode.
+ */
+export function backgroundModeError(mode: string, isNestedChild = false): string | undefined {
+  if (mode === "tui" || isNestedChild) return undefined;
   return `background mode is invalid in ${mode} mode`;
 }
 

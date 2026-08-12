@@ -48,17 +48,32 @@ interface ChildSessionServices {
 /** All seven Pi built-in tools; the allowlist when an agent omits `tools`. */
 const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
 
-/** pi-code extension tools appended to every child allowlist. */
-const EXTENSION_TOOLS = ["web_search", "web_fetch", "llm_wikis_search"] as const;
+/**
+ * pi-code extension tools appended to every child allowlist so subagents can
+ * recurse: the web tools for research and the agent-family tools so a child
+ * can spawn its own descendants, list them, and cancel them within the same
+ * scoped pool. Goal and MCP capabilities stay root-only.
+ */
+const EXTENSION_TOOLS = [
+  "agent",
+  "agent_list",
+  "agent_jobs",
+  "agent_status",
+  "agent_cancel",
+  "web_search",
+  "web_fetch",
+  "llm_wikis_search",
+] as const;
 
 /**
  * Map a resolved agent to its child tool allowlist.
  *
- * An explicit non-empty frontmatter `tools` list wins, except that goal
- * capabilities are always removed because goals belong to the main host. An
+ * An explicit non-empty frontmatter `tools` list wins, except that goal and MCP
+ * capabilities are always removed because they belong to the main host. An
  * absent/empty list enables the full built-in set so the read-only Pi tools
- * (grep, find, ls) are active by default. The pi-code web tools and local wiki
- * search are appended in every case so they stay available to subagents.
+ * (grep, find, ls) are active by default. The pi-code web tools, local wiki
+ * search, and agent-family tools are appended in every case so subagents stay
+ * able to research and to recurse through the shared scoped pool.
  */
 const ROOT_ONLY_TOOLS = new Set([
   "goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear",

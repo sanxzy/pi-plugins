@@ -363,6 +363,17 @@ test("backgroundModeError rejects non-TUI modes and allows the TUI", () => {
   assert.equal(backgroundModeError("rpc"), "background mode is invalid in rpc mode");
 });
 
+test("backgroundModeError lets nested child agents recurse in any mode", () => {
+  // A root host must stay TUI-backed so its delivery sink survives; a child
+  // already runs under that live root, so it may spawn descendants even though
+  // the SDK creates child sessions with the non-interactive `print` mode.
+  assert.equal(backgroundModeError("tui", true), undefined);
+  assert.equal(backgroundModeError("print", true), undefined);
+  assert.equal(backgroundModeError("json", true), undefined);
+  assert.equal(backgroundModeError("rpc", true), undefined);
+  assert.equal(backgroundModeError("print", false), "background mode is invalid in print mode");
+});
+
 test("formatBackgroundResult formats each terminal child status", () => {
   assert.equal(formatBackgroundResult("reviewer", "j1", completedResult("done")), 'Background agent reviewer (j1) completed:\ndone');
   assert.equal(
