@@ -181,6 +181,52 @@ test("an aborted in-flight local save does not publish the candidate", async () 
   assert.deepEqual(document, { references: {} });
 });
 
+test("controller removes an entry atomically and preserves the rest", async () => {
+  let document = { references: { docs: { path: "/tmp/docs" } as Record<string, unknown>, keep: "~/keep" as string | Record<string, unknown> } };
+  const controller = createReferencesSetupController({
+    catalog: {
+      filePath: "/tmp/references.json",
+      readDocument: async () => document,
+      preflight: async () => ({ ok: true as const }),
+      save: async (candidate: unknown) => {
+        document = candidate as typeof document;
+        return { ok: true as const };
+      },
+    },
+  });
+  const result = await controller.remove("docs");
+  assert.deepEqual(result, { ok: true, message: "Reference removed." });
+  assert.deepEqual(document, { references: { keep: "~/keep" } });
+});
+
+test("/setup-references maps saved, error, and cancelled results to notifications", async () => {
+  const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
+  const notifications: Array<[string, string]> = [];
+  const pi = {
+    registerCommand(name: string, options: { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> }) {
+      handlers.set(name, options.handler);
+    },
+  } as unknown as ExtensionAPI;
+  registerReferencesSetup(pi);
+  const ctxFor = (result: unknown): ExtensionCommandContext => ({
+    mode: "tui",
+    hasUI: true,
+    signal: undefined,
+    ui: {
+      custom: async () => result,
+      notify: (message: string, kind?: string) => notifications.push([message, kind ?? "info"] as [string, string]),
+    },
+  } as unknown as ExtensionCommandContext);
+  await handlers.get("setup-references")!("", ctxFor({ status: "saved", message: "Done" }));
+  await handlers.get("setup-references")!("", ctxFor({ status: "error", message: "Broken" }));
+  await handlers.get("setup-references")!("", ctxFor({ status: "cancelled" }));
+  assert.deepEqual(notifications, [
+    ["Done", "info"],
+    ["Broken", "error"],
+    ["References setup cancelled", "info"],
+  ]);
+});
+
 test("registers /setup-references and gates it to interactive TUI", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: string[] = [];

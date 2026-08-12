@@ -282,6 +282,80 @@ test("Git edit sends an empty branch marker when clearing a stored branch", asyn
   assert.ok(lines(wizard).some((line) => line.includes("Branch cleared")));
 });
 
+test("Remove requires explicit confirmation and leaves the catalog unchanged on decline", async () => {
+  const removed: string[] = [];
+  const ctl = controller({
+    list: async () => ({ items: [{ name: "docs", label: "/tmp/docs", local: { path: "/tmp/docs" } }] }),
+    remove: async (alias) => {
+      removed.push(alias);
+      return { ok: true as const, message: "Reference removed." };
+    },
+  });
+  const wizard = new ReferencesSetupWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+  // Decline first: cancel must not call remove.
+  wizard.handleInput("\x1b[B"); // Add Git
+  wizard.handleInput("\x1b[B"); // Edit
+  wizard.handleInput("\x1b[B"); // Remove
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("References setup · remove")));
+  wizard.handleInput("\r"); // select docs
+  assert.ok(lines(wizard).some((line) => line.includes("docs — /tmp/docs")));
+  assert.ok(lines(wizard).some((line) => line.includes("Remove")));
+  wizard.handleInput("\x1b[B"); // Cancel
+  wizard.handleInput("\r");
+  assert.deepEqual(removed, []);
+  assert.ok(lines(wizard).some((line) => line.includes("References setup · remove")));
+  // Confirm now: remove must run and return to the menu.
+  wizard.handleInput("\r"); // select docs
+  wizard.handleInput("\r"); // Remove
+  await flush();
+  assert.deepEqual(removed, ["docs"]);
+  assert.ok(lines(wizard).some((line) => line.includes("Reference removed.")));
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("References setup")));
+});
+
+test("Test and Refresh actions run from the action menu", async () => {
+  const testCalls: string[] = [];
+  const refreshCalls: string[] = [];
+  const ctl = controller({
+    list: async () => ({ items: [{ name: "react", label: "facebook/react", git: { repository: "facebook/react" } }] }),
+    testGit: async (alias) => {
+      testCalls.push(alias);
+      return { ok: true as const, message: "Reference available." };
+    },
+    refreshGit: async (alias) => {
+      refreshCalls.push(alias);
+      return { ok: true as const, message: "Reference refreshed." };
+    },
+  });
+  const wizard = new ReferencesSetupWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+  // Test action: Add Git, Edit, Remove, Test.
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("References setup · test")));
+  wizard.handleInput("\r");
+  await flush();
+  assert.deepEqual(testCalls, ["react"]);
+  wizard.handleInput("\r"); // result -> menu
+  // Refresh action: Add Git, Edit, Remove, Test, Refresh.
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("References setup · refresh")));
+  wizard.handleInput("\r");
+  await flush();
+  assert.deepEqual(refreshCalls, ["react"]);
+});
+
 test("Test and Refresh run observationally from the operation chooser", async () => {
   const testCalls: string[] = [];
   const refreshCalls: string[] = [];
