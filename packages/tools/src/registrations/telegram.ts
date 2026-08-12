@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   clearTelegramChoiceTokens,
   createChannelChatRegistry,
@@ -154,6 +155,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<TelegramChatDetails>> {
+      return processWithLog({ operation: TOOL_OPERATIONS.TELEGRAM_EXECUTE, parameters: { action: (params as { action?: unknown }).action } }, async () => {
       const action = (params as { action?: unknown }).action;
       if (action !== "send_text" && action !== "react" && action !== "send_choices" && action !== "send_media") {
         return errorResult("Unsupported Telegram action", {
@@ -288,6 +290,7 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         chatId: target.targetId,
         chunks: result.sent,
         messageIds: result.messageIds,
+      });
       });
     },
     renderCall(args: TelegramChatParams, theme) {
