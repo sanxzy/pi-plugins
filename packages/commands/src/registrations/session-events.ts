@@ -8,7 +8,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
-import { currentProcessIdentity, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
+import { createSessionLogger, processWithLog, runWithLogContext } from "@xzy-ai/observability";
+import { currentProcessIdentity, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
 type SessionReloadMarkers = Map<string, boolean>;
@@ -36,6 +37,17 @@ export function takeSessionReload(projectRoot: string): boolean {
 /** Clear a marker when the reload operation fails before session_start. */
 export function clearSessionReload(projectRoot: string): void {
   sessionReloadMarkers().delete(canonicalProjectRoot(projectRoot));
+}
+
+function sessionLogger(projectRoot: string, sessionId: string) {
+  const projectId = encodeProjectId(projectRoot);
+  const localDate = new Date().toISOString().slice(0, 10);
+  return createSessionLogger({
+    projectId,
+    rootSessionId: sessionId,
+    eventsPath: homeDailyEventFile(projectId, sessionId, localDate),
+    errorsPath: homeDailyErrorFile(projectId, sessionId, localDate),
+  });
 }
 
 function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext): GoalDeliveryBinding {
@@ -68,6 +80,16 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
   pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
     const projectRoot = canonicalProjectRoot(ctx.cwd);
     const sessionId = ctx.sessionManager.getSessionId();
+    const logger = sessionLogger(projectRoot, sessionId);
+    return runWithLogContext(logger, () => processWithLog(
+      { operation: "session.start", parameters: { reason: event.reason } },
+      async () => {
+        await startSession(event, ctx, pi, projectRoot, sessionId);
+      },
+    ));
+  });
+
+  async function startSession(event: SessionStartEvent, ctx: ExtensionContext, pi: ExtensionAPI, projectRoot: string, sessionId: string): Promise<void> {
     const rootPool = getChildPool(ctx.cwd, sessionId);
     // A root host has no agent event. The bootstrap predicate applies only to
     // this real lifecycle boundary; ordinary callers use manifest-backed
@@ -138,10 +160,21 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
 
     // A fresh host binding is established above before delivery resumes. The
     // goal pool does not retain the old session/UI handles across replacement.
-  });
+  }
 
   pi.on("session_shutdown", async (event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    const projectRoot = canonicalProjectRoot(ctx.cwd);
     const rootSessionId = ctx.sessionManager.getSessionId();
+    const logger = sessionLogger(projectRoot, rootSessionId);
+    return runWithLogContext(logger, () => processWithLog(
+      { operation: "session.stop", parameters: { reason: event.reason } },
+      async () => {
+        await stopSession(event, ctx, projectRoot, rootSessionId);
+      },
+    ));
+  });
+
+  async function stopSession(event: SessionShutdownEvent, ctx: ExtensionContext, projectRoot: string, rootSessionId: string): Promise<void> {
     const pool = getChildPool(ctx.cwd, rootSessionId);
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (sessionFile) {
@@ -174,5 +207,5 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // channel state remain untouched.
     const goalPool = getGoalPool(ctx.cwd, rootSessionId);
     goalPool.clearStore();
-  });
+  }
 }
