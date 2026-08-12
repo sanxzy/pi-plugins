@@ -54,6 +54,32 @@ test("cleanup reconciles dead sessions and interrupts their persisted running ag
   assert.equal(JSON.parse(readFileSync(homeSessionManifestFile(encodeProjectId(root), "dead-root"), "utf8")).active, false);
 });
 
+test("cleanup prunes oldest inactive sessions even when active sessions alone exceed 200", () => {
+  setup();
+  const root = project();
+  const current = { currentPid: 9999, currentProcessStartTime: "current-start" };
+  // 202 active sessions alone exceed the 200 cap; Q57/AC-5 allow this to
+  // temporarily exceed 200, but stale inactive sessions must still be pruned.
+  for (let index = 0; index < 202; index += 1) {
+    const id = `active-${String(index).padStart(3, "0")}`;
+    startRootSession({ projectRoot: root, sessionId: id, pid: 9999, processStartTime: "current-start" });
+  }
+  for (let index = 0; index < 5; index += 1) {
+    const id = `inactive-${String(index).padStart(3, "0")}`;
+    startRootSession({ projectRoot: root, sessionId: id, pid: 1111, processStartTime: "old-start", now: `2020-01-01T00:0${index}:00.000Z` });
+  }
+  const result = cleanupRootSessions(root, {
+    ...current,
+    isAlive: (pid) => pid === 9999,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.removed, 5, "all stale inactive sessions must be pruned regardless of active count");
+  assert.equal(result.remaining, 202);
+  // Active sessions are never removed, even past the cap.
+  assert.equal(existsSync(homeSessionManifestFile(encodeProjectId(root), "active-000")), true);
+  assert.equal(existsSync(homeSessionManifestFile(encodeProjectId(root), "active-201")), true);
+});
+
 test("cleanup retains active sessions, removes oldest inactive sessions past 200, and preserves project channel state", () => {
   setup();
   const root = project();
