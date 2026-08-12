@@ -603,6 +603,8 @@ export class ReferencesSetupWizard implements Component {
   private gitInput(): { repository: string; branch?: string; description?: string; hidden?: boolean; signal?: AbortSignal } {
     const input: { repository: string; branch?: string; description?: string; hidden?: boolean; signal?: AbortSignal } = { repository: this.repository };
     if (this.branch) input.branch = this.branch;
+    else if (this.editing()) input.branch = ""; // explicit empty marker clears a stored branch
+    if (this.description) input.description = this.description;
     if (this.description) input.description = this.description;
     if (this.hiddenTouched) input.hidden = this.hidden;
     if (this.signal) input.signal = this.signal;
