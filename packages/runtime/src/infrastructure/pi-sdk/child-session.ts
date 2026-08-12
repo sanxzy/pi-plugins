@@ -19,6 +19,7 @@ import type {
   ChildSessionControl,
   SpawnChildSession,
 } from "@xzy-ai/core";
+import { processWithLog } from "@xzy-ai/observability";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
 import { getChildExtensionFactories } from "./child-extensions.ts";
@@ -374,6 +375,8 @@ export const spawnChildSession: SpawnChildSession & {
     options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; depth?: number; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[]; mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>; mcpBridge?: { invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>; listResources(server: string): unknown; readResource(server: string, uri: string, signal?: AbortSignal): Promise<unknown> }; },
   ) => Promise<ChildSessionServices>;
 } = (async (options) => {
+  // Wrap the whole foreground child lifecycle as one correlated boundary.
+  return processWithLog({ operation: "agent.lifecycle", parameters: { jobId: options.jobId } }, async () => {
   // A cancelled parent run must not start a child at all.
   if (options.signal?.aborted) {
     return { sessionFile: "", output: "(aborted before start)", status: "aborted" };
@@ -470,6 +473,7 @@ export const spawnChildSession: SpawnChildSession & {
       child.dispose();
     }
   }, options.signal);
+  });
 }) as SpawnChildSession & {
   __createChild?: (
     options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; depth?: number; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[] },
