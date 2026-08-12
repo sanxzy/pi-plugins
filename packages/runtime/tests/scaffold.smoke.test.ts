@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getChildPool } from "@xzy-ai/runtime";
-import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
+import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS, createJob } from "@xzy-ai/core";
 
 /**
  * Phase 1 smoke tests.
@@ -54,4 +54,42 @@ test("getChildPool upgrades a stale singleton left by an older extension runtime
   assert.equal(upgraded.liveChildren.get("still-running"), marker, "live child handles survive");
   const coordinator = upgraded.deliveryFor("root-a");
   assert.equal(coordinator, upgraded.deliveryFor("root-a"), "one coordinator per root session");
+});
+
+test("getChildPool replaces a stale registry that cannot refresh", () => {
+  const root = "/tmp/projects/reload-registry-upgrade";
+  // Seed a real job on disk through the current runtime.
+  const seed = getChildPool(root, "root-a");
+  seed.registry.createJob(createJob({
+    jobId: "on-disk-job",
+    parentSessionId: "root-a",
+    status: "queued",
+    description: "on-disk-job",
+    subagentType: "test-agent",
+  }));
+  // Simulate a pool built by an older runtime whose registry cannot refresh
+  // and therefore holds a stale in-memory view of home storage.
+  const stale: Record<string, unknown> = {
+    projectRoot: root,
+    registry: {
+      get: () => undefined,
+      all: () => new Map(),
+      getBySessionId: () => undefined,
+      createJob() {},
+      updateJob() {},
+      ensureSession() {},
+      // deliberately absent: no refresh()/load-on-read from older modules
+    },
+    scopedRegistry: undefined,
+    rootSessionId: "root-a",
+    concurrency: seed.concurrency,
+    liveChildren: new Map(),
+    resetParallelAgents() {},
+  };
+  globalThis.piCodePool[`pi-code:${root}`] = stale as never;
+  const upgraded = getChildPool(root, "root-a");
+  assert.equal(upgraded, stale, "the singleton identity survives the upgrade");
+  const registry = upgraded.registry as unknown as { refresh?: unknown; all: () => Map<string, unknown> };
+  assert.equal(typeof registry?.refresh, "function", "registry is replaced with a refreshing one");
+  assert.ok(registry.all().has("on-disk-job"), "replaced registry reads the authoritative on-disk job");
 });

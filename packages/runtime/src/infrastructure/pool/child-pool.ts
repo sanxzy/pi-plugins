@@ -173,10 +173,20 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
  * stale object.
  */
 function upgradePool(pool: ChildPool, projectRoot: string, rootSessionId?: string): void {
-  const registry = pool.registry;
   const patch = (key: string, value: unknown): void => {
     Object.defineProperty(pool, key, { value, configurable: true, writable: true });
   };
+  let registry = pool.registry;
+  if (typeof registry.refresh !== "function") {
+    // A pre-refresh registry cannot observe home cleanup. Rebuild only the
+    // read-model object from authoritative event logs; preserve the pool,
+    // concurrency gate, live child handles, and durable on-disk jobs.
+    registry = createAgentEventRegistry(projectRoot, pool.rootSessionId ?? rootSessionId);
+    patch("registry", registry);
+    patch("scopedRegistry", registry);
+  } else {
+    registry.refresh();
+  }
 
   if (typeof pool.rootSessionIdFor !== "function") {
     patch("rootSessionIdFor", (sessionId: string): string => {

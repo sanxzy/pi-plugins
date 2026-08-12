@@ -22,6 +22,8 @@ export interface AgentEventRegistry {
   ensureSession(sessionId: string): void;
   fileForJob(jobId: string): string | undefined;
   registries(): ReadonlyMap<string, AgentManifestStore>;
+  /** Refresh the in-memory read model from authoritative home event logs. */
+  refresh(): void;
 }
 
 interface Entry {
@@ -243,5 +245,6 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       load();
       return stores;
     },
+    refresh(): void { load(); },
   };
 }
