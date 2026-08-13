@@ -12,6 +12,7 @@ import {
   takeSessionReload,
   clearSessionReload,
 } from "../src/registrations/session-events.ts";
+import { createHostMessageGate } from "../src/registrations/safe-host-delivery.ts";
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
@@ -202,3 +203,68 @@ test("delivery sink defers results while the host agent is busy", async () => {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test("a disposed host gate drops queued messages, cancels retries, and rejects new sends", async () => {
+  let idle = false;
+  const steers: string[] = [];
+  const pi = {
+    on() {},
+    sendUserMessage(content: string) {
+      steers.push(content);
+    },
+  } as unknown as ExtensionAPI;
+  const ctx = { isIdle: () => idle, hasPendingMessages: () => false } as unknown as ExtensionContext;
+  const gate = createHostMessageGate(pi, ctx);
+  gate.send("queued-while-busy");
+  assert.deepEqual(steers, [], "the busy host must not be prompted");
+
+  // A session replacement disposes the gate: queued work is dropped, the retry
+  // timer is cancelled, and the disposed gate never sends again.
+  gate.dispose();
+  idle = true;
+  gate.send("after-dispose");
+  assert.equal(gate.trySend("try-after-dispose"), false);
+  assert.equal(gate.ready(), false);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(steers, [], "a disposed gate must never deliver");
+});
+
+test("session_shutdown disposes the host gate so a stale context cannot crash the host", async () => {
+  const cwd = projectRoot();
+  try {
+    // A reload lands while the host is mid-run and a reload notice is queued
+    // behind the gate's backoff timer.
+    markSessionReload(cwd);
+    let idle = false;
+    const { pi, handlers, steers } = registrationsWithSteer();
+    const ctx = {
+      ...context(cwd, "root-a"),
+      isIdle: () => idle,
+      hasPendingMessages: () => false,
+    } as unknown as ExtensionContext;
+    registerSessionEvents(pi);
+    await handlers.get("session_start")!({ reason: "reload" }, ctx);
+    assert.deepEqual(steers, []);
+
+    // The session is replaced: shutdown disposes the gate. The context then
+    // behaves like pi's invalidated runner, whose getters throw.
+    await handlers.get("session_shutdown")!({ reason: "reload" }, ctx);
+    idle = true;
+    Object.assign(ctx, {
+      isIdle: () => {
+        throw new Error("This extension ctx is stale after session replacement or reload.");
+      },
+      hasPendingMessages: () => {
+        throw new Error("This extension ctx is stale after session replacement or reload.");
+      },
+    });
+
+    // Advance well past the gate's backoff window: the disposed gate must not
+    // fire a timer, must not throw, and must not deliver the stale notice.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.deepEqual(steers, [], "the replaced session must never deliver through a stale gate");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
