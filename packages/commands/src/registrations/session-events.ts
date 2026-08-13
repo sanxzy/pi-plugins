@@ -10,6 +10,7 @@ import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
 import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
 import { currentProcessIdentity, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
+import { createHostMessageGate, type HostMessageGate } from "./safe-host-delivery.ts";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
 type SessionReloadMarkers = Map<string, boolean>;
@@ -50,11 +51,11 @@ function sessionLogger(projectRoot: string, sessionId: string) {
   });
 }
 
-function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLogger): GoalDeliveryBinding {
+function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLogger, gate: HostMessageGate): GoalDeliveryBinding {
   return {
     cwd: ctx.cwd,
     hasUI: ctx.hasUI,
-    sendUserMessage: (content, options) => pi.sendUserMessage(content, options),
+    sendUserMessage: (content, options) => gate.send(content, options?.deliverAs ?? "steer"),
     notify: (message, type) => {
       if (ctx.hasUI) ctx.ui.notify(message, type);
     },
@@ -94,6 +95,11 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
 
   async function startSession(event: SessionStartEvent, ctx: ExtensionContext, pi: ExtensionAPI, projectRoot: string, sessionId: string, logger: SessionLogger): Promise<void> {
     const rootPool = getChildPool(ctx.cwd, sessionId);
+    // Host-bound model messages (reload notice, background results, goals) are
+    // gated behind the agent's run state so they never race an active prompt
+    // and never surface pi's "already processing a prompt" error during
+    // session replacement (reload/new/resume).
+    const gate = createHostMessageGate(pi, ctx);
     // A root host has no agent event. The bootstrap predicate applies only to
     // this real lifecycle boundary; ordinary callers use manifest-backed
     // isRootSession. This covers a first host and every replacement root
@@ -116,9 +122,11 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
         currentProcessStartTime: identity.processStartTime,
       });
       if (takeSessionReload(projectRoot)) {
-        // This handler runs in the fresh runtime after reload; unlike the old
-        // command frame, this pi API is valid and can steer the model safely.
-        pi.sendUserMessage("Your session was reloaded.", { deliverAs: "steer" });
+        // The fresh runtime's pi API is valid after reload. Gate the notice so
+        // a reload performed while the previous turn still runs cannot collide
+        // with an active prompt (pi prints "Agent is already processing a
+        // prompt"); it is delivered once the host settles.
+        gate.send("Your session was reloaded.");
       }
     }
 
@@ -139,7 +147,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // offered continuation of another session's goal, so delivery starts only
     // for the current root's own persisted goal (if any).
     const goalPool = getGoalPool(ctx.cwd, sessionId);
-    goalPool.bind(goalBinding(pi, ctx, logger));
+    goalPool.bind(goalBinding(pi, ctx, logger, gate));
     goalPool.resumeDelivery();
 
     const sessionFile = ctx.sessionManager.getSessionFile();
@@ -156,9 +164,13 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
       pool.deliveryFor(pool.rootSessionIdFor(sessionId)).rebind(event.previousSessionFile, sessionFile);
     }
     pool.deliveryFor(pool.rootSessionIdFor(sessionId)).register(sessionFile, (content) => {
-      // Steer the active parent session immediately. The SDK host owns the
-      // actual parent session.
-      pi.sendUserMessage(content, { deliverAs: "steer" });
+      // Reject while the host agent is mid-run: the delivery coordinator keeps
+      // the result durable pending and retries once the host settles, so a
+      // background result is never lost to an active prompt and never surfaces
+      // pi's "already processing a prompt" error.
+      if (!gate.trySend(content, "steer")) {
+        throw new Error("host agent is busy; defer result delivery");
+      }
     });
 
     // A fresh host binding is established above before delivery resumes. The

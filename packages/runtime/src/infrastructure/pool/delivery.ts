@@ -34,6 +34,12 @@ export interface DeliveryCoordinatorOptions {
   readonly rootSessionId?: string;
   /** Called after a pending result is successfully delivered on re-register. */
   readonly onDelivered?: (jobId: string) => void;
+  /**
+   * Delay before re-driving delivery to a registered sink that rejected it
+   * (e.g. a busy host mid-run). Defaults to 2000ms. Timers are unref'd so
+   * they never hold the process open.
+   */
+  readonly retryDelayMs?: number;
 }
 
 function loadPending(path: string | undefined): PendingResult[] {
@@ -73,9 +79,25 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
     ? pendingDeliveryFile(options.projectRoot, options.rootSessionId)
     : undefined;
   const pending: PendingResult[] = loadPending(pendingPath);
+  const retryDelayMs = options.retryDelayMs ?? 2_000;
+  const retryTimers = new Map<string, NodeJS.Timeout>();
 
   const persist = (): void => {
     persistPending(pendingPath, pending);
+  };
+
+  /** Re-drive delivery for a registered parent whose sink rejected a result. */
+  const scheduleRetry = (sessionFile: string): void => {
+    if (retryTimers.has(sessionFile)) return;
+    const timer = setTimeout(() => {
+      retryTimers.delete(sessionFile);
+      // The parent may have disappeared while waiting; only re-drive when the
+      // sink is still registered so nothing is delivered out of scope.
+      if (!sinks.has(sessionFile)) return;
+      deliverPending(sessionFile);
+    }, retryDelayMs);
+    timer.unref?.();
+    retryTimers.set(sessionFile, timer);
   };
 
   const deliverPending = (sessionFile: string): void => {
@@ -96,9 +118,11 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
         changed = true;
         options.onDelivered?.(result.jobId);
       } catch {
-        // Keep the result pending if the host rejects delivery while a session
-        // is being replaced. A later registration can retry it safely.
+        // The host rejected delivery (e.g. the agent is mid-run during a
+        // reload). Keep the result pending and re-drive once the host settles
+        // instead of only waiting for the next registration.
         index += 1;
+        scheduleRetry(sessionFile);
       }
     }
     if (changed) persist();
@@ -156,6 +180,7 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
       } catch {
         pending.push({ jobId, parentSessionFile, content });
         persist();
+        scheduleRetry(parentSessionFile);
         return false;
       }
       });
