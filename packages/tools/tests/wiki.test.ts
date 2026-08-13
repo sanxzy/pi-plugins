@@ -68,6 +68,18 @@ test("slugifyUrl maps equivalent URLs to one stable slug", () => {
   assert.equal(slugifyUrl("https://example.com/docs?b=2&a=1"), "example-com-docs-a-1-b-2");
 });
 
+test("slugifyUrl redacts secret query values and userinfo before slugging (H7)", () => {
+  const remaining = "x9-super-secret-slug-token";
+  const slug = slugifyUrl(`https://example.com/docs?access_token=${remaining}&page=2`);
+  assert.equal(slug.includes("super-secret-slug-token"), false, "slugified token remnant leaked into wiki filename");
+  assert.equal(slug, "example-com-docs-access-token-redacted-page-2");
+  const userinfo = "p8-userinfo-credential";
+  const userInfoSlug = slugifyUrl(`https://user:${userinfo}@example.com/docs?a=1`);
+  assert.equal(userInfoSlug.includes(userinfo), false, "slugified userinfo remnant leaked into wiki filename");
+  assert.equal(userInfoSlug, "example-com-redacted-docs-a-1");
+  assert.equal(slugifyUrl("https://example.com/docs?b=2&a=1&token=redacted&code=redacted"), "example-com-docs-a-1-b-2-code-redacted-token-redacted");
+});
+
 test("formatWikiEntry wraps a search entry in markers with heading and metadata", () => {
   const entry = formatWikiEntry({
     topic: "effect-typescript",

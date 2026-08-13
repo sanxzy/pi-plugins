@@ -147,7 +147,9 @@ export function slugifyUrl(value: string): string {
     const query = [...url.searchParams.entries()].sort(
       ([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue),
     );
-    for (const [key, item] of query) parts.push(key, item);
+    const secretKey = /(?:token|code|secret|password|credential|api[-_]?key|api[-_]?secret|authorization|client[-_]?secret|client[-_]?id|private[-_]?key)/i;
+    for (const [key, item] of query) parts.push(key, secretKey.test(key) ? "redacted" : item);
+    if (url.username || url.password) parts.splice(1, 0, "redacted");
     return slugify(parts.join("-"));
   } catch {
     return slugify(value);

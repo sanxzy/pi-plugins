@@ -10,6 +10,8 @@ const PRIVATE_FILE = 0o600;
 const TOKEN_PATTERN = /\b\d{5,}:[A-Za-z0-9_-]{20,}\b/g;
 const SECRET_KEY_PATTERN = /(?:token|password|credential|api[-_]?key|api[-_]?secret|secret|authorization|bearer|cookie|private[-_]?key)/i;
 const SECRET_VALUE_PATTERN = /(?:\bbearer\s*[=:]\s*(?:bearer\s+)?|\bbearer\s+|\b(?:api[-_]?key|api[-_]?secret|authorization|credential|private[-_]?key|secret|token|password)\s*[=:]\s*(?:bearer\s+)?)[^\s,;}]+/gi;
+const URL_SECRET_KEY_PATTERN = /(?:token|code|secret|password|credential|api[-_]?key|api[-_]?secret|authorization|client[-_]?secret|client[-_]?id|private[-_]?key)/i;
+const MAX_FIELD_LENGTH = 16 * 1024;
 const TELEGRAM_UPDATE_KEYS = new Set([
   "message", "edited_message", "channel_post", "edited_channel_post", "inline_query",
   "chosen_inline_result", "callback_query", "shipping_query", "pre_checkout_query", "poll",
@@ -92,7 +94,10 @@ export function mask(value: unknown, key?: string): unknown {
 }
 
 function maskWithSeen(value: unknown, key: string | undefined, seen: WeakSet<object>): unknown {
-  if (typeof value === "string") return value.replace(TOKEN_PATTERN, "[Redacted]").replace(SECRET_VALUE_PATTERN, "[Redacted]");
+  if (typeof value === "string") {
+    const redacted = redactUrl(value).replace(TOKEN_PATTERN, "[Redacted]").replace(SECRET_VALUE_PATTERN, "[Redacted]");
+    return redacted.length > MAX_FIELD_LENGTH ? `[truncated:${value.length}]` : redacted;
+  }
   if (value === null || typeof value !== "object") return value;
   // Same object already on the current recursion path: a true cycle. Break it
   // instead of recursing forever. Shared references elsewhere (DAG sharing)
@@ -114,6 +119,24 @@ function maskWithSeen(value: unknown, key: string | undefined, seen: WeakSet<obj
     return "[Omitted]";
   } finally {
     seen.delete(value);
+  }
+}
+
+function redactUrl(value: string): string {
+  const match = value.match(/^(https?:\/\/[^\s]+)$/i);
+  if (!match) return value;
+  try {
+    const url = new URL(match[1]!);
+    if (url.username || url.password) {
+      url.username = "[Redacted]";
+      url.password = "[Redacted]";
+    }
+    for (const key of [...url.searchParams.keys()]) {
+      if (URL_SECRET_KEY_PATTERN.test(key)) url.searchParams.set(key, "[Redacted]");
+    }
+    return url.toString().replace(/%5BRedacted%5D/gi, "[Redacted]");
+  } catch {
+    return value;
   }
 }
 

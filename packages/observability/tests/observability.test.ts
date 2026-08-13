@@ -46,6 +46,38 @@ test("operation identifiers persist with their constant casing (H1)", async () =
   assert.deepEqual(output.map((record) => record.operation), [MCP_OPERATIONS.MANAGER_START, MCP_OPERATIONS.MANAGER_START, PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE, PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE]);
 });
 
+test("oversized string fields are bounded before persistence (H6)", () => {
+  const paths = scope();
+  const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
+  const big = "A".repeat(40000);
+  const result = processWithLog({ operation: "bound.check", parameters: { payload: big, nested: { blob: big } } }, () => ({ echo: big }));
+  assert.equal(result.echo, big, "business result must stay unbounded");
+  const after = records(paths.eventsPath).find((record) => record.phase === "after");
+  assert.ok(after, "missing after record");
+  const params = after.parameters as { payload: unknown; nested: { blob: unknown } };
+  assert.equal(params.payload, "[truncated:40000]");
+  assert.equal(params.nested.blob, "[truncated:40000]");
+  assert.equal((after.result as { echo: unknown }).echo, "[truncated:40000]");
+  assert.ok(readFileSync(paths.eventsPath, "utf8").length < 20000, "persisted file must be bounded");
+});
+
+test("URL query secret values and userinfo are redacted before persistence (H7)", () => {
+  const paths = scope();
+  const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
+  const tokenValue = "z-secret-query-value-9";
+  processWithLog({ operation: "url.params", parameters: {
+    target: `https://api.example.com/v1/data?name=alice&access_token=${tokenValue}&code=${tokenValue}&client_id=${tokenValue}`,
+    mirror: `https://user:${tokenValue}@svc.example.net/`,
+  } }, () => "ok");
+  const raw = readFileSync(paths.eventsPath, "utf8");
+  assert.equal(raw.includes(tokenValue), false, "query secret value leaked");
+  assert.match(raw, /access_token=\[Redacted\]/);
+  assert.match(raw, /code=\[Redacted\]/);
+  assert.match(raw, /client_id=\[Redacted\]/);
+  assert.match(raw, /name=alice/, "non-secret query values must survive");
+  assert.match(raw, /https:\/\/\[Redacted\]:\[Redacted\]@svc\.example\.net\//);
+});
+
 test("processWithLog emits correlated before/after records to events.jsonl", async () => {
   const paths = scope();
   const logger = createSessionLogger({
