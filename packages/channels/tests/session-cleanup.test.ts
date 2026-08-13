@@ -58,11 +58,19 @@ test("cleanupRootSessions logs its destructive cleanup boundary", () => {
   assert.deepEqual(cleanupRecords.map((record) => record.phase), ["before", "after"]);
 });
 
-test("cleanup reconciles dead sessions and interrupts their persisted running agents", () => {
+test("cleanup cancels all persisted non-terminal agents of a dead session", () => {
   setup();
   const root = project();
   startRootSession({ projectRoot: root, sessionId: "dead-root", pid: 1111, processStartTime: "old-start" });
   const registry = createAgentEventRegistry(root, "dead-root");
+  registry.createJob(createJob({
+    jobId: "queued-agent",
+    parentSessionId: "dead-root",
+    sessionId: "queued-agent",
+    status: "queued",
+    description: "queued",
+    subagentType: "test-agent",
+  }));
   registry.createJob(createJob({
     jobId: "running-agent",
     parentSessionId: "dead-root",
@@ -78,8 +86,13 @@ test("cleanup reconciles dead sessions and interrupts their persisted running ag
     isAlive: () => false,
   });
   assert.equal(result.ok, true);
+  assert.equal(result.cancelledAgents, 2, "both non-terminal agents are cancelled");
+  // A parent shutdown is absolute: every recorded job in the dead session is
+  // cancelled regardless of whether it had started (`running`) or not
+  // (`queued`).
   const fresh = createAgentEventRegistry(root, "dead-root");
-  assert.equal(fresh.get("running-agent")?.status, "interrupted");
+  assert.equal(fresh.get("queued-agent")?.status, "cancelled");
+  assert.equal(fresh.get("running-agent")?.status, "cancelled");
   assert.equal(JSON.parse(readFileSync(homeSessionManifestFile(encodeProjectId(root), "dead-root"), "utf8")).active, false);
 });
 

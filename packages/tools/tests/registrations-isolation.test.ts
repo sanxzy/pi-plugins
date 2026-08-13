@@ -164,6 +164,19 @@ test("agent_cancel aborts a running job that has a job-level controller but no l
   });
 });
 
+test("agent_cancel marks an orphaned running job cancelled when no live child or controller exists", async () => {
+  await withIsolationPool(async (cwd) => {
+    const pool = getChildPool(cwd);
+    // Reproduces a dead-host zombie: the job is durably `running` but the
+    // fresh pool has no live child handle and no abort controller for it.
+    const tool = register(registerCancelTool);
+    const result = await tool.execute("call", { job_id: "a-running" }, undefined, undefined, context(cwd, "root-a"));
+    assert.equal(result.content[0]?.text, "Agent a-running was cancelled.");
+    assert.deepEqual(result.details, { jobId: "a-running", success: true, status: "cancelled" });
+    assert.equal(pool.registry.get("a-running")?.status, "cancelled");
+  });
+});
+
 test("agent rejects an unknown subagent type, including the removed default", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-unknown-agent-"));
   try {
