@@ -37,27 +37,34 @@ export interface DeliveryCoordinatorOptions {
 }
 
 function loadPending(path: string | undefined): PendingResult[] {
-  if (!path || !existsSync(path)) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is PendingResult => Boolean(
-      item && typeof item === "object" &&
-      typeof (item as PendingResult).jobId === "string" &&
-      typeof (item as PendingResult).parentSessionFile === "string" &&
-      typeof (item as PendingResult).content === "string",
-    ));
-  } catch {
-    return [];
-  }
+  let loaded: PendingResult[] = [];
+  processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_LOAD, parameters: { path } }, () => {
+    if (!path || !existsSync(path)) return;
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (!Array.isArray(parsed)) return;
+      loaded = parsed.filter((item): item is PendingResult => Boolean(
+        item && typeof item === "object" &&
+        typeof (item as PendingResult).jobId === "string" &&
+        typeof (item as PendingResult).parentSessionFile === "string" &&
+        typeof (item as PendingResult).content === "string",
+      ));
+    } catch {
+      // Corruption is tolerated: the queue is rebuilt from fresh results. This is
+      // the explicit policy chosen for M14; a corrupt file is never fatal.
+    }
+  });
+  return loaded;
 }
 
 function persistPending(path: string | undefined, pending: readonly PendingResult[]): void {
-  if (!path) return;
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify(pending, null, 2), { encoding: "utf8", mode: 0o600 });
-  renameSync(temporary, path);
+  processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_PERSIST, parameters: { path } }, () => {
+    if (!path) return;
+    mkdirSync(dirname(path), { recursive: true });
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(pending, null, 2), { encoding: "utf8", mode: 0o600 });
+    renameSync(temporary, path);
+  });
 }
 
 export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = {}): DeliveryCoordinator {

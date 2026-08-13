@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 /**
  * Persistent, URL-scoped OAuth credential store for MCP servers.
@@ -89,20 +90,26 @@ export function createAuthStore(path: string): AuthStore {
       return entry.serverUrl === serverUrl ? entry : undefined;
     },
     set(serverUrl, entry) {
-      const entries = load();
-      entries[serverUrl] = { ...entry, serverUrl };
-      persist(entries);
+      processWithLog({ operation: MCP_OPERATIONS.AUTH_STORE, parameters: { url: serverUrl, action: "set" } }, () => {
+        const entries = load();
+        entries[serverUrl] = { ...entry, serverUrl };
+        persist(entries);
+      });
     },
     update(serverUrl, update) {
-      const entries = load();
-      const prior = entries[serverUrl] ?? {};
-      entries[serverUrl] = { ...update(prior), serverUrl };
-      persist(entries);
+      processWithLog({ operation: MCP_OPERATIONS.AUTH_STORE, parameters: { url: serverUrl, action: "update" } }, () => {
+        const entries = load();
+        const prior = entries[serverUrl] ?? {};
+        entries[serverUrl] = { ...update(prior), serverUrl };
+        persist(entries);
+      });
     },
     remove(serverUrl) {
-      const entries = load();
-      delete entries[serverUrl];
-      persist(entries);
+      processWithLog({ operation: MCP_OPERATIONS.AUTH_STORE, parameters: { url: serverUrl, action: "remove" } }, () => {
+        const entries = load();
+        delete entries[serverUrl];
+        persist(entries);
+      });
     },
   };
 }

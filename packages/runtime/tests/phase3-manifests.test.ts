@@ -19,7 +19,8 @@ import {
   createAgentManifestStore,
   foldAgentEvents,
 } from "@xzy-ai/runtime";
-import { canonicalProjectRoot, encodeProjectId, homeProjectDir } from "@xzy-ai/runtime";
+import { canonicalProjectRoot, encodeProjectId, homeProjectDir, writeProjectManifest } from "@xzy-ai/runtime";
+import { PERSISTENCE_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
 const PRIVATE_DIR = 0o700;
 const PRIVATE_FILE = 0o600;
@@ -37,6 +38,24 @@ function setupHome(): string {
   process.env.PI_CODE_TEST_HOME = home;
   return home;
 }
+
+test("writeProjectManifest emits a dedicated project-write boundary", () => {
+  setupHome();
+  const root = project();
+  const logDir = mkdtempSync(join(tmpdir(), "pi-code-phase3-mlog-"));
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  runWithLogContext(logger, () => {
+    writeProjectManifest(root, "2026-08-11T10:00:00.000Z");
+  });
+  const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const writes = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE.toLowerCase());
+  assert.deepEqual(writes.map((record) => record.phase), ["before", "after"]);
+});
 
 test("starting and finishing a root session atomically persists private project/session manifests", () => {
   const home = setupHome();

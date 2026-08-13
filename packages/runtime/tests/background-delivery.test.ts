@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
+import { PERSISTENCE_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import { createJob, updateJob, type Job, type JobUpdate } from "@xzy-ai/core";
 import { canTransition } from "@xzy-ai/core";
 import type { ChildRunResult } from "@xzy-ai/core";
@@ -70,6 +71,82 @@ function makeJob(jobId: string, status = "queued", description = "d"): Job {
 function completedResult(output: string): ChildRunResult {
   return { sessionFile: "/sessions/1.jsonl", output, status: "completed" };
 }
+
+test("delivery load telemetry never persists pending result content", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-secret-"));
+  const pendingFile = pendingDeliveryFile(root, "root-a");
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-a",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  try {
+    mkdirSync(dirname(pendingFile), { recursive: true });
+    writeFileSync(pendingFile, JSON.stringify([
+      { jobId: "job-a", parentSessionFile: "parent-a.jsonl", content: "SUPER-SECRET-QUEUE-CONTENT" },
+    ], null, 2));
+    runWithLogContext(logger, () => {
+      const coordinator = createDeliveryCoordinator({ projectRoot: root, rootSessionId: "root-a" });
+      assert.equal(coordinator.pendingCount, 1);
+    });
+    const events = readFileSync(join(logDir, "events.jsonl"), "utf8");
+    assert.ok(!events.includes("SUPER-SECRET-QUEUE-CONTENT"), "pending content must never appear in load telemetry");
+    const records = events.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    const loadRecords = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_LOAD.toLowerCase());
+    assert.deepEqual(loadRecords.map((record) => record.phase), ["before", "after"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("corrupt pending delivery queue is tolerated without error records", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-corrupt-"));
+  const pendingFile = pendingDeliveryFile(root, "root-a");
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-a",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  try {
+    mkdirSync(dirname(pendingFile), { recursive: true });
+    writeFileSync(pendingFile, "{not valid json");
+    runWithLogContext(logger, () => {
+      const coordinator = createDeliveryCoordinator({ projectRoot: root, rootSessionId: "root-a" });
+      assert.equal(coordinator.pendingCount, 0);
+    });
+    const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.equal(records.filter((record) => record.phase === "error").length, 0);
+    const loadRecords = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_LOAD.toLowerCase());
+    assert.deepEqual(loadRecords.map((record) => record.phase), ["before", "after"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("delivery load and persist emit boundary records for the durable queue", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-log-"));
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-a",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  runWithLogContext(logger, () => {
+    const coordinator = createDeliveryCoordinator({ projectRoot: root, rootSessionId: "root-a" });
+    coordinator.deliverResult("job-a", "parent-a.jsonl", "result-a");
+  });
+  const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  for (const operation of [PERSISTENCE_OPERATIONS.DELIVERY_LOAD, PERSISTENCE_OPERATIONS.DELIVERY_PERSIST]) {
+    assert.deepEqual(records.filter((record) => record.operation === operation.toLowerCase() && record.phase === "before").length, 1, `missing ${operation}`);
+    assert.deepEqual(records.filter((record) => record.operation === operation.toLowerCase() && record.phase === "after").length, 1, `missing ${operation}`);
+  }
+  rmSync(root, { recursive: true, force: true });
+});
 
 test("delivery coordinator routes a result to its own direct parent", () => {
   const coordinator = createDeliveryCoordinator();

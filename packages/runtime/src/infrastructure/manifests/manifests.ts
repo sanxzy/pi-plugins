@@ -41,6 +41,7 @@ export function writeProjectManifest(projectRoot: string, now = new Date().toISO
   readonly path: string;
   readonly manifest: ProjectManifest;
 } {
+  return processWithLog({ operation: PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE, parameters: { projectRoot } }, () => {
   const canonicalRoot = canonicalProjectRoot(projectRoot);
   const projectId = encodeProjectId(canonicalRoot);
   const path = homeProjectManifestFile(projectId);
@@ -55,6 +56,7 @@ export function writeProjectManifest(projectRoot: string, now = new Date().toISO
   };
   writePrivateJson(path, manifest);
   return { path, manifest };
+  });
 }
 
 /** Read the project manifest for a project root, failing closed on corruption. */

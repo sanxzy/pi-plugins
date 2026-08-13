@@ -59,11 +59,13 @@ export const REGISTRY_OPERATIONS = {
 } as const;
 
 export const PERSISTENCE_OPERATIONS = {
+  DELIVERY_LOAD: "persistence.deliveryLoad",
   DELIVERY_PERSIST: "persistence.deliveryPersist",
   DELIVERY_REGISTER: "persistence.deliveryRegister",
   DELIVERY_UNREGISTER: "persistence.deliveryUnregister",
   DELIVERY_REBIND: "persistence.deliveryRebind",
   DELIVERY_RESULT: "persistence.deliveryResult",
+  MANIFEST_PROJECT_WRITE: "persistence.manifestProjectWrite",
   GOAL_APPEND: "persistence.goalAppend",
   MANIFEST_START: "persistence.manifestStart",
   MANIFEST_FINISH: "persistence.manifestFinish",

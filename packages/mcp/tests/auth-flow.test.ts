@@ -214,8 +214,10 @@ test("remote auth mutation boundaries emit telemetry and preserve failure propag
   const events = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
   const errors = readFileSync(join(logDir, "errors.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
   const authEvents = events.filter((record) => record.operation === MCP_OPERATIONS.AUTH_STORE.toLowerCase());
-  assert.equal(authEvents.filter((record) => record.phase === "before").length, 4);
-  assert.equal(authEvents.filter((record) => record.phase === "after").length, 3);
+  // logout → provider.clear() → store.remove() now emits a dedicated store-level
+  // AUTH_STORE boundary (M13) nested inside the remote logout wrapper (M9).
+  assert.equal(authEvents.filter((record) => record.phase === "before").length, 5);
+  assert.equal(authEvents.filter((record) => record.phase === "after").length, 4);
   assert.equal(errors.filter((record) => record.operation === MCP_OPERATIONS.AUTH_STORE.toLowerCase() && record.phase === "error").length, 1);
   rmSync(agentDir, { recursive: true, force: true });
 });

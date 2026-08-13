@@ -4,10 +4,37 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { authStorePath, createAuthStore } from "../src/auth-store.ts";
+import { MCP_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
 function tempAgentDir(prefix: string): string {
   return join(mkdtempSync(join(tmpdir(), prefix)), "agent");
 }
+
+test("auth store mutations emit boundary records without leaking tokens", () => {
+  const agentDir = tempAgentDir("pi-code-mcp-auth-log-");
+  const logDir = join(agentDir, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  const store = createAuthStore(authStorePath(agentDir));
+  runWithLogContext(logger, () => {
+    store.set("https://one.example/mcp", { tokens: { accessToken: "secret-token" } });
+    store.update("https://one.example/mcp", (prior) => ({ ...prior, tokens: { accessToken: "replaced-token" } }));
+    store.remove("https://one.example/mcp");
+  });
+  const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const authRecords = records.filter((record) => record.operation === MCP_OPERATIONS.AUTH_STORE.toLowerCase());
+  assert.deepEqual(
+    authRecords.map((record) => record.phase),
+    ["before", "after", "before", "after", "before", "after"],
+  );
+  assert.ok(!JSON.stringify(records).includes("secret-token"), "tokens must never appear in telemetry");
+  assert.ok(!JSON.stringify(records).includes("replaced-token"), "tokens must never appear in telemetry");
+  rmSync(agentDir, { recursive: true, force: true });
+});
 
 test("auth store persists entries atomically with owner-only mode", async () => {
   const agentDir = tempAgentDir("pi-code-mcp-auth-agent-");
