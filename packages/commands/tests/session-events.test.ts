@@ -161,10 +161,12 @@ test("reload steer is deferred while the host agent is mid-run and sent on agent
     // started while a run is in flight, so the reload notice must wait.
     assert.deepEqual(steers, [], "a busy host must not receive the reload steer");
 
-    // The in-flight run settles: the gate drains its queue at agent_end (the
-    // very next backoff tick).
+    // The in-flight run settles: the gate drains its queue only once the run
+    // has fully settled (agent_end then agent_settled), so the notice can
+    // never race a still-finishing prompt.
     idle = true;
     await handlers.get("agent_end")!({ messages: [] });
+    await handlers.get("agent_settled")!({});
     await new Promise((resolve) => setTimeout(resolve, 40));
     assert.deepEqual(steers, ["Your session was reloaded."]);
     assert.equal(takeSessionReload(cwd), false, "the marker was consumed by session_start");
@@ -247,13 +249,20 @@ test("an active turn blocks host delivery even when the runner misreports idle",
   } as unknown as ExtensionAPI;
   const ctx = { isIdle: () => true, hasPendingMessages: () => false } as unknown as ExtensionContext;
   const gate = createHostMessageGate(pi, ctx);
-  for (const handler of listeners.get("turn_start") ?? []) handler({} as never);
+  const emit = (event: string, payload: unknown = {}) => {
+    for (const handler of listeners.get(event) ?? []) handler(payload as never);
+  };
+  emit("turn_start");
   assert.equal(gate.trySend("during-run"), false, "a running turn must never be prompted even if isIdle lies");
   gate.send("queued-during-run");
   assert.deepEqual(steers, [], "nothing is sent while the turn runs");
-  for (const handler of listeners.get("agent_end") ?? []) handler({ messages: [] } as never);
+  emit("agent_end", { messages: [] });
+  assert.equal(gate.trySend("between-end-and-settled"), false, "the end-of-run window is not yet settled");
   await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.equal(steers.length, 1, "the queued result drains exactly once after the turn ends");
+  assert.deepEqual(steers, [], "agent_end alone must not green-light a delivery");
+  emit("agent_settled");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(steers.length, 1, "the queued result drains exactly once after the run settles");
   assert.equal(steers[0], "queued-during-run");
 });
 
@@ -275,13 +284,15 @@ test("a disposed host gate releases its lifecycle listeners", () => {
   const gate = createHostMessageGate(pi, ctx);
   assert.equal(listeners.get("turn_start")?.length, 1, "the gate subscribes to turn_start");
   assert.equal(listeners.get("agent_end")?.length, 1, "the gate subscribes to agent_end");
+  assert.equal(listeners.get("agent_settled")?.length, 1, "the gate subscribes to agent_settled");
   gate.dispose();
   assert.equal(listeners.get("turn_start")?.length, 0, "turn_start listener is released on dispose");
   assert.equal(listeners.get("agent_end")?.length, 0, "agent_end listener is released on dispose");
+  assert.equal(listeners.get("agent_settled")?.length, 0, "agent_settled listener is released on dispose");
   assert.equal(nonce, 0);
 });
 
-test("a background result raced into an active run is delivered at agent_end", async () => {
+test("a background result raced into an active run is delivered after the run settles", async () => {
   const cwd = projectRoot();
   try {
     const { pi, handlers, steers } = registrationsWithSteer();
@@ -292,16 +303,19 @@ test("a background result raced into an active run is delivered at agent_end", a
     } as unknown as ExtensionContext;
     registerSessionEvents(pi);
     await handlers.get("session_start")!({ reason: "startup" }, ctx);
-    // The runner misreports idle in the delivery window; the explicit turn
-    // lifecycle latch is what must hold delivery back.
+    // The runner misreports idle in the delivery window; only the explicit
+    // lifecycle latch (turn_start..agent_settled) holds delivery back.
     await handlers.get("turn_start")!({ turnIndex: 0, timestamp: 1 }, ctx);
     const sessionFile = join(cwd, "sessions", "root-a.jsonl");
     const sent = getChildPool(cwd, "root-a").deliveryFor("root-a").deliverResult("job-a", sessionFile, "result-a");
     assert.equal(sent, false, "a racing result is kept durable pending");
     assert.deepEqual(steers, [], "no prompt while the turn runs");
     await handlers.get("agent_end")!({ messages: [] }, ctx);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.deepEqual(steers, ["result-a"], "the result reaches the host once the turn ends");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.deepEqual(steers, [], "agent_end alone must not deliver into the unsettled window");
+    await handlers.get("agent_settled")!({}, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.deepEqual(steers, ["result-a"], "the result reaches the host once the run has fully settled");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
