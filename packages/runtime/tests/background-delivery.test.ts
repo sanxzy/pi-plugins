@@ -208,6 +208,86 @@ test("deferred results survive a coordinator restart through the durable queue",
   }
 });
 
+test("delivery register and unregister emit boundary records around actual sink mutations (H8)", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-h8-"));
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-a",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  try {
+    runWithLogContext(logger, () => {
+      const coordinator = createDeliveryCoordinator();
+      const delivered: string[] = [];
+      coordinator.register("parent-a.jsonl", (content) => delivered.push(content));
+      coordinator.unregister("parent-a.jsonl");
+    });
+    const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    for (const operation of [PERSISTENCE_OPERATIONS.DELIVERY_REGISTER, PERSISTENCE_OPERATIONS.DELIVERY_UNREGISTER]) {
+      const phases = records.filter((record) => record.operation === operation).map((record) => record.phase);
+      assert.deepEqual(phases, ["before", "after"], `${operation} must wrap its mutation`);
+    }
+    assert.equal(records.filter((record) => record.phase === "error").length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("no-op unregister and rebind calls are silent (no boundary noise) (H8)", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-h8-silent-"));
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-a",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  try {
+    runWithLogContext(logger, () => {
+      const coordinator = createDeliveryCoordinator();
+      coordinator.unregister("never-registered.jsonl");
+      coordinator.rebind("same.jsonl", "same.jsonl");
+      coordinator.rebind("nothing-pending.jsonl", "other.jsonl");
+    });
+    const raw = readFileSync(join(logDir, "events.jsonl"), "utf8");
+    const records = raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.equal(records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_UNREGISTER).length, 0, "unknown-sink unregister must not emit records");
+    assert.equal(records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_REBIND).length, 0, "no-op rebind must not emit records");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rebind records a boundary and moves only matching pending results (H8)", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-h8-rebind-"));
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-a",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  try {
+    runWithLogContext(logger, () => {
+      const coordinator = createDeliveryCoordinator();
+      coordinator.deliverResult("job-a", "old-parent.jsonl", "result-a");
+      coordinator.deliverResult("job-b", "unrelated.jsonl", "result-b");
+      coordinator.rebind("old-parent.jsonl", "new-parent.jsonl");
+      const delivered: string[] = [];
+      coordinator.register("new-parent.jsonl", (content) => delivered.push(content));
+      assert.deepEqual(delivered, ["result-a"]);
+      assert.equal(coordinator.pendingCount, 1);
+    });
+    const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    const rebindRecords = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_REBIND);
+    assert.deepEqual(rebindRecords.map((record) => record.phase), ["before", "after"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("delivery coordinator drops a stale sink on unregister", () => {
   const coordinator = createDeliveryCoordinator();
   coordinator.register("parent-a.jsonl", () => {});

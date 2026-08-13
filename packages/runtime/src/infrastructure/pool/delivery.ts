@@ -112,28 +112,33 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
       return pending.length;
     },
     register(sessionFile, deliver): void {
-      sinks.set(sessionFile, deliver);
-      processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_REGISTER, parameters: { sessionFile } }, () => deliverPending(sessionFile));
+      processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_REGISTER, parameters: { sessionFile } }, () => {
+        sinks.set(sessionFile, deliver);
+        deliverPending(sessionFile);
+      });
     },
     unregister(sessionFile): void {
-      sinks.delete(sessionFile);
-      processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_UNREGISTER, parameters: { sessionFile } }, () => undefined);
+      if (!sinks.has(sessionFile)) return;
+      processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_UNREGISTER, parameters: { sessionFile } }, () => {
+        sinks.delete(sessionFile);
+      });
     },
     rebind(previousSessionFile, nextSessionFile): void {
       if (previousSessionFile === nextSessionFile) return;
+      if (!pending.some((result) => result.parentSessionFile === previousSessionFile)) return;
       processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_REBIND, parameters: { from: previousSessionFile, to: nextSessionFile } }, () => {
-      // A result addressed to the replaced parent belongs to the descendant
-      // session that continues the same conversation, so it must follow the
-      // fork. Live sinks are not moved: those sessions are shared jobs, not a
-      // parent waiting for a result.
-      let changed = false;
-      for (const result of pending) {
-        if (result.parentSessionFile === previousSessionFile) {
-          result.parentSessionFile = nextSessionFile;
-          changed = true;
+        // A result addressed to the replaced parent belongs to the descendant
+        // session that continues the same conversation, so it must follow the
+        // fork. Live sinks are not moved: those sessions are shared jobs, not a
+        // parent waiting for a result.
+        let changed = false;
+        for (const result of pending) {
+          if (result.parentSessionFile === previousSessionFile) {
+            result.parentSessionFile = nextSessionFile;
+            changed = true;
+          }
         }
-      }
-      if (changed) persist();
+        if (changed) persist();
       });
     },
     deliverResult(jobId, parentSessionFile, content): boolean {
