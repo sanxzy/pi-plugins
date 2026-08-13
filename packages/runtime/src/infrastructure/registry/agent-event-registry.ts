@@ -27,6 +27,13 @@ export interface AgentEventRegistry {
   registries(): ReadonlyMap<string, AgentManifestStore>;
   /** Refresh the in-memory read model from authoritative home event logs. */
   refresh(): void;
+  /** Rebind newly-created jobs to the current root-session storage boundary. */
+  rebindRootSession(rootSessionId: string): void;
+}
+
+export interface AgentEventRegistryOptions {
+  /** Test/diagnostic seam for observing authoritative filesystem scans. */
+  readonly onAuthoritativeScan?: () => void;
 }
 
 interface Entry {
@@ -66,7 +73,7 @@ function toJob(manifest: NonNullable<ReturnType<typeof foldAgentEvents>>): Job {
     description: manifest.description,
     subagentType: manifest.subagentType,
     parentJobId: manifest.parentJobId,
-    rootJobId: manifest.rootAgentId,
+    rootJobId: canonicalJobId(manifest.rootAgentId ?? manifest.jobId ?? manifest.agentId),
     depth: manifest.depth,
     sessionFile: manifest.sessionFile,
     delivered: manifest.delivered,
@@ -79,14 +86,16 @@ export function canonicalJobId(jobId: string): string {
   return canonicalAgentId(jobId);
 }
 
-export function createAgentEventRegistry(projectRoot: string, rootSessionId?: string): AgentEventRegistry {
+export function createAgentEventRegistry(projectRoot: string, rootSessionId?: string, options: AgentEventRegistryOptions = {}): AgentEventRegistry {
   const byJob = new Map<string, Entry>();
+  let activeRootSessionId = rootSessionId;
   const stores = new Map<string, AgentManifestStore>();
   let nextSequence = 0;
   let snapshot = new Map<string, Job>() as ReadonlyMap<string, Job>;
   const projectId = encodeProjectId(projectRoot);
 
   const load = (): void => {
+    options.onAuthoritativeScan?.();
     processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_LOAD, parameters: { projectRoot } }, () => {
     byJob.clear();
     stores.clear();
@@ -135,7 +144,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
     }
     const store = createAgentManifestStore({
       projectRoot,
-      rootSessionId: rootSessionId ?? job.parentSessionId ?? "unknown-root",
+      rootSessionId: activeRootSessionId ?? job.parentSessionId ?? "unknown-root",
       jobId: job.jobId,
       piSessionId: job.sessionId,
       parentAgentIds: parentIds,
@@ -187,29 +196,44 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       byParent.set(parent, group);
     }
     const retained = new Set<string>();
+    const removed = new Set<string>();
+    for (const job of jobs) if (!isTerminal(job.status)) retained.add(job.jobId);
     for (const group of byParent.values()) {
       const terminal = group.filter((job) => isTerminal(job.status));
+      if (terminal.length <= MAX_RETAINED_TERMINAL_AGENTS) continue;
       for (const job of group) if (!isTerminal(job.status)) retained.add(job.jobId);
       terminal.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.updatedAt.localeCompare(b.updatedAt) || a.jobId.localeCompare(b.jobId));
       for (const job of terminal.slice(-MAX_RETAINED_TERMINAL_AGENTS)) retained.add(job.jobId);
+      for (const job of terminal) if (!retained.has(job.jobId)) removed.add(job.jobId);
     }
-    for (const job of jobs) {
-      if (!retained.has(job.jobId)) continue;
-      let parentId = job.parentJobId;
-      while (parentId) {
-        retained.add(parentId);
-        parentId = byJob.get(parentId)?.job.parentJobId;
+    // A retained job's whole ancestor chain survives. The walk resolves every
+    // id through the canonical index so records that carry a legacy `job-`
+    // prefixed parent id still find their parent entry.
+    const pending = [...retained];
+    while (pending.length > 0) {
+      const id = pending.pop()!;
+      const parentId = findEntry(id)?.job.parentJobId;
+      if (!parentId) continue;
+      const parentEntry = findEntry(parentId);
+      if (!parentEntry) continue;
+      const parentKey = parentEntry.job.jobId;
+      if (retained.has(parentKey)) continue;
+      retained.add(parentKey);
+      removed.delete(parentKey);
+      pending.push(parentKey);
+    }
+    for (const jobId of removed) {
+      const entry = byJob.get(jobId);
+      if (!entry) continue;
+      try {
+        rmSync(entry.store.agentDir, { recursive: true, force: true });
+      } catch {
+        // The directory may already be gone; in-memory eviction still proceeds.
       }
+      byJob.delete(jobId);
+      stores.delete(jobId);
     }
-    for (const job of jobs) {
-      if (retained.has(job.jobId) || !isTerminal(job.status)) continue;
-      const store = byJob.get(job.jobId)?.store;
-      if (store) rmSync(store.agentDir, { recursive: true, force: true });
-    }
-    // Refresh only after destructive pruning. The normal lifecycle write path
-    // remains in-memory-first; this reload removes pruned records and repairs
-    // the snapshot after external directories have been deleted.
-    load();
+    publish();
     });
   };
 
@@ -232,6 +256,9 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
         parentAgentIds: (job.parentAgentIds ?? []).map(cc),
       };
       const sequence = nextSequence++;
+      if (findEntry(normalized.jobId)) {
+        throw new Error(`Cannot create duplicate agent job id: ${normalized.jobId}`);
+      }
       const store = storeFor(normalized, sequence);
       store.create({ description: normalized.description, subagentType: normalized.subagentType });
       const initialTransitions: Job["status"][] = normalized.status === "created"
@@ -301,5 +328,8 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       return stores;
     },
     refresh(): void { load(); },
+    rebindRootSession(nextRootSessionId: string): void {
+      activeRootSessionId = nextRootSessionId;
+    },
   };
 }

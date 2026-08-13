@@ -112,10 +112,16 @@ test("concurrent resumes of the same terminal job launch exactly one child", asy
   spawnChildSession.__createChild = async () => {
     childCreated += 1;
     await release.promise;
+    const message = {
+      role: "assistant",
+      content: [{ type: "text", text: "resumed" }],
+      timestamp: 1,
+      stopReason: "stop",
+    };
     const fakeSession = {
       sessionFile,
       isStreaming: false as boolean,
-      agent: { state: { messages: [] as unknown[] } },
+      agent: { state: { messages: [message] as unknown[] } },
       subscribe() {
         return () => {};
       },

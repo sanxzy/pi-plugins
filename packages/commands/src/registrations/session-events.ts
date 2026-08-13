@@ -9,7 +9,7 @@ import type {
 import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
 import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
-import { currentProcessIdentity, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
+import { currentProcessIdentity, clearAgentDiscoveryCache, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 import { createHostMessageGate, type HostMessageGate } from "./safe-host-delivery.ts";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
@@ -37,6 +37,10 @@ function sessionReloadMarkers(): SessionReloadMarkers {
 /** Mark the next fresh session_start for a project as a reload continuation. */
 export function markSessionReload(projectRoot: string): void {
   sessionReloadMarkers().set(canonicalProjectRoot(projectRoot), true);
+  // A reload may ship with a changed agent ecosystem (new/edited agent
+  // markdown, changed precedence); drop discovery caches so the fresh runtime
+  // rescans once instead of serving the pre-reload snapshot.
+  clearAgentDiscoveryCache();
 }
 
 /** Consume the reload marker for a project. */
@@ -122,6 +126,10 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // (/new, reload, resume) that has not yet created its session manifest.
     const isRootSession = rootPool.shouldBootstrapRootSession(sessionId) || rootPool.isRootSession(sessionId);
     if (isRootSession) {
+      // The shared pool survives `/new`, reload, and resume. Rebind the
+      // registry before any child is created so event logs/manifests and
+      // transcripts for this root session share the same storage boundary.
+      rootPool.rebindRootSession(sessionId);
       const identity = currentProcessIdentity();
       startRootSession({
         projectRoot,

@@ -214,13 +214,13 @@ test("explicit refresh is the only hot-path authoritative scan", () => {
   let scans = 0;
   const factory = createAgentEventRegistry as unknown as (projectRoot: string, rootSessionId: string, options: { onAuthoritativeScan: () => void }) => ReturnType<typeof createAgentEventRegistry>;
   const registry = factory(root, "root-session", { onAuthoritativeScan: () => scans += 1 });
-  assert.equal(scans, 0, "construction probe begins after the registry exists");
+  assert.equal(scans, 1, "constructor performs the single cold scan (AGENT_LOAD boundary)");
   registry.get("missing");
   registry.all();
   registry.snapshot();
-  assert.equal(scans, 0, "hot-path reads do not scan the filesystem");
+  assert.equal(scans, 1, "hot-path reads do not scan the filesystem");
   registry.refresh();
-  assert.equal(scans, 1, "explicit refresh performs the authoritative scan");
+  assert.equal(scans, 2, "explicit refresh performs the authoritative scan");
   rmSync(root, { recursive: true, force: true });
 });
 

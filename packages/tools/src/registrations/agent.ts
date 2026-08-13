@@ -117,6 +117,15 @@ async function executeAgentCall(
         },
       );
     }
+    // A background launch may already be in flight for this job (concurrent
+    // tool calls resuming the same terminal job). Only one child may start;
+    // later callers acknowledge without consuming the parallel budget.
+    if (pool.launchingJobs.has(job.jobId)) {
+      return textResult(
+        `Agent ${job.subagentType} (${params.agent_id}) is already being started or resumed; its result will arrive when it settles.`,
+        { jobId: job.jobId, status: job.status },
+      );
+    }
     // Resume (or retry a created job) in place. Its job id, lineage, and
     // transcript remain stable, so resuming never creates duplicate
     // registry records or copied session files.
@@ -214,20 +223,33 @@ async function startAgentInner(
       });
     }
   }
-  const jobId = makeJobId();
-  const job = existingJob ?? recordNewJob(pool.registry, {
-    jobId,
-    status: "queued",
-    description: params.description,
-    subagentType: params.subagent_type,
-    parentSessionId,
-    parentJobId: parent?.jobId,
-    rootJobId: parent?.rootJobId,
-    depth: parent ? parent.depth + 1 : undefined,
-    sessionFile,
-    sessionId: jobId,
-    parentAgentIds: allParentAgentIds,
-  });
+  // A fresh spawn must never collide with an existing id: the registry is the
+  // in-memory authority, so check it before recording (6^36 guesses is enough).
+  let jobId = makeJobId();
+  for (let attempt = 0; attempt < 5 && pool.registry.get(jobId) !== undefined; attempt += 1) {
+    jobId = makeJobId();
+  }
+  let job: Job;
+  try {
+    job = existingJob ?? recordNewJob(pool.registry, {
+      jobId,
+      status: "queued",
+      description: params.description,
+      subagentType: params.subagent_type,
+      parentSessionId,
+      parentJobId: parent?.jobId,
+      rootJobId: parent?.rootJobId,
+      depth: parent ? parent.depth + 1 : undefined,
+      sessionFile,
+      sessionId: jobId,
+      parentAgentIds: allParentAgentIds,
+    });
+  } catch (error) {
+    return errorResult(`could not record agent ${jobId}: ${error instanceof Error ? error.message : String(error)}`, {
+      jobId,
+      reason: "job recording failed",
+    });
+  }
   if (existingJob) {
     // Terminal and created jobs are explicitly re-queued in place. Resetting
     // delivered prevents an earlier terminal result from suppressing reuse.
@@ -259,7 +281,7 @@ async function startAgentInner(
   // concurrency gate, so a call beyond the cap stays `queued` until it acquires
   // a slot. `signal: undefined` keeps the child alive when the turn is cancelled.
   const parentSessionFile = ctx.sessionManager.getSessionFile() ?? "";
-  void runBackgroundJob(
+  const launch = runBackgroundJob(
     { registry: pool.registry, delivery: pool.deliveryFor(pool.rootSessionIdFor(parentSessionId)) },
     job,
     {
@@ -269,6 +291,23 @@ async function startAgentInner(
           ...spawnOptions,
           signal: undefined,
         }),
+    },
+  );
+  // Hold a launch lease so a concurrent resume of this job never starts a
+  // second child, and keep the terminal outcome visible if delivery/persist
+  // fails: a background failure must never surface as an unhandled rejection.
+  pool.launchingJobs.set(job.jobId, launch);
+  void launch.then(
+    () => pool.launchingJobs.delete(job.jobId),
+    (error: unknown) => {
+      pool.launchingJobs.delete(job.jobId);
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        pool.registry.updateJob(job.jobId, { status: "failed" });
+      } catch {
+        // The registry may already be terminal; the job stays visible either way.
+      }
+      void message;
     },
   );
 

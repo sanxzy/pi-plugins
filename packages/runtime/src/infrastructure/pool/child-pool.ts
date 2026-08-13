@@ -44,6 +44,14 @@ export interface ChildPool {
   /** Abort controllers for queued/running jobs, including jobs not yet admitted. */
   readonly jobAbortControllers?: Map<string, AbortController>;
   /**
+   * Background launch leases keyed by job id, held from first launch until the
+   * child settles. Concurrent `agent(agent_id)` calls for the same terminal or
+   * queued job consult this map so only one child is ever started for it.
+   */
+  readonly launchingJobs: Map<string, Promise<void>>;
+  /** Rebind the registry's new-job storage boundary to a replacement root. */
+  rebindRootSession(rootSessionId: string): void;
+  /**
    * Mark running jobs interrupted and abort their children.
    *
    * Idempotent and shared: invoked from the lifecycle adapter when the host
@@ -64,7 +72,7 @@ declare global {
 const POOL_SLOT_PREFIX = "pi-code:";
 
 function poolSlot(projectRoot: string): string {
-  return `${POOL_SLOT_PREFIX}${projectRoot}`;
+  return `${POOL_SLOT_PREFIX}${canonicalProjectRoot(projectRoot)}`;
 }
 
 export function getChildPool(projectRoot: string, rootSessionId?: string): ChildPool {
@@ -97,6 +105,7 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
   const registry = createAgentEventRegistry(projectRoot, rootSessionId);
   const liveChildren = new Map<string, ChildSessionControl>();
   const jobAbortControllers = new Map<string, AbortController>();
+  const launchingJobs = new Map<string, Promise<void>>();
   const deliveries = new Map<string, DeliveryCoordinator>();
   const rootSessionIdFor = (sessionId: string): string => {
     // Walk a caller/job session up to its root: a job records its parent
@@ -153,6 +162,10 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
     rootSessionIdFor,
     liveChildren,
     jobAbortControllers,
+    launchingJobs,
+    rebindRootSession(nextRootSessionId: string): void {
+      registry.rebindRootSession(nextRootSessionId);
+    },
     interruptRunningJobs: createInterruptionSweep({ registry, liveChildren, jobAbortControllers, rootSessionId }),
     resetParallelAgents(): void {
       pool.concurrency.resetParallelCount();
@@ -244,6 +257,14 @@ function upgradePool(pool: ChildPool, projectRoot: string, rootSessionId?: strin
   }
   if (pool.jobAbortControllers === undefined) {
     patch("jobAbortControllers", new Map<string, AbortController>());
+  }
+  if (pool.launchingJobs === undefined) {
+    patch("launchingJobs", new Map<string, Promise<void>>());
+  }
+  if (typeof pool.rebindRootSession !== "function") {
+    patch("rebindRootSession", (nextRootSessionId: string): void => {
+      if (typeof registry.rebindRootSession === "function") registry.rebindRootSession(nextRootSessionId);
+    });
   }
   // Always rebuild the sweep after upgrading so it closes over the current
   // registry and controller map, while preserving the stable pool identity.
