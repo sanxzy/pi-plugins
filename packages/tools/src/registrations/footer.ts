@@ -18,6 +18,40 @@ import { getChildPool, scopeDescendants } from "@xzy-ai/runtime";
 /** Debounce job-status and live-leaf repaints so bursty child activity coalesces. */
 const REPAINT_DEBOUNCE_MS = 250;
 
+/**
+ * Heartbeat cadence that advances running child timers while a long quiet tool
+ * call emits no transcript events. Rendered durations are computed from the
+ * wall clock at render time, but renders are otherwise event-driven; without
+ * this tick the footer's elapsed timer freezes during silent running work.
+ */
+const FOOTER_HEARTBEAT_MS = 1_000;
+
+/**
+ * Request a repaint once per interval while at least one live child feed is
+ * running. Unsubscribe stops the interval. The heartbeat never fires for
+ * settled children and makes no assumptions about their transcripts.
+ */
+export function createFooterHeartbeat(
+  liveChildren: ReadonlyMap<string, { live?: { snapshot?: { status?: string } } }>,
+  repaint: () => void,
+  intervalMs: number = FOOTER_HEARTBEAT_MS,
+): () => void {
+  const hasRunning = (): boolean => {
+    for (const child of liveChildren.values()) {
+      const status = child.live?.snapshot?.status;
+      // An unknown live status is treated as running so the heartbeat stays
+      // conservative (safe over-repaint rather than a frozen timer).
+      if (status === undefined || status === "running") return true;
+    }
+    return false;
+  };
+  const heartbeat = setInterval(() => {
+    if (hasRunning()) repaint();
+  }, intervalMs);
+  heartbeat.unref?.();
+  return () => clearInterval(heartbeat);
+}
+
 /** Install the permanent native-information footer for TUI sessions. */
 export function registerAgentFooter(pi: ExtensionAPI): void {
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
@@ -129,8 +163,12 @@ function subscribeFooterTree(
   const poll = setInterval(attachLiveChildren, REPAINT_DEBOUNCE_MS);
   poll.unref();
   attachLiveChildren();
+  // A second, slower cadence keeps running child timers advancing while a long
+  // quiet tool call emits no transcript events; see createFooterHeartbeat.
+  const stopHeartbeat = createFooterHeartbeat(pool.liveChildren, repaint);
   return () => {
     clearInterval(poll);
+    stopHeartbeat();
     for (const unsubscribe of subscriptions.values()) unsubscribe();
     subscriptions.clear();
   };
