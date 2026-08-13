@@ -79,6 +79,14 @@ test("cleanup cancels all persisted non-terminal agents of a dead session", () =
     description: "running",
     subagentType: "test-agent",
   }));
+  registry.createJob(createJob({
+    jobId: "terminal-agent",
+    parentSessionId: "dead-root",
+    sessionId: "terminal-agent",
+    status: "completed",
+    description: "completed",
+    subagentType: "test-agent",
+  }));
 
   const result = cleanupRootSessions(root, {
     currentPid: 9999,
@@ -93,7 +101,72 @@ test("cleanup cancels all persisted non-terminal agents of a dead session", () =
   const fresh = createAgentEventRegistry(root, "dead-root");
   assert.equal(fresh.get("queued-agent")?.status, "cancelled");
   assert.equal(fresh.get("running-agent")?.status, "cancelled");
+  assert.equal(fresh.get("terminal-agent")?.status, "completed", "terminal records remain unchanged");
   assert.equal(JSON.parse(readFileSync(homeSessionManifestFile(encodeProjectId(root), "dead-root"), "utf8")).active, false);
+});
+
+test("cleanup cancels only the dead session's tree and leaves a live session untouched", () => {
+  setup();
+  const root = project();
+  startRootSession({ projectRoot: root, sessionId: "dead-root", pid: 1111, processStartTime: "old-start" });
+  startRootSession({ projectRoot: root, sessionId: "live-root", pid: 5555, processStartTime: "live-start" });
+  const registry = createAgentEventRegistry(root, "dead-root");
+  registry.createJob(createJob({
+    jobId: "dead-queued",
+    parentSessionId: "dead-root",
+    sessionId: "dead-queued",
+    status: "queued",
+    description: "queued",
+    subagentType: "test-agent",
+  }));
+  registry.createJob(createJob({
+    jobId: "dead-running",
+    parentSessionId: "dead-root",
+    sessionId: "dead-running",
+    status: "running",
+    description: "running",
+    subagentType: "test-agent",
+  }));
+  registry.createJob(createJob({
+    jobId: "live-running",
+    parentSessionId: "live-root",
+    sessionId: "live-running",
+    status: "running",
+    description: "live",
+    subagentType: "test-agent",
+  }));
+  registry.createJob(createJob({
+    jobId: "live-queued",
+    parentSessionId: "live-root",
+    sessionId: "live-queued",
+    status: "queued",
+    description: "live",
+    subagentType: "test-agent",
+  }));
+  registry.createJob(createJob({
+    jobId: "live-done",
+    parentSessionId: "live-root",
+    sessionId: "live-done",
+    status: "completed",
+    description: "live",
+    subagentType: "test-agent",
+  }));
+
+  const result = cleanupRootSessions(root, {
+    currentPid: 9999,
+    currentProcessStartTime: "current-start",
+    isAlive: (pid) => pid === 5555,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.cancelledAgents, 2, "only the dead session's non-terminal agents are cancelled");
+  const fresh = createAgentEventRegistry(root, "dead-root");
+  assert.equal(fresh.get("dead-queued")?.status, "cancelled");
+  assert.equal(fresh.get("dead-running")?.status, "cancelled");
+  assert.equal(fresh.get("live-running")?.status, "running", "a live session's running job stays untouched");
+  assert.equal(fresh.get("live-queued")?.status, "queued", "a live session's queued job stays untouched");
+  assert.equal(fresh.get("live-done")?.status, "completed", "terminal records stay untouched");
+  assert.equal(JSON.parse(readFileSync(homeSessionManifestFile(encodeProjectId(root), "dead-root"), "utf8")).active, false);
+  assert.equal(JSON.parse(readFileSync(homeSessionManifestFile(encodeProjectId(root), "live-root"), "utf8")).active, true, "the live session manifest stays active");
 });
 
 test("cleanup prunes oldest inactive sessions even when active sessions alone exceed 200", () => {
