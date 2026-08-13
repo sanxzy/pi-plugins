@@ -7,6 +7,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { approvePairingAt, canonicalProjectRoot, channelConfigFile, channelLogFile, clearTelegramChoiceState, createTelegramChoice, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
+import { createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
 function markChild(cwd: string, sessionId: string): void {
   const pool = getChildPool(cwd, "root-a");
@@ -261,6 +262,41 @@ test("a choice callback is answered promptly and disables its keyboard", async (
   assert.deepEqual(answered, ["cq1"]);
   assert.deepEqual(edited, [{ reply_markup: { inline_keyboard: [] } }]);
   assert.equal(sent.length, 1);
+  clearTelegramChoiceState();
+  clearTelegramProjectManagers();
+});
+
+test("choice callback processing emits a correlated telemetry boundary", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  clearTelegramChoiceState();
+  const { pi, handlers } = registrations();
+  registerTelegramInbound(pi, { createInbound: (opts) => createTelegramInbound(opts) });
+  const root = { ...context(cwd, "root-a"), sessionManager: { getSessionId: () => "root-a", getBranch: () => [] } } as unknown as ExtensionContext;
+  await handlers.get("session_start")?.({ reason: "startup" }, root);
+  const state = createTelegramChoice({
+    projectRoot: canonicalProjectRoot(cwd), sessionId: "root-a", chatId: "777", senderId: "111",
+    question: "Proceed?", choices: [{ label: "Yes", value: "approved" }], expiresAt: Date.now() + 60_000,
+  });
+  const callback = getTelegramCallbackQueryHandlerFactory(cwd)?.({ token: "x", approvedUserIds: ["111"] });
+  assert.ok(callback);
+  const logDir = mkdtempSync(join(tmpdir(), "pi-code-choice-log-"));
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-a",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  await runWithLogContext(logger, () => callback({
+    callbackQuery: {
+      id: "cq-log", data: state.callbackData[0]!, from: { id: 111 },
+      message: { chat: { id: 777 }, message_id: 10 },
+    },
+  }));
+  const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const choiceRecords = records.filter((record) => record.operation === "telegram.choiceconsume");
+  assert.deepEqual(choiceRecords.map((record) => record.phase), ["before", "after"]);
+  assert.equal(choiceRecords[0]?.correlationId, choiceRecords[1]?.correlationId);
   clearTelegramChoiceState();
   clearTelegramProjectManagers();
 });

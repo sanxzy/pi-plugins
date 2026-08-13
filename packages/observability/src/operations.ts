@@ -97,6 +97,7 @@ export const TELEGRAM_OPERATIONS = {
   LIFECYCLE_START: "telegram.lifecycleStart",
   LIFECYCLE_STOP: "telegram.lifecycleStop",
   INBOUND: "telegram.inbound",
+  CHOICE_CONSUME: "telegram.choiceConsume",
   CONTROLS_DISPATCH: "telegram.controlsDispatch",
   SEND: "telegram.send",
 } as const;

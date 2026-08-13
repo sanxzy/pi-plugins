@@ -262,7 +262,10 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
       projectRoot,
       sessionId,
       createMessageHandler: () => (context) => listener.handle(context),
-      createCallbackQueryHandler: () => async (callbackContext) => {
+      createCallbackQueryHandler: () => async (callbackContext) => processWithLog({
+        operation: TELEGRAM_OPERATIONS.CHOICE_CONSUME,
+        parameters: { projectRoot, sessionId },
+      }, async () => {
         const callback = (callbackContext as { callbackQuery?: { id?: string; data?: string; from?: { id?: number | string }; message?: { chat?: { id?: number | string }; message_id?: number } } }).callbackQuery;
         if (!callback?.id || typeof callback.data !== "string" || !callback.from) return;
         const chatId = typeof callback.message?.chat?.id === "number" ? String(callback.message.chat.id) : callback.message?.chat?.id;
@@ -287,7 +290,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
         if (!consumed) return;
         const content = `Based on your question: ${consumed.question}\nMy answer: ${consumed.value}${formatTelegramSignature(chatId)}`;
         pi.sendUserMessage(content, { deliverAs: "steer" });
-      },
+      }),
     });
     activeListener = listener;
     runningByProject.set(projectRoot, listener);
