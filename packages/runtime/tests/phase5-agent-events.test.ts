@@ -127,8 +127,13 @@ test("live singleton registry drops a job removed from home storage", () => {
   assert.equal(registry.get("removed")?.status, "queued");
 
   // Simulate home-root cleanup of an orphaned queued job while the process
-  // singleton survives a Pi extension reload.
+  // singleton survives a Pi extension reload. In-memory-first lookups stay
+  // stable until an explicit authoritative refresh observes the removal
+  // (see registry-cache tests); lifecycle boundaries call refresh().
   rmSync(join(events, ".."), { recursive: true, force: true });
+  assert.equal(registry.get("removed")?.status, "queued", "in-memory read model stays stable without a refresh");
+  assert.equal(registry.all().has("removed"), true);
+  registry.refresh();
   assert.equal(registry.get("removed"), undefined);
   assert.equal(registry.all().has("removed"), false);
 });

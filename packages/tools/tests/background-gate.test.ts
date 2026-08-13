@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createJob, MAX_CONCURRENCY } from "@xzy-ai/core";
+import { REGISTRY_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import { encodeProjectId, getChildPool, homeAgentManifestFile, spawnChildSession } from "@xzy-ai/runtime";
 import { registerAgentTool } from "../src/registrations/agent.ts";
 
@@ -276,6 +277,117 @@ test("a root background agent stays queued until running with a live handle", as
     await Promise.allSettled(holdRuns);
     await flush();
     rmSync(cwd, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
+    else process.env.PI_CODE_TEST_HOME = previousHome;
+  }
+});
+
+/**
+ * Red-phase regression gate for the spawn freeze: one root background agent
+ * call must rescan the home event logs at most once (the pool construction).
+ * Previously every spawn paid ~9-14 full synchronous rescans on the tool-call
+ * stack because registry lookups and lifecycle writes reloaded every log.
+ */
+test("one root agent call performs at most one authoritative registry load", async () => {
+  const previousHome = process.env.PI_CODE_TEST_HOME;
+  process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-spawn-load-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-spawn-load-"));
+  mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "agents", "test-agent.md"),
+    "---\nname: test-agent\ndescription: Test agent\n---\ntest body",
+    "utf8",
+  );
+  // Seed several persisted event folders so every full-history rescan is
+  // non-trivial; the probe below must not pay them again.
+  const pool = getChildPool(cwd, "root-session");
+  for (let index = 0; index < 5; index += 1) {
+    pool.registry.createJob(createJob({
+      jobId: `seeded-${index}`,
+      parentSessionId: "root-session",
+      status: "completed",
+      description: `seed ${index}`,
+      subagentType: "test-agent",
+    }));
+  }
+
+  const listeners = new Set<(event: unknown) => void>();
+  const fakeMessage = {
+    role: "assistant",
+    content: [{ type: "text", text: "done" }],
+    timestamp: 1,
+    stopReason: "stop",
+  };
+  const fakeSession = {
+    sessionFile: join(cwd, "sessions", "child.jsonl"),
+    isStreaming: false as boolean,
+    agent: { state: { messages: [] as unknown[] } },
+    subscribe(listener: (event: unknown) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    async prompt() {
+      fakeSession.isStreaming = false;
+      fakeSession.agent.state.messages.push(fakeMessage);
+      for (const listener of [...listeners]) {
+        listener({ type: "message_start", message: { ...fakeMessage } });
+        listener({ type: "message_end", message: { ...fakeMessage } });
+        listener({ type: "agent_settled" });
+      }
+    },
+    async steer() {},
+    async abort() {},
+    getLastAssistantText() {
+      return "done";
+    },
+    dispose() {},
+  };
+  const previousFactory = spawnChildSession.__createChild;
+  spawnChildSession.__createChild = async () => ({
+    session: fakeSession as never,
+    dispose: () => fakeSession.dispose(),
+  });
+
+  let registered: RegisteredAgent | undefined;
+  const pi = {
+    registerTool(tool: RegisteredAgent) {
+      registered = tool;
+    },
+  } as unknown as ExtensionAPI;
+  registerAgentTool(pi);
+
+  const logRoot = mkdtempSync(join(tmpdir(), "pi-code-spawn-load-log-"));
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(logRoot, "events.jsonl"),
+    errorsPath: join(logRoot, "errors.jsonl"),
+  });
+  try {
+    assert.ok(registered);
+    await runWithLogContext(logger, async () => {
+      const result = await registered!.execute(
+        "call",
+        { description: "work", prompt: "work", subagent_type: "test-agent" },
+        undefined,
+        undefined,
+        context(cwd),
+      );
+      assert.ok(result.details.jobId);
+      await flush();
+      await flush();
+      assert.equal(pool.registry.get(result.details.jobId!)?.status, "completed");
+    });
+    const records = readFileSync(join(logRoot, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const loadStarts = records.filter(
+      (record) => record.operation === REGISTRY_OPERATIONS.AGENT_LOAD && record.phase === "before",
+    );
+    assert.equal(loadStarts.length, 1, "a full spawn must run exactly one authoritative load");
+  } finally {
+    spawnChildSession.__createChild = previousFactory;
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(logRoot, { recursive: true, force: true });
     if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
     else process.env.PI_CODE_TEST_HOME = previousHome;
   }
