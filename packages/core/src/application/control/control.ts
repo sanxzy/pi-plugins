@@ -103,7 +103,10 @@ function isVisibleToCaller(caller: ControlCaller, target: Job, getJob: (jobId: s
   return checkControlScope(caller, target, getJob).allowed;
 }
 
-/** Whether a job may be cancelled: running, in scope, and not already terminal. */
+/** Statuses that may still be cancelled: running, or queued behind the concurrency gate. */
+const CANCELABLE_STATUSES: ReadonlySet<Job["status"]> = new Set(["queued", "running"]);
+
+/** Whether a job may be cancelled: running or queued, in scope, and not terminal. */
 export function canCancel(
   caller: ControlCaller,
   target: Job,
@@ -112,7 +115,7 @@ export function canCancel(
   const scope = checkControlScope(caller, target, getJob);
   if (!scope.allowed) return { allowed: false, reason: scope.reason };
   if (isTerminal(target.status)) return { allowed: false, reason: "already terminal" };
-  if (target.status !== "running") return { allowed: false, reason: "not running" };
+  if (!CANCELABLE_STATUSES.has(target.status)) return { allowed: false, reason: "not running" };
   return { allowed: true };
 }
 
