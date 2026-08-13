@@ -142,3 +142,63 @@ test("clearSessionReload drops a pending marker", async () => {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test("reload steer is deferred while the host agent is mid-run and sent on agent_end", async () => {
+  const cwd = projectRoot();
+  try {
+    markSessionReload(cwd);
+    let idle = false;
+    const { pi, handlers, steers } = registrationsWithSteer();
+    const ctx = {
+      ...context(cwd, "root-a"),
+      isIdle: () => idle,
+      hasPendingMessages: () => false,
+    } as unknown as ExtensionContext;
+    registerSessionEvents(pi);
+    await handlers.get("session_start")!({ reason: "reload" }, ctx);
+    // pi prints "Agent is already processing a prompt" when a new prompt is
+    // started while a run is in flight, so the reload notice must wait.
+    assert.deepEqual(steers, [], "a busy host must not receive the reload steer");
+
+    // The in-flight run settles: the gate drains its queue at agent_end (the
+    // very next backoff tick).
+    idle = true;
+    await handlers.get("agent_end")!({ messages: [] });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.deepEqual(steers, ["Your session was reloaded."]);
+    assert.equal(takeSessionReload(cwd), false, "the marker was consumed by session_start");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("delivery sink defers results while the host agent is busy", async () => {
+  const cwd = projectRoot();
+  try {
+    let idle = false;
+    const { pi, handlers, steers } = registrationsWithSteer();
+    const ctx = {
+      ...context(cwd, "root-a"),
+      isIdle: () => idle,
+      hasPendingMessages: () => false,
+    } as unknown as ExtensionContext;
+    registerSessionEvents(pi);
+    await handlers.get("session_start")!({ reason: "startup" }, ctx);
+    const sessionFile = join(cwd, "sessions", "root-a.jsonl");
+
+    // A background result arrives while the host is mid-run: the sink must
+    // reject so the coordinator keeps it durable pending instead of calling
+    // pi.sendUserMessage into an active prompt.
+    const sent = getChildPool(cwd, "root-a").deliveryFor("root-a").deliverResult("job-a", sessionFile, "result-a");
+    assert.equal(sent, false);
+    assert.deepEqual(steers, [], "the busy host must not be prompted");
+
+    // Once idle, the sink accepts the result on the coordinator's retry.
+    idle = true;
+    const pool = getChildPool(cwd, "root-a");
+    const coordinator = pool.deliveryFor("root-a");
+    assert.equal(coordinator.pendingCount, 1);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

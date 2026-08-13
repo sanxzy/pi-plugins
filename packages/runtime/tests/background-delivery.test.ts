@@ -148,6 +148,51 @@ test("delivery load and persist emit boundary records for the durable queue", ()
   rmSync(root, { recursive: true, force: true });
 });
 
+test("delivery coordinator retries a rejected sink while its parent stays registered", async () => {
+  // A registered sink that rejects (e.g. because the host agent is mid-run
+  // during a reload) must self-heal: the result stays durable pending and the
+  // coordinator re-drives delivery once the sink accepts, without requiring
+  // the parent session to re-register.
+  const coordinator = createDeliveryCoordinator({ retryDelayMs: 5 });
+  const delivered: string[] = [];
+  let reject = true;
+  coordinator.register("parent-a.jsonl", (content) => {
+    if (reject) throw new Error("host agent is busy");
+    delivered.push(content);
+  });
+
+  const sent = coordinator.deliverResult("job-a", "parent-a.jsonl", "result-a");
+  assert.equal(sent, false);
+  assert.equal(coordinator.pendingCount, 1);
+  assert.deepEqual(delivered, [], "the busy host must not receive the result yet");
+
+  // The host run settles; the coordinator retries on its own and delivers.
+  reject = false;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(coordinator.pendingCount, 0);
+  assert.deepEqual(delivered, ["result-a"]);
+});
+
+test("delivery coordinator stops scheduling retries once the sink is unregistered", async () => {
+  const coordinator = createDeliveryCoordinator({ retryDelayMs: 5 });
+  const delivered: string[] = [];
+  let reject = true;
+  coordinator.register("parent-a.jsonl", (content) => {
+    if (reject) throw new Error("host agent is busy");
+    delivered.push(content);
+  });
+  coordinator.deliverResult("job-a", "parent-a.jsonl", "result-a");
+  assert.equal(coordinator.pendingCount, 1);
+
+  // The parent disappears before accepting; the result stays pending for a
+  // later registration instead of being force-delivered.
+  coordinator.unregister("parent-a.jsonl");
+  reject = false;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(coordinator.pendingCount, 1);
+  assert.deepEqual(delivered, []);
+});
+
 test("delivery coordinator routes a result to its own direct parent", () => {
   const coordinator = createDeliveryCoordinator();
   const delivered: string[] = [];
