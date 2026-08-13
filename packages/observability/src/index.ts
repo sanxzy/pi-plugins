@@ -257,8 +257,9 @@ export function processWithLog<T>(
   logger.write({ ...common, phase: "before" });
   try {
     const result = contextStorage.run({ logger, correlationId, parentCorrelationId }, () => callback({ logger, correlationId, parentCorrelationId }));
-    if (result instanceof Promise) {
-      return result.then((value) => {
+    if ((typeof result === "object" || typeof result === "function") && result !== null && typeof (result as unknown as PromiseLike<unknown>).then === "function") {
+      const captured = result as unknown as PromiseLike<unknown>;
+      return Promise.resolve(captured).then((value) => {
         logger.write({ ...common, timestamp: new Date().toISOString(), phase: "after", result: value, durationMs: Date.now() - started });
         return value;
       }).catch((error) => {

@@ -35,6 +35,20 @@ function records(path: string): Array<Record<string, unknown>> {
   return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
+function makeThenable<T>(): PromiseLike<T> & { resolve(value: T): void; reject(error: unknown): void } {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void;
+  let rejectPromise!: (error: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    then: promise.then.bind(promise),
+    resolve: resolvePromise,
+    reject: rejectPromise,
+  };
+}
+
 test("operation identifiers persist with their constant casing (H1)", async () => {
   const paths = scope();
   const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
@@ -76,6 +90,27 @@ test("URL query secret values and userinfo are redacted before persistence (H7)"
   assert.match(raw, /client_id=\[Redacted\]/);
   assert.match(raw, /name=alice/, "non-secret query values must survive");
   assert.match(raw, /https:\/\/\[Redacted\]:\[Redacted\]@svc\.example\.net\//);
+});
+
+test("thenable (non-Promise) results are correlated like promises (H9)", async () => {
+  const paths = scope();
+  const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
+  const thenableSecret = "thenable-resolved-value-77";
+  const thenable = makeThenable<string>();
+  const outcome = runWithLogContext(logger, () => processWithLog({ operation: "thenable.check" }, () => thenable));
+  assert.equal(typeof outcome.then, "function", "thenable must be returned untouched");
+  thenable.resolve(thenableSecret);
+  assert.equal(await outcome, thenableSecret);
+  const after = records(paths.eventsPath).find((record) => record.phase === "after");
+  assert.equal(after?.result, thenableSecret, "after record must carry the resolved value");
+
+  const failing = makeThenable<void>();
+  const failingOutcome = runWithLogContext(logger, () => processWithLog({ operation: "thenable.fail" }, () => failing));
+  failing.reject(new Error("thenable boom"));
+  await assert.rejects(async () => failingOutcome, /thenable boom/);
+  const errorRecords = records(paths.errorsPath);
+  assert.equal(errorRecords.length >= 1, true);
+  assert.equal(errorRecords.at(-1)?.operation, "thenable.fail");
 });
 
 test("processWithLog emits correlated before/after records to events.jsonl", async () => {
