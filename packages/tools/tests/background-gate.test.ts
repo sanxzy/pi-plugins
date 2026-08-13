@@ -25,6 +25,7 @@ type RegisteredAgent = {
       description: string;
       prompt: string;
       subagent_type: string;
+      agent_id?: string;
     },
     signal: AbortSignal | undefined,
     onUpdate: unknown,
@@ -79,6 +80,89 @@ test("agent schema removes the redundant background parameter", () => {
   assert.match(registered.description, /Prefer agent_id/);
   assert.match(registered.description, /preserves transcript and context/);
   assert.match(registered.description, /foreground/);
+});
+
+test("concurrent resumes of the same terminal job launch exactly one child", async () => {
+  const previousHome = process.env.PI_CODE_TEST_HOME;
+  process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-resume-lease-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-resume-lease-"));
+  mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "agents", "test-agent.md"),
+    "---\nname: test-agent\ndescription: Test agent\n---\ntest body",
+    "utf8",
+  );
+  const sessionFile = join(cwd, "sessions", "target-job.jsonl");
+  mkdirSync(join(cwd, "sessions"), { recursive: true });
+  writeFileSync(sessionFile, `${JSON.stringify({ type: "session", id: "target-job" })}\n`, "utf8");
+  const pool = getChildPool(cwd, "root-session");
+  pool.registry.createJob(createJob({
+    jobId: "target-job",
+    parentSessionId: "root-session",
+    sessionId: "target-job",
+    status: "completed",
+    description: "already done",
+    subagentType: "test-agent",
+    sessionFile,
+  }));
+
+  let childCreated = 0;
+  const release = deferred<void>();
+  const previousFactory = spawnChildSession.__createChild;
+  spawnChildSession.__createChild = async () => {
+    childCreated += 1;
+    await release.promise;
+    const fakeSession = {
+      sessionFile,
+      isStreaming: false as boolean,
+      agent: { state: { messages: [] as unknown[] } },
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {},
+      async steer() {},
+      async abort() {},
+      getLastAssistantText() {
+        return "resumed";
+      },
+      dispose() {},
+    };
+    return { session: fakeSession as never, dispose: () => fakeSession.dispose() };
+  };
+
+  let registered: RegisteredAgent | undefined;
+  registerAgentTool({
+    registerTool(tool: RegisteredAgent) {
+      registered = tool;
+    },
+  } as unknown as ExtensionAPI);
+  try {
+    assert.ok(registered);
+    const call = () => registered!.execute(
+      "call",
+      { description: "resume", prompt: "continue", subagent_type: "test-agent", agent_id: "target-job" },
+      undefined,
+      undefined,
+      context(cwd),
+    );
+    const [first, second] = await Promise.all([call(), call()]);
+    assert.ok(first.details.jobId, "first resume is acknowledged");
+    assert.ok(second.details.jobId, "second resume is acknowledged");
+    await flush();
+    await flush();
+    assert.equal(childCreated, 1, "two concurrent resumes launch exactly one child");
+    release.resolve();
+    await flush();
+    assert.equal(pool.registry.get("target-job")?.status, "completed");
+    const launchingJobs = (pool as unknown as { launchingJobs?: Map<string, unknown> }).launchingJobs;
+    assert.equal(launchingJobs?.has("target-job"), false, "the launch lease is released on settle");
+  } finally {
+    release.resolve();
+    spawnChildSession.__createChild = previousFactory;
+    rmSync(cwd, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
+    else process.env.PI_CODE_TEST_HOME = previousHome;
+  }
 });
 
 test("root background spawns remain TUI-only", async () => {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { REGISTRY_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import { createJob } from "@xzy-ai/core";
-import { createAgentEventRegistry, getChildPool, encodeProjectId, homeProjectDir } from "@xzy-ai/runtime";
+import { createAgentEventRegistry, getChildPool, encodeProjectId, homeProjectDir, homeAgentEventsFile } from "@xzy-ai/runtime";
 
 function project(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-cache-project-"));
@@ -208,6 +208,97 @@ test("getChildPool reuse on a surviving pool never rescans home", () => {
  * reads are in flight, and a lifecycle write must publish without rescanning.
  * This is the per-call cost model of a TUI repaint plus an agent spawn.
  */
+test("explicit refresh is the only hot-path authoritative scan", () => {
+  setupHome();
+  const root = project();
+  let scans = 0;
+  const factory = createAgentEventRegistry as unknown as (projectRoot: string, rootSessionId: string, options: { onAuthoritativeScan: () => void }) => ReturnType<typeof createAgentEventRegistry>;
+  const registry = factory(root, "root-session", { onAuthoritativeScan: () => scans += 1 });
+  assert.equal(scans, 0, "construction probe begins after the registry exists");
+  registry.get("missing");
+  registry.all();
+  registry.snapshot();
+  assert.equal(scans, 0, "hot-path reads do not scan the filesystem");
+  registry.refresh();
+  assert.equal(scans, 1, "explicit refresh performs the authoritative scan");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("root-session rebinding keeps new manifests and events with the replacement root", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "old-root");
+  const rebound = registry as ReturnType<typeof createAgentEventRegistry> & { rebindRootSession(rootSessionId: string): void };
+  rebound.rebindRootSession("new-root");
+  registry.createJob(createJob({
+    jobId: "replacement-child",
+    parentSessionId: "new-root",
+    sessionId: "replacement-child",
+    status: "queued",
+    description: "replacement child",
+    subagentType: "test-agent",
+  }));
+  assert.equal(
+    registry.fileForJob("replacement-child"),
+    homeAgentEventsFile(encodeProjectId(root), "new-root", "replacement-child"),
+  );
+  assert.equal(existsSync(homeAgentEventsFile(encodeProjectId(root), "old-root", "replacement-child")), false);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("over-cap pruning evicts locally without rescanning the whole project", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  const logRoot = project();
+  for (let index = 0; index < 25; index += 1) {
+    registry.createJob(createJob({
+      jobId: `terminal-${index}`,
+      parentSessionId: "root-session",
+      status: "completed",
+      description: `terminal ${index}`,
+      subagentType: "test-agent",
+    }));
+  }
+  runWithLogContext(loggerAt(logRoot), () => {
+    registry.createJob(createJob({
+      jobId: "terminal-25",
+      parentSessionId: "root-session",
+      status: "completed",
+      description: "terminal 25",
+      subagentType: "test-agent",
+    }));
+  });
+  const records = recordsAt(logRoot);
+  assert.equal(records.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_LOAD).length, 0, "crossing the cap must not reload every event log");
+  assert.equal(registry.all().size, 25);
+  assert.equal(registry.get("terminal-0"), undefined);
+  rmSync(root, { recursive: true, force: true });
+  rmSync(logRoot, { recursive: true, force: true });
+});
+
+test("duplicate job ids are rejected without overwriting the existing job", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(createJob({
+    jobId: "same-id",
+    parentSessionId: "root-session",
+    status: "queued",
+    description: "original",
+    subagentType: "test-agent",
+  }));
+  assert.throws(() => registry.createJob(createJob({
+    jobId: "same-id",
+    parentSessionId: "root-session",
+    status: "queued",
+    description: "replacement",
+    subagentType: "other-agent",
+  })), /duplicate agent job id/);
+  assert.equal(registry.get("same-id")?.description, "original");
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("composite read/write access performs no home rescan beyond construction", () => {
   setupHome();
   const root = project();
