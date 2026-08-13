@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createChildLiveFeed, createJob } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
 import { TOOL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
-import { registerAgentFooter } from "../src/registrations/footer.ts";
+import { registerAgentFooter, createFooterHeartbeat } from "../src/registrations/footer.ts";
 
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";
@@ -89,6 +89,33 @@ function piDouble(): {
     } as unknown as ExtensionAPI,
   };
 }
+
+test("the footer heartbeat repaints once per second only while a child is running", () => {
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    let repaints = 0;
+    const live = { snapshot: { status: "running" } };
+    const stop = createFooterHeartbeat(new Map([["job-a", { live }]]), () => {
+      repaints++;
+    });
+
+    mock.timers.tick(999);
+    assert.equal(repaints, 0, "the heartbeat waits one second before repainting");
+    mock.timers.tick(1);
+    assert.equal(repaints, 1, "a running child receives a heartbeat repaint");
+
+    live.snapshot.status = "completed";
+    mock.timers.tick(2_000);
+    assert.equal(repaints, 1, "settled children do not receive heartbeat repaints");
+
+    stop();
+    live.snapshot.status = "running";
+    mock.timers.tick(2_000);
+    assert.equal(repaints, 1, "disposing the heartbeat stops future repaints");
+  } finally {
+    mock.timers.reset();
+  }
+});
 
 test("the custom footer is installed for TUI sessions and restored on root shutdown", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
