@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { CHANNEL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import {
   MEDIA_DOCUMENT_MAX_BYTES,
   MEDIA_PHOTO_MAX_BYTES,
@@ -13,6 +17,42 @@ import {
   sanitizeMediaFilename,
   validateMediaContentType,
 } from "../src/index.ts";
+
+test("media download and resolve emit boundary records without secrets in parameters", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-code-media-log-"));
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(dir, "events.jsonl"),
+    errorsPath: join(dir, "errors.jsonl"),
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    return new Response(new Uint8Array([0xff, 0xd8, 0xff]), {
+      status: 200,
+      headers: { "content-type": "image/png" },
+    });
+  };
+  try {
+    await runWithLogContext(logger, async () => {
+      await downloadMediaHttps("https://example.com/safe.png?querySecret=SECRET", { maxBytes: MEDIA_PHOTO_MAX_BYTES });
+      await resolveMediaSource({ kind: "https", url: "https://example.com/safe.png?querySecret=SECRET" }, "photo");
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const records = readFileSync(join(dir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const downloads = records.filter((record) => record.operation === CHANNEL_OPERATIONS.MEDIA_DOWNLOAD.toLowerCase());
+  assert.deepEqual(downloads.map((record) => record.phase), ["before", "after", "before", "after"]);
+  assert.deepEqual(downloads.filter((record) => record.phase === "before").map((record) => record.parameters), [
+    { maxBytes: MEDIA_PHOTO_MAX_BYTES },
+    { maxBytes: MEDIA_PHOTO_MAX_BYTES },
+  ]);
+  const resolves = records.filter((record) => record.operation === CHANNEL_OPERATIONS.MEDIA_RESOLVE.toLowerCase());
+  assert.deepEqual(resolves.map((record) => record.phase), ["before", "after"]);
+  assert.deepEqual(resolves[0]?.parameters, { mediaType: "photo", kind: "https" });
+  assert.ok(!JSON.stringify(records).includes("querySecret=SECRET"), "URL query secrets must not appear in persisted records");
+});
 
 test("sanitizeMediaFilename reduces to a safe basename", () => {
   assert.equal(sanitizeMediaFilename("report.pdf"), "report.pdf");

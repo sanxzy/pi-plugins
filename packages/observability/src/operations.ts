@@ -76,6 +76,8 @@ export const CHANNEL_OPERATIONS = {
   OUTBOUND_SEND: "channel.outboundSend",
   OUTBOUND_REACT: "channel.outboundReact",
   OUTBOUND_MEDIA: "channel.outboundMedia",
+  MEDIA_DOWNLOAD: "channel.mediaDownload",
+  MEDIA_RESOLVE: "channel.mediaResolve",
   OUTBOUND_CHOICES: "channel.outboundChoices",
   INBOUND_HANDLE: "channel.inboundHandle",
   INBOUND_DRAIN: "channel.inboundDrain",
