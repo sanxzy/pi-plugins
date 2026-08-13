@@ -128,9 +128,20 @@ export function statusFor(caller: ControlCaller, job: Job, getJob: (jobId: strin
   return { job, controllable: isVisibleToCaller(caller, job, getJob) };
 }
 
-/** The jobs visible to a caller: its own descendant lineage plus, at root, everything. */
-export function visibleJobs(caller: ControlCaller, jobs: Iterable<Job>, getJob: (jobId: string) => Job | undefined): Job[] {
-  return Array.from(jobs).filter((job) => isVisibleToCaller(caller, job, getJob));
+/**
+ * The jobs listed to a caller: only jobs spawned directly by that caller.
+ *
+ * This intentionally differs from `isVisibleToCaller`, which remains
+ * recursive for status, cancellation, and resume/steer operations. Listing a
+ * caller's direct children keeps each parent's history bounded to its own
+ * 25-job retention window and prevents grandchildren from leaking upward.
+ */
+export function visibleJobs(caller: ControlCaller, jobs: Iterable<Job>, _getJob: (jobId: string) => Job | undefined): Job[] {
+  return Array.from(jobs).filter((job) =>
+    caller.jobId === undefined
+      ? job.parentSessionId === caller.sessionId && job.parentJobId === undefined
+      : job.parentJobId === caller.jobId,
+  );
 }
 
 /** Outcome of a resume/steer admission check. */
