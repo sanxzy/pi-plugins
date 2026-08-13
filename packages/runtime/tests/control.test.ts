@@ -90,7 +90,7 @@ test("checkControlScope: siblings and ancestors are not controllable", () => {
   assert.deepEqual(checkControlScope(caller, jobs.get("c")!, getJobFrom(jobs)), { allowed: true });
 });
 
-test("canCancel: only a running in-scope job may be cancelled", () => {
+test("canCancel: running and queued in-scope jobs may be cancelled", () => {
   const jobs = new Map<string, Job>([
     ["a", makeJob("a", "running")],
     ["b", makeJob("b", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
@@ -99,11 +99,22 @@ test("canCancel: only a running in-scope job may be cancelled", () => {
   ]);
   const caller: ControlCaller = { sessionId: "a", jobId: "a" };
   assert.deepEqual(canCancel(caller, jobs.get("b")!, getJobFrom(jobs)), { allowed: true });
-  assert.equal(canCancel(caller, jobs.get("c")!, getJobFrom(jobs)).reason, "not running");
+  // A queued job has not started but is still cancellable: aborting its gate
+  // controller prevents it from ever acquiring a concurrency slot.
+  assert.deepEqual(canCancel(caller, jobs.get("c")!, getJobFrom(jobs)), { allowed: true });
   assert.equal(canCancel(caller, jobs.get("done")!, getJobFrom(jobs)).reason, "already terminal");
   // A sibling cannot be cancelled from a sibling's own view.
   const sibling: ControlCaller = { sessionId: "sib", jobId: "sib" };
   assert.equal(canCancel(sibling, jobs.get("b")!, getJobFrom(jobs)).reason, "not a descendant");
+});
+
+test("canCancel: created jobs are not cancellable", () => {
+  const jobs = new Map<string, Job>([
+    ["a", makeJob("a", "running")],
+    ["created", makeJob("created", "created", { parentJobId: "a", rootJobId: "a", depth: 1 })],
+  ]);
+  const caller: ControlCaller = { sessionId: "a", jobId: "a" };
+  assert.equal(canCancel(caller, jobs.get("created")!, getJobFrom(jobs)).reason, "not running");
 });
 
 test("resumeDisposition: running jobs are steered", () => {

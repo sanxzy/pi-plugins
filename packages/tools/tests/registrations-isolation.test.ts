@@ -164,6 +164,22 @@ test("agent_cancel treats another parent session's job id as unknown without abo
   });
 });
 
+test("agent_cancel cancels a queued job by aborting its gate controller", async () => {
+  await withIsolationPool(async (cwd) => {
+    const pool = getChildPool(cwd);
+    pool.registry.createJob(job("a-queued", "root-a", "queued"));
+    // A queued job waits for a concurrency slot behind its own abort controller.
+    const controller = new AbortController();
+    pool.jobAbortControllers?.set("a-queued", controller);
+    const tool = register(registerCancelTool);
+    const result = await tool.execute("call", { job_id: "a-queued" }, undefined, undefined, context(cwd, "root-a"));
+    assert.equal(result.content[0]?.text, "Agent a-queued was cancelled.");
+    assert.deepEqual(result.details, { jobId: "a-queued", success: true, status: "cancelled" });
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(pool.registry.get("a-queued")?.status, "cancelled");
+  });
+});
+
 test("agent_cancel aborts a running job that has a job-level controller but no live child", async () => {
   await withIsolationPool(async (cwd) => {
     const pool = getChildPool(cwd);
