@@ -9,6 +9,7 @@ import {
   homeSessionDirFromRoot,
   homeSessionManifestFile,
   readSessionManifest,
+  sessionTreeJobs,
 } from "@xzy-ai/runtime";
 import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { isProcessAlive } from "./ownership.ts";
@@ -118,7 +119,13 @@ export function cleanupRootSessions(
       const alive = !samePid && session.pid !== undefined && checkAlive(session.pid);
       if (sameProcess || alive) continue;
       const registry = createAgentEventRegistry(projectRoot, session.sessionId);
-      for (const job of registry.all().values()) {
+      // Only jobs owned by the reconciled session's own recursive tree are
+      // cancelled. The registry is project-scoped: `all()` spans every session
+      // under the project home, so without this filter a dead session would
+      // cancel queued/running records of other sessions — including sessions
+      // whose PID is still alive and that must stay untouched.
+      const owned = sessionTreeJobs((jobId) => registry.get(jobId), registry.all(), session.sessionId);
+      for (const job of owned) {
         if (job.status !== "queued" && job.status !== "running") continue;
         registry.updateJob(job.jobId, { status: "cancelled" });
         cancelledAgents += 1;
