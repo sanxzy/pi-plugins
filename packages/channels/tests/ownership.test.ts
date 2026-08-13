@@ -1,13 +1,34 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { CHANNEL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import { channelOwnerFile, createChannelOwner } from "../src/index.ts";
 
 function projectRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-channels-owner-"));
 }
+
+test("ownership acquire and release emit boundary records", () => {
+  const root = projectRoot();
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  const owner = createChannelOwner(root, { pid: process.pid });
+  runWithLogContext(logger, () => {
+    assert.equal(owner.acquire().ok, true);
+    owner.release();
+  });
+  const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  for (const operation of [CHANNEL_OPERATIONS.OWNER_ACQUIRE, CHANNEL_OPERATIONS.OWNER_RELEASE]) {
+    assert.deepEqual(records.filter((record) => record.operation === operation.toLowerCase()).map((record) => record.phase), ["before", "after"]);
+  }
+});
 
 test("canonical equivalent paths share one crash-safe owner", () => {
   const root = projectRoot();

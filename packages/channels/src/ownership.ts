@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync,
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { channelOwnerFile } from "./shared/paths.ts";
+import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { type StateResult } from "./state.ts";
 
 /** Crash-safe per-project connection owner record. */
@@ -126,7 +127,7 @@ export function createChannelOwner(
     return { owner, stale: owner.pid === pid ? false : !checkAlive(owner.pid) };
   };
 
-  const acquire = (): StateResult<ChannelOwnerRecord> => {
+  const acquire = (): StateResult<ChannelOwnerRecord> => processWithLog({ operation: CHANNEL_OPERATIONS.OWNER_ACQUIRE, parameters: { projectRoot, pid } }, () => {
     if (owned && ownedRecord) return { ok: true, value: ownedRecord };
     let release: (() => void) | undefined;
     try {
@@ -160,9 +161,9 @@ export function createChannelOwner(
     ownedRecord = record;
     releaseLock = release;
     return { ok: true, value: record };
-  };
+  });
 
-  const release = (): void => {
+  const release = (): void => processWithLog({ operation: CHANNEL_OPERATIONS.OWNER_RELEASE, parameters: { projectRoot, pid } }, () => {
     if (!owned || !ownedRecord) return;
     const current = readOwnerRecord(filePath);
     if (current?.claimId === ownedRecord.claimId) {
@@ -181,7 +182,7 @@ export function createChannelOwner(
     owned = false;
     ownedRecord = undefined;
     releaseLock = undefined;
-  };
+  });
 
   return { projectRoot, pid, filePath, read, acquire, release, get isOwner() { return owned; } };
 }
