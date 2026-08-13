@@ -145,6 +145,14 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     }
   }
 
+  // Fire-and-forget reaction acknowledgment with its own telemetry boundary.
+  // `acknowledgeReaction` never rejects (errors route to onReactionError), so
+  // the voided promise settles with a correlated after record; agent_start
+  // never blocks on Telegram either way.
+  const acknowledge = (projectRoot: string, sessionId: string, origin: TelegramMessageOrigin): void => {
+    void processWithLog({ operation: TELEGRAM_OPERATIONS.REACTION_ACK, parameters: { chatId: origin.chatId } }, () => acknowledgeReaction(projectRoot, sessionId, origin));
+  };
+
   // Acknowledge exactly once at agent_start. The origin is correlated from
   // before_agent_start when available; the branch fallback supports hosts that
   // emit agent_start without the preceding extension event.
@@ -153,7 +161,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     if (!isRootSession(ctx) || event.reason !== "manual") return;
     const origin = takeTelegramCompactionOrigin(canonicalProjectRoot(ctx.cwd), ctx.sessionManager.getSessionId());
     if (!origin) return;
-    void acknowledgeReaction(canonicalProjectRoot(ctx.cwd), ctx.sessionManager.getSessionId(), origin);
+    void acknowledge(canonicalProjectRoot(ctx.cwd), ctx.sessionManager.getSessionId(), origin);
     });
   });
 
@@ -175,7 +183,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     pendingReactionOrigin = undefined;
     observedBeforeStart = false;
     if (!origin) return;
-    void acknowledgeReaction(projectRoot, ctx.sessionManager.getSessionId(), origin);
+    void acknowledge(projectRoot, ctx.sessionManager.getSessionId(), origin);
     });
   });
 

@@ -168,6 +168,10 @@ export async function dispatchTelegramControl(
       }
       await reply("🗜 Compaction started.");
       const finish = async (message: string, success: boolean): Promise<void> => {
+        // Called from host onComplete/onError callbacks after dispatch returns: the
+        // decoupling is intentional (the control must not await a host callback),
+        // and every piece of meaningful work here is already wrapped — the reply
+        // goes through OUTBOUND_SEND and the memory bookkeeping is best-effort.
         compactionByProject.delete(options.projectRoot);
         if (!success) {
           const sessionId = options.context.sessionManager.getSessionId();

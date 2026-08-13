@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createChildLiveFeed, createJob } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
+import { TOOL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import { registerAgentFooter } from "../src/registrations/footer.ts";
 
 const DOWN = "\x1b[B";
@@ -113,6 +114,26 @@ test("the custom footer is installed for TUI sessions and restored on root shutd
     assert.equal(restoredToNative, true, "root shutdown restores the native footer");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("non-TUI footer lifecycle is a silent no-op (H9)", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-noop-"));
+  const logDir = mkdtempSync(join(tmpdir(), "pi-code-footer-noop-log-"));
+  try {
+    const d = piDouble();
+    registerAgentFooter(d.pi);
+    const logger = createSessionLogger({ projectId: "project", rootSessionId: "root", eventsPath: join(logDir, "events.jsonl"), errorsPath: join(logDir, "errors.jsonl") });
+    const nonTui: ExtensionContext = { ...ctx(cwd), mode: "print", hasUI: false } as ExtensionContext;
+    runWithLogContext(logger, () => d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, nonTui));
+    assert.equal(existsSync(join(logDir, "events.jsonl")), false, "non-TUI no-op must not create telemetry files");
+    // The shutdown guard is symmetric: a non-TUI session never had a footer, so
+    // FOOTER_STOP must stay telemetry-silent and never touch the UI surface.
+    d.handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "quit" }, nonTui);
+    assert.equal(existsSync(join(logDir, "events.jsonl")), false, "non-TUI shutdown no-op must not create telemetry files");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(logDir, { recursive: true, force: true });
   }
 });
 

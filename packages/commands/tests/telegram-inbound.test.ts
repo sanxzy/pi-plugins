@@ -443,6 +443,28 @@ test("agent_start acknowledgements are deduplicated for one agent run", async ()
   assert.equal(reactionCount, 1);
 });
 
+test("fire-and-forget reaction acknowledgement has its own telemetry boundary (H9)", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  const logDir = mkdtempSync(join(tmpdir(), "pi-code-reaction-log-"));
+  const logger = createSessionLogger({ projectId: "project", rootSessionId: "root-a", eventsPath: join(logDir, "events.jsonl"), errorsPath: join(logDir, "errors.jsonl") });
+  const { pi, handlers } = registrations();
+  registerTelegramInbound(pi, { reactTelegramMessage: async () => undefined });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: { getSessionId: () => "root-a", getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } }] },
+  } as unknown as ExtensionContext;
+  await runWithLogContext(logger, async () => {
+    await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "hello" + formatTelegramSignature("777", 42) }, agentContext);
+    await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const reactionRecords = records.filter((record) => record.operation === TELEGRAM_OPERATIONS.REACTION_ACK);
+  assert.deepEqual(reactionRecords.map((record) => record.phase), ["before", "after"]);
+  assert.deepEqual(reactionRecords.map((record) => record.parameters), [{ chatId: "777" }, { chatId: "777" }], "reaction telemetry carries chat id only, never message id, tokens, or URLs");
+});
+
 test("agent_start reaction failure is logged and does not block", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);

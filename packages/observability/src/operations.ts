@@ -107,6 +107,7 @@ export const TELEGRAM_OPERATIONS = {
   INBOUND: "telegram.inbound",
   CHOICE_CONSUME: "telegram.choiceConsume",
   CONTROLS_DISPATCH: "telegram.controlsDispatch",
+  REACTION_ACK: "telegram.reactionAck",
   SEND: "telegram.send",
 } as const;
 

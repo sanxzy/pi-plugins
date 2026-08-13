@@ -21,8 +21,9 @@ const REPAINT_DEBOUNCE_MS = 250;
 /** Install the permanent native-information footer for TUI sessions. */
 export function registerAgentFooter(pi: ExtensionAPI): void {
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
-    processWithLog({ operation: TOOL_OPERATIONS.FOOTER_START, parameters: { cwd: ctx.cwd } }, () => {
+    // The footer is a TUI-only surface; any other mode must stay telemetry-silent.
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
+    processWithLog({ operation: TOOL_OPERATIONS.FOOTER_START, parameters: { cwd: ctx.cwd } }, () => {
     // The root session id scopes the descendant projection; the pool is created
     // with it so the root (which is not a job) is the tree root.
     const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
@@ -86,6 +87,9 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", (_event: SessionShutdownEvent, ctx: ExtensionContext) => {
+    // Symmetric with session_start: non-TUI sessions never had a footer, so
+    // leaving the surface alone, and no telemetry noise either.
+    if (ctx.mode !== "tui" || !ctx.hasUI) return;
     processWithLog({ operation: TOOL_OPERATIONS.FOOTER_STOP, parameters: { cwd: ctx.cwd } }, () => {
     const pool = getChildPool(ctx.cwd);
     if (!pool.isRootSession(ctx.sessionManager.getSessionId()) && !pool.shouldBootstrapRootSession(ctx.sessionManager.getSessionId())) return;
