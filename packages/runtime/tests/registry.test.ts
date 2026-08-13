@@ -5,11 +5,21 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createJob, updateJob } from "@xzy-ai/core";
 import { canTransition, isTerminal } from "@xzy-ai/core";
-import { createRegistry, foldLog } from "@xzy-ai/runtime";
+import { createSessionLogger, REGISTRY_OPERATIONS, runWithLogContext } from "@xzy-ai/observability";
+import { createRegistry, createScopedRegistry, foldLog } from "@xzy-ai/runtime";
 
 function tmpRegistryPath(): string {
   const dir = mkdtempSync(join(tmpdir(), "pi-code-registry-"));
   return join(dir, ".pi", "pi-code", "jobs.jsonl");
+}
+
+function logScope(): { eventsPath: string; errorsPath: string } {
+  const dir = mkdtempSync(join(tmpdir(), "pi-code-registry-log-"));
+  return { eventsPath: join(dir, "events.jsonl"), errorsPath: join(dir, "errors.jsonl") };
+}
+
+function eventRecords(path: string): Array<Record<string, unknown>> {
+  return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
 test("status state machine: legal transitions", () => {
@@ -70,6 +80,25 @@ test("updateJob is immutable and preserves lineage", () => {
   assert.equal(running.rootJobId, "j1");
   assert.equal(running.depth, 0);
   assert.equal(running.updatedAt, "2026-01-01T00:00:00.000Z");
+});
+
+test("registry append is logged for direct and scoped registries", () => {
+  const filePath = tmpRegistryPath();
+  const direct = createRegistry(filePath);
+  const projectRoot = mkdtempSync(join(tmpdir(), "pi-code-scoped-registry-"));
+  const scoped = createScopedRegistry(projectRoot, "root-session");
+  const paths = logScope();
+  const logger = createSessionLogger({ projectId: "project", rootSessionId: "root-session", ...paths });
+  const directJob = createJob({ jobId: "direct", status: "created", description: "d", subagentType: "g" });
+  const scopedJob = createJob({ jobId: "scoped", status: "created", description: "s", subagentType: "g", parentSessionId: "parent-session" });
+
+  runWithLogContext(logger, () => {
+    direct.append({ type: "created", job: directJob, at: directJob.createdAt });
+    scoped.append({ type: "created", job: scopedJob, at: scopedJob.createdAt });
+  });
+
+  const appendRecords = eventRecords(paths.eventsPath).filter((record) => record.operation === REGISTRY_OPERATIONS.APPEND && record.phase === "before");
+  assert.equal(appendRecords.length, 2);
 });
 
 test("registry appends and folds a full lifecycle", () => {

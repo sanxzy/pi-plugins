@@ -93,8 +93,13 @@ export function createRegistry(filePath: string): Registry {
   }
 
   const append = (event: JobEvent): void => {
-    mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${serializeJobEvent(event)}\n`, { flag: "a" });
+    processWithLog({
+      operation: REGISTRY_OPERATIONS.APPEND,
+      parameters: { eventType: event.type, jobId: event.type === "created" ? event.job.jobId : event.jobId },
+    }, () => {
+      mkdirSync(dirname(filePath), { recursive: true });
+      writeFileSync(filePath, `${serializeJobEvent(event)}\n`, { flag: "a" });
+    });
   };
 
   /** Collect ancestor job ids of the given job, walking the parent chain. */
