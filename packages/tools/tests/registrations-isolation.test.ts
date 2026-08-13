@@ -96,6 +96,20 @@ test("agent_jobs lists only the active parent session's running and historical d
   });
 });
 
+test("agent_jobs surfaces only the caller's direct child agents, never grandchildren", async () => {
+  await withIsolationPool(async (cwd) => {
+    const pool = getChildPool(cwd, "root-a");
+    pool.registry.createJob(job("a-grandchild", "a-running", "completed", "a-running"));
+    const tool = register(registerJobsTool);
+    const result = await tool.execute("call", {}, undefined, undefined, context(cwd, "root-a"));
+    const ids = new Set((result.details.jobs as Array<{ jobId: string }>).map((entry) => entry.jobId));
+    // The root lists its direct children only; the grandchild belongs to a-running.
+    assert.deepEqual(ids, new Set(["a-running", "a-completed", "a-cancelled"]));
+    assert.equal(ids.has("a-grandchild"), false);
+    assert.equal(result.content[0]?.text.includes("a-grandchild"), false);
+  });
+});
+
 test("agent_jobs reports active jobs and discourages polling or sleep-based waiting", async () => {
   await withIsolationPool(async (cwd) => {
     const tool = register(registerJobsTool);

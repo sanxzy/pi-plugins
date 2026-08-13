@@ -152,18 +152,39 @@ test("resumeDisposition: out-of-scope jobs are rejected", () => {
   assert.equal(disposition.reason, "not a descendant");
 });
 
-test("visibleJobs: the root sees everything, a child sees its own lineage", () => {
+test("visibleJobs: the root and nested callers list only direct children", () => {
   const jobs = new Map<string, Job>([
     ["a", makeJob("a", "running")],
     ["b", makeJob("b", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
     ["c", makeJob("c", "running", { parentJobId: "b", rootJobId: "a", depth: 2 })],
     ["d", makeJob("d", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
   ]);
+  // The root orchestrator lists only the jobs it spawned directly; b, c, and d
+  // belong to deeper lineage owned by the child that spawned them and are
+  // never surfaced to an ancestor's listing.
   const rootVisible = visibleJobs({ sessionId: "root-session", jobId: undefined }, jobs.values(), getJobFrom(jobs)).map((j) => j.jobId);
-  assert.deepEqual(rootVisible, ["a", "b", "c", "d"]);
+  assert.deepEqual(rootVisible, ["a"]);
 
+  // A nested caller lists only its direct children, never its own record,
+  // grandchildren, or deeper descendants.
   const childVisible = visibleJobs({ sessionId: "b", jobId: "b" }, jobs.values(), getJobFrom(jobs)).map((j) => j.jobId);
-  assert.deepEqual(childVisible, ["b", "c"]);
+  assert.deepEqual(childVisible, ["c"]);
+});
+
+test("visibleJobs never surfaces grandchildren or deeper job history", () => {
+  // root -> a -> b -> c, plus root's other direct child d.
+  const jobs = new Map<string, Job>([
+    ["a", makeJob("a", "running", { parentSessionId: "root-session" })],
+    ["b", makeJob("b", "running", { parentJobId: "a", rootJobId: "a", depth: 1 })],
+    ["c", makeJob("c", "running", { parentJobId: "b", rootJobId: "a", depth: 2 })],
+    ["d", makeJob("d", "completed", { parentSessionId: "root-session" })],
+  ]);
+  const getJob = getJobFrom(jobs);
+
+  // Root: only the direct children it spawned; the grandchild chain is hidden.
+  assert.deepEqual(visibleJobs({ sessionId: "root-session" }, jobs.values(), getJob).map((job) => job.jobId), ["a", "d"]);
+  // Nested caller a: only direct child b; grandchild c stays with b.
+  assert.deepEqual(visibleJobs({ sessionId: "a", jobId: "a" }, jobs.values(), getJob).map((job) => job.jobId), ["b"]);
 });
 
 test("statusFor: root controls everything, a child cannot control an ancestor", () => {
@@ -188,11 +209,9 @@ test("session-scoped root callers cannot see or control another parent session",
   const getJob = getJobFrom(jobs);
   const caller: ControlCaller = { sessionId: "root-a" };
 
-  assert.deepEqual(visibleJobs(caller, jobs.values(), getJob).map((job) => job.jobId), [
-    "a-running",
-    "a-done",
-    "a-cancelled",
-  ]);
+  // The root lists only its direct children; a-done/a-cancelled are
+  // grandchildren of the root session and stay with their own parent agent.
+  assert.deepEqual(visibleJobs(caller, jobs.values(), getJob).map((job) => job.jobId), ["a-running"]);
   assert.deepEqual(checkControlScope(caller, jobs.get("a-running")!, getJob), { allowed: true });
   assert.deepEqual(checkControlScope(caller, jobs.get("b-running")!, getJob), {
     allowed: false,
@@ -210,7 +229,7 @@ test("session-scoped root callers cannot see or control another parent session",
   });
 });
 
-test("a nested caller sees its own job and recursive descendants, not siblings or ancestors", () => {
+test("a nested caller lists direct children, not descendants, siblings, or ancestors", () => {
   const jobs = new Map<string, Job>([
     ["a", makeJob("a", "running", { parentSessionId: "root-a" })],
     ["b", makeJob("b", "completed", { parentJobId: "a", rootJobId: "a", depth: 1 })],
@@ -221,7 +240,8 @@ test("a nested caller sees its own job and recursive descendants, not siblings o
   const getJob = getJobFrom(jobs);
   const caller: ControlCaller = { sessionId: "a", jobId: "a", rootJobId: "a" };
 
-  assert.deepEqual(visibleJobs(caller, jobs.values(), getJob).map((job) => job.jobId), ["a", "b", "c"]);
+  // Only direct children; grandchild c is owned by b.
+  assert.deepEqual(visibleJobs(caller, jobs.values(), getJob).map((job) => job.jobId), ["b"]);
   assert.deepEqual(checkControlScope(caller, jobs.get("b")!, getJob), { allowed: true });
   assert.deepEqual(checkControlScope(caller, jobs.get("c")!, getJob), { allowed: true });
   assert.deepEqual(checkControlScope(caller, jobs.get("sibling")!, getJob), {
@@ -241,10 +261,8 @@ test("session scope accepts a rehydrated descendant when its parent chain is pre
   ]);
   const caller: ControlCaller = { sessionId: "root-a" };
 
-  assert.deepEqual(visibleJobs(caller, jobs.values(), getJobFrom(jobs)).map((job) => job.jobId), [
-    "root-child",
-    "grandchild",
-  ]);
+  // The rehydrated child is listed; its own child (the grandchild) is not.
+  assert.deepEqual(visibleJobs(caller, jobs.values(), getJobFrom(jobs)).map((job) => job.jobId), ["root-child"]);
 });
 
 test("prepareResumeSessionFile trims a trailing tool call in the same file", () => {
