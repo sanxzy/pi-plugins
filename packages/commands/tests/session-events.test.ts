@@ -267,4 +267,3 @@ test("session_shutdown disposes the host gate so a stale context cannot crash th
     rmSync(cwd, { recursive: true, force: true });
   }
 });
-

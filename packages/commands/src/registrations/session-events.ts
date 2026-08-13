@@ -15,6 +15,19 @@ import { createHostMessageGate, type HostMessageGate } from "./safe-host-deliver
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
 type SessionReloadMarkers = Map<string, boolean>;
 
+const HOST_GATES_KEY = Symbol.for("@xzy-ai/pi-code:host-message-gates");
+type HostGateRegistry = Map<string, HostMessageGate>;
+
+function hostGateRegistry(): HostGateRegistry {
+  const global = globalThis as unknown as Record<symbol, HostGateRegistry | undefined>;
+  global[HOST_GATES_KEY] ??= new Map<string, HostMessageGate>();
+  return global[HOST_GATES_KEY] as HostGateRegistry;
+}
+
+function hostGateKey(projectRoot: string, sessionId: string): string {
+  return `${canonicalProjectRoot(projectRoot)}\u0000${sessionId}`;
+}
+
 function sessionReloadMarkers(): SessionReloadMarkers {
   const global = globalThis as unknown as Record<symbol, SessionReloadMarkers | undefined>;
   global[SESSION_RELOAD_MARKERS_KEY] ??= new Map<string, boolean>();
@@ -99,7 +112,10 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // gated behind the agent's run state so they never race an active prompt
     // and never surface pi's "already processing a prompt" error during
     // session replacement (reload/new/resume).
+    const gateKey = hostGateKey(projectRoot, sessionId);
+    hostGateRegistry().get(gateKey)?.dispose();
     const gate = createHostMessageGate(pi, ctx);
+    hostGateRegistry().set(gateKey, gate);
     // A root host has no agent event. The bootstrap predicate applies only to
     // this real lifecycle boundary; ordinary callers use manifest-backed
     // isRootSession. This covers a first host and every replacement root
@@ -190,6 +206,16 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
   });
 
   async function stopSession(event: SessionShutdownEvent, ctx: ExtensionContext, projectRoot: string, rootSessionId: string): Promise<void> {
+    // Dispose this session's host-message gate before any further teardown: a
+    // surviving retry timer could otherwise fire against the extension context
+    // once the runner is invalidated, whose getters throw and would surface as
+    // an uncaught exception.
+    const gates = hostGateRegistry();
+    const gate = gates.get(hostGateKey(projectRoot, rootSessionId));
+    if (gate) {
+      gate.dispose();
+      gates.delete(hostGateKey(projectRoot, rootSessionId));
+    }
     const pool = getChildPool(ctx.cwd, rootSessionId);
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (sessionFile) {
