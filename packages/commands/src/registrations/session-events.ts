@@ -192,15 +192,19 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
       // were addressed to the replaced parent must follow that descendant.
       pool.deliveryFor(pool.rootSessionIdFor(sessionId)).rebind(event.previousSessionFile, sessionFile);
     }
-    pool.deliveryFor(pool.rootSessionIdFor(sessionId)).register(sessionFile, (content) => {
+    const delivery = pool.deliveryFor(pool.rootSessionIdFor(sessionId));
+    delivery.register(sessionFile, (content) => {
       // Reject while the host agent is mid-run: the delivery coordinator keeps
       // the result durable pending and retries once the host settles, so a
       // background result is never lost to an active prompt and never surfaces
-      // pi's "already processing a prompt" error.
+      // pi's "already processing a prompt" error. The gate's settled hook
+      // redrives this coordinator the moment agent_end fires, so the result
+      // does not wait for the coordinator's polling retry.
       if (!gate.trySend(content, "steer")) {
         throw new Error("host agent is busy; defer result delivery");
       }
     });
+    gate.onSettled(() => delivery.redrive(sessionFile));
 
     // A fresh host binding is established above before delivery resumes. The
     // goal pool does not retain the old session/UI handles across replacement.

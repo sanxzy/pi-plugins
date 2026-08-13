@@ -15,6 +15,8 @@ export interface HostMessageGate {
    * getters throw after replacement.
    */
   dispose(): void;
+  /** Register a callback invoked after the host-run latch is released (agent_end). */
+  onSettled(listener: () => void): void;
 }
 
 interface QueuedMessage {
@@ -54,11 +56,18 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
   let retryTimer: NodeJS.Timeout | undefined;
   let retryStep = 0;
   let disposed = false;
+  // `isIdle()` can briefly be stale around a turn boundary. The explicit
+  // lifecycle latch closes that race: once turn_start fires, host delivery is
+  // blocked until agent_end, regardless of the instantaneous SDK getter.
+  let turnActive = false;
+  const settledListeners: Array<() => void> = [];
+  const unsubscribeLifecycle: Array<() => void> = [];
 
   const hostIsReady = (): boolean => {
     // A replaced runner's context getters throw. Treat an unreadable context as
     // busy so the gate only ever defers or disposes, never crashes.
     try {
+      if (turnActive) return false;
       return typeof ctx.isIdle === "function" && typeof ctx.hasPendingMessages === "function"
         ? ctx.isIdle() && !ctx.hasPendingMessages() && ctx.signal === undefined
         : true;
@@ -104,7 +113,26 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     if (queue.length > 0) scheduleFlush();
   };
 
-  pi.on("agent_end", () => scheduleFlush());
+  const onTurnStart = (): void => {
+    turnActive = true;
+  };
+  const onAgentEnd = (): void => {
+    turnActive = false;
+    retryStep = 0;
+    scheduleFlush();
+    for (const listener of settledListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener (the delivery redrive) may touch a disposed coordinator;
+        // a settled host must never surface extension exceptions.
+      }
+    }
+  };
+  const turnStartUnsubscribe = pi.on("turn_start", onTurnStart) as unknown as (() => void) | undefined;
+  const agentEndUnsubscribe = pi.on("agent_end", onAgentEnd) as unknown as (() => void) | undefined;
+  if (typeof turnStartUnsubscribe === "function") unsubscribeLifecycle.push(turnStartUnsubscribe);
+  if (typeof agentEndUnsubscribe === "function") unsubscribeLifecycle.push(agentEndUnsubscribe);
 
   return {
     send(content: string, deliverAs: HostDeliverAs = "steer"): void {
@@ -122,8 +150,15 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
       }
     },
     ready: () => !disposed && hostIsReady(),
+    onSettled(listener: () => void): void {
+      if (disposed) return;
+      settledListeners.push(listener);
+    },
     dispose(): void {
       disposed = true;
+      turnActive = false;
+      settledListeners.length = 0;
+      for (const unsubscribe of unsubscribeLifecycle.splice(0)) unsubscribe();
       queue.length = 0;
       if (retryTimer !== undefined) {
         clearTimeout(retryTimer);

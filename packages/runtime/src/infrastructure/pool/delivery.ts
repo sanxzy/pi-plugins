@@ -18,6 +18,8 @@ export interface DeliveryCoordinator {
   unregister(sessionFile: string): void;
   /** Move pending results from a replaced parent session to its descendant. */
   rebind(previousSessionFile: string, nextSessionFile: string): void;
+  /** Re-drive durable pending delivery now (called after the host settles). */
+  redrive(sessionFile?: string): void;
   deliverResult(jobId: string, parentSessionFile: string, content: string): boolean;
 }
 
@@ -164,6 +166,13 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
         }
         if (changed) persist();
       });
+    },
+    redrive(sessionFile?: string): void {
+      if (sessionFile !== undefined) {
+        deliverPending(sessionFile);
+        return;
+      }
+      for (const registered of sinks.keys()) deliverPending(registered);
     },
     deliverResult(jobId, parentSessionFile, content): boolean {
       return processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_RESULT, parameters: { jobId, parentSessionFile } }, () => {
