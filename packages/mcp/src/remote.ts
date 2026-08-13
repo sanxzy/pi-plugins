@@ -317,6 +317,10 @@ export async function finishRemoteAuth(
   options: ConnectRemoteOptions,
   authorizationCode?: string,
 ): Promise<void> {
+  return processWithLog({
+    operation: MCP_OPERATIONS.AUTH_STORE,
+    parameters: { url: options.url, action: "finish" },
+  }, async () => {
   const key = authKey(options.ownerKey, options.url);
   const pending = pendingRemoteAuth.get(key);
   const provider = pending?.provider ?? makeProvider(options);
@@ -339,22 +343,37 @@ export async function finishRemoteAuth(
     stopCallbackServerIfIdle();
     throw error;
   }
+  });
 }
 
 /** Clear stored credentials and cancel any pending callback for a remote URL. */
 export function logoutRemote(options: ConnectRemoteOptions): void {
-  const provider = makeProvider(options);
-  provider?.clear();
-  cancelPendingAuth(options.url, options.ownerKey);
+  processWithLog({
+    operation: MCP_OPERATIONS.AUTH_STORE,
+    parameters: { url: options.url, action: "logout" },
+  }, () => {
+    const provider = makeProvider(options);
+    provider?.clear();
+    cancelPendingAuth(options.url, options.ownerKey);
+  });
 }
 
 /** Cancel a pending callback for a single remote URL without global teardown. */
 export function cancelRemoteAuth(url: string, ownerKey?: string): void {
-  cancelPendingAuth(url, ownerKey);
+  processWithLog({
+    operation: MCP_OPERATIONS.AUTH_STORE,
+    parameters: { url, action: "cancel" },
+  }, () => {
+    cancelPendingAuth(url, ownerKey);
+  });
 }
 
 /** Stop the callback server and clear all pending auth, used on session shutdown. */
 export async function teardownRemoteAuth(ownerKey?: string): Promise<void> {
+  return processWithLog({
+    operation: MCP_OPERATIONS.AUTH_STORE,
+    parameters: { action: "teardown", ownerKey },
+  }, async () => {
   const prefix = ownerKey ? `${ownerKey}\u0000` : undefined;
   for (const [key, pending] of pendingRemoteAuth) {
     if (prefix && !key.startsWith(prefix)) continue;
@@ -363,6 +382,7 @@ export async function teardownRemoteAuth(ownerKey?: string): Promise<void> {
   }
   if (!ownerKey) pendingRemoteAuth.clear();
   stopCallbackServerIfIdle();
+  });
 }
 
 function cancelPendingAuth(url: string, ownerKey?: string): void {

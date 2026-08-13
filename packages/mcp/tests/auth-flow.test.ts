@@ -1,10 +1,12 @@
 import { createServer, type Server } from "node:http";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createSessionLogger, MCP_OPERATIONS, runWithLogContext } from "@xzy-ai/observability";
 import {
+  cancelRemoteAuth,
   connectRemote,
   ensureCallbackServer,
   finishRemoteAuth,
@@ -186,6 +188,36 @@ test("logoutRemote clears credentials and cancels pending callbacks", async () =
     await auth.close();
     rmSync(agentDir, { recursive: true, force: true });
   }
+});
+
+test("remote auth mutation boundaries emit telemetry and preserve failure propagation", async () => {
+  const agentDir = tempAgent("pi-code-mcp-auth-boundary-");
+  const options: ConnectRemoteOptions = {
+    url: "https://server.example/mcp",
+    agentDir,
+    ownerKey: "root-session",
+    onRedirect: () => {},
+  };
+  const logDir = mkdtempSync(join(tmpdir(), "pi-code-mcp-auth-log-"));
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  await runWithLogContext(logger, async () => {
+    logoutRemote(options);
+    cancelRemoteAuth(options.url, options.ownerKey);
+    await teardownRemoteAuth(options.ownerKey);
+    await assert.rejects(finishRemoteAuth(options), /No OAuth authorization code is pending/);
+  });
+  const events = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const errors = readFileSync(join(logDir, "errors.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const authEvents = events.filter((record) => record.operation === MCP_OPERATIONS.AUTH_STORE.toLowerCase());
+  assert.equal(authEvents.filter((record) => record.phase === "before").length, 4);
+  assert.equal(authEvents.filter((record) => record.phase === "after").length, 3);
+  assert.equal(errors.filter((record) => record.operation === MCP_OPERATIONS.AUTH_STORE.toLowerCase() && record.phase === "error").length, 1);
+  rmSync(agentDir, { recursive: true, force: true });
 });
 
 test("failed finishRemoteAuth rejects and drops the pending flow", async () => {
