@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { channelConfigFile, channelRuntimeFile } from "./shared/paths.ts";
 
 const PRIVATE_FILE_MODE = 0o600;
@@ -123,6 +124,7 @@ function readJson<T>(filePath: string, parse: (value: unknown) => StateResult<T>
  * that preserve the destination mode instead of the source mode.
  */
 export function writePrivateJson(filePath: string, value: unknown): StateResult<void> {
+  return processWithLog({ operation: CHANNEL_OPERATIONS.STATE_WRITE, parameters: { filePath } }, () => {
   const directory = dirname(filePath);
   const temporaryPath = join(directory, `.${filePath.split("/").pop() ?? "state"}.${process.pid}.${Date.now()}.tmp`);
   try {
@@ -141,6 +143,7 @@ export function writePrivateJson(filePath: string, value: unknown): StateResult<
     }
     return { ok: false, code: "io", message: `Unable to write private state: ${safeErrorMessage(error)}` };
   }
+  });
 }
 
 export function readChannelConfig(projectRoot: string): StateResult<ChannelConfig> {
@@ -175,6 +178,7 @@ export function writeChannelRuntime(projectRoot: string, state: ChannelRuntimeSt
  * listener keeps polling against the removed config.
  */
 export function clearChannelConfig(projectRoot: string): StateResult<void> {
+  return processWithLog({ operation: CHANNEL_OPERATIONS.STATE_CLEAR, parameters: { projectRoot } }, () => {
   const files = [channelConfigFile(projectRoot), channelRuntimeFile(projectRoot)];
   try {
     for (const file of files) {
@@ -184,6 +188,7 @@ export function clearChannelConfig(projectRoot: string): StateResult<void> {
   } catch (error) {
     return { ok: false, code: "io", message: `Unable to clear Telegram channel state: ${safeErrorMessage(error)}` };
   }
+  });
 }
 
 /** Exposed for tests and diagnostics without leaking token values. */

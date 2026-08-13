@@ -10,6 +10,7 @@
  */
 
 import { Bot, InputFile } from "grammy";
+import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { readChannelConfig } from "./state.ts";
 import {
   MEDIA_DOCUMENT_MAX_BYTES,
@@ -239,6 +240,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
   };
 
   const send = async (projectRoot: string, chatId: string, text: string, options: TelegramSendTextOptions = {}): Promise<OutboundTextResult> => {
+    return processWithLog({ operation: CHANNEL_OPERATIONS.OUTBOUND_SEND, parameters: { chatId, bytes: text.length } }, async () => {
     const target = validateTelegramTarget(projectRoot, chatId, readConfig);
     if (!target.ok) return { ok: false, sent: 0, failed: 1, error: target.error, category: target.category };
     const format = options.format ?? "plain";
@@ -267,9 +269,11 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
       });
     });
     return result as OutboundTextResult;
+    });
   };
 
   const react = async (projectRoot: string, chatId: string, messageId: number, reaction: unknown): Promise<OutboundTextResult> => {
+    return processWithLog({ operation: CHANNEL_OPERATIONS.OUTBOUND_REACT, parameters: { chatId, messageId } }, async () => {
     const target = validateTelegramTarget(projectRoot, chatId, readConfig);
     if (!target.ok) return { ok: false, sent: 0, failed: 1, error: target.error, category: target.category };
     const result = await withConfig(projectRoot, async (api) => {
@@ -282,6 +286,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
       }
     });
     return result as OutboundTextResult;
+    });
   };
 
   const sendMedia = async (
@@ -291,6 +296,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
     source: TelegramResolvedMediaSource,
     mediaOptions: { caption?: string; filename?: string } = {},
   ): Promise<OutboundMediaResult> => {
+    return processWithLog({ operation: CHANNEL_OPERATIONS.OUTBOUND_MEDIA, parameters: { chatId, mediaType, bytes: source.kind === "bytes" ? source.bytes.byteLength : 0 } }, async () => {
     const target = validateTelegramTarget(projectRoot, chatId, readConfig);
     if (!target.ok) return { ok: false, error: target.error, category: target.category };
     if (source.kind !== "file_id" && source.kind !== "bytes") return { ok: false, error: "Unsupported media source", category: "telegram_rejected" };
@@ -338,9 +344,11 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
       }
     });
     return result as OutboundMediaResult;
+    });
   };
 
   const sendChoices = async (projectRoot: string, chatId: string, question: string, buttons: TelegramChoiceButton[], replyToMessageId?: number): Promise<OutboundChoiceResult> => {
+    return processWithLog({ operation: CHANNEL_OPERATIONS.OUTBOUND_CHOICES, parameters: { chatId, count: buttons.length } }, async () => {
     const target = validateTelegramTarget(projectRoot, chatId, readConfig);
     if (!target.ok) return { ok: false, error: target.error, category: target.category };
     const expiresAt = Date.now() + 10 * 60 * 1000;
@@ -360,6 +368,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
       }
     });
     return result as OutboundChoiceResult;
+    });
   };
 
   return { send, react, sendChoices, sendMedia };

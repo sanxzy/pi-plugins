@@ -4,6 +4,7 @@ import type {
 } from "./manager.ts";
 import { readChannelConfig } from "./state.ts";
 import type { StateResult } from "./state.ts";
+import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 export interface TelegramChannelLifecycle {
   readonly projectRoot: string;
@@ -30,6 +31,7 @@ export function createTelegramChannelLifecycle(
   const readConfig = options.readConfig ?? readChannelConfig;
 
   const start = async (): Promise<StateResult<ChannelConnectionState>> => {
+    return processWithLog({ operation: CHANNEL_OPERATIONS.LIFECYCLE_START, parameters: { projectRoot: options.projectRoot } }, async () => {
     const current = options.manager.state();
     if (current.status.kind === "ready" || current.status.kind === "starting") {
       return { ok: true, value: current };
@@ -43,13 +45,14 @@ export function createTelegramChannelLifecycle(
       return config;
     }
     return options.manager.start(config.value);
+    });
   };
 
   return {
     projectRoot: options.projectRoot,
     manager: options.manager,
     start,
-    stop: () => options.manager.stop(),
+    stop: () => processWithLog({ operation: CHANNEL_OPERATIONS.LIFECYCLE_STOP, parameters: { projectRoot: options.projectRoot } }, () => options.manager.stop()),
     state: () => options.manager.state(),
   };
 }

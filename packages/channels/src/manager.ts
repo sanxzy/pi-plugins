@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { createChannelOwner, type ChannelOwner, type ChannelOwnerRecord } from "./ownership.ts";
 import { type ChannelConfig, type StateResult } from "./state.ts";
 
@@ -150,17 +151,17 @@ export function createChannelManager(deps: ChannelManagerDeps): ChannelManager {
   };
 
   const start = (config: ChannelConfig): Promise<StateResult<ChannelConnectionState>> =>
-    serialize(() => startInternal(config));
+    processWithLog({ operation: CHANNEL_OPERATIONS.MANAGER_START, parameters: { projectRoot } }, () => serialize(() => startInternal(config)));
 
-  const stop = (): Promise<void> => serialize(stopPoller);
+  const stop = (): Promise<void> => processWithLog({ operation: CHANNEL_OPERATIONS.MANAGER_STOP, parameters: { projectRoot } }, () => serialize(stopPoller));
 
   const replace = (config: ChannelConfig): Promise<StateResult<ChannelConnectionState>> =>
-    serialize(async () => {
+    processWithLog({ operation: CHANNEL_OPERATIONS.MANAGER_REPLACE, parameters: { projectRoot } }, () => serialize(async () => {
       // Stop the current listener before a candidate runs so two pollers for
       // the same token never compete.
       await stopPoller();
       return startInternal(config);
-    });
+    }));
 
   return { projectRoot, owner, state, start, stop, replace };
 }
