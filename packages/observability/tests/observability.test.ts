@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
   MCP_OPERATIONS,
@@ -185,6 +187,14 @@ test("masking safely bounds cyclic values instead of recursing forever", () => {
   const cyclic: Record<string, unknown> = { name: "cycle" };
   cyclic.self = cyclic;
   assert.deepEqual(mask(cyclic), { name: "cycle", self: "[Circular]" });
+});
+
+test("no-context processWithLog fallback is silent and non-persistent (H2)", () => {
+  const helper = fileURLToPath(new URL("./no-context-helper.ts", import.meta.url));
+  const result = spawnSync(process.execPath, ["--import", "tsx", helper], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "COUNT=0\n");
+  assert.equal(result.stderr, "", "no-context fallback must not emit persistence noise");
 });
 
 test("persistence failure does not fail business work and reports safe fallback metadata", () => {

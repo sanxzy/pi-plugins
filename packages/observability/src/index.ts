@@ -55,6 +55,21 @@ export interface ProcessLogInput {
 const contextStorage = new AsyncLocalStorage<LogContext>();
 let defaultLogger: SessionLogger | undefined;
 
+/**
+ * Silent no-op logger used when no ambient context and no default logger
+ * exist. It never persists, never touches the filesystem (no /dev chmod), and
+ * never replaces the global `defaultLogger`. Nested boundaries under this
+ * fallback stay fully silent instead of emitting persistence noise.
+ */
+const silentLogger: SessionLogger = {
+  projectId: "unknown",
+  rootSessionId: "unknown",
+  eventsPath: "/dev/null",
+  errorsPath: "/dev/null",
+  child: () => silentLogger,
+  write: () => undefined,
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -200,7 +215,7 @@ export function processWithLog<T>(
   const ambient = contextStorage.getStore();
   const logger = ambient?.logger ?? defaultLogger;
   if (!logger) {
-    return callback({ logger: createSessionLogger({ projectId: "unknown", rootSessionId: "unknown", eventsPath: "/dev/null", errorsPath: "/dev/null" }), correlationId: randomUUID() });
+    return callback({ logger: silentLogger, correlationId: randomUUID() });
   }
   const correlationId = randomUUID();
   const parentCorrelationId = ambient?.correlationId;
