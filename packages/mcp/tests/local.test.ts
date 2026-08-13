@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { createSessionLogger, MCP_OPERATIONS, runWithLogContext } from "@xzy-ai/observability";
 import { createMcpManager, terminateProcessTree, ProcessStdioTransport, userConfigPath } from "../src/index.ts";
 
 const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
@@ -239,6 +240,35 @@ test("local server stderr is piped and bounded on the transport", async () => {
     assert.ok(transport.stderrText.length <= 32 * 1024, "stderr capture must be bounded");
   } finally {
     await transport.close();
+  }
+});
+
+test("stdio process lifecycle emits start/send/close/terminate telemetry", async () => {
+  const root = tempRoot("pi-code-mcp-stdio-log-");
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(logDir, "events.jsonl"),
+    errorsPath: join(logDir, "errors.jsonl"),
+  });
+  const transport = new ProcessStdioTransport({
+    command: process.execPath,
+    args: [fixture],
+    cwd: fixtureCwd,
+  });
+  try {
+    await runWithLogContext(logger, async () => {
+      await transport.start();
+      await transport.send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+      await transport.close();
+    });
+    const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    for (const operation of [MCP_OPERATIONS.STDIO_START, MCP_OPERATIONS.STDIO_SEND, MCP_OPERATIONS.STDIO_CLOSE, MCP_OPERATIONS.PROCESS_TERMINATE]) {
+      assert.ok(records.some((record) => record.operation === operation.toLowerCase() && record.phase === "before"), `missing ${operation}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

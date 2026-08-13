@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport, TransportSendOptions } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 export interface ProcessStdioOptions {
   command: string;
@@ -29,6 +30,7 @@ function isAlive(pid: number): boolean {
 
 /** Terminate a local MCP process and all descendants in its dedicated group. */
 export async function terminateProcessTree(pid: number): Promise<void> {
+  return processWithLog({ operation: MCP_OPERATIONS.PROCESS_TERMINATE, parameters: { pid } }, async () => {
   if (process.platform === "win32") {
     await new Promise<void>((resolve) => {
       const killer = spawn("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
@@ -60,6 +62,7 @@ export async function terminateProcessTree(pid: number): Promise<void> {
       // The group is fully gone.
     }
   }
+  });
 }
 
 /**
@@ -91,6 +94,7 @@ export class ProcessStdioTransport implements Transport {
   }
 
   async start(): Promise<void> {
+    return processWithLog({ operation: MCP_OPERATIONS.STDIO_START, parameters: { command: this.options.command } }, async () => {
     if (this.started) throw new Error("ProcessStdioTransport already started");
     this.started = true;
     await new Promise<void>((resolve, reject) => {
@@ -142,9 +146,11 @@ export class ProcessStdioTransport implements Transport {
         this.stderrBuffer = (this.stderrBuffer + chunk.toString()).slice(-STDERR_LIMIT);
       });
     });
+    });
   }
 
   async send(message: JSONRPCMessage, _options?: TransportSendOptions): Promise<void> {
+    return processWithLog({ operation: MCP_OPERATIONS.STDIO_SEND, parameters: { command: this.options.command, method: "method" in message ? message.method : undefined } }, async () => {
     const stdin = this.child?.stdin;
     if (!stdin) throw new Error("MCP stdio transport is not connected");
     const serialized = serializeMessage(message);
@@ -153,9 +159,11 @@ export class ProcessStdioTransport implements Transport {
       stdin.once("drain", resolve);
       stdin.once("error", reject);
     });
+    });
   }
 
   async close(): Promise<void> {
+    return processWithLog({ operation: MCP_OPERATIONS.STDIO_CLOSE, parameters: { command: this.options.command } }, async () => {
     if (this.closing) return this.closing;
     const child = this.child;
     this.closing = (async () => {
@@ -173,6 +181,7 @@ export class ProcessStdioTransport implements Transport {
       this.child = undefined;
       this.readBuffer.clear();
     })();
-    return this.closing;
+    await this.closing;
+    });
   }
 }
