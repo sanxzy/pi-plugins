@@ -56,6 +56,8 @@ export const REGISTRY_OPERATIONS = {
   AGENT_CREATE: "registry.agentCreate",
   AGENT_UPDATE: "registry.agentUpdate",
   AGENT_PRUNE: "registry.agentPrune",
+  AGENT_LOAD: "registry.agentLoad",
+  AGENT_ENSURE_SESSION: "registry.agentEnsureSession",
 } as const;
 
 export const PERSISTENCE_OPERATIONS = {

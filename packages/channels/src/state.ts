@@ -146,6 +146,12 @@ export function writePrivateJson(filePath: string, value: unknown): StateResult<
   });
 }
 
+/**
+ * Read-only channel config loader. Exempt from a dedicated processWithLog
+ * boundary (M18): it performs no writes or side effects; every mutating
+ * channel-state path is already wrapped via STATE_WRITE/STATE_CLEAR and the
+ * wrapped writePrivateJson primitive.
+ */
 export function readChannelConfig(projectRoot: string): StateResult<ChannelConfig> {
   return readJson(channelConfigFile(projectRoot), parseConfig);
 }
@@ -161,6 +167,12 @@ export function writeChannelConfig(projectRoot: string, config: ChannelConfig): 
   return writePrivateJson(channelConfigFile(projectRoot), validation.value);
 }
 
+/**
+ * Read-only channel runtime loader. Exempt from a dedicated processWithLog
+ * boundary (M18): it performs no writes or side effects; every mutating
+ * channel-state path is already wrapped via STATE_WRITE/STATE_CLEAR and the
+ * wrapped writePrivateJson primitive.
+ */
 export function readChannelRuntime(projectRoot: string): StateResult<ChannelRuntimeState> {
   return readJson(channelRuntimeFile(projectRoot), parseChannelRuntime);
 }

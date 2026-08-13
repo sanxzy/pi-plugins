@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { TOOL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   executeLlmWikisSearch,
@@ -49,6 +50,35 @@ function text(result: { content: Array<{ type: string; text?: string }> }): stri
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-wikis-search-"));
 }
+
+test("wiki save emits a boundary without persisting entry content as telemetry parameters", async () => {
+  const root = tempRoot();
+  const logRoot = tempRoot();
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(logRoot, "events.jsonl"),
+    errorsPath: join(logRoot, "errors.jsonl"),
+  });
+  await runWithLogContext(logger, async () => {
+    const result = await saveWikiEntry({
+      topic: "telemetry",
+      source: "web_search",
+      queryOrUrl: "query",
+      format: "markdown",
+      title: "Title",
+      text: "WIKI-SECRET-CONTENT",
+      root,
+    });
+    assert.equal(result.saved, true);
+  });
+  const records = readFileSync(join(logRoot, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const wikiRecords = records.filter((record) => record.operation === TOOL_OPERATIONS.WIKI_EXECUTE.toLowerCase());
+  assert.deepEqual(wikiRecords.map((record) => record.phase), ["before", "after"]);
+  assert.ok(!JSON.stringify(wikiRecords).includes("WIKI-SECRET-CONTENT"));
+  rmSync(root, { recursive: true, force: true });
+  rmSync(logRoot, { recursive: true, force: true });
+});
 
 test("llm_wikis_search is registered with an explicit type discriminator and a local-first description", () => {
   const tool = captureTool();

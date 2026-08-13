@@ -85,6 +85,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
   const projectId = encodeProjectId(projectRoot);
 
   const load = (): void => {
+    processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_LOAD, parameters: { projectRoot } }, () => {
     byJob.clear();
     stores.clear();
     const sessionsRoot = join(homeProjectDir(projectId), "sessions");
@@ -115,6 +116,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       void agentDir;
     }
     snapshot = new Map([...byJob].map(([id, entry]) => [id, entry.job]));
+    });
   };
 
   const storeFor = (job: Job): AgentManifestStore => {
@@ -256,7 +258,11 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       return snapshot;
     },
     prune,
-    ensureSession(sessionId): void { ensurePrivateDirectory(homeSessionDirFromRoot(projectRoot, sessionId)); },
+    ensureSession(sessionId): void {
+      processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_ENSURE_SESSION, parameters: { projectRoot, sessionId } }, () => {
+        ensurePrivateDirectory(homeSessionDirFromRoot(projectRoot, sessionId));
+      });
+    },
     fileForJob(jobId): string | undefined {
       const job = byJob.get(jobId)?.job ?? byJob.get(canonicalAgentId(jobId))?.job ?? [...byJob.values()].find((e) => canonicalAgentId(e.job.jobId) === canonicalAgentId(jobId))?.job;
       return job ? byJob.get(job.jobId)?.store.eventsPath : undefined;

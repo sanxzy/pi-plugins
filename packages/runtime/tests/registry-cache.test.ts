@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { REGISTRY_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import { createJob } from "@xzy-ai/core";
 import { createAgentEventRegistry, encodeProjectId, homeProjectDir } from "@xzy-ai/runtime";
 
@@ -15,6 +16,33 @@ function setupHome(): string {
   process.env.PI_CODE_TEST_HOME = home;
   return home;
 }
+
+test("agent registry load and ensureSession emit boundary records", () => {
+  setupHome();
+  const root = project();
+  const logRoot = project();
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(logRoot, "events.jsonl"),
+    errorsPath: join(logRoot, "errors.jsonl"),
+  });
+  runWithLogContext(logger, () => {
+    const registry = createAgentEventRegistry(root, "root-session");
+    registry.ensureSession("child-session");
+    registry.refresh();
+  });
+  const records = readFileSync(join(logRoot, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const loadRecords = records.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_LOAD.toLowerCase());
+  assert.ok(loadRecords.some((record) => record.phase === "before"), "AGENT_LOAD before record missing");
+  assert.ok(loadRecords.some((record) => record.phase === "after"), "AGENT_LOAD after record missing");
+  assert.deepEqual(
+    records.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_ENSURE_SESSION.toLowerCase()).map((record) => record.phase),
+    ["before", "after"],
+  );
+  rmSync(root, { recursive: true, force: true });
+  rmSync(logRoot, { recursive: true, force: true });
+});
 
 test("cached snapshot reflects in-process updates without rescaming home, then advances on refresh", () => {
   setupHome();

@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 export interface WikiEntry {
   title: string;
@@ -194,6 +195,7 @@ export async function saveWikiEntry(input: WikiEntryInput & { root?: string }): 
 }
 
 async function writePaginatedWikiEntry(input: WikiEntryInput, root: string, topic: string): Promise<WikiSaveResult> {
+  return processWithLog({ operation: TOOL_OPERATIONS.WIKI_EXECUTE, parameters: { topic, root } }, async () => {
   const pageSize = Math.max(input.pageSize ?? WIKI_PAGE_SIZE, 256);
   await mkdir(root, { recursive: true });
   const existingPages = await listTopicPages(root, topic);
@@ -219,6 +221,7 @@ async function writePaginatedWikiEntry(input: WikiEntryInput, root: string, topi
     await atomicWrite(join(root, pages[index]!), document);
   }
   return { saved: true, topic, pages };
+  });
 }
 
 async function listTopicPages(root: string, topic: string): Promise<string[]> {
