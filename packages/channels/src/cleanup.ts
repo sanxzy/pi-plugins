@@ -31,7 +31,7 @@ export interface CleanupRootSessionsOptions {
 export interface CleanupRootSessionsResult {
   readonly ok: true;
   readonly reconciled: number;
-  readonly interruptedAgents: number;
+  readonly cancelledAgents: number;
   readonly removed: number;
   readonly remaining: number;
 }
@@ -108,7 +108,7 @@ export function cleanupRootSessions(
     });
     const sessions = discoverSessions(projectRoot);
     let reconciled = 0;
-    let interruptedAgents = 0;
+    let cancelledAgents = 0;
     for (const session of sessions) {
       if (!session.active) continue;
       const samePid = session.pid === currentPid;
@@ -119,9 +119,9 @@ export function cleanupRootSessions(
       if (sameProcess || alive) continue;
       const registry = createAgentEventRegistry(projectRoot, session.sessionId);
       for (const job of registry.all().values()) {
-        if (job.status !== "running") continue;
-        registry.updateJob(job.jobId, { status: "interrupted" });
-        interruptedAgents += 1;
+        if (job.status !== "queued" && job.status !== "running") continue;
+        registry.updateJob(job.jobId, { status: "cancelled" });
+        cancelledAgents += 1;
       }
       finishRootSession({ projectRoot, sessionId: session.sessionId, reason: "liveness-reconciliation", now: options.now });
       session.active = false;
@@ -142,7 +142,7 @@ export function cleanupRootSessions(
       rmSync(session.path, { recursive: true, force: true });
     }
     const removed = Math.min(removeCount, inactive.length);
-    return { ok: true, reconciled, interruptedAgents, removed, remaining: refreshed.length - removed };
+    return { ok: true, reconciled, cancelledAgents, removed, remaining: refreshed.length - removed };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Unable to clean root sessions" };
   } finally {

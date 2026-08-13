@@ -52,12 +52,14 @@ export function registerCancelTool(pi: ExtensionAPI): void {
       const control = pool.liveChildren.get(job.jobId);
       const abortController = pool.jobAbortControllers?.get(job.jobId);
       if (!control && !abortController && pool.registry.get(job.jobId)?.status === "running") {
-        return textResult(`Agent ${params.job_id} is running but has no live child to abort.`, {
+        // The durable record outlived its launching host: no live child or
+        // abort controller remains, so the job can never settle on its own.
+        // Reconcile the phantom live job to a terminal cancelled state.
+        pool.registry.updateJob(job.jobId, { status: "cancelled" });
+        return textResult(`Agent ${params.job_id} was cancelled.`, {
           jobId: params.job_id,
-          success: false,
-          status: job.status,
-          allowed: false,
-          reason: "no live child",
+          success: true,
+          status: "cancelled",
         });
       }
 
