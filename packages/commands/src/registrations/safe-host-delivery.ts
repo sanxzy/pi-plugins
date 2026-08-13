@@ -15,7 +15,7 @@ export interface HostMessageGate {
    * getters throw after replacement.
    */
   dispose(): void;
-  /** Register a callback invoked after the host-run latch is released (agent_end). */
+  /** Register a callback invoked after the host-run latch is released. */
   onSettled(listener: () => void): void;
 }
 
@@ -26,6 +26,10 @@ interface QueuedMessage {
 
 /** Backoff for re-delivery while the host run settles (agent_end / reload). */
 const RETRY_STEPS_MS = [25, 50, 100, 200, 400, 800, 1600];
+// Pi 0.80 emits no extension-level `agent_settled` event. Two consecutive
+// idle observations provide a compatibility boundary without reopening the
+// original agent_end race on runtimes that do support the event.
+const LEGACY_SETTLE_SAMPLE_MS = 50;
 
 /**
  * Protect host-bound messages from pi's prompt lifecycle race.
@@ -36,7 +40,10 @@ const RETRY_STEPS_MS = [25, 50, 100, 200, 400, 800, 1600];
  * "Agent is already processing a prompt" and, for delivery, a falsely-marked
  * delivered result. Messages are therefore held until the host is idle, has no
  * pending messages, and has no active abort signal. `agent_end` plus a bounded
- * backoff cover both normal run completion and runtime replacement ordering
+ * backoff cover both normal run completion and runtime replacement ordering.
+ * Modern runtimes additionally emit
+ * `agent_settled`; older runtimes use two stable-idle samples after
+ * `agent_end` as the compatibility settlement boundary
  * without requiring callers to poll the host.
  *
  * Lifecycle: every gate belongs to exactly one session and must be disposed on
@@ -56,7 +63,9 @@ const RETRY_STEPS_MS = [25, 50, 100, 200, 400, 800, 1600];
 export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): HostMessageGate {
   const queue: QueuedMessage[] = [];
   let retryTimer: NodeJS.Timeout | undefined;
+  let settleTimer: NodeJS.Timeout | undefined;
   let retryStep = 0;
+  let idleSamples = 0;
   let disposed = false;
   // `isIdle()` can briefly be stale around a turn boundary, and pi itself
   // still finalizes work between `agent_end` and the fully-settled state. The
@@ -65,6 +74,11 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
   // instantaneous SDK getter.
   let turnActive = false;
   let hostSettled = true;
+  // `sendUserMessage()` is void-typed and may not synchronously update the
+  // SDK's idle getter. Treat an accepted send as in flight until the next
+  // lifecycle settlement so a burst of pending results can never start two
+  // prompts in the same tick.
+  let sendInFlight = false;
   const settledListeners: Array<() => void> = [];
   const unsubscribeLifecycle: Array<() => void> = [];
 
@@ -72,7 +86,7 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     // A replaced runner's context getters throw. Treat an unreadable context as
     // busy so the gate only ever defers or disposes, never crashes.
     try {
-      if (turnActive || !hostSettled) return false;
+      if (turnActive || !hostSettled || sendInFlight) return false;
       return typeof ctx.isIdle === "function" && typeof ctx.hasPendingMessages === "function"
         ? ctx.isIdle() && !ctx.hasPendingMessages() && ctx.signal === undefined
         : true;
@@ -112,24 +126,27 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     const next = queue.shift()!;
     try {
       pi.sendUserMessage(next.content, { deliverAs: next.deliverAs });
+      sendInFlight = true;
     } catch {
       queue.unshift(next);
     }
     if (queue.length > 0) scheduleFlush();
   };
 
-  const onTurnStart = (): void => {
-    turnActive = true;
-    hostSettled = false;
+  const contextIsIdle = (): boolean => {
+    try {
+      return typeof ctx.isIdle === "function" && typeof ctx.hasPendingMessages === "function"
+        ? ctx.isIdle() && !ctx.hasPendingMessages() && ctx.signal === undefined
+        : true;
+    } catch {
+      return false;
+    }
   };
-  const onAgentEnd = (): void => {
-    turnActive = false;
-    retryStep = 0;
-    scheduleFlush();
-  };
-  const onAgentSettled = (): void => {
-    turnActive = false;
+
+  const settleHost = (): void => {
+    if (disposed || hostSettled) return;
     hostSettled = true;
+    sendInFlight = false;
     retryStep = 0;
     scheduleFlush();
     for (const listener of settledListeners) {
@@ -140,6 +157,51 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
         // a settled host must never surface extension exceptions.
       }
     }
+  };
+
+  const scheduleLegacySettle = (): void => {
+    if (disposed || settleTimer !== undefined) return;
+    settleTimer = setTimeout(() => {
+      settleTimer = undefined;
+      if (disposed || turnActive) return;
+      if (!contextIsIdle()) {
+        idleSamples = 0;
+        scheduleLegacySettle();
+        return;
+      }
+      idleSamples += 1;
+      if (idleSamples < 2) {
+        scheduleLegacySettle();
+        return;
+      }
+      idleSamples = 0;
+      settleHost();
+    }, LEGACY_SETTLE_SAMPLE_MS);
+    settleTimer.unref?.();
+  };
+
+  const onTurnStart = (): void => {
+    turnActive = true;
+    hostSettled = false;
+    idleSamples = 0;
+  };
+  const onAgentEnd = (): void => {
+    turnActive = false;
+    retryStep = 0;
+    // Newer Pi versions call onAgentSettled. Older versions (including the
+    // runtime currently launching this extension) need an explicit stable-idle
+    // fallback or durable deliveries remain pending forever.
+    scheduleLegacySettle();
+    scheduleFlush();
+  };
+  const onAgentSettled = (): void => {
+    if (settleTimer !== undefined) {
+      clearTimeout(settleTimer);
+      settleTimer = undefined;
+    }
+    idleSamples = 0;
+    turnActive = false;
+    settleHost();
   };
   const turnStartUnsubscribe = pi.on("turn_start", onTurnStart) as unknown as (() => void) | undefined;
   const agentEndUnsubscribe = pi.on("agent_end", onAgentEnd) as unknown as (() => void) | undefined;
@@ -158,6 +220,7 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
       if (disposed || !hostIsReady()) return false;
       try {
         pi.sendUserMessage(content, { deliverAs });
+        sendInFlight = true;
         return true;
       } catch {
         return false;
@@ -178,6 +241,10 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
       if (retryTimer !== undefined) {
         clearTimeout(retryTimer);
         retryTimer = undefined;
+      }
+      if (settleTimer !== undefined) {
+        clearTimeout(settleTimer);
+        settleTimer = undefined;
       }
     },
   };
