@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createJob } from "@xzy-ai/core";
+import { CHANNEL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import {
   channelConfigFile,
   channelOwnerFile,
@@ -28,6 +29,34 @@ function setup(): string {
 function project(): string {
   return mkdtempSync(join(tmpdir(), "pi-code-phase7-cleanup-project-"));
 }
+
+function cleanupLog(): { eventsPath: string; errorsPath: string } {
+  const dir = mkdtempSync(join(tmpdir(), "pi-code-phase7-cleanup-log-"));
+  return { eventsPath: join(dir, "events.jsonl"), errorsPath: join(dir, "errors.jsonl") };
+}
+
+function records(path: string): Array<Record<string, unknown>> {
+  return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+test("cleanupRootSessions logs its destructive cleanup boundary", () => {
+  setup();
+  const root = project();
+  const paths = cleanupLog();
+  const logger = createSessionLogger({ projectId: "project", rootSessionId: "root-session", ...paths });
+
+  runWithLogContext(logger, () => {
+    const result = cleanupRootSessions(root, {
+      currentPid: 9999,
+      currentProcessStartTime: "current-start",
+      isAlive: () => false,
+    });
+    assert.equal(result.ok, true);
+  });
+
+  const cleanupRecords = records(paths.eventsPath).filter((record) => record.operation === CHANNEL_OPERATIONS.CLEANUP);
+  assert.deepEqual(cleanupRecords.map((record) => record.phase), ["before", "after"]);
+});
 
 test("cleanup reconciles dead sessions and interrupts their persisted running agents", () => {
   setup();

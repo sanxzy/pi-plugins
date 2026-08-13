@@ -10,6 +10,7 @@ import {
   homeSessionManifestFile,
   readSessionManifest,
 } from "@xzy-ai/runtime";
+import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { isProcessAlive } from "./ownership.ts";
 
 interface LockfileModule {
@@ -90,6 +91,10 @@ export function cleanupRootSessions(
   projectRoot: string,
   options: CleanupRootSessionsOptions = {},
 ): CleanupRootSessionsResult | { readonly ok: false; readonly message: string } {
+  return processWithLog({
+    operation: CHANNEL_OPERATIONS.CLEANUP,
+    parameters: { projectRoot },
+  }, () => {
   const currentPid = options.currentPid ?? process.pid;
   const currentProcessStartTime = options.currentProcessStartTime;
   const checkAlive = options.isAlive ?? isProcessAlive;
@@ -143,4 +148,5 @@ export function cleanupRootSessions(
   } finally {
     try { release?.(); } catch { /* cleanup lock release is best effort */ }
   }
+  });
 }
