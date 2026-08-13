@@ -260,9 +260,10 @@ test("an active turn blocks host delivery even when the runner misreports idle",
   assert.equal(gate.trySend("between-end-and-settled"), false, "the end-of-run window is not yet settled");
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.deepEqual(steers, [], "agent_end alone must not green-light a delivery");
-  emit("agent_settled");
-  await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.equal(steers.length, 1, "the queued result drains exactly once after the run settles");
+  // Older Pi runtimes do not expose agent_settled. A stable idle window is the
+  // compatibility fallback, but it must still drain only one host message.
+  await new Promise((resolve) => setTimeout(resolve, 2_100));
+  assert.equal(steers.length, 1, "the queued result drains after a stable idle fallback");
   assert.equal(steers[0], "queued-during-run");
 });
 
@@ -284,11 +285,11 @@ test("a disposed host gate releases its lifecycle listeners", () => {
   const gate = createHostMessageGate(pi, ctx);
   assert.equal(listeners.get("turn_start")?.length, 1, "the gate subscribes to turn_start");
   assert.equal(listeners.get("agent_end")?.length, 1, "the gate subscribes to agent_end");
-  assert.equal(listeners.get("agent_settled")?.length, 1, "the gate subscribes to agent_settled");
+  assert.equal(listeners.get("agent_settled")?.length ?? 0, 0, "legacy test runtimes may omit agent_settled");
   gate.dispose();
   assert.equal(listeners.get("turn_start")?.length, 0, "turn_start listener is released on dispose");
   assert.equal(listeners.get("agent_end")?.length, 0, "agent_end listener is released on dispose");
-  assert.equal(listeners.get("agent_settled")?.length, 0, "agent_settled listener is released on dispose");
+  assert.equal(listeners.get("agent_settled")?.length ?? 0, 0, "no unsupported agent_settled listener is retained");
   assert.equal(nonce, 0);
 });
 
@@ -313,9 +314,11 @@ test("a background result raced into an active run is delivered after the run se
     await handlers.get("agent_end")!({ messages: [] }, ctx);
     await new Promise((resolve) => setTimeout(resolve, 60));
     assert.deepEqual(steers, [], "agent_end alone must not deliver into the unsettled window");
-    await handlers.get("agent_settled")!({}, ctx);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    assert.deepEqual(steers, ["result-a"], "the result reaches the host once the run has fully settled");
+    // This fixture models the legacy 0.80 runtime, where agent_settled is not
+    // an extension event. The stable-idle fallback must redrive the durable
+    // result without requiring a reload or a second user turn.
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    assert.deepEqual(steers, ["result-a"], "the result reaches the host after stable idle fallback");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
