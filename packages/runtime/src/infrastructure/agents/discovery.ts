@@ -162,3 +162,71 @@ export function createAgentDiscovery(cwd: string): AgentDiscovery {
     },
   };
 }
+
+/**
+ * Fingerprint the ecosystem directories a discovery scan depends on.
+ *
+ * Includes the resolved user agents directory (so a `PI_CODING_AGENT_DIR`
+ * change invalidates) and every project ecosystem directory, plus each
+ * directory's entry count and mtime so adding, removing, or editing an agent
+ * Markdown file changes the key and forces a fresh scan.
+ */
+function ecosystemFingerprint(cwd: string): string {
+  const userDir = join(getAgentDir(), "agents");
+  const projectRoot = findProjectRoot(cwd);
+  const directories = projectRoot === undefined
+    ? [userDir]
+    : [userDir, ...PROJECT_ECOSYSTEMS.map((ecosystem) => join(projectRoot, ecosystem, "agents"))];
+  // The nearest project root plus the user directory fully determines the
+  // merged ecosystem. Cwd itself is not part of the identity, so calls from
+  // nested folders reuse one scan for the same project.
+  const parts = [projectRoot ?? ""];
+  for (const directory of directories) {
+    try {
+      const entries = readdirSync(directory).sort();
+      const signatures = entries.map((entry) => {
+        try {
+          const path = join(directory, entry);
+          // mtimeNs (bigint, nanosecond resolution) so successive writes
+          // within the same millisecond still invalidate the cache.
+          return `${entry}:${statSync(path, { bigint: true }).mtimeNs}:${statSync(path, { bigint: true }).size}`;
+        } catch {
+          return `${entry}:unstatable`;
+        }
+      });
+      parts.push(`${directory}:${signatures.join(",")}`);
+    } catch {
+      parts.push(`${directory}:missing`);
+    }
+  }
+  return parts.join("\u0000");
+}
+
+/** Module-level discovery cache keyed by the ecosystem fingerprint. */
+const discoveryCache = new Map<string, AgentDiscovery>();
+const DISCOVERY_CACHE_LIMIT = 32;
+
+/** Drop every cached agent discovery; the next call rescans from disk. */
+export function clearAgentDiscoveryCache(): void {
+  discoveryCache.clear();
+}
+
+/**
+ * Create an agent discovery, reusing the last scan for the same ecosystem.
+ *
+ * `agent` calls and `agent_list` calls hit this on the hot tool path; the
+ * cached discovery is immutable after creation and is invalidated by any
+ * change to the ecosystem directories or by `clearAgentDiscoveryCache()`.
+ */
+export function createCachedAgentDiscovery(cwd: string): AgentDiscovery {
+  const key = ecosystemFingerprint(cwd);
+  const cached = discoveryCache.get(key);
+  if (cached) return cached;
+  const discovery = createAgentDiscovery(cwd);
+  discoveryCache.set(key, discovery);
+  if (discoveryCache.size > DISCOVERY_CACHE_LIMIT) {
+    const oldest = discoveryCache.keys().next();
+    if (!oldest.done && oldest.value !== undefined) discoveryCache.delete(oldest.value);
+  }
+  return discovery;
+}

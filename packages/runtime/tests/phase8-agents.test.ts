@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createAgentDiscovery } from "@xzy-ai/runtime";
+import { createAgentDiscovery, createCachedAgentDiscovery, clearAgentDiscoveryCache } from "@xzy-ai/runtime";
 import type { DiscoveredAgent } from "@xzy-ai/core";
 
 /** Assert a resolved name is a discovered agent. */
@@ -310,6 +310,45 @@ test("all() returns discovered agents with project precedence", () => {
     assert.ok(reviewer);
     assert.equal(reviewer.source, "project");
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+test("cached agent discovery reuses one scan and invalidates on ecosystem change or explicit clear", () => {
+  const root = tmpRoot();
+  const userDir = join(root, "user");
+  writeAgent(join(userDir, "agents"), "alpha", { name: "alpha", description: "a" }, "body");
+  const previous = processEnv().PI_CODING_AGENT_DIR;
+  processEnv().PI_CODING_AGENT_DIR = userDir;
+  try {
+    const first = createCachedAgentDiscovery(root);
+    const second = createCachedAgentDiscovery(root);
+    assert.equal(first, second, "an unchanged ecosystem reuses the discovery object (no rescan)");
+    assert.ok(first.resolve("alpha"));
+
+    // A different cwd with the same agent ecosystems reuses the same scan: the
+    // cache is keyed by the ecosystem directories, not by cwd alone.
+    assert.equal(createCachedAgentDiscovery(join(root, "packages", "app")), first);
+
+    // Adding an agent file changes the ecosystem fingerprint (entry count and
+    // mtime), so the next call rescans and sees the new agent.
+    writeAgent(join(userDir, "agents"), "beta", { name: "beta", description: "b" }, "body");
+    const third = createCachedAgentDiscovery(root);
+    assert.notEqual(third, first, "ecosystem changes invalidate the cache");
+    assert.ok(third.resolve("beta"));
+
+    // Explicit invalidation forces a fresh scan even when nothing changed.
+    clearAgentDiscoveryCache();
+    const fourth = createCachedAgentDiscovery(root);
+    assert.notEqual(fourth, third, "clearAgentDiscoveryCache forces a fresh scan");
+    assert.ok(fourth.resolve("alpha"));
+    assert.ok(fourth.resolve("beta"));
+  } finally {
+    clearAgentDiscoveryCache();
+    if (previous === undefined) {
+      delete processEnv().PI_CODING_AGENT_DIR;
+    } else {
+      processEnv().PI_CODING_AGENT_DIR = previous;
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });

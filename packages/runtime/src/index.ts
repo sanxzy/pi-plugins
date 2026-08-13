@@ -1,4 +1,4 @@
-export { createAgentDiscovery } from "./infrastructure/agents/discovery.ts";
+export { createAgentDiscovery, createCachedAgentDiscovery, clearAgentDiscoveryCache } from "./infrastructure/agents/discovery.ts";
 export {
   canonicalAgentId,
   createAgentManifestStore,

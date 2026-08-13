@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_AGENT_DEPTH } from "@xzy-ai/core";
@@ -49,18 +49,48 @@ function maxAgentDepthFromEnv(): number | undefined {
  * user `<agentDir>/pi-code/config.json` > `DEFAULT_MAX_AGENT_DEPTH`. Reads are
  * lazy so a reloaded extension picks up a changed value without a restart.
  * Invalid values are ignored (treated as unset), never fatal.
+ *
+ * Results are cached per (env, config-file stat) fingerprint so the hot spawn
+ * path does not re-read either config file for every child; the cache
+ * invalidates whenever a config file is created, modified, or removed.
  */
+const configCache = new Map<string, number>();
+const CONFIG_CACHE_LIMIT = 32;
+
+/** Stat fingerprint: mtimeNs+size, or the literal `missing` when unreadable. */
+function fileFingerprint(configPath: string): string {
+  try {
+    const stat = statSync(configPath, { bigint: true });
+    // mtimeNs (bigint, nanosecond resolution) so successive writes within the
+    // same millisecond with equal byte sizes still invalidate the cache.
+    return `${stat.mtimeNs}:${stat.size}`;
+  } catch {
+    return "missing";
+  }
+}
+
 export function maxAgentDepth(cwd?: string): number {
   const fromEnv = maxAgentDepthFromEnv();
   if (fromEnv !== undefined) return fromEnv;
 
-  if (cwd) {
-    const fromProject = maxAgentDepthFromFile(join(cwd, PROJECT_CONFIG_RELATIVE));
-    if (fromProject !== undefined) return fromProject;
+  const projectPath = cwd ? join(cwd, PROJECT_CONFIG_RELATIVE) : undefined;
+  const userPath = join(getAgentDir(), USER_CONFIG_RELATIVE);
+  const key = `${cwd ?? ""}\u0000${projectPath ? fileFingerprint(projectPath) : "none"}\u0000${fileFingerprint(userPath)}`;
+  const cached = configCache.get(key);
+  if (cached !== undefined) return cached;
+
+  // Resolve low-to-high precedence so project configuration overrides the
+  // user-level fallback, matching the uncached behavior.
+  let value = maxAgentDepthFromFile(userPath) ?? DEFAULT_MAX_AGENT_DEPTH;
+  if (projectPath) {
+    const fromProject = maxAgentDepthFromFile(projectPath);
+    if (fromProject !== undefined) value = fromProject;
   }
 
-  const fromUser = maxAgentDepthFromFile(join(getAgentDir(), USER_CONFIG_RELATIVE));
-  if (fromUser !== undefined) return fromUser;
-
-  return DEFAULT_MAX_AGENT_DEPTH;
+  configCache.set(key, value);
+  if (configCache.size > CONFIG_CACHE_LIMIT) {
+    const oldest = configCache.keys().next();
+    if (!oldest.done) configCache.delete(oldest.value as string);
+  }
+  return value;
 }

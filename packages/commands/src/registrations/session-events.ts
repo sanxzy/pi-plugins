@@ -137,6 +137,11 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
         currentPid: identity.pid,
         currentProcessStartTime: identity.processStartTime,
       });
+      // Authoritative rescan of the shared registry after cleanup: the pool
+      // serves hot-path reads from memory, while this lifecycle boundary makes
+      // external home changes (other processes and cleanup) visible before
+      // this fresh root starts channel/goal delivery.
+      rootPool.registry.refresh();
       if (takeSessionReload(projectRoot)) {
         // The fresh runtime's pi API is valid after reload. Gate the notice so
         // a reload performed while the previous turn still runs cannot collide

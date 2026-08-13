@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, rmSync, type Dirent } from "node:fs";
 import { basename, join } from "node:path";
-import type { Job, JobEvent, JobUpdate } from "@xzy-ai/core";
+import { updateJob as applyJobUpdate, type Job, type JobEvent, type JobUpdate } from "@xzy-ai/core";
 import { canonicalAgentId, createAgentManifestStore, foldAgentEvents, type AgentManifestStore } from "../manifests/manifests.ts";
 import { ensurePrivateDirectory, homeProjectDir, homeSessionDirFromRoot, encodeProjectId } from "../../shared/paths.ts";
 import { canTransition, isTerminal } from "@xzy-ai/core";
@@ -32,6 +32,8 @@ export interface AgentEventRegistry {
 interface Entry {
   readonly store: AgentManifestStore;
   readonly job: Job;
+  /** Stable ordering key for this record, from its persisted manifest sequence. */
+  readonly sequence: number;
 }
 
 function agentEventFiles(sessionDir: string): string[] {
@@ -93,6 +95,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       const manifest = foldAgentEvents(eventsPath);
       if (!manifest) continue;
       const job = toJob(manifest);
+      const sequence = manifest.sequence ?? nextSequence++;
       const agentDir = join(eventsPath, "..");
       const store = createAgentManifestStore({
         projectRoot,
@@ -108,18 +111,18 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
         sequence: manifest.sequence,
         now: manifest.createdAt,
       });
-      byJob.set(job.jobId, { store, job });
+      byJob.set(job.jobId, { store, job, sequence });
       stores.set(job.jobId, store);
       // The event log is authoritative; this also rebuilds a missing or stale snapshot.
       store.read();
-      nextSequence = Math.max(nextSequence, (manifest.sequence ?? nextSequence) + 1);
+      nextSequence = Math.max(nextSequence, sequence + 1);
       void agentDir;
     }
     snapshot = new Map([...byJob].map(([id, entry]) => [id, entry.job]));
     });
   };
 
-  const storeFor = (job: Job): AgentManifestStore => {
+  const storeFor = (job: Job, sequence?: number): AgentManifestStore => {
     const id = canonicalAgentId(job.jobId);
     const existing = stores.get(id);
     if (existing) return existing;
@@ -141,23 +144,41 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       rootAgentId: job.rootJobId,
       depth: job.depth,
       sessionFile: job.sessionFile,
-      sequence: nextSequence++,
+      sequence: sequence ?? nextSequence++,
       now: job.createdAt,
     });
     stores.set(id, store);
     return store;
   };
 
-  const reload = (): void => load();
   load();
 
+  const publish = (): void => {
+    snapshot = new Map([...byJob].map(([id, entry]) => [id, entry.job]));
+  };
+
+  const sortedJobs = (): Map<string, Job> => new Map(
+    [...byJob]
+      .sort(([, a], [, b]) => a.sequence - b.sequence || a.job.createdAt.localeCompare(b.job.createdAt) || a.job.jobId.localeCompare(b.job.jobId))
+      .map(([id, entry]) => [id, entry.job]),
+  );
+
+  const findEntry = (jobId: string): Entry | undefined => {
+    const canonical = canonicalAgentId(jobId);
+    return byJob.get(jobId) ?? byJob.get(canonical) ?? [...byJob.values()].find((entry) => canonicalAgentId(entry.job.jobId) === canonical);
+  };
+
   const prune = (): void => {
-    processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_PRUNE, parameters: { projectRoot } }, () => {
-    // The home event logs are authoritative even while the process singleton
-    // survives an extension reload. Refresh before pruning so externally
-    // removed agent directories cannot remain visible in memory.
-    load();
     const jobs = [...byJob.values()].map((entry) => entry.job);
+    const terminalByParent = new Map<string, number>();
+    for (const job of jobs) {
+      if (!isTerminal(job.status)) continue;
+      const parent = job.parentSessionId ?? "";
+      terminalByParent.set(parent, (terminalByParent.get(parent) ?? 0) + 1);
+    }
+    if (![...terminalByParent.values()].some((count) => count > MAX_RETAINED_TERMINAL_AGENTS)) return;
+
+    processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_PRUNE, parameters: { projectRoot } }, () => {
     const byParent = new Map<string, Job[]>();
     for (const job of jobs) {
       const parent = job.parentSessionId ?? "";
@@ -185,7 +206,10 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       const store = byJob.get(job.jobId)?.store;
       if (store) rmSync(store.agentDir, { recursive: true, force: true });
     }
-    reload();
+    // Refresh only after destructive pruning. The normal lifecycle write path
+    // remains in-memory-first; this reload removes pruned records and repairs
+    // the snapshot after external directories have been deleted.
+    load();
     });
   };
 
@@ -200,14 +224,15 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
     createJob(job): void {
       processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_CREATE, parameters: { jobId: job.jobId } }, () => {
       const cc = (id: string): string => canonicalAgentId(id);
-      const normalized = {
+      const normalized: Job = {
         ...job,
         jobId: cc(job.jobId),
         parentJobId: job.parentJobId ? cc(job.parentJobId) : undefined,
         rootJobId: job.rootJobId ? cc(job.rootJobId) : job.jobId,
         parentAgentIds: (job.parentAgentIds ?? []).map(cc),
       };
-      const store = storeFor(normalized);
+      const sequence = nextSequence++;
+      const store = storeFor(normalized, sequence);
       store.create({ description: normalized.description, subagentType: normalized.subagentType });
       const initialTransitions: Job["status"][] = normalized.status === "created"
         ? []
@@ -219,42 +244,47 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
               ? ["queued", "running", normalized.status]
               : [normalized.status];
       for (const status of initialTransitions) store.update({ status, at: normalized.updatedAt, sessionFile: normalized.sessionFile });
-      load();
+      const entry: Entry = { store, job: normalized, sequence };
+      byJob.set(normalized.jobId, entry);
+      stores.set(normalized.jobId, store);
+      // The store has persisted all initial events. Publish the requested final
+      // state directly instead of folding every project event log again.
+      const finalJob = initialTransitions.reduce<Job>((current, status) => applyJobUpdate(current, { status, sessionFile: normalized.sessionFile, updatedAt: normalized.updatedAt }), normalized);
+      byJob.set(normalized.jobId, { ...entry, job: finalJob });
+      publish();
       prune();
       });
     },
     updateJob(jobId, update): void {
       processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_UPDATE, parameters: { jobId, status: update.status } }, () => {
-      load();
-      const entry = byJob.get(jobId) ?? byJob.get(canonicalAgentId(jobId)) ?? [...byJob.values()].find((e) => canonicalAgentId(e.job.jobId) === canonicalAgentId(jobId));
+      const entry = findEntry(jobId);
       if (!entry) return;
       const nextStatus = update.status ?? entry.job.status;
       if (nextStatus !== entry.job.status && !canTransition(entry.job.status, nextStatus)) return;
       entry.store.update({ ...update, status: nextStatus });
-      load();
+      const nextJob = applyJobUpdate(entry.job, { ...update, status: nextStatus });
+      byJob.set(entry.job.jobId, { ...entry, job: nextJob });
+      publish();
       prune();
       });
     },
-    fold(): Map<string, Job> { load(); return new Map([...byJob].sort(([, a], [, b]) => (a.store.read()?.sequence ?? 0) - (b.store.read()?.sequence ?? 0)).map(([id, entry]) => [id, entry.job])); },
+    fold(): Map<string, Job> { return sortedJobs(); },
     get(jobId): Job | undefined {
-      load();
-      return byJob.get(jobId)?.job ?? byJob.get(canonicalAgentId(jobId))?.job ?? [...byJob.values()].find((e) => canonicalAgentId(e.job.jobId) === canonicalAgentId(jobId))?.job;
+      return findEntry(jobId)?.job;
     },
     getBySessionId(sessionId): Job | undefined {
-      load();
       return [...byJob.values()].find((entry) => entry.job.sessionId === sessionId || canonicalAgentId(entry.job.sessionId ?? "") === canonicalAgentId(sessionId))?.job;
     },
     all(): Map<string, Job> {
-      load();
-      return new Map([...byJob].sort(([, a], [, b]) => (a.store.read()?.sequence ?? 0) - (b.store.read()?.sequence ?? 0)).map(([id, entry]) => [id, entry.job]));
+      return sortedJobs();
     },
     snapshot(): ReadonlyMap<string, Job> {
-      // UI hot path: reads only the already-loaded in-memory model. Every
-      // authoritative `get()`/`all()` triggers a synchronous rescan+parse of
-      // home event logs, which made every footer repaint O(all logs). Render
-      // consumes this stable snapshot; explicit `refresh()` and lifecycle
-      // transitions rebuild it. The returned map is the shared snapshot, not a
-      // per-call copy, so rendering allocates nothing.
+      // UI hot path: reads only the already-loaded in-memory model. Lookups
+      // (`get`/`getBySessionId`/`all`/`fold`/`registries`) also serve from
+      // memory; only explicit `refresh()` rescans the home event logs. Render
+      // consumes this stable snapshot; lifecycle writes and `refresh()`
+      // publish a fresh reference. The returned map is the shared snapshot,
+      // not a per-call copy, so rendering allocates nothing.
       return snapshot;
     },
     prune,
@@ -264,11 +294,10 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       });
     },
     fileForJob(jobId): string | undefined {
-      const job = byJob.get(jobId)?.job ?? byJob.get(canonicalAgentId(jobId))?.job ?? [...byJob.values()].find((e) => canonicalAgentId(e.job.jobId) === canonicalAgentId(jobId))?.job;
-      return job ? byJob.get(job.jobId)?.store.eventsPath : undefined;
+      const entry = findEntry(jobId);
+      return entry?.store.eventsPath;
     },
     registries(): ReadonlyMap<string, AgentManifestStore> {
-      load();
       return stores;
     },
     refresh(): void { load(); },

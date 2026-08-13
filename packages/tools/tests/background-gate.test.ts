@@ -383,7 +383,10 @@ test("one root agent call performs at most one authoritative registry load", asy
     const loadStarts = records.filter(
       (record) => record.operation === REGISTRY_OPERATIONS.AGENT_LOAD && record.phase === "before",
     );
-    assert.equal(loadStarts.length, 1, "a full spawn must run exactly one authoritative load");
+    // The pool was constructed before the probe (one construction load). The
+    // spawn itself, from getChildPool reuse through queued->running admission,
+    // must never rescan the home event logs again.
+    assert.equal(loadStarts.length, 0, "a full spawn must not rescan home beyond pool construction");
   } finally {
     spawnChildSession.__createChild = previousFactory;
     rmSync(cwd, { recursive: true, force: true });

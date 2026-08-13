@@ -1,5 +1,5 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createAgentDiscovery } from "@xzy-ai/runtime";
+import { createCachedAgentDiscovery } from "@xzy-ai/runtime";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { agentNoArgsParams } from "../tools.ts";
 import type { AgentListDetails } from "../types.ts";
@@ -36,7 +36,7 @@ export function registerAgentListTool(pi: ExtensionAPI): void {
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<AgentListDetails>> {
       return processWithLog({ operation: TOOL_OPERATIONS.AGENT_LIST_EXECUTE }, async () => {
-      const agents = createAgentDiscovery(ctx.cwd)
+      const agents = createCachedAgentDiscovery(ctx.cwd)
         .all()
         .sort((left, right) => left.name.localeCompare(right.name))
         .map(({ name, description }) => ({ name, description }));

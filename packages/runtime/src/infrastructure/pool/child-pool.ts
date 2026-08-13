@@ -188,9 +188,11 @@ function upgradePool(pool: ChildPool, projectRoot: string, rootSessionId?: strin
     registry = createAgentEventRegistry(projectRoot, pool.rootSessionId ?? rootSessionId);
     patch("registry", registry);
     patch("scopedRegistry", registry);
-  } else {
-    registry.refresh();
   }
+  // A surviving pool is already the authoritative in-process read model. Do
+  // not refresh it on every getChildPool() call: callers reach this function
+  // on the hot spawn path, and refresh() recursively scans every home event
+  // log. Lifecycle boundaries and explicit recovery call refresh() instead.
 
   if (typeof pool.rootSessionIdFor !== "function") {
     patch("rootSessionIdFor", (sessionId: string): string => {

@@ -201,3 +201,36 @@ test("getChildPool reuse on a surviving pool never rescans home", () => {
   rmSync(root, { recursive: true, force: true });
   rmSync(probeLog, { recursive: true, force: true });
 });
+
+/**
+ * Composite scan regression: a logical read (get + getBySessionId + all +
+ * fold + registries + snapshot) must perform no home rescan while the leaf
+ * reads are in flight, and a lifecycle write must publish without rescanning.
+ * This is the per-call cost model of a TUI repaint plus an agent spawn.
+ */
+test("composite read/write access performs no home rescan beyond construction", () => {
+  setupHome();
+  const root = project();
+  const probeLog = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(createJob({
+    jobId: "agent-z",
+    parentSessionId: "root-session",
+    status: "queued",
+    description: "agent-z",
+    subagentType: "test-agent",
+  }));
+  registry.updateJob("agent-z", { status: "running" });
+  runWithLogContext(loggerAt(probeLog), () => {
+    assert.equal(registry.get("agent-z")?.status, "running");
+    assert.ok(registry.all().has("agent-z"));
+    assert.ok(registry.fold().has("agent-z"));
+    assert.ok(registry.snapshot().has("agent-z"));
+    registry.updateJob("agent-z", { status: "completed" });
+  });
+  const probeRecords = recordsAt(probeLog);
+  assert.equal(probeRecords.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_LOAD).length, 0);
+  assert.equal(probeRecords.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_PRUNE).length, 0);
+  rmSync(root, { recursive: true, force: true });
+  rmSync(probeLog, { recursive: true, force: true });
+});

@@ -11,7 +11,7 @@ import {
 import { isInSessionScope, resumeDisposition, type Job } from "@xzy-ai/core";
 import { MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
-import { backgroundModeError, createAgentDiscovery, getChildPool, prepareResumeSessionFile, recordNewJob, runBackgroundJob } from "@xzy-ai/runtime";
+import { backgroundModeError, createCachedAgentDiscovery, getChildPool, prepareResumeSessionFile, recordNewJob, runBackgroundJob } from "@xzy-ai/runtime";
 import { agentParams, type AgentParams } from "../tools.ts";
 import type { AgentDetails, AgentErrorDetails } from "../types.ts";
 import { formatResumingAgentText, formatRunningAgentText } from "./status.ts";
@@ -188,7 +188,7 @@ async function startAgentInner(
       reason: "no model available",
     });
   }
-  const agent = createAgentDiscovery(ctx.cwd).resolve(params.subagent_type);
+  const agent = createCachedAgentDiscovery(ctx.cwd).resolve(params.subagent_type);
   if (!agent) {
     return errorResult(
       `unknown subagent_type: ${params.subagent_type}`,
