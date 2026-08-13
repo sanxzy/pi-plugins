@@ -229,6 +229,84 @@ test("a disposed host gate drops queued messages, cancels retries, and rejects n
   assert.deepEqual(steers, [], "a disposed gate must never deliver");
 });
 
+test("an active turn blocks host delivery even when the runner misreports idle", async () => {
+  const listeners = new Map<string, Array<(event: unknown) => void>>();
+  const steers: string[] = [];
+  const pi = {
+    on(event: string, handler: (event: unknown) => void) {
+      const list = listeners.get(event) ?? [];
+      list.push(handler);
+      listeners.set(event, list);
+      return () => {
+        listeners.set(event, (listeners.get(event) ?? []).filter((h) => h !== handler));
+      };
+    },
+    sendUserMessage(content: string) {
+      steers.push(content);
+    },
+  } as unknown as ExtensionAPI;
+  const ctx = { isIdle: () => true, hasPendingMessages: () => false } as unknown as ExtensionContext;
+  const gate = createHostMessageGate(pi, ctx);
+  for (const handler of listeners.get("turn_start") ?? []) handler({} as never);
+  assert.equal(gate.trySend("during-run"), false, "a running turn must never be prompted even if isIdle lies");
+  gate.send("queued-during-run");
+  assert.deepEqual(steers, [], "nothing is sent while the turn runs");
+  for (const handler of listeners.get("agent_end") ?? []) handler({ messages: [] } as never);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(steers.length, 1, "the queued result drains exactly once after the turn ends");
+  assert.equal(steers[0], "queued-during-run");
+});
+
+test("a disposed host gate releases its lifecycle listeners", () => {
+  let nonce = 0;
+  const listeners = new Map<string, Array<() => void>>();
+  const pi = {
+    on(event: string, handler: () => void) {
+      listeners.set(event, [...(listeners.get(event) ?? []), handler]);
+      return () => {
+        listeners.set(event, (listeners.get(event) ?? []).filter((h) => h !== handler));
+      };
+    },
+    sendUserMessage() {
+      nonce += 1;
+    },
+  } as unknown as ExtensionAPI;
+  const ctx = { isIdle: () => true, hasPendingMessages: () => false } as unknown as ExtensionContext;
+  const gate = createHostMessageGate(pi, ctx);
+  assert.equal(listeners.get("turn_start")?.length, 1, "the gate subscribes to turn_start");
+  assert.equal(listeners.get("agent_end")?.length, 1, "the gate subscribes to agent_end");
+  gate.dispose();
+  assert.equal(listeners.get("turn_start")?.length, 0, "turn_start listener is released on dispose");
+  assert.equal(listeners.get("agent_end")?.length, 0, "agent_end listener is released on dispose");
+  assert.equal(nonce, 0);
+});
+
+test("a background result raced into an active run is delivered at agent_end", async () => {
+  const cwd = projectRoot();
+  try {
+    const { pi, handlers, steers } = registrationsWithSteer();
+    const ctx = {
+      ...context(cwd, "root-a"),
+      isIdle: () => true,
+      hasPendingMessages: () => false,
+    } as unknown as ExtensionContext;
+    registerSessionEvents(pi);
+    await handlers.get("session_start")!({ reason: "startup" }, ctx);
+    // The runner misreports idle in the delivery window; the explicit turn
+    // lifecycle latch is what must hold delivery back.
+    await handlers.get("turn_start")!({ turnIndex: 0, timestamp: 1 }, ctx);
+    const sessionFile = join(cwd, "sessions", "root-a.jsonl");
+    const sent = getChildPool(cwd, "root-a").deliveryFor("root-a").deliverResult("job-a", sessionFile, "result-a");
+    assert.equal(sent, false, "a racing result is kept durable pending");
+    assert.deepEqual(steers, [], "no prompt while the turn runs");
+    await handlers.get("agent_end")!({ messages: [] }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.deepEqual(steers, ["result-a"], "the result reaches the host once the turn ends");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("session_shutdown disposes the host gate so a stale context cannot crash the host", async () => {
   const cwd = projectRoot();
   try {
