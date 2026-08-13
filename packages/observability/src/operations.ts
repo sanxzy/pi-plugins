@@ -53,6 +53,42 @@ export const REGISTRY_OPERATIONS = {
   APPEND: "registry.append",
   PRUNE: "registry.prune",
   FOLD: "registry.fold",
+  AGENT_CREATE: "registry.agentCreate",
+  AGENT_UPDATE: "registry.agentUpdate",
+  AGENT_PRUNE: "registry.agentPrune",
+} as const;
+
+export const PERSISTENCE_OPERATIONS = {
+  DELIVERY_PERSIST: "persistence.deliveryPersist",
+  DELIVERY_REGISTER: "persistence.deliveryRegister",
+  DELIVERY_UNREGISTER: "persistence.deliveryUnregister",
+  DELIVERY_REBIND: "persistence.deliveryRebind",
+  DELIVERY_RESULT: "persistence.deliveryResult",
+  GOAL_APPEND: "persistence.goalAppend",
+  MANIFEST_START: "persistence.manifestStart",
+  MANIFEST_FINISH: "persistence.manifestFinish",
+  MANIFEST_AGENT_CREATE: "persistence.agentManifestCreate",
+  MANIFEST_AGENT_UPDATE: "persistence.agentManifestUpdate",
+  SESSION_RESUME_PREPARE: "persistence.sessionResumePrepare",
+} as const;
+
+export const CHANNEL_OPERATIONS = {
+  OUTBOUND_SEND: "channel.outboundSend",
+  OUTBOUND_REACT: "channel.outboundReact",
+  OUTBOUND_MEDIA: "channel.outboundMedia",
+  OUTBOUND_CHOICES: "channel.outboundChoices",
+  INBOUND_HANDLE: "channel.inboundHandle",
+  INBOUND_DRAIN: "channel.inboundDrain",
+  MANAGER_START: "channel.managerStart",
+  MANAGER_STOP: "channel.managerStop",
+  MANAGER_REPLACE: "channel.managerReplace",
+  STATE_WRITE: "channel.stateWrite",
+  STATE_CLEAR: "channel.stateClear",
+  OWNER_ACQUIRE: "channel.ownerAcquire",
+  OWNER_RELEASE: "channel.ownerRelease",
+  CLEANUP: "channel.cleanup",
+  LIFECYCLE_START: "channel.lifecycleStart",
+  LIFECYCLE_STOP: "channel.lifecycleStop",
 } as const;
 
 export const TELEGRAM_OPERATIONS = {
@@ -120,6 +156,8 @@ export const ALL_OPERATIONS = {
   ...AGENT_OPERATIONS,
   ...GOAL_OPERATIONS,
   ...REGISTRY_OPERATIONS,
+  ...PERSISTENCE_OPERATIONS,
+  ...CHANNEL_OPERATIONS,
   ...TELEGRAM_OPERATIONS,
   ...COMMAND_OPERATIONS,
   ...MCP_OPERATIONS,
