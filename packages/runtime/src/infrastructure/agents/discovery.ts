@@ -189,7 +189,8 @@ function ecosystemFingerprint(cwd: string): string {
           const path = join(directory, entry);
           // mtimeNs (bigint, nanosecond resolution) so successive writes
           // within the same millisecond still invalidate the cache.
-          return `${entry}:${statSync(path, { bigint: true }).mtimeNs}:${statSync(path, { bigint: true }).size}`;
+          const stat = statSync(path, { bigint: true });
+          return `${entry}:${stat.mtimeNs}:${stat.size}`;
         } catch {
           return `${entry}:unstatable`;
         }
