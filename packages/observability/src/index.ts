@@ -108,7 +108,9 @@ function safeError(error: unknown): Record<string, unknown> {
 }
 
 function normalizeOperation(operation: string): string {
-  const normalized = operation.trim().toLowerCase().replace(/[^a-z0-9.]+/g, ".").replace(/\.+/g, ".");
+  // Preserve the exact centralized constant casing; only separators are
+  // normalized. Persisted operation ids therefore match the constants exactly.
+  const normalized = operation.trim().replace(/[^a-zA-Z0-9.]+/g, ".").replace(/\.+/g, ".");
   return normalized.replace(/^\.|\.$/g, "") || "unknown.operation";
 }
 

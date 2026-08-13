@@ -33,11 +33,11 @@ test("agent registry load and ensureSession emit boundary records", () => {
     registry.refresh();
   });
   const records = readFileSync(join(logRoot, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-  const loadRecords = records.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_LOAD.toLowerCase());
+  const loadRecords = records.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_LOAD);
   assert.ok(loadRecords.some((record) => record.phase === "before"), "AGENT_LOAD before record missing");
   assert.ok(loadRecords.some((record) => record.phase === "after"), "AGENT_LOAD after record missing");
   assert.deepEqual(
-    records.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_ENSURE_SESSION.toLowerCase()).map((record) => record.phase),
+    records.filter((record) => record.operation === REGISTRY_OPERATIONS.AGENT_ENSURE_SESSION).map((record) => record.phase),
     ["before", "after"],
   );
   rmSync(root, { recursive: true, force: true });

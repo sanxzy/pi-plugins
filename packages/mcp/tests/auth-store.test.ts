@@ -26,7 +26,7 @@ test("auth store mutations emit boundary records without leaking tokens", () => 
     store.remove("https://one.example/mcp");
   });
   const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-  const authRecords = records.filter((record) => record.operation === MCP_OPERATIONS.AUTH_STORE.toLowerCase());
+  const authRecords = records.filter((record) => record.operation === MCP_OPERATIONS.AUTH_STORE);
   assert.deepEqual(
     authRecords.map((record) => record.phase),
     ["before", "after", "before", "after", "before", "after"],

@@ -87,8 +87,7 @@ test("manager reload, reconnect, close, and stop paths emit dedicated boundaries
   });
   const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
   for (const [operation, label] of [[MCP_OPERATIONS.RELOAD, "reload"], [MCP_OPERATIONS.MANAGER_START, "start"], [MCP_OPERATIONS.MANAGER_CLOSE, "close"], [MCP_OPERATIONS.MANAGER_STOP, "stop"], [MCP_OPERATIONS.RECONNECT, "reconnect"]] as const) {
-    const normalized = operation.toLowerCase();
-    assert.ok(records.some((record) => record.operation === normalized && record.phase === "before"), `missing ${label}`);
+    assert.ok(records.some((record) => record.operation === operation && record.phase === "before"), `missing ${label}`);
   }
   rmSync(root, { recursive: true, force: true });
 });

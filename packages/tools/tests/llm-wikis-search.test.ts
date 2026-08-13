@@ -73,7 +73,7 @@ test("wiki save emits a boundary without persisting entry content as telemetry p
     assert.equal(result.saved, true);
   });
   const records = readFileSync(join(logRoot, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-  const wikiRecords = records.filter((record) => record.operation === TOOL_OPERATIONS.WIKI_EXECUTE.toLowerCase());
+  const wikiRecords = records.filter((record) => record.operation === TOOL_OPERATIONS.WIKI_EXECUTE);
   assert.deepEqual(wikiRecords.map((record) => record.phase), ["before", "after"]);
   assert.ok(!JSON.stringify(wikiRecords).includes("WIKI-SECRET-CONTENT"));
   rmSync(root, { recursive: true, force: true });

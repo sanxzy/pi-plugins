@@ -139,11 +139,11 @@ test("inbound handle and drain emit correlated boundary records", async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   const records = readFileSync(join(dir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
   assert.deepEqual(
-    records.filter((record) => record.operation === CHANNEL_OPERATIONS.INBOUND_HANDLE.toLowerCase()).map((record) => record.phase),
+    records.filter((record) => record.operation === CHANNEL_OPERATIONS.INBOUND_HANDLE).map((record) => record.phase),
     ["before", "after"],
   );
   assert.deepEqual(
-    records.filter((record) => record.operation === CHANNEL_OPERATIONS.INBOUND_DRAIN.toLowerCase()).map((record) => record.phase),
+    records.filter((record) => record.operation === CHANNEL_OPERATIONS.INBOUND_DRAIN).map((record) => record.phase),
     ["before", "after"],
   );
   listener.stop();

@@ -53,7 +53,7 @@ test("writeProjectManifest emits a dedicated project-write boundary", () => {
     writeProjectManifest(root, "2026-08-11T10:00:00.000Z");
   });
   const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-  const writes = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE.toLowerCase());
+  const writes = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE);
   assert.deepEqual(writes.map((record) => record.phase), ["before", "after"]);
 });
 

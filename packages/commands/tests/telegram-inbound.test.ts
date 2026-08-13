@@ -7,7 +7,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { approvePairingAt, canonicalProjectRoot, channelConfigFile, channelLogFile, clearTelegramChoiceState, createTelegramChoice, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
 import { getChildPool } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
-import { createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
+import { TELEGRAM_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
 function markChild(cwd: string, sessionId: string): void {
   const pool = getChildPool(cwd, "root-a");
@@ -294,7 +294,7 @@ test("choice callback processing emits a correlated telemetry boundary", async (
     },
   }));
   const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-  const choiceRecords = records.filter((record) => record.operation === "telegram.choiceconsume");
+  const choiceRecords = records.filter((record) => record.operation === TELEGRAM_OPERATIONS.CHOICE_CONSUME);
   assert.deepEqual(choiceRecords.map((record) => record.phase), ["before", "after"]);
   assert.equal(choiceRecords[0]?.correlationId, choiceRecords[1]?.correlationId);
   clearTelegramChoiceState();

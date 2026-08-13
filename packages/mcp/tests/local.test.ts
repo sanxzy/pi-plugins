@@ -265,7 +265,7 @@ test("stdio process lifecycle emits start/send/close/terminate telemetry", async
     });
     const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
     for (const operation of [MCP_OPERATIONS.STDIO_START, MCP_OPERATIONS.STDIO_SEND, MCP_OPERATIONS.STDIO_CLOSE, MCP_OPERATIONS.PROCESS_TERMINATE]) {
-      assert.ok(records.some((record) => record.operation === operation.toLowerCase() && record.phase === "before"), `missing ${operation}`);
+      assert.ok(records.some((record) => record.operation === operation && record.phase === "before"), `missing ${operation}`);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

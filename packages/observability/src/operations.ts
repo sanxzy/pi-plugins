@@ -6,10 +6,12 @@
  * searchable (single source of truth), avoids typos across the many call sites,
  * and makes log rerouting/analysis predictable.
  *
- * Naming convention: `<domain>.<verb>` (lowercase, dot-separated). Domains are
- * the processing-family (session, agent, goal, registry, telegram, command,
- * tool). The `normalizeOperation` fallback in `index.ts` is only a safety net
- * for unknowable dynamic operations, not a substitute for these constants.
+ * Naming convention: `<domain>.<verb>` with camelCase verbs (e.g.
+ * `mcp.managerStart`). Domains are the processing-family (session, agent,
+ * goal, registry, telegram, command, tool). `normalizeOperation` in `index.ts`
+ * preserves this exact casing so persisted operation ids match the constants
+ * 1:1; it is only a safety net for unknowable dynamic operations, not a
+ * substitute for these constants.
  */
 
 export const SESSION_OPERATIONS = {

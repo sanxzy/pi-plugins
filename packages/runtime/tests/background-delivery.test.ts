@@ -94,7 +94,7 @@ test("delivery load telemetry never persists pending result content", () => {
     const events = readFileSync(join(logDir, "events.jsonl"), "utf8");
     assert.ok(!events.includes("SUPER-SECRET-QUEUE-CONTENT"), "pending content must never appear in load telemetry");
     const records = events.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-    const loadRecords = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_LOAD.toLowerCase());
+    const loadRecords = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_LOAD);
     assert.deepEqual(loadRecords.map((record) => record.phase), ["before", "after"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -120,7 +120,7 @@ test("corrupt pending delivery queue is tolerated without error records", () => 
     });
     const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
     assert.equal(records.filter((record) => record.phase === "error").length, 0);
-    const loadRecords = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_LOAD.toLowerCase());
+    const loadRecords = records.filter((record) => record.operation === PERSISTENCE_OPERATIONS.DELIVERY_LOAD);
     assert.deepEqual(loadRecords.map((record) => record.phase), ["before", "after"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -142,8 +142,8 @@ test("delivery load and persist emit boundary records for the durable queue", ()
   });
   const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
   for (const operation of [PERSISTENCE_OPERATIONS.DELIVERY_LOAD, PERSISTENCE_OPERATIONS.DELIVERY_PERSIST]) {
-    assert.deepEqual(records.filter((record) => record.operation === operation.toLowerCase() && record.phase === "before").length, 1, `missing ${operation}`);
-    assert.deepEqual(records.filter((record) => record.operation === operation.toLowerCase() && record.phase === "after").length, 1, `missing ${operation}`);
+    assert.deepEqual(records.filter((record) => record.operation === operation && record.phase === "before").length, 1, `missing ${operation}`);
+    assert.deepEqual(records.filter((record) => record.operation === operation && record.phase === "after").length, 1, `missing ${operation}`);
   }
   rmSync(root, { recursive: true, force: true });
 });

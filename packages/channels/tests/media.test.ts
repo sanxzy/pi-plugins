@@ -42,13 +42,13 @@ test("media download and resolve emit boundary records without secrets in parame
     globalThis.fetch = originalFetch;
   }
   const records = readFileSync(join(dir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-  const downloads = records.filter((record) => record.operation === CHANNEL_OPERATIONS.MEDIA_DOWNLOAD.toLowerCase());
+  const downloads = records.filter((record) => record.operation === CHANNEL_OPERATIONS.MEDIA_DOWNLOAD);
   assert.deepEqual(downloads.map((record) => record.phase), ["before", "after", "before", "after"]);
   assert.deepEqual(downloads.filter((record) => record.phase === "before").map((record) => record.parameters), [
     { maxBytes: MEDIA_PHOTO_MAX_BYTES },
     { maxBytes: MEDIA_PHOTO_MAX_BYTES },
   ]);
-  const resolves = records.filter((record) => record.operation === CHANNEL_OPERATIONS.MEDIA_RESOLVE.toLowerCase());
+  const resolves = records.filter((record) => record.operation === CHANNEL_OPERATIONS.MEDIA_RESOLVE);
   assert.deepEqual(resolves.map((record) => record.phase), ["before", "after"]);
   assert.deepEqual(resolves[0]?.parameters, { mediaType: "photo", kind: "https" });
   assert.ok(!JSON.stringify(records).includes("querySecret=SECRET"), "URL query secrets must not appear in persisted records");

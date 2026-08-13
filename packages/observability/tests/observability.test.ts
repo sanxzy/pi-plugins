@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  MCP_OPERATIONS,
+  PERSISTENCE_OPERATIONS,
   createSessionLogger,
   getPersistenceFailureCount,
   mask,
@@ -30,6 +32,17 @@ function records(path: string): Array<Record<string, unknown>> {
   if (!existsSync(path)) return [];
   return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
+
+test("operation identifiers persist with their constant casing (H1)", async () => {
+  const paths = scope();
+  const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
+  await runWithLogContext(logger, () => {
+    processWithLog({ operation: MCP_OPERATIONS.MANAGER_START }, () => undefined);
+    processWithLog({ operation: PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE }, () => undefined);
+  });
+  const output = records(paths.eventsPath);
+  assert.deepEqual(output.map((record) => record.operation), [MCP_OPERATIONS.MANAGER_START, MCP_OPERATIONS.MANAGER_START, PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE, PERSISTENCE_OPERATIONS.MANIFEST_PROJECT_WRITE]);
+});
 
 test("processWithLog emits correlated before/after records to events.jsonl", async () => {
   const paths = scope();

@@ -26,7 +26,7 @@ test("ownership acquire and release emit boundary records", () => {
   });
   const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
   for (const operation of [CHANNEL_OPERATIONS.OWNER_ACQUIRE, CHANNEL_OPERATIONS.OWNER_RELEASE]) {
-    assert.deepEqual(records.filter((record) => record.operation === operation.toLowerCase()).map((record) => record.phase), ["before", "after"]);
+    assert.deepEqual(records.filter((record) => record.operation === operation).map((record) => record.phase), ["before", "after"]);
   }
 });
 
