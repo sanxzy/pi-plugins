@@ -67,3 +67,16 @@ test("/goal forwards an interval-prefixed request verbatim for model interpretat
   assert.equal(sent.length, 1);
   assert.equal(sent[0].content, `${GOAL_WORKFLOW_PROMPT}\n\n${request}`);
 });
+
+test("/goal returns the logging promise so delivery failures reach the command caller", async () => {
+  const { command } = registrations();
+  const failing = registrations();
+  failing.pi.sendUserMessage = (() => {
+    throw new Error("delivery failed");
+  }) as ExtensionAPI["sendUserMessage"];
+  await assert.rejects(
+    () => failing.command!.handler("ship it", {} as unknown as ExtensionCommandContext),
+    /delivery failed/,
+  );
+  assert.ok(command);
+});

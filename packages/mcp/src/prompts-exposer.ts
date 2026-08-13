@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Prompt } from "@modelcontextprotocol/sdk/types.js";
 import { sessionMcpBridge } from "@xzy-ai/core";
+import { MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { NameRegistry } from "./naming.ts";
 import { promptResultToText, resourceResultToText, type McpPromptResult, type McpResourceResult } from "./prompts-resources.ts";
 
@@ -163,24 +164,26 @@ export class McpPromptsResourcesExposer {
   }
 
   private async handlePrompt(commandName: string, args: string, ctx: ExtensionContext): Promise<void> {
-    const identity = this.promptCommands.get(commandName);
-    if (!identity) {
-      this.output(ctx, "Error: MCP prompt is no longer available.");
-      return;
-    }
-    const [serverName, nativeName] = splitIdentity(identity);
-    const allowed = this.options.authorize ? await this.options.authorize("prompt", serverName, nativeName, ctx) : true;
-    if (!allowed) {
-      this.output(ctx, "Error: MCP prompt denied by policy.");
-      return;
-    }
-    const reader = this.sessionFor(ctx)?.readPrompt;
-    if (!reader) {
-      this.output(ctx, "Error: MCP prompt session is unavailable.");
-      return;
-    }
-    const result = await reader(serverName, nativeName, parsePromptArgs(args), ctx.signal, ctx);
-    this.output(ctx, promptResultToText(result));
+    return processWithLog({ operation: MCP_OPERATIONS.HANDLE_PROMPT, parameters: { commandName, args } }, async () => {
+      const identity = this.promptCommands.get(commandName);
+      if (!identity) {
+        this.output(ctx, "Error: MCP prompt is no longer available.");
+        return;
+      }
+      const [serverName, nativeName] = splitIdentity(identity);
+      const allowed = this.options.authorize ? await this.options.authorize("prompt", serverName, nativeName, ctx) : true;
+      if (!allowed) {
+        this.output(ctx, "Error: MCP prompt denied by policy.");
+        return;
+      }
+      const reader = this.sessionFor(ctx)?.readPrompt;
+      if (!reader) {
+        this.output(ctx, "Error: MCP prompt session is unavailable.");
+        return;
+      }
+      const result = await reader(serverName, nativeName, parsePromptArgs(args), ctx.signal, ctx);
+      this.output(ctx, promptResultToText(result));
+    });
   }
 
   private registerResourceTools(readResource: McpResourceAccess, listResources: McpResourceLister): void {
@@ -189,7 +192,10 @@ export class McpPromptsResourcesExposer {
       label: "MCP resources list",
       description: "List MCP resources from a configured server. Use mcp_resources_read to read a URI.",
       parameters: { type: "object", properties: { server: { type: "string" } }, required: ["server"] } as never,
-      execute: async (_id, params: { server: string }, _signal, _onUpdate, ctx) => {
+      execute: async (_id, params: { server: string }, _signal, _onUpdate, ctx) => processWithLog({
+        operation: MCP_OPERATIONS.RESOURCE_LIST,
+        parameters: { server: params?.server },
+      }, async () => {
         const server = String(params?.server ?? "");
         if (this.options.authorize && !(await this.options.authorize("resource", server, "", ctx))) {
           return { content: [{ type: "text", text: "Error: MCP resource listing denied by policy" }], details: { server, denied: true } };
@@ -203,7 +209,7 @@ export class McpPromptsResourcesExposer {
           ? resources.map((r) => `${r.uri}\t${r.name}${r.description ? `\t${r.description.slice(0, 1_000)}` : ""}`).join("\n")
           : "(no resources)";
         return { content: [{ type: "text", text }], details: { server, count: resources.length } };
-      },
+      }),
     });
     this.pi.registerTool({
       name: "mcp_resources_read",
@@ -214,7 +220,10 @@ export class McpPromptsResourcesExposer {
         properties: { server: { type: "string" }, uri: { type: "string" } },
         required: ["server", "uri"],
       } as never,
-      execute: async (_id, params: { server: string; uri: string }, signal, _onUpdate, ctx) => {
+      execute: async (_id, params: { server: string; uri: string }, signal, _onUpdate, ctx) => processWithLog({
+        operation: MCP_OPERATIONS.RESOURCE_READ,
+        parameters: { server: params?.server, uri: params?.uri },
+      }, async () => {
         const server = String(params?.server ?? "");
         const uri = String(params?.uri ?? "");
         if (this.options.authorize && !(await this.options.authorize("resource", server, uri, ctx))) {
@@ -233,7 +242,7 @@ export class McpPromptsResourcesExposer {
           }
         }
         return { content, details: result };
-      },
+      }),
     });
   }
 

@@ -31,7 +31,7 @@ export function registerGoalCommand(pi: ExtensionAPI): void {
   pi.registerCommand("goal", {
     description: "Teach the current session the persistent goal workflow.",
     async handler(args: string, _ctx: ExtensionCommandContext): Promise<void> {
-      processWithLog({ operation: COMMAND_OPERATIONS.GOAL_COMMAND, parameters: { hasArgs: args.length > 0 } }, async () => {
+      return processWithLog({ operation: COMMAND_OPERATIONS.GOAL_COMMAND, parameters: { hasArgs: args.length > 0 } }, async () => {
         pi.sendUserMessage(expandTelegramGoalCommand(args), { deliverAs: "steer" });
       });
     },

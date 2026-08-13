@@ -19,7 +19,7 @@ import type {
   ChildSessionControl,
   SpawnChildSession,
 } from "@xzy-ai/core";
-import { AGENT_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { AGENT_OPERATIONS, MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
 import { getChildExtensionFactories } from "./child-extensions.ts";
@@ -262,9 +262,12 @@ async function createIsolatedChild(options: {
       label: definition.name,
       description: definition.description,
       parameters: definition.parameters,
-      execute: async (_id: string, args: Record<string, unknown>, signal: AbortSignal | undefined) => options.mcpBridge
+      execute: async (_id: string, args: Record<string, unknown>, signal: AbortSignal | undefined) => processWithLog({
+        operation: MCP_OPERATIONS.INVOKE_TOOL,
+        parameters: { name: definition.name, args },
+      }, async () => options.mcpBridge
         ? await options.mcpBridge.invokeTool(definition.name, args, signal)
-        : { content: [{ type: "text", text: "Inherited MCP execution bridge is unavailable" }], details: { error: "mcp bridge unavailable" } },
+        : { content: [{ type: "text", text: "Inherited MCP execution bridge is unavailable" }], details: { error: "mcp bridge unavailable" } }),
     }));
   }
 

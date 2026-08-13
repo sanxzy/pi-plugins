@@ -45,103 +45,115 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
-      const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
-
-      const countAgentCall = (): AgentToolResult<AgentDetails | AgentErrorDetails> | undefined => {
-        if (pool.concurrency.countAgentCall(MAX_PARALLEL_AGENTS)) return undefined;
-        return errorResult(
-          `too many parallel agents in one response: at most ${MAX_PARALLEL_AGENTS} agent calls are allowed`,
-          { jobId: undefined, reason: "parallel agent limit exceeded" },
-        );
-      };
-
-      // The caller's own job id is its child session id when that session is
-      // itself a registered job; the root orchestrator session is not a job, so
-      // it controls and views every job in the project.
-      const caller = callerFor(ctx, pool);
-      const isChildCaller = caller.jobId !== undefined || pool.registry.getBySessionId(ctx.sessionManager.getSessionId()) !== undefined;
-
-      // Address an existing job: a running job is steered, a finished job is
-      // resumed in the background, and a job with no transcript yet is
-      // re-spawned in the background. The parallel-call counter above is
-      // deliberately not consumed by a steer, which does not launch a child.
-      if (params.agent_id) {
-        const job = pool.registry.get(params.agent_id);
-        if (!job) {
-          return errorResult(`unknown agent id: ${params.agent_id}`, {
-            jobId: params.agent_id,
-            reason: "unknown agent id",
-          });
-        }
-        if (!isInSessionScope(caller, job, (jobId) => pool.registry.get(jobId))) {
-          return errorResult(`unknown agent id: ${params.agent_id}`, {
-            jobId: params.agent_id,
-            reason: "unknown agent id",
-          });
-        }
-        const disposition = resumeDisposition(caller, job, (jobId) => pool.registry.get(jobId));
-        if (disposition.kind === "reject") {
-          return errorResult(`cannot resume agent ${params.agent_id}: ${disposition.reason}`, {
-            jobId: params.agent_id,
-            reason: disposition.reason,
-          });
-        }
-        if (disposition.kind === "steer") {
-          const control = pool.liveChildren.get(job.jobId);
-          if (!control) {
-            return errorResult(`agent ${params.agent_id} is running but has no live child to steer`, {
-              jobId: job.jobId,
-              reason: "no live child",
-            });
-          }
-          await control.steer(params.prompt);
-          return textResult(
-            `Steered agent ${job.subagentType} (${params.agent_id}). The agent keeps its running context and will notify you when it settles. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.`,
-            {
-              jobId: job.jobId,
-              status: "running",
-            },
-          );
-        }
-        // Resume (or retry a created job) in place. Its job id, lineage, and
-        // transcript remain stable, so resuming never creates duplicate
-        // registry records or copied session files.
-        if (!isChildCaller) {
-          const backgroundError = backgroundModeError(ctx.mode);
-          if (backgroundError) {
-            return errorResult("background agents are available only in TUI mode", {
-              jobId: job.jobId,
-              reason: backgroundError,
-            });
-          }
-        }
-        const budgetError = countAgentCall();
-        if (budgetError) return budgetError;
-        if (disposition.kind === "resume" && !job.sessionFile) {
-          return errorResult(`agent ${params.agent_id} has no stored transcript to resume`, {
-            jobId: job.jobId,
-            reason: "no stored transcript",
-          });
-        }
-        return startAgent(params, ctx, { existingJob: job }, _signal);
-      }
-
-      // Root-host calls are background; child and descendant calls are
-      // foreground (their SDK mode is `print` but nested spawns await).
-      if (!isChildCaller) {
-        const backgroundError = backgroundModeError(ctx.mode);
-        if (backgroundError) {
-          return errorResult("background agents are available only in TUI mode", {
-            jobId: undefined,
-            reason: backgroundError,
-          });
-        }
-      }
-      const budgetError = countAgentCall();
-      if (budgetError) return budgetError;
-      return startAgent(params, ctx, {}, _signal);
+      // Every model-visible agent call logs as one correlated boundary, from
+      // the parallel-budget and scope checks through the spawn/steer decision.
+      return processWithLog({ operation: TOOL_OPERATIONS.AGENT_EXECUTE, parameters: { subagentType: params.subagent_type, prompt: params.prompt } }, () =>
+        executeAgentCall(params, ctx, _signal),
+      );
     },
   });
+}
+
+async function executeAgentCall(
+  params: AgentParams,
+  ctx: ExtensionContext,
+  _signal: AbortSignal | undefined,
+): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
+  const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
+
+  const countAgentCall = (): AgentToolResult<AgentDetails | AgentErrorDetails> | undefined => {
+    if (pool.concurrency.countAgentCall(MAX_PARALLEL_AGENTS)) return undefined;
+    return errorResult(
+      `too many parallel agents in one response: at most ${MAX_PARALLEL_AGENTS} agent calls are allowed`,
+      { jobId: undefined, reason: "parallel agent limit exceeded" },
+    );
+  };
+
+  // The caller's own job id is its child session id when that session is
+  // itself a registered job; the root orchestrator session is not a job, so
+  // it controls and views every job in the project.
+  const caller = callerFor(ctx, pool);
+  const isChildCaller = caller.jobId !== undefined || pool.registry.getBySessionId(ctx.sessionManager.getSessionId()) !== undefined;
+
+  // Address an existing job: a running job is steered, a finished job is
+  // resumed in the background, and a job with no transcript yet is
+  // re-spawned in the background. The parallel-call counter above is
+  // deliberately not consumed by a steer, which does not launch a child.
+  if (params.agent_id) {
+    const job = pool.registry.get(params.agent_id);
+    if (!job) {
+      return errorResult(`unknown agent id: ${params.agent_id}`, {
+        jobId: params.agent_id,
+        reason: "unknown agent id",
+      });
+    }
+    if (!isInSessionScope(caller, job, (jobId) => pool.registry.get(jobId))) {
+      return errorResult(`unknown agent id: ${params.agent_id}`, {
+        jobId: params.agent_id,
+        reason: "unknown agent id",
+      });
+    }
+    const disposition = resumeDisposition(caller, job, (jobId) => pool.registry.get(jobId));
+    if (disposition.kind === "reject") {
+      return errorResult(`cannot resume agent ${params.agent_id}: ${disposition.reason}`, {
+        jobId: params.agent_id,
+        reason: disposition.reason,
+      });
+    }
+    if (disposition.kind === "steer") {
+      const control = pool.liveChildren.get(job.jobId);
+      if (!control) {
+        return errorResult(`agent ${params.agent_id} is running but has no live child to steer`, {
+          jobId: job.jobId,
+          reason: "no live child",
+        });
+      }
+      await control.steer(params.prompt);
+      return textResult(
+        `Steered agent ${job.subagentType} (${params.agent_id}). The agent keeps its running context and will notify you when it settles. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.`,
+        {
+          jobId: job.jobId,
+          status: "running",
+        },
+      );
+    }
+    // Resume (or retry a created job) in place. Its job id, lineage, and
+    // transcript remain stable, so resuming never creates duplicate
+    // registry records or copied session files.
+    if (!isChildCaller) {
+      const backgroundError = backgroundModeError(ctx.mode);
+      if (backgroundError) {
+        return errorResult("background agents are available only in TUI mode", {
+          jobId: job.jobId,
+          reason: backgroundError,
+        });
+      }
+    }
+    const budgetError = countAgentCall();
+    if (budgetError) return budgetError;
+    if (disposition.kind === "resume" && !job.sessionFile) {
+      return errorResult(`agent ${params.agent_id} has no stored transcript to resume`, {
+        jobId: params.agent_id,
+        reason: "no stored transcript",
+      });
+    }
+    return startAgent(params, ctx, { existingJob: job }, _signal);
+  }
+
+  // Root-host calls are background; child and descendant calls are
+  // foreground (their SDK mode is `print` but nested spawns await).
+  if (!isChildCaller) {
+    const backgroundError = backgroundModeError(ctx.mode);
+    if (backgroundError) {
+      return errorResult("background agents are available only in TUI mode", {
+        jobId: undefined,
+        reason: backgroundError,
+      });
+    }
+  }
+  const budgetError = countAgentCall();
+  if (budgetError) return budgetError;
+  return startAgent(params, ctx, {}, _signal);
 }
 
 /**
@@ -159,9 +171,7 @@ async function startAgent(
   resume: { existingJob?: Job } = {},
   parentSignal?: AbortSignal,
 ): Promise<AgentToolResult<AgentDetails | AgentErrorDetails>> {
-  return processWithLog({ operation: TOOL_OPERATIONS.AGENT_EXECUTE, parameters: { subagentType: params.subagent_type, prompt: params.prompt } }, async () =>
-    startAgentInner(params, ctx, resume, parentSignal),
-  );
+  return startAgentInner(params, ctx, resume, parentSignal);
 }
 
 async function startAgentInner(
