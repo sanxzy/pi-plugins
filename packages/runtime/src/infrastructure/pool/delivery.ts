@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { PERSISTENCE_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { pendingDeliveryFile } from "../../shared/paths.ts";
 
 /**
@@ -105,13 +106,15 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
     },
     register(sessionFile, deliver): void {
       sinks.set(sessionFile, deliver);
-      deliverPending(sessionFile);
+      processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_REGISTER, parameters: { sessionFile } }, () => deliverPending(sessionFile));
     },
     unregister(sessionFile): void {
       sinks.delete(sessionFile);
+      processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_UNREGISTER, parameters: { sessionFile } }, () => undefined);
     },
     rebind(previousSessionFile, nextSessionFile): void {
       if (previousSessionFile === nextSessionFile) return;
+      processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_REBIND, parameters: { from: previousSessionFile, to: nextSessionFile } }, () => {
       // A result addressed to the replaced parent belongs to the descendant
       // session that continues the same conversation, so it must follow the
       // fork. Live sinks are not moved: those sessions are shared jobs, not a
@@ -124,8 +127,10 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
         }
       }
       if (changed) persist();
+      });
     },
     deliverResult(jobId, parentSessionFile, content): boolean {
+      return processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_RESULT, parameters: { jobId, parentSessionFile } }, () => {
       const sink = sinks.get(parentSessionFile);
       if (!sink) {
         pending.push({ jobId, parentSessionFile, content });
@@ -141,6 +146,7 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
         persist();
         return false;
       }
+      });
     },
   };
 }

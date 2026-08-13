@@ -4,6 +4,7 @@ import type { Job, JobEvent, JobUpdate } from "@xzy-ai/core";
 import { canonicalAgentId, createAgentManifestStore, foldAgentEvents, type AgentManifestStore } from "../manifests/manifests.ts";
 import { ensurePrivateDirectory, homeProjectDir, homeSessionDirFromRoot, encodeProjectId } from "../../shared/paths.ts";
 import { canTransition, isTerminal } from "@xzy-ai/core";
+import { REGISTRY_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 export const MAX_RETAINED_TERMINAL_AGENTS = 25;
 
@@ -149,6 +150,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
   load();
 
   const prune = (): void => {
+    processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_PRUNE, parameters: { projectRoot } }, () => {
     // The home event logs are authoritative even while the process singleton
     // survives an extension reload. Refresh before pruning so externally
     // removed agent directories cannot remain visible in memory.
@@ -182,6 +184,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       if (store) rmSync(store.agentDir, { recursive: true, force: true });
     }
     reload();
+    });
   };
 
   return {
@@ -193,6 +196,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       else this.updateJob(event.jobId, event.update);
     },
     createJob(job): void {
+      processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_CREATE, parameters: { jobId: job.jobId } }, () => {
       const cc = (id: string): string => canonicalAgentId(id);
       const normalized = {
         ...job,
@@ -215,8 +219,10 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       for (const status of initialTransitions) store.update({ status, at: normalized.updatedAt, sessionFile: normalized.sessionFile });
       load();
       prune();
+      });
     },
     updateJob(jobId, update): void {
+      processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_UPDATE, parameters: { jobId, status: update.status } }, () => {
       load();
       const entry = byJob.get(jobId) ?? byJob.get(canonicalAgentId(jobId)) ?? [...byJob.values()].find((e) => canonicalAgentId(e.job.jobId) === canonicalAgentId(jobId));
       if (!entry) return;
@@ -225,6 +231,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       entry.store.update({ ...update, status: nextStatus });
       load();
       prune();
+      });
     },
     fold(): Map<string, Job> { load(); return new Map([...byJob].sort(([, a], [, b]) => (a.store.read()?.sequence ?? 0) - (b.store.read()?.sequence ?? 0)).map(([id, entry]) => [id, entry.job])); },
     get(jobId): Job | undefined {

@@ -8,6 +8,7 @@ import {
   type Goal,
   type GoalEvent,
 } from "@xzy-ai/core";
+import { PERSISTENCE_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { goalsFile } from "../../shared/paths.ts";
 
 /**
@@ -55,9 +56,11 @@ export function createGoalStore(filePath: string): GoalStore {
   let index = foldGoalLog(filePath);
 
   const append = (event: GoalEvent): void => {
-    mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${serializeGoalEvent(event)}\n`, { flag: "a" });
-    index = foldGoalLog(filePath);
+    processWithLog({ operation: PERSISTENCE_OPERATIONS.GOAL_APPEND, parameters: { event: event.event, cwd: event.cwd } }, () => {
+      mkdirSync(dirname(filePath), { recursive: true });
+      writeFileSync(filePath, `${serializeGoalEvent(event)}\n`, { flag: "a" });
+      index = foldGoalLog(filePath);
+    });
   };
 
   return {

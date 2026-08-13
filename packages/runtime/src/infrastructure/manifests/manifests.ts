@@ -17,6 +17,7 @@ import {
   writePrivateJson,
   writePrivateText,
 } from "../../shared/paths.ts";
+import { PERSISTENCE_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 /** Canonical agent id for storage: strip a `job-` prefix from a job id. */
 export function canonicalAgentId(jobId: string): string {
@@ -159,6 +160,7 @@ export interface StartRootSessionResult {
 
 /** Create (or reopen) the root-session manifest and ensure the project manifest exists. */
 export function startRootSession(input: StartRootSessionInput): StartRootSessionResult {
+  return processWithLog({ operation: PERSISTENCE_OPERATIONS.MANIFEST_START, parameters: { sessionId: input.sessionId, projectRoot: input.projectRoot } }, () => {
   const projectRoot = canonicalProjectRoot(input.projectRoot);
   const projectManifest = writeProjectManifest(projectRoot, input.now);
   const now = input.now ?? new Date().toISOString();
@@ -182,6 +184,7 @@ export function startRootSession(input: StartRootSessionInput): StartRootSession
   };
   writePrivateJson(sessionPath, manifest);
   return { manifest, projectManifest, sessionPath };
+  });
 }
 
 export interface FinishRootSessionInput {
@@ -199,6 +202,7 @@ export interface FinishRootSessionResult {
 
 /** Flip the root-session manifest inactive atomically. */
 export function finishRootSession(input: FinishRootSessionInput): FinishRootSessionResult {
+  return processWithLog({ operation: PERSISTENCE_OPERATIONS.MANIFEST_FINISH, parameters: { sessionId: input.sessionId, reason: input.reason } }, () => {
   const projectRoot = canonicalProjectRoot(input.projectRoot);
   const now = input.now ?? new Date().toISOString();
   const sessionPath = homeSessionManifestFile(encodeProjectId(projectRoot), input.sessionId);
@@ -210,6 +214,7 @@ export function finishRootSession(input: FinishRootSessionInput): FinishRootSess
   };
   writePrivateJson(sessionPath, manifest);
   return { active: false, endedAt: now, manifest };
+  });
 }
 
 /** Read the root-session manifest, failing closed on corruption. */
@@ -487,6 +492,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
     eventsPath,
     projectId,
     create({ description, subagentType }): void {
+      processWithLog({ operation: PERSISTENCE_OPERATIONS.MANIFEST_AGENT_CREATE, parameters: { agentId } }, () => {
       if (existsSync(manifestPath)) {
         const existingManifest = validateAgentManifest(readPrivateJson<Partial<AgentManifest>>(manifestPath), manifestPath);
         if (existingManifest.agentId !== agentId || existingManifest.rootSessionId !== rootSessionId) {
@@ -519,8 +525,10 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
       append(created);
       const snapshot = foldAgentEvents(eventsPath);
       if (snapshot) writePrivateJson(manifestPath, snapshot);
+      });
     },
     update(cfg): void {
+      processWithLog({ operation: PERSISTENCE_OPERATIONS.MANIFEST_AGENT_UPDATE, parameters: { agentId, status: cfg.status } }, () => {
       const current = foldAgentEvents(eventsPath);
       if (!current) return;
       if (cfg.status !== current.status && !canTransition(current.status, cfg.status)) return;
@@ -536,6 +544,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
       };
       append(updated);
       rebuildSnapshot(eventsPath, manifestPath);
+      });
     },
     read(): AgentManifest | undefined {
       const folded = foldAgentEvents(eventsPath);

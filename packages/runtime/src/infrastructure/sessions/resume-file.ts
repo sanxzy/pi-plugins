@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { PERSISTENCE_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 type SessionEntry = {
   type?: unknown;
@@ -59,6 +60,7 @@ function trimTrailingToolCalls(entries: SessionEntry[]): void {
  * transcript files.
  */
 export function prepareResumeSessionFile(source: string, jobId: string): string {
+  return processWithLog({ operation: PERSISTENCE_OPERATIONS.SESSION_RESUME_PREPARE, parameters: { jobId, source } }, () => {
   if (!existsSync(source)) {
     throw new Error(`session file does not exist: ${source}`);
   }
@@ -84,4 +86,5 @@ export function prepareResumeSessionFile(source: string, jobId: string): string 
     chmodSync(source, 0o600);
   }
   return source;
+  });
 }
