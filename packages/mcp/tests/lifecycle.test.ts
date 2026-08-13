@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { registerMcpLifecycle } from "../src/index.ts";
 import { userConfigPath, projectConfigPath, createDefaultAuthStore } from "../src/index.ts";
 import { publishSessionMcpBridge, clearSessionMcpBridge } from "@xzy-ai/core";
 import { dirname } from "node:path";
+import { MCP_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
 const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
 const fixtureCwd = dirname(fixture);
@@ -86,6 +87,49 @@ test("simultaneous sessions expose isolated MCP managers and shared tool binding
     await shutdown({ reason: "quit" }, firstCtx);
     await shutdown({ reason: "quit" }, secondCtx);
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("one logical prompt/resource read emits exactly one telemetry record pair (H4)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-h4-"));
+  const agentDir = join(root, "agent");
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  const project = join(root, "project");
+  mkdirSync(join(project, ".pi"), { recursive: true });
+  writeFileSync(projectConfigPath(project), JSON.stringify({ mcp: { servers: { s: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_LABEL: "h4", MCP_FIXTURE_MODE: "policy" } } } } }));
+  const pi = fakePi();
+  const realPi = { ...pi, sendUserMessage() {}, getAllTools() { return [...pi.tools.values()].map((tool) => ({ name: tool.name })); }, getActiveTools() { return []; }, setActiveTools() {} };
+  registerMcpLifecycle(realPi as never, { agentDir });
+  const start = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  const ctx = { ...context(project, "h4-session"), hasUI: false, ui: {} };
+  const logDir = mkdtempSync(join(tmpdir(), "pi-code-mcp-h4-log-"));
+  const logger = createSessionLogger({ projectId: "project-h4", rootSessionId: "h4-session", eventsPath: join(logDir, "events.jsonl"), errorsPath: join(logDir, "errors.jsonl") });
+  try {
+    await runWithLogContext(logger, () => start({ reason: "startup" }, ctx));
+    const prompt = [...pi.commands.keys()].find((name) => name.includes("allowed_prompt"));
+    assert.ok(prompt, "prompt command is exposed");
+    await runWithLogContext(logger, async () => {
+      await pi.commands.get(prompt)!.handler('{"value":"two"}', ctx);
+      const read = pi.tools.get("mcp_resources_read");
+      assert.ok(read, "resource read tool is exposed");
+      await read!.execute("x", { server: "s", uri: "file:///allowed" }, undefined, undefined, ctx);
+    });
+  } finally {
+    try {
+      await shutdown({ reason: "quit" }, ctx);
+    } catch {
+      // best-effort teardown
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+  const raw = readFileSync(join(logDir, "events.jsonl"), "utf8");
+  const records = raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  for (const operation of [MCP_OPERATIONS.GET_PROMPT, MCP_OPERATIONS.READ_RESOURCE]) {
+    const spans = records.filter((record) => record.operation === operation);
+    assert.equal(spans.length, 2, `${operation} must emit exactly one before+after pair, got ${spans.length}`);
+    assert.deepEqual(spans.map((record) => record.phase), ["before", "after"]);
+    assert.equal(spans[0]?.correlationId, spans[1]?.correlationId);
   }
 });
 

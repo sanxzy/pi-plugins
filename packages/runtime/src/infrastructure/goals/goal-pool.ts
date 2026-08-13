@@ -6,7 +6,7 @@ import {
   validateGoalInput,
   type Goal,
 } from "@xzy-ai/core";
-import { GOAL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { GOAL_OPERATIONS, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
 import { encodeProjectId, homeGoalFile } from "../../shared/paths.ts";
 import { createGoalStore, type GoalStore } from "./goal-store.ts";
 
@@ -27,6 +27,13 @@ export interface GoalDeliveryBinding {
   readonly sendUserMessage: (content: string, options?: { readonly deliverAs?: "steer" }) => void;
   readonly hasUI: boolean;
   readonly notify: (message: string, type?: "info" | "warning" | "error") => void;
+  /**
+   * Explicit telemetry owner for the pool's independent scheduler root. Goal
+   * ticks fire from setInterval callbacks with no ambient session context;
+   * without this binding the records would fall back to the process-wide
+   * last-created default logger, which can belong to an unrelated session.
+   */
+  readonly logger?: SessionLogger;
 }
 
 /** The timer seam keeps scheduler tests manually controllable. */
@@ -112,29 +119,33 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
   };
 
   const tick = (cwd: string): void => {
-    processWithLog({ operation: GOAL_OPERATIONS.TICK, parameters: { cwd } }, () => {
-      if (deliverySuspended) return;
-      const normalizedCwd = normalizeGoalCwd(cwd);
-      const goals = store.fold();
-      const goal = goals.get(normalizedCwd);
-      if (!goal) {
-        clearScheduler(cwd);
-        return;
-      }
-
-      const binding = bindings.get(goal.cwd) ?? currentBinding;
-      if (!binding) return;
-
-      try {
-        if (goal.status === "active") {
-          binding.sendUserMessage(`${goal.prompt}\n${GOAL_DELIVERY_FOOTER}`, { deliverAs: "steer" });
-        } else if (binding.hasUI) {
-          binding.notify(`Goal paused: ${goal.pauseReason ?? ""}`, "warning");
+    const binding = bindings.get(normalizeGoalCwd(cwd)) ?? currentBinding;
+    const execute = (): void => {
+      processWithLog({ operation: GOAL_OPERATIONS.TICK, parameters: { cwd } }, () => {
+        if (deliverySuspended) return;
+        const normalizedCwd = normalizeGoalCwd(cwd);
+        const goals = store.fold();
+        const goal = goals.get(normalizedCwd);
+        if (!goal) {
+          clearScheduler(cwd);
+          return;
         }
-      } catch {
-        // One failed cwd delivery must not stop other project schedulers.
-      }
-    });
+
+        const target = bindings.get(goal.cwd) ?? currentBinding;
+        if (!target) return;
+        try {
+          if (goal.status === "active") {
+            target.sendUserMessage(`${goal.prompt}\n${GOAL_DELIVERY_FOOTER}`, { deliverAs: "steer" });
+          } else if (target.hasUI) {
+            target.notify(`Goal paused: ${goal.pauseReason ?? ""}`, "warning");
+          }
+        } catch {
+          // One failed cwd delivery must not stop other project schedulers.
+        }
+      });
+    };
+    if (binding?.logger) runWithLogContext(binding.logger, execute);
+    else execute();
   };
 
   const ensureScheduler = (cwd: string): void => {

@@ -21,6 +21,25 @@ function binding(overrides: Partial<GoalDeliveryBinding> = {}): GoalDeliveryBind
   return { ...base, ...overrides };
 }
 
+test("goal tick telemetry binds to the pool's own logger, not the stale default (H3)", () => {
+  const pool = createGoalPool(projectRoot());
+  pool.setScheduler(() => ({ clear() {} }));
+  const lines: Array<Record<string, unknown>> = [];
+  const own = createSessionLogger({ projectId: "project-own", rootSessionId: "root-own", eventsPath: "/dev/stdout", errorsPath: "/dev/stdout", write: (_p, line) => lines.push(JSON.parse(line)) });
+  // A newer logger from an unrelated session becomes the global default; the
+  // pool must ignore it for its own independent tick root.
+  createSessionLogger({ projectId: "project-other", rootSessionId: "root-other", eventsPath: "/dev/stdout", errorsPath: "/dev/stdout", write: () => undefined });
+  pool.bind({ cwd: "/project", sendUserMessage: () => {}, hasUI: true, notify: () => {}, logger: own });
+  assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  pool.tick("/project");
+  const tickRecords = lines.filter((record) => record.operation === GOAL_OPERATIONS.TICK);
+  assert.ok(tickRecords.length >= 1, "tick records must use the pool's own logger");
+  for (const record of tickRecords) {
+    assert.equal(record.projectId, "project-own");
+    assert.equal(record.rootSessionId, "root-own");
+  }
+});
+
 test("first active delivery occurs only after one complete interval", () => {
   const pool = createGoalPool(projectRoot());
   const sent: Array<{ content: string; deliverAs: string }> = [];

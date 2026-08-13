@@ -219,9 +219,6 @@ importers:
       '@earendil-works/pi-tui':
         specifier: ^0.84.1
         version: 0.84.1
-      '@xzy-ai/observability':
-        specifier: workspace:*
-        version: link:../observability
     devDependencies:
       '@types/node':
         specifier: ^24.13.3

@@ -8,7 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
-import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext } from "@xzy-ai/observability";
+import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
 import { currentProcessIdentity, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
@@ -50,7 +50,7 @@ function sessionLogger(projectRoot: string, sessionId: string) {
   });
 }
 
-function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext): GoalDeliveryBinding {
+function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLogger): GoalDeliveryBinding {
   return {
     cwd: ctx.cwd,
     hasUI: ctx.hasUI,
@@ -58,6 +58,7 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext): GoalDeliveryBindi
     notify: (message, type) => {
       if (ctx.hasUI) ctx.ui.notify(message, type);
     },
+    logger,
   };
 }
 
@@ -86,12 +87,12 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     return runWithLogContext(logger, () => processWithLog(
       { operation: SESSION_OPERATIONS.START, parameters: { reason: event.reason } },
       async () => {
-        await startSession(event, ctx, pi, projectRoot, sessionId);
+        await startSession(event, ctx, pi, projectRoot, sessionId, logger);
       },
     ));
   });
 
-  async function startSession(event: SessionStartEvent, ctx: ExtensionContext, pi: ExtensionAPI, projectRoot: string, sessionId: string): Promise<void> {
+  async function startSession(event: SessionStartEvent, ctx: ExtensionContext, pi: ExtensionAPI, projectRoot: string, sessionId: string, logger: SessionLogger): Promise<void> {
     const rootPool = getChildPool(ctx.cwd, sessionId);
     // A root host has no agent event. The bootstrap predicate applies only to
     // this real lifecycle boundary; ordinary callers use manifest-backed
@@ -138,7 +139,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // offered continuation of another session's goal, so delivery starts only
     // for the current root's own persisted goal (if any).
     const goalPool = getGoalPool(ctx.cwd, sessionId);
-    goalPool.bind(goalBinding(pi, ctx));
+    goalPool.bind(goalBinding(pi, ctx, logger));
     goalPool.resumeDelivery();
 
     const sessionFile = ctx.sessionManager.getSessionFile();

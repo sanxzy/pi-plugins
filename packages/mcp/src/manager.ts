@@ -608,12 +608,15 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     );
   };
 
+  // The lifecycle layer owns GET_PROMPT/READ_RESOURCE telemetry (normalization
+  // + error semantics live there); these manager entry points deliberately do
+  // NOT add a second span so one logical read persists exactly one record pair.
   const getPrompt = (
     name: string,
     nativeName: string,
     args: Record<string, string>,
     signal?: AbortSignal,
-  ): Promise<GetPromptResult> => processWithLog({ operation: MCP_OPERATIONS.GET_PROMPT, parameters: { server: name, prompt: nativeName } }, () => serialize(() => getPromptInternal(name, nativeName, args, signal)));
+  ): Promise<GetPromptResult> => serialize(() => getPromptInternal(name, nativeName, args, signal));
 
   const readResourceInternal = async (
     name: string,
@@ -628,8 +631,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     );
   };
 
-  const readResource = (name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> =>
-    processWithLog({ operation: MCP_OPERATIONS.READ_RESOURCE, parameters: { server: name, uri } }, () => serialize(() => readResourceInternal(name, uri, signal)));
+  const readResource = (name: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> => serialize(() => readResourceInternal(name, uri, signal));
 
   const refreshCatalogInternal = async (name: string, signal?: AbortSignal): Promise<ServerCatalog | undefined> => {
     const connection = connections.get(name);
