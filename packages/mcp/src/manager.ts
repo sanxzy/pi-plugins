@@ -283,7 +283,10 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       reconnectTimers.delete(name);
       const server = state.config?.servers[name];
       if (stopped || scheduledGeneration !== generation || !server || server.disabled === true) return;
-      void serialize(async () => {
+      void processWithLog({
+        operation: MCP_OPERATIONS.RECONNECT,
+        parameters: { server: name, attempt },
+      }, () => serialize(async () => {
         const result = server.type === "local"
           ? await connectLocalInternal(name, server)
           : await connectRemoteInternal(name, server);
@@ -291,7 +294,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
           clearReconnect(name);
           options.onServerChanged?.(name);
         } else scheduleReconnect(name);
-      }).catch(() => scheduleReconnect(name));
+      })).catch(() => scheduleReconnect(name));
     }, delay);
     timer.unref();
     reconnectTimers.set(name, timer);
@@ -311,7 +314,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
 
   };
 
-  const reload = (): McpConfigResult => {
+  const reloadInternal = (): McpConfigResult => {
     const previousConfig = state.config;
     const previousServers = state.servers;
     const result = loadMcpConfig(agentDir, projectRoot, options);
@@ -327,6 +330,8 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     options.onReload?.(state);
     return result;
   };
+
+  const reload = (): McpConfigResult => processWithLog({ operation: MCP_OPERATIONS.RELOAD }, () => reloadInternal());
 
   const scheduleConfigReload = (): void => {
     if (stopped) return;
@@ -497,13 +502,11 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   };
 
   const disconnect = (name: string): Promise<void> => processWithLog({ operation: MCP_OPERATIONS.DISCONNECT, parameters: { server: name } }, () => serialize(() => disconnectInternal(name)));
-  const close = (): Promise<void> => {
+  const close = (): Promise<void> => processWithLog({ operation: MCP_OPERATIONS.MANAGER_CLOSE, parameters: { mode: "close" } }, () => serialize(async () => {
     beginShutdown();
-    return serialize(async () => {
-      await closeInternal();
-      state = { ...state, running: false };
-    });
-  };
+    await closeInternal();
+    state = { ...state, running: false };
+  }));
 
   const callWithRecovery = async <T>(
     name: string,
@@ -673,7 +676,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     processWithLog({ operation: MCP_OPERATIONS.MANAGER_START }, () => serialize(async () => {
       stopped = false;
       managerAbortController = new AbortController();
-      reload();
+      reloadInternal();
       state = { ...state, running: true };
       if (!unsubscribe) {
         const watch = options.watch ?? defaultWatch;
@@ -684,13 +687,11 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       return reconcileInternal();
     }));
 
-  const stop = (): Promise<void> => {
+  const stop = (): Promise<void> => processWithLog({ operation: MCP_OPERATIONS.MANAGER_STOP, parameters: { mode: "stop" } }, () => serialize(async () => {
     beginShutdown();
-    return processWithLog({ operation: MCP_OPERATIONS.MANAGER_STOP }, () => serialize(async () => {
-      await closeInternal();
-      state = { ...state, running: false };
-    }));
-  };
+    await closeInternal();
+    state = { ...state, running: false };
+  }));
 
   return {
     projectRoot,

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { createSessionLogger, MCP_OPERATIONS, runWithLogContext } from "@xzy-ai/observability";
 import { createMcpManager, projectConfigPath, userConfigPath } from "../src/index.ts";
 
 async function startRecoveryFixture(): Promise<{ url: string; server: Server; calls: () => number }> {
@@ -54,6 +55,41 @@ test("explicit reload reconciliation keeps active server status and removes remo
   assert.equal(manager.status("fixture"), undefined);
   assert.deepEqual(manager.serverNames(), []);
   await manager.stop();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("manager reload, reconnect, close, and stop paths emit dedicated boundaries", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-manager-log-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
+  const exitOnce = join(root, "exit-once");
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: { reconnect: { type: "local", command: [process.execPath, fixture], cwd: dirname(fixture), environment: { MCP_FIXTURE_EXIT_ONCE_FILE: exitOnce, MCP_FIXTURE_EXIT_AFTER_MS: "25" } } } } }));
+  const logDir = join(root, "logs");
+  const logger = createSessionLogger({ projectId: "project", rootSessionId: "root", eventsPath: join(logDir, "events.jsonl"), errorsPath: join(logDir, "errors.jsonl") });
+  const manager = createMcpManager({ agentDir, projectRoot, reconnectBaseDelayMs: 5, reconnectMaxAttempts: 2 });
+  await runWithLogContext(logger, async () => {
+    manager.reload();
+    await manager.start();
+    assert.equal(manager.status("reconnect")?.status, "connected");
+    const deadline = Date.now() + 3_000;
+    let sawFailed = false;
+    while (Date.now() < deadline) {
+      if (manager.status("reconnect")?.status === "failed") sawFailed = true;
+      if (sawFailed && manager.status("reconnect")?.status === "connected") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(sawFailed, true, "reconnect fixture must report a failed transition");
+    assert.equal(manager.status("reconnect")?.status, "connected", "reconnect fixture must recover");
+    await manager.close();
+    await manager.stop();
+  });
+  const records = readFileSync(join(logDir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  for (const [operation, label] of [[MCP_OPERATIONS.RELOAD, "reload"], [MCP_OPERATIONS.MANAGER_START, "start"], [MCP_OPERATIONS.MANAGER_CLOSE, "close"], [MCP_OPERATIONS.MANAGER_STOP, "stop"], [MCP_OPERATIONS.RECONNECT, "reconnect"]] as const) {
+    const normalized = operation.toLowerCase();
+    assert.ok(records.some((record) => record.operation === normalized && record.phase === "before"), `missing ${label}`);
+  }
   rmSync(root, { recursive: true, force: true });
 });
 
