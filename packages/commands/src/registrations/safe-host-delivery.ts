@@ -45,21 +45,26 @@ const RETRY_STEPS_MS = [25, 50, 100, 200, 400, 800, 1600];
  * be touched by a surviving timer; as defense in depth the timer callback also
  * swallows any throw so an uncaught exception can never escape.
  *
- * Residual race (documented, no SDK API to observe): `sendUserMessage` is
+ * Residual race (closed at the lifecycle boundary): `sendUserMessage` is
  * void-typed and the pi runner swallows async rejections, so a send that slips
  * into the tiny precondition window surfaces only as a `<runtime>` error, not
- * as a throw the gate can catch. The pre-check plus `agent_end` backoff keeps
- * that window effectively closed for lifecycle-driven sends.
+ * as a throw the gate can catch. The gate therefore latches the run state from
+ * explicit lifecycle events (`turn_start` .. `agent_settled`) and never sends
+ * outside that fully-settled window; `ctx.isIdle()` backoff is only a final
+ * safety net, not the primary guard.
  */
 export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): HostMessageGate {
   const queue: QueuedMessage[] = [];
   let retryTimer: NodeJS.Timeout | undefined;
   let retryStep = 0;
   let disposed = false;
-  // `isIdle()` can briefly be stale around a turn boundary. The explicit
-  // lifecycle latch closes that race: once turn_start fires, host delivery is
-  // blocked until agent_end, regardless of the instantaneous SDK getter.
+  // `isIdle()` can briefly be stale around a turn boundary, and pi itself
+  // still finalizes work between `agent_end` and the fully-settled state. The
+  // explicit lifecycle latch closes that race: from `turn_start` until
+  // `agent_settled` the gate refuses every host send, regardless of the
+  // instantaneous SDK getter.
   let turnActive = false;
+  let hostSettled = true;
   const settledListeners: Array<() => void> = [];
   const unsubscribeLifecycle: Array<() => void> = [];
 
@@ -67,7 +72,7 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     // A replaced runner's context getters throw. Treat an unreadable context as
     // busy so the gate only ever defers or disposes, never crashes.
     try {
-      if (turnActive) return false;
+      if (turnActive || !hostSettled) return false;
       return typeof ctx.isIdle === "function" && typeof ctx.hasPendingMessages === "function"
         ? ctx.isIdle() && !ctx.hasPendingMessages() && ctx.signal === undefined
         : true;
@@ -115,9 +120,16 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
 
   const onTurnStart = (): void => {
     turnActive = true;
+    hostSettled = false;
   };
   const onAgentEnd = (): void => {
     turnActive = false;
+    retryStep = 0;
+    scheduleFlush();
+  };
+  const onAgentSettled = (): void => {
+    turnActive = false;
+    hostSettled = true;
     retryStep = 0;
     scheduleFlush();
     for (const listener of settledListeners) {
@@ -131,8 +143,10 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
   };
   const turnStartUnsubscribe = pi.on("turn_start", onTurnStart) as unknown as (() => void) | undefined;
   const agentEndUnsubscribe = pi.on("agent_end", onAgentEnd) as unknown as (() => void) | undefined;
+  const agentSettledUnsubscribe = pi.on("agent_settled", onAgentSettled) as unknown as (() => void) | undefined;
   if (typeof turnStartUnsubscribe === "function") unsubscribeLifecycle.push(turnStartUnsubscribe);
   if (typeof agentEndUnsubscribe === "function") unsubscribeLifecycle.push(agentEndUnsubscribe);
+  if (typeof agentSettledUnsubscribe === "function") unsubscribeLifecycle.push(agentSettledUnsubscribe);
 
   return {
     send(content: string, deliverAs: HostDeliverAs = "steer"): void {
@@ -157,6 +171,7 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     dispose(): void {
       disposed = true;
       turnActive = false;
+      hostSettled = false;
       settledListeners.length = 0;
       for (const unsubscribe of unsubscribeLifecycle.splice(0)) unsubscribe();
       queue.length = 0;
