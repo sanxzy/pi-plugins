@@ -7,6 +7,7 @@
  * persisted DM pairing flow and never enter the parent session until approved.
  */
 
+import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   readChannelConfig,
   writeChannelConfig,
@@ -50,6 +51,11 @@ interface TelegramRawMessage {
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function extractUpdateId(context: unknown): unknown {
+  const raw = context as TelegramRawMessageContext;
+  return raw?.update_id ?? raw?.update?.update_id;
 }
 
 function isNumericId(value: unknown): value is number | string {
@@ -275,8 +281,12 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     if (busy || delivering || queue.length === 0) return;
     const item = queue.shift()!;
     delivering = true;
-    Promise.resolve()
-      .then(() => options.onAccepted(item.updateId, item.chatId, item.text, item.messageId))
+    void processWithLog({
+      operation: CHANNEL_OPERATIONS.INBOUND_DRAIN,
+      parameters: { updateId: item.updateId, chatId: item.chatId },
+    }, async () => {
+      await options.onAccepted(item.updateId, item.chatId, item.text, item.messageId);
+    })
       .then(() => deliverySettled(item, true))
       .catch((error: unknown) => {
         deliverySettled(item, false);
@@ -286,28 +296,33 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
 
   return {
     async handle(context: unknown): Promise<void> {
-      const update = decodeAcceptedText(context);
-      if (update === undefined) return;
-      const config = refreshConfig();
-      if (!approvedUserIds.has(update.fromId)) {
-        await handleUnauthorized(context, update, config);
-        return;
-      }
-      // An update at or below the last durably persisted id is a replay. A
-      // failed delivery never advances the durable cursor, so re-arrivals of
-      // the same id remain eligible for retry rather than being treated as a
-      // delivered replay.
-      if (update.updateId < lastUpdateId || (update.updateId === lastUpdateId && !failed.has(update.updateId))) return;
-      if (failed.has(update.updateId)) {
-        // The failed item is already at the head of the queue; a re-arrival
-        // retries it without enqueueing a duplicate payload.
+      return processWithLog({
+        operation: CHANNEL_OPERATIONS.INBOUND_HANDLE,
+        parameters: { updateId: extractUpdateId(context) },
+      }, async () => {
+        const update = decodeAcceptedText(context);
+        if (update === undefined) return;
+        const config = refreshConfig();
+        if (!approvedUserIds.has(update.fromId)) {
+          await handleUnauthorized(context, update, config);
+          return;
+        }
+        // An update at or below the last durably persisted id is a replay. A
+        // failed delivery never advances the durable cursor, so re-arrivals of
+        // the same id remain eligible for retry rather than being treated as a
+        // delivered replay.
+        if (update.updateId < lastUpdateId || (update.updateId === lastUpdateId && !failed.has(update.updateId))) return;
+        if (failed.has(update.updateId)) {
+          // The failed item is already at the head of the queue; a re-arrival
+          // retries it without enqueueing a duplicate payload.
+          attemptDrain();
+          return;
+        }
+        if (seen.has(update.updateId)) return;
+        seen.add(update.updateId);
+        queue.push({ updateId: update.updateId, chatId: update.chatId, text: update.text, messageId: update.messageId });
         attemptDrain();
-        return;
-      }
-      if (seen.has(update.updateId)) return;
-      seen.add(update.updateId);
-      queue.push({ updateId: update.updateId, chatId: update.chatId, text: update.text, messageId: update.messageId });
-      attemptDrain();
+      });
     },
 
     setApprovedUserIds(userIds: readonly string[]): void {

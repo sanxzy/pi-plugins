@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CHANNEL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
 process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-channel-test-home-"));
 import {
@@ -124,6 +125,29 @@ function makeListener(approved: string[], onAccepted: (id: number, chat: string,
   });
   return { listener, accepted, errors };
 }
+
+test("inbound handle and drain emit correlated boundary records", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-code-inbound-log-"));
+  const logger = createSessionLogger({
+    projectId: "project",
+    rootSessionId: "root-session",
+    eventsPath: join(dir, "events.jsonl"),
+    errorsPath: join(dir, "errors.jsonl"),
+  });
+  const { listener } = makeListener(["111"]);
+  await runWithLogContext(logger, () => listener.handle(privateText(1, "111", "logged")));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const records = readFileSync(join(dir, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.deepEqual(
+    records.filter((record) => record.operation === CHANNEL_OPERATIONS.INBOUND_HANDLE.toLowerCase()).map((record) => record.phase),
+    ["before", "after"],
+  );
+  assert.deepEqual(
+    records.filter((record) => record.operation === CHANNEL_OPERATIONS.INBOUND_DRAIN.toLowerCase()).map((record) => record.phase),
+    ["before", "after"],
+  );
+  listener.stop();
+});
 
 test("inbound only delivers authorized private text and dedupes update ids", async () => {
   const { listener, accepted } = makeListener(["111"]);
