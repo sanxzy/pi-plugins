@@ -299,15 +299,13 @@ async function startAgentInner(
   pool.launchingJobs.set(job.jobId, launch);
   void launch.then(
     () => pool.launchingJobs.delete(job.jobId),
-    (error: unknown) => {
+    () => {
       pool.launchingJobs.delete(job.jobId);
-      const message = error instanceof Error ? error.message : String(error);
       try {
         pool.registry.updateJob(job.jobId, { status: "failed" });
       } catch {
         // The registry may already be terminal; the job stays visible either way.
       }
-      void message;
     },
   );
 
