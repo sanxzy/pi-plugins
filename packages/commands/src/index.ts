@@ -1,4 +1,5 @@
 export { registerSessionEvents } from "./registrations/session-events.ts";
+export { registerSystemPrompt } from "./registrations/system-prompt.ts";
 export {
   clearSessionReload,
   markSessionReload,

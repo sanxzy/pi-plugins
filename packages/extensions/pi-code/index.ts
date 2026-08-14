@@ -15,6 +15,7 @@ import {
 } from "@xzy-ai/tools";
 import {
   registerSessionEvents,
+  registerSystemPrompt,
   registerLifecycleGates,
   registerTelegramSetup,
   registerReferencesSetup,
@@ -81,6 +82,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerAgentFooter(pi);
   registerTelegramChatTool(pi);
   registerSessionEvents(pi);
+  registerSystemPrompt(pi);
   registerLifecycleGates(pi);
   registerGoalCommand(pi);
 }
