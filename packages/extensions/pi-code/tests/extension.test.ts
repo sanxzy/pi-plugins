@@ -204,6 +204,6 @@ test("extension re-exports QuestionDetails", () => {
   };
   // The re-export is a type-only surface; exercising it through a value keeps
   // the shape contract in sync with the source package.
-  assert.equal(extensionName, "pi-code");
+  assert.equal(extensionName, "pi-c2");
   assert.equal(details.options.length, 2);
 });
