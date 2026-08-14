@@ -17,7 +17,7 @@ import { createHostMessageGate } from "../src/registrations/safe-host-delivery.t
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-session-events-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-session-events-"));
 }
 
 function context(cwd: string, sessionId: string): ExtensionContext {

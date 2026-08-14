@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import piCodeExtension, {
+import piC2Extension, {
   extensionName,
   type QuestionDetails,
   type WebFetchDetails,
@@ -17,7 +17,7 @@ import piCodeExtension, {
  * registration stays main-agent-only (nothing is registered for child
  * sessions), and the extension re-exports `QuestionDetails`.
  */
-test("pi-code extension registers Telegram setup and goal workflow alongside existing tools", () => {
+test("pi-c2 extension registers Telegram setup and goal workflow alongside existing tools", () => {
   const names: string[] = [];
   const commands: string[] = [];
   const events: string[] = [];
@@ -38,7 +38,7 @@ test("pi-code extension registers Telegram setup and goal workflow alongside exi
     },
     sendUserMessage() {},
   } as unknown as ExtensionAPI;
-  piCodeExtension(pi);
+  piC2Extension(pi);
   assert.ok(names.includes("question"), "question tool registered");
   assert.ok(names.includes("agent"), "agent tool registered");
   assert.ok(names.includes("agent_status"), "agent_status tool registered");
@@ -82,10 +82,10 @@ test("question registration is main-agent-only (no child tool registrations)", (
     },
     sendUserMessage() {},
   } as unknown as ExtensionAPI;
-  piCodeExtension(pi);
+  piC2Extension(pi);
   // Child sessions receive only the built-in allowlist; the extension never
   // registers anything scoped to child sessions, so the question tool (like the
-  // other pi-code tools) is structurally main-agent-only.
+  // other pi-c2 tools) is structurally main-agent-only.
   assert.deepEqual(names, [
     "mcp_resources_list",
     "mcp_resources_read",
@@ -128,7 +128,7 @@ test("parent startup activates the registered tools including web_search and web
     },
     sendUserMessage() {},
   } as unknown as ExtensionAPI;
-  piCodeExtension(pi);
+  piC2Extension(pi);
   assert.ok(sessionStarts.length > 0, "session_start handler registered");
   const ctx = {
     mode: "tui",
@@ -165,7 +165,7 @@ test("research tool descriptions direct local-first lookup and automatic fallbac
     },
     sendUserMessage() {},
   } as unknown as ExtensionAPI;
-  piCodeExtension(pi);
+  piC2Extension(pi);
   const wiki = descriptions.get("knowledge_search") ?? "";
   const search = descriptions.get("web_search") ?? "";
   const fetch = descriptions.get("web_fetch") ?? "";

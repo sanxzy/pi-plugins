@@ -83,9 +83,9 @@ test("agent schema removes the redundant background parameter", () => {
 });
 
 test("concurrent resumes of the same terminal job launch exactly one child", async () => {
-  const previousHome = process.env.PI_CODE_TEST_HOME;
-  process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-resume-lease-home-"));
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-resume-lease-"));
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-resume-lease-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-resume-lease-"));
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(
     join(cwd, ".pi", "agents", "test-agent.md"),
@@ -166,8 +166,8 @@ test("concurrent resumes of the same terminal job launch exactly one child", asy
     release.resolve();
     spawnChildSession.__createChild = previousFactory;
     rmSync(cwd, { recursive: true, force: true });
-    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
-    else process.env.PI_CODE_TEST_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
   }
 });
 
@@ -179,7 +179,7 @@ test("root background spawns remain TUI-only", async () => {
     },
   } as unknown as ExtensionAPI);
   assert.ok(registered);
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-background-mode-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-background-mode-"));
   try {
     const result = await registered.execute(
       "call",
@@ -203,9 +203,9 @@ test("a running child agent awaits a descendant in print mode", async () => {
     },
   } as unknown as ExtensionAPI);
   assert.ok(detailed);
-  const previousHome = process.env.PI_CODE_TEST_HOME;
-  process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-child-recurse-home-"));
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-child-recurse-"));
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-child-recurse-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-child-recurse-"));
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(
     join(cwd, ".pi", "agents", "test-agent.md"),
@@ -247,15 +247,15 @@ test("a running child agent awaits a descendant in print mode", async () => {
   } finally {
     spawnChildSession.__createChild = previousFactory;
     rmSync(cwd, { recursive: true, force: true });
-    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
-    else process.env.PI_CODE_TEST_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
   }
 });
 
 test("a root background agent stays queued until running with a live handle", async () => {
-  const previousHome = process.env.PI_CODE_TEST_HOME;
-  process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-background-gate-home-"));
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-background-gate-"));
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-background-gate-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-background-gate-"));
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(
     join(cwd, ".pi", "agents", "test-agent.md"),
@@ -367,8 +367,8 @@ test("a root background agent stays queued until running with a live handle", as
     await Promise.allSettled(holdRuns);
     await flush();
     rmSync(cwd, { recursive: true, force: true });
-    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
-    else process.env.PI_CODE_TEST_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
   }
 });
 
@@ -379,9 +379,9 @@ test("a root background agent stays queued until running with a live handle", as
  * stack because registry lookups and lifecycle writes reloaded every log.
  */
 test("one root agent call performs at most one authoritative registry load", async () => {
-  const previousHome = process.env.PI_CODE_TEST_HOME;
-  process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-spawn-load-home-"));
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-spawn-load-"));
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-spawn-load-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-spawn-load-"));
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(
     join(cwd, ".pi", "agents", "test-agent.md"),
@@ -446,7 +446,7 @@ test("one root agent call performs at most one authoritative registry load", asy
   } as unknown as ExtensionAPI;
   registerAgentTool(pi);
 
-  const logRoot = mkdtempSync(join(tmpdir(), "pi-code-spawn-load-log-"));
+  const logRoot = mkdtempSync(join(tmpdir(), "pi-c2-spawn-load-log-"));
   const logger = createSessionLogger({
     projectId: "project",
     rootSessionId: "root-session",
@@ -481,7 +481,7 @@ test("one root agent call performs at most one authoritative registry load", asy
     spawnChildSession.__createChild = previousFactory;
     rmSync(cwd, { recursive: true, force: true });
     rmSync(logRoot, { recursive: true, force: true });
-    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
-    else process.env.PI_CODE_TEST_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
   }
 });

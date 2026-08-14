@@ -277,7 +277,7 @@ test("session scope accepts a rehydrated descendant when its parent chain is pre
 });
 
 test("prepareResumeSessionFile trims a trailing tool call in the same file", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-control-"));
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-control-"));
   const source = join(dir, "original.jsonl");
   const header = { type: "session", version: 3, id: "original-job", timestamp: "t", cwd: dir };
   const assistant = {
@@ -310,7 +310,7 @@ test("prepareResumeSessionFile trims a trailing tool call in the same file", () 
 });
 
 test("prepareResumeSessionFile drops a trailing assistant message whose content empties", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-control-"));
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-control-"));
   const source = join(dir, "original.jsonl");
   const header = { type: "session", version: 3, id: "original-job", timestamp: "t", cwd: dir };
   const assistant = {
@@ -333,7 +333,7 @@ test("prepareResumeSessionFile drops a trailing assistant message whose content 
 });
 
 test("prepareResumeSessionFile preserves a normal completed transcript unchanged", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-control-"));
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-control-"));
   const source = join(dir, "original.jsonl");
   const header = { type: "session", version: 3, id: "original-job", timestamp: "t", cwd: dir };
   const assistant = {

@@ -12,12 +12,12 @@ function temp(prefix: string): string {
 }
 
 test("list-change notification refreshes the live manager catalog and removes stale entries", async () => {
-  const root = temp("pi-code-mcp-refresh-");
+  const root = temp("pi-c2-mcp-refresh-");
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
   const stateFile = join(root, "state.json");
   const notifyFile = join(root, "notify");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   mkdirSync(projectRoot, { recursive: true });
   writeFileSync(stateFile, JSON.stringify({ prompts: ["old_prompt"], resources: ["file:///old"] }));
   writeFileSync(notifyFile, "0");
@@ -51,12 +51,12 @@ test("list-change notification refreshes the live manager catalog and removes st
 });
 
 test("manager prompt and resource calls preserve an already-aborted signal", async () => {
-  const root = temp("pi-code-mcp-refresh-abort-");
+  const root = temp("pi-c2-mcp-refresh-abort-");
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
   const stateFile = join(root, "state.json");
   const notifyFile = join(root, "notify");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   mkdirSync(projectRoot, { recursive: true });
   writeFileSync(stateFile, JSON.stringify({ prompts: ["p"], resources: ["file:///r"] }));
   writeFileSync(notifyFile, "0");

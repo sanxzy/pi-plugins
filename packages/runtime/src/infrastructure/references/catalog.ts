@@ -13,7 +13,7 @@ import {
   type ReferenceSource,
 } from "@xzy-ai/core";
 
-export const REFERENCES_DIRECTORY = "pi-code";
+export const REFERENCES_DIRECTORY = "pi-c2";
 export const REFERENCES_FILE_NAME = "references.json";
 export const REFERENCES_REPOS_DIRECTORY = "repos";
 export const REFERENCES_FILE_MODE = 0o644;

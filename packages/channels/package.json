@@ -1,7 +1,7 @@
 {
   "name": "@xzy-ai/channels",
   "version": "0.1.0",
-  "description": "pi-code channel integrations, project state, ownership, and delivery adapters",
+  "description": "pi-c2 channel integrations, project state, ownership, and delivery adapters",
   "type": "module",
   "main": "./src/index.ts",
   "private": true,

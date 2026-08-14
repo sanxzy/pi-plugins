@@ -11,7 +11,7 @@ function tempAgentDir(prefix: string): string {
 }
 
 test("auth store mutations emit boundary records without leaking tokens", () => {
-  const agentDir = tempAgentDir("pi-code-mcp-auth-log-");
+  const agentDir = tempAgentDir("pi-c2-mcp-auth-log-");
   const logDir = join(agentDir, "logs");
   const logger = createSessionLogger({
     projectId: "project",
@@ -37,7 +37,7 @@ test("auth store mutations emit boundary records without leaking tokens", () => 
 });
 
 test("auth store persists entries atomically with owner-only mode", async () => {
-  const agentDir = tempAgentDir("pi-code-mcp-auth-agent-");
+  const agentDir = tempAgentDir("pi-c2-mcp-auth-agent-");
   const store = createAuthStore(authStorePath(agentDir));
   store.update("https://server.example/mcp", (prior) => ({
     ...prior,
@@ -52,7 +52,7 @@ test("auth store persists entries atomically with owner-only mode", async () => 
 });
 
 test("credentials are scoped to the exact server URL", async () => {
-  const agentDir = tempAgentDir("pi-code-mcp-auth-url-");
+  const agentDir = tempAgentDir("pi-c2-mcp-auth-url-");
   const store = createAuthStore(authStorePath(agentDir));
   store.set("https://one.example/mcp", { serverUrl: "https://one.example/mcp", tokens: { accessToken: "a" } });
   store.set("https://two.example/mcp", { serverUrl: "https://two.example/mcp", tokens: { accessToken: "b" } });
@@ -63,7 +63,7 @@ test("credentials are scoped to the exact server URL", async () => {
 });
 
 test("store tolerates and discards corrupt entries", async () => {
-  const agentDir = tempAgentDir("pi-code-mcp-auth-corrupt-");
+  const agentDir = tempAgentDir("pi-c2-mcp-auth-corrupt-");
   const path = authStorePath(agentDir);
   const { mkdirSync } = await import("node:fs");
   mkdirSync(join(agentDir), { recursive: true });
@@ -76,7 +76,7 @@ test("store tolerates and discards corrupt entries", async () => {
 });
 
 test("remove deletes only the targeted URL entry", async () => {
-  const agentDir = tempAgentDir("pi-code-mcp-auth-remove-");
+  const agentDir = tempAgentDir("pi-c2-mcp-auth-remove-");
   const store = createAuthStore(authStorePath(agentDir));
   store.set("https://a.example/mcp", { serverUrl: "https://a.example/mcp", tokens: { accessToken: "a" } });
   store.set("https://b.example/mcp", { serverUrl: "https://b.example/mcp", tokens: { accessToken: "b" } });
@@ -87,7 +87,7 @@ test("remove deletes only the targeted URL entry", async () => {
 });
 
 test("atomic rename leaves no temp files behind", async () => {
-  const agentDir = tempAgentDir("pi-code-mcp-auth-tmp-");
+  const agentDir = tempAgentDir("pi-c2-mcp-auth-tmp-");
   const path = authStorePath(agentDir);
   const store = createAuthStore(path);
   for (let i = 0; i < 5; i += 1) store.update(`https://server-${i}.example/mcp`, () => ({ tokens: { accessToken: `t${i}` } }));

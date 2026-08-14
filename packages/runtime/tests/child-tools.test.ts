@@ -154,22 +154,22 @@ test("depth 0 through 3 retain agent-family tools while depth 4 is a terminal le
 });
 
 test("maxAgentDepth falls back to the default when unset or invalid", () => {
-  const previous = process.env.PI_CODE_MAX_AGENT_DEPTH;
+  const previous = process.env.PI_C2_MAX_AGENT_DEPTH;
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  const agentDir = mkdtempSync(join(tmpdir(), "pi-code-depth-default-"));
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-c2-depth-default-"));
   try {
     process.env.PI_CODING_AGENT_DIR = agentDir;
-    delete process.env.PI_CODE_MAX_AGENT_DEPTH;
+    delete process.env.PI_C2_MAX_AGENT_DEPTH;
     const unset = maxAgentDepth();
     assert.equal(unset, 4, "default depth is 4 when unset");
 
     for (const invalid of ["", "0", "-1", "abc", "2.5", "999999999999999999999"]) {
-      process.env.PI_CODE_MAX_AGENT_DEPTH = invalid;
+      process.env.PI_C2_MAX_AGENT_DEPTH = invalid;
       assert.equal(maxAgentDepth(), 4, `invalid value ${JSON.stringify(invalid)} falls back to default`);
     }
   } finally {
-    if (previous === undefined) delete process.env.PI_CODE_MAX_AGENT_DEPTH;
-    else process.env.PI_CODE_MAX_AGENT_DEPTH = previous;
+    if (previous === undefined) delete process.env.PI_C2_MAX_AGENT_DEPTH;
+    else process.env.PI_C2_MAX_AGENT_DEPTH = previous;
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     rmSync(agentDir, { recursive: true, force: true });
@@ -177,9 +177,9 @@ test("maxAgentDepth falls back to the default when unset or invalid", () => {
 });
 
 test("a configured max agent depth shifts the terminal leaf", () => {
-  const previous = process.env.PI_CODE_MAX_AGENT_DEPTH;
+  const previous = process.env.PI_C2_MAX_AGENT_DEPTH;
   try {
-    process.env.PI_CODE_MAX_AGENT_DEPTH = "2";
+    process.env.PI_C2_MAX_AGENT_DEPTH = "2";
     assert.equal(maxAgentDepth(), 2);
 
     // Depth 0–1 still spawn agents; depth 2 is now the terminal leaf.
@@ -194,50 +194,50 @@ test("a configured max agent depth shifts the terminal leaf", () => {
     }
     assert.ok(!leaf.includes("ls"));
   } finally {
-    if (previous === undefined) delete process.env.PI_CODE_MAX_AGENT_DEPTH;
-    else process.env.PI_CODE_MAX_AGENT_DEPTH = previous;
+    if (previous === undefined) delete process.env.PI_C2_MAX_AGENT_DEPTH;
+    else process.env.PI_C2_MAX_AGENT_DEPTH = previous;
   }
 });
 
-test("project and user pi-code config files set the max agent depth with precedence", () => {
-  const previousEnvDepth = process.env.PI_CODE_MAX_AGENT_DEPTH;
+test("project and user pi-c2 config files set the max agent depth with precedence", () => {
+  const previousEnvDepth = process.env.PI_C2_MAX_AGENT_DEPTH;
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  const root = mkdtempSync(join(tmpdir(), "pi-code-depth-config-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-depth-config-"));
   const cwd = join(root, "project");
   const agentDir = join(root, "agent");
   mkdirSync(join(cwd, ".pi"), { recursive: true });
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   try {
-    delete process.env.PI_CODE_MAX_AGENT_DEPTH;
+    delete process.env.PI_C2_MAX_AGENT_DEPTH;
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
     // Default when nothing is configured.
     assert.equal(maxAgentDepth(cwd), 4);
 
     // User-level config is applied.
-    writeFileSync(join(agentDir, "pi-code", "config.json"), JSON.stringify({ maxAgentDepth: 3 }));
+    writeFileSync(join(agentDir, "pi-c2", "config.json"), JSON.stringify({ maxAgentDepth: 3 }));
     assert.equal(maxAgentDepth(cwd), 3, "user config applies");
 
     // Project-level overrides user.
-    writeFileSync(join(cwd, ".pi", "pi-code.json"), JSON.stringify({ maxAgentDepth: 2 }));
+    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: 2 }));
     assert.equal(maxAgentDepth(cwd), 2, "project config overrides user");
 
     // Env overrides both.
-    process.env.PI_CODE_MAX_AGENT_DEPTH = "7";
+    process.env.PI_C2_MAX_AGENT_DEPTH = "7";
     assert.equal(maxAgentDepth(cwd), 7, "env overrides project and user");
 
     // Invalid values in files are ignored (treated as unset).
-    delete process.env.PI_CODE_MAX_AGENT_DEPTH;
-    writeFileSync(join(cwd, ".pi", "pi-code.json"), JSON.stringify({ maxAgentDepth: "2" }));
+    delete process.env.PI_C2_MAX_AGENT_DEPTH;
+    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: "2" }));
     assert.equal(maxAgentDepth(cwd), 3, "invalid project value falls back to user config");
-    writeFileSync(join(cwd, ".pi", "pi-code.json"), JSON.stringify({ maxAgentDepth: 0 }));
+    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: 0 }));
     assert.equal(maxAgentDepth(cwd), 3, "non-positive project value falls back to user config");
-    writeFileSync(join(agentDir, "pi-code", "config.json"), "{ not json");
-    writeFileSync(join(cwd, ".pi", "pi-code.json"), JSON.stringify({ maxAgentDepth: -1 }));
+    writeFileSync(join(agentDir, "pi-c2", "config.json"), "{ not json");
+    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: -1 }));
     assert.equal(maxAgentDepth(cwd), 4, "malformed/invalid sources fall back to the default");
   } finally {
-    if (previousEnvDepth === undefined) delete process.env.PI_CODE_MAX_AGENT_DEPTH;
-    else process.env.PI_CODE_MAX_AGENT_DEPTH = previousEnvDepth;
+    if (previousEnvDepth === undefined) delete process.env.PI_C2_MAX_AGENT_DEPTH;
+    else process.env.PI_C2_MAX_AGENT_DEPTH = previousEnvDepth;
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     rmSync(root, { recursive: true, force: true });

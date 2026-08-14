@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { mkdirSync } from "node:fs";
 
-process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-channel-state-home-"));
+process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-channel-state-home-"));
 import {
   channelConfigFile,
   channelRuntimeFile,
@@ -17,7 +17,7 @@ import {
 } from "../src/index.ts";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-channels-state-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-channels-state-"));
 }
 
 const tokenA = "123456789:ABCDEFGHIJKLMNOPQRSTUVWX";

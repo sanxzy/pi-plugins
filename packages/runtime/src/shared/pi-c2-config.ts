@@ -4,19 +4,19 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_AGENT_DEPTH } from "@xzy-ai/core";
 
 /**
- * pi-code runtime configuration.
+ * pi-c2 runtime configuration.
  *
  * Follows the reference extension-config pattern (pi-messenger): project
  * config overrides the user/extension-level config, env vars override both,
  * and every source falls back to the build-time default. The only supported
  * key today is `maxAgentDepth`:
  *
- * - project:  `<cwd>/.pi/pi-code.json`          `{ "maxAgentDepth": 3 }`
- * - user:     `<agentDir>/pi-code/config.json`  `{ "maxAgentDepth": 3 }`
- * - env:      `PI_CODE_MAX_AGENT_DEPTH=3`
+ * - project:  `<cwd>/.pi/pi-c2.json`          `{ "maxAgentDepth": 3 }`
+ * - user:     `<agentDir>/pi-c2/config.json`  `{ "maxAgentDepth": 3 }`
+ * - env:      `PI_C2_MAX_AGENT_DEPTH=3`
  */
-const USER_CONFIG_RELATIVE = join("pi-code", "config.json");
-const PROJECT_CONFIG_RELATIVE = join(".pi", "pi-code.json");
+const USER_CONFIG_RELATIVE = join("pi-c2", "config.json");
+const PROJECT_CONFIG_RELATIVE = join(".pi", "pi-c2.json");
 
 /** Parse a positive safe integer from a config file's `maxAgentDepth` key. */
 function maxAgentDepthFromFile(configPath: string): number | undefined {
@@ -35,7 +35,7 @@ function maxAgentDepthFromFile(configPath: string): number | undefined {
 
 /** Parse a positive safe integer from the environment. */
 function maxAgentDepthFromEnv(): number | undefined {
-  const raw = process.env.PI_CODE_MAX_AGENT_DEPTH;
+  const raw = process.env.PI_C2_MAX_AGENT_DEPTH;
   if (raw === undefined || raw === "") return undefined;
   const parsed = Number(raw);
   if (!Number.isSafeInteger(parsed) || parsed < 1) return undefined;
@@ -45,8 +45,8 @@ function maxAgentDepthFromEnv(): number | undefined {
 /**
  * Resolve the configured maximum recursive agent depth.
  *
- * Precedence: `PI_CODE_MAX_AGENT_DEPTH` env > project `.pi/pi-code.json` >
- * user `<agentDir>/pi-code/config.json` > `DEFAULT_MAX_AGENT_DEPTH`. Reads are
+ * Precedence: `PI_C2_MAX_AGENT_DEPTH` env > project `.pi/pi-c2.json` >
+ * user `<agentDir>/pi-c2/config.json` > `DEFAULT_MAX_AGENT_DEPTH`. Reads are
  * lazy so a reloaded extension picks up a changed value without a restart.
  * Invalid values are ignored (treated as unset), never fatal.
  *

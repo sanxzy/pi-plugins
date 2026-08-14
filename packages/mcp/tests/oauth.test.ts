@@ -20,7 +20,7 @@ function providerFor(agentDir: string, url: string, redirectUri?: string): PiOAu
 }
 
 test("stored credentials are URL-scoped and reusable across provider instances", async () => {
-  const agentDir = tempAgent("pi-code-mcp-oauth-scope-");
+  const agentDir = tempAgent("pi-c2-mcp-oauth-scope-");
   const store = createDefaultAuthStore(agentDir);
   store.update("https://one.example/mcp", () => ({
     tokens: { accessToken: "token-a" },
@@ -33,7 +33,7 @@ test("stored credentials are URL-scoped and reusable across provider instances",
 });
 
 test("pending tokens commit only after success and never replace working credentials on failure", async () => {
-  const agentDir = tempAgent("pi-code-mcp-oauth-commit-");
+  const agentDir = tempAgent("pi-c2-mcp-oauth-commit-");
   const provider = providerFor(agentDir, "https://one.example/mcp");
   await provider.saveTokens({ access_token: "new-token", token_type: "Bearer" });
   // Before commit the store is untouched.
@@ -53,7 +53,7 @@ test("pending tokens commit only after success and never replace working credent
 });
 
 test("invalidate all preserves committed tokens during failed reauthentication", async () => {
-  const agentDir = tempAgent("pi-code-mcp-oauth-invalidate-");
+  const agentDir = tempAgent("pi-c2-mcp-oauth-invalidate-");
   const url = "https://one.example/mcp";
   const store = createDefaultAuthStore(agentDir);
   store.update(url, () => ({ tokens: { accessToken: "working-token", refreshToken: "working-refresh" } }));
@@ -65,7 +65,7 @@ test("invalidate all preserves committed tokens during failed reauthentication",
 });
 
 test("auth store is only written for the exact server URL", async () => {
-  const agentDir = tempAgent("pi-code-mcp-oauth-url-");
+  const agentDir = tempAgent("pi-c2-mcp-oauth-url-");
   const provider = providerFor(agentDir, "https://one.example/mcp");
   await provider.saveCodeVerifier("verifier-1");
   const store = createDefaultAuthStore(agentDir);
@@ -144,11 +144,11 @@ test("stopping the callback server rejects still-pending flows", async () => {
 });
 
 test("provider client metadata carries Pi identity and configured OAuth settings", async () => {
-  const agentDir = tempAgent("pi-code-mcp-oauth-meta-");
+  const agentDir = tempAgent("pi-c2-mcp-oauth-meta-");
   const provider = providerFor(agentDir, "https://one.example/mcp");
   const metadata = provider.clientMetadata;
   assert.deepEqual(metadata.redirect_uris, ["http://127.0.0.1:19876/mcp/oauth/callback"]);
-  assert.equal(metadata.client_name, "pi-code");
+  assert.equal(metadata.client_name, "pi-c2");
   const secured = new PiOAuthProvider({
     serverUrl: "https://one.example/mcp",
     agentDir,
@@ -176,7 +176,7 @@ test("owner-scoped OAuth callbacks do not cancel a simultaneous session flow", a
 });
 
 test("cancelOAuthCallback rejects an in-flight callback promise", async () => {
-  const agentDir = tempAgent("pi-code-mcp-oauth-cancel-");
+  const agentDir = tempAgent("pi-c2-mcp-oauth-cancel-");
   const { port, path } = await ensureCallbackServer("http://127.0.0.1:0/mcp/oauth/callback");
   const pending = waitForOAuthCallback("state-cancel", "https://server.example/mcp");
   await cancelOAuthCallback("https://server.example/mcp");

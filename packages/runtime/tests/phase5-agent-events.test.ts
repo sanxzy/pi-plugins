@@ -20,12 +20,12 @@ import { makeJobId } from "@xzy-ai/tools";
 import { registerSessionEvents } from "../../commands/src/registrations/session-events.ts";
 
 function project(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-phase5-project-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-phase5-project-"));
 }
 
 function setupHome(): string {
-  const home = mkdtempSync(join(tmpdir(), "pi-code-phase5-home-"));
-  process.env.PI_CODE_TEST_HOME = home;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-phase5-home-"));
+  process.env.PI_C2_TEST_HOME = home;
   return home;
 }
 

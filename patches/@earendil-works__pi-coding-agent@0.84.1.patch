@@ -72,9 +72,9 @@ index 8cdfbdec42f696b8cd6b762a92180a81ec142433..0ff5ec7eb0ce6e7c32b0dc516780c979
  export interface NewSessionOptions {
      id?: string;
      parentSession?: string;
-+    /** pi-code patch: fixed filename for the session transcript (e.g. "transcript.jsonl"). */
++    /** pi-c2 patch: fixed filename for the session transcript (e.g. "transcript.jsonl"). */
 +    sessionFilename?: string;
-+    /** pi-code patch: private storage boundary whose existing ancestors are repaired to 0700. */
++    /** pi-c2 patch: private storage boundary whose existing ancestors are repaired to 0700. */
 +    privateRoot?: string;
  }
  export interface SessionEntryBase {
@@ -98,7 +98,7 @@ index e69e4d7f2dadbd68982feddfae45432fa197a286..d4b8cda9b2eed38d7f2caf2a60130085
  import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage, } from "./messages.js";
  export const CURRENT_SESSION_VERSION = 3;
 +
-+/** pi-code patch: enforce owner-only modes on the session directory and file. */
++/** pi-c2 patch: enforce owner-only modes on the session directory and file. */
 +function ensurePrivateSessionDir(dir, boundary) {
 +    if (!dir) return;
 +    mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -153,7 +153,7 @@ index e69e4d7f2dadbd68982feddfae45432fa197a286..d4b8cda9b2eed38d7f2caf2a60130085
          }
          return this.sessionFile;
      }
-+    /** pi-code patch: prefer a caller-fixed sessionFilename, else the stock timestamped name. */
++    /** pi-c2 patch: prefer a caller-fixed sessionFilename, else the stock timestamped name. */
 +    _resolveSessionFilename(options) {
 +        const explicit = options?.sessionFilename;
 +        if (typeof explicit === "string" && explicit.length > 0) return explicit;

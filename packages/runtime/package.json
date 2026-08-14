@@ -1,7 +1,7 @@
 {
   "name": "@xzy-ai/runtime",
   "version": "0.1.0",
-  "description": "pi-code runtime: persistent jobs, child-session adapters, pools, delivery, and concurrency",
+  "description": "pi-c2 runtime: persistent jobs, child-session adapters, pools, delivery, and concurrency",
   "type": "module",
   "main": "./src/index.ts",
   "private": true,

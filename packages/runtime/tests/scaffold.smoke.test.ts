@@ -38,7 +38,7 @@ test("child pool slot is namespaced by project root", () => {
 test("getChildPool upgrades a stale singleton left by an older extension runtime", () => {
   const root = "/tmp/projects/reload-upgrade";
   const first = getChildPool(root, "root-a");
-  const stored = globalThis.piCodePool?.[`pi-code:${root}`];
+  const stored = globalThis.piC2Pool?.[`pi-c2:${root}`];
   assert.ok(stored);
   // Simulate the pool created by a previous extension runtime (pre-merge):
   // the singleton keeps its durable registry, live children, and gate, but
@@ -86,7 +86,7 @@ test("getChildPool replaces a stale registry that cannot refresh", () => {
     liveChildren: new Map(),
     resetParallelAgents() {},
   };
-  globalThis.piCodePool[`pi-code:${root}`] = stale as never;
+  globalThis.piC2Pool[`pi-c2:${root}`] = stale as never;
   const upgraded = getChildPool(root, "root-a");
   assert.equal(upgraded, stale, "the singleton identity survives the upgrade");
   const registry = upgraded.registry as unknown as { refresh?: unknown; all: () => Map<string, unknown> };

@@ -8,7 +8,7 @@ import { GOAL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai
 import { createGoalPool, getGoalPool, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-goal-scheduler-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-goal-scheduler-"));
 }
 
 function binding(overrides: Partial<GoalDeliveryBinding> = {}): GoalDeliveryBinding {

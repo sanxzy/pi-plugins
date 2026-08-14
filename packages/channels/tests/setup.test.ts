@@ -13,7 +13,7 @@ import {
 } from "../src/index.ts";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-channels-setup-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-channels-setup-"));
 }
 
 const VALID = "123456789:ABCDEFGHIJKLMNOPQRSTUVWX";

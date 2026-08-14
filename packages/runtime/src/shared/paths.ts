@@ -5,8 +5,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { TextDecoder } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
-/** Home-scoped pi-code storage names. */
-export const RUNTIME_DIR_NAME = "pi-code";
+/** Home-scoped pi-c2 storage names. */
+export const RUNTIME_DIR_NAME = "pi-c2";
 export const PROJECTS_DIR_NAME = "projects";
 export const SESSIONS_DIR_NAME = "sessions";
 export const AGENTS_DIR_NAME = "agents";
@@ -125,13 +125,13 @@ function resolveHome(value: string): string {
   return resolve(value);
 }
 
-/** The configured pi-code home base, or the Pi agent home directory default. */
+/** The configured pi-c2 home base, or the Pi agent home directory default. */
 export function homeRootBase(): string {
-  // Production reads only `PI_CODE_HOME` (or the Pi agent home directory
-  // default). Test runs set `PI_CODE_TEST_HOME`; the test-setup harness
-  // mirrors it into `PI_CODE_HOME` so this resolver never needs to know the
+  // Production reads only `PI_C2_HOME` (or the Pi agent home directory
+  // default). Test runs set `PI_C2_TEST_HOME`; the test-setup harness
+  // mirrors it into `PI_C2_HOME` so this resolver never needs to know the
   // test-only name.
-  const configured = process.env.PI_CODE_HOME;
+  const configured = process.env.PI_C2_HOME;
   const base = configured && configured.length > 0 ? resolveHome(configured) : homeAgentDirectory();
   return canonicalProjectRoot(base);
 }

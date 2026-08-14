@@ -33,7 +33,7 @@ import {
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-telegram-inbound-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-telegram-inbound-"));
 }
 
 function writeConfig(cwd: string): void {
@@ -280,7 +280,7 @@ test("choice callback processing emits a correlated telemetry boundary", async (
   });
   const callback = getTelegramCallbackQueryHandlerFactory(cwd)?.({ token: "x", approvedUserIds: ["111"] });
   assert.ok(callback);
-  const logDir = mkdtempSync(join(tmpdir(), "pi-code-choice-log-"));
+  const logDir = mkdtempSync(join(tmpdir(), "pi-c2-choice-log-"));
   const logger = createSessionLogger({
     projectId: "project",
     rootSessionId: "root-a",
@@ -446,7 +446,7 @@ test("agent_start acknowledgements are deduplicated for one agent run", async ()
 test("fire-and-forget reaction acknowledgement has its own telemetry boundary (H9)", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);
-  const logDir = mkdtempSync(join(tmpdir(), "pi-code-reaction-log-"));
+  const logDir = mkdtempSync(join(tmpdir(), "pi-c2-reaction-log-"));
   const logger = createSessionLogger({ projectId: "project", rootSessionId: "root-a", eventsPath: join(logDir, "events.jsonl"), errorsPath: join(logDir, "errors.jsonl") });
   const { pi, handlers } = registrations();
   registerTelegramInbound(pi, { reactTelegramMessage: async () => undefined });

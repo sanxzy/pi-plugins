@@ -16,8 +16,8 @@ import {
 
 const PRIVATE_DIR = 0o700;
 const PRIVATE_FILE = 0o600;
-const testHome = mkdtempSync(join(tmpdir(), "pi-code-phase2-home-"));
-process.env.PI_CODE_TEST_HOME = testHome;
+const testHome = mkdtempSync(join(tmpdir(), "pi-c2-phase2-home-"));
+process.env.PI_C2_TEST_HOME = testHome;
 
 function mode(path: string): number {
   return statSync(path).mode & 0o777;
@@ -33,7 +33,7 @@ function flushTranscript(manager: SessionManager): void {
 }
 
 test("production child storage paths use the home project and nested agent layout", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-paths-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-phase2-paths-"));
   const paths = childSessionPaths({
     cwd: root,
     rootSessionId: "root-1",
@@ -48,7 +48,7 @@ test("production child storage paths use the home project and nested agent layou
 });
 
 test("prepareResumeSessionFile trims in place and preserves private permissions", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-resume-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-phase2-resume-"));
   const target = homeAgentTranscriptFile(encodeProjectId(root), "root-1", "resumed-1", ["parent-1"]);
   mkdirSync(dirname(target), { recursive: true, mode: PRIVATE_DIR });
   chmodSync(dirname(target), PRIVATE_DIR);
@@ -63,7 +63,7 @@ test("prepareResumeSessionFile trims in place and preserves private permissions"
 });
 
 test("production child-session manager creates and resumes the home transcript", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-adapter-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-phase2-adapter-"));
   const context = { cwd: root, rootSessionId: "root-1", parentSessionId: "root-1", parentAgentIds: ["parent-1"] };
   const fresh = createChildSessionManager({ ...context, jobId: "fresh-1" });
   flushTranscript(fresh);
@@ -76,11 +76,11 @@ test("production child-session manager creates and resumes the home transcript",
   const resumed = createChildSessionManager({ ...context, jobId: "fresh-1", sessionFile: resumedPath });
   assert.equal(resumed.getSessionFile(), expectedFresh);
   assert.equal(mode(resumed.getSessionFile()!), PRIVATE_FILE);
-  assert.equal(mode(join(testHome, "pi-code")), PRIVATE_DIR);
+  assert.equal(mode(join(testHome, "pi-c2")), PRIVATE_DIR);
 });
 
 test("fresh SDK child session uses deterministic transcript.jsonl with private permissions", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-phase2-"));
   const agentDir = join(root, "agent");
   const manager = SessionManager.create(root, agentDir, { id: "agent-1", parentSession: "root-1", sessionFilename: "transcript.jsonl" });
   flushTranscript(manager);
@@ -93,7 +93,7 @@ test("fresh SDK child session uses deterministic transcript.jsonl with private p
 });
 
 test("reopening and reflushing a child transcript preserves its deterministic path and modes", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-reopen-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-phase2-reopen-"));
   const agentDir = join(root, "agent");
   const first = SessionManager.create(root, agentDir, { id: "agent-2", parentSession: "root-1", sessionFilename: "transcript.jsonl" });
   flushTranscript(first);
@@ -112,7 +112,7 @@ test("reopening and reflushing a child transcript preserves its deterministic pa
 });
 
 test("reopening an existing permissive transcript repairs its directory and file modes", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-repair-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-phase2-repair-"));
   const agentDir = join(root, "agent");
   const first = SessionManager.create(root, agentDir, { id: "agent-3", parentSession: "root-1", sessionFilename: "transcript.jsonl" });
   flushTranscript(first);
@@ -128,7 +128,7 @@ test("reopening an existing permissive transcript repairs its directory and file
 });
 
 test("SDK repairs permissive existing ancestors up to the project boundary", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-ancestors-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-phase2-ancestors-"));
   const paths = childSessionPaths({ cwd: root, rootSessionId: "root-1", jobId: "agent-4" });
   mkdirSync(paths.agentDir, { recursive: true, mode: 0o755 });
   for (let current = paths.agentDir; ; current = dirname(current)) {
@@ -152,7 +152,7 @@ test("SDK repairs permissive existing ancestors up to the project boundary", () 
 });
 
 test("nested agent directories remain private when created through SDK sessions", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-phase2-nested-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-phase2-nested-"));
   const parentDir = join(root, "parent", "agents", "parent-1");
   const childDir = join(parentDir, "agents", "child-1");
   const manager = SessionManager.create(root, childDir, { id: "child-1", parentSession: "parent-1", sessionFilename: "transcript.jsonl" });

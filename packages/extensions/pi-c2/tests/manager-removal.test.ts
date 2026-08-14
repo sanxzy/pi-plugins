@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
-import piCodeExtension from "../index.ts";
+import piC2Extension from "../index.ts";
 
 interface ShortcutRegistration {
   shortcut: string;
@@ -31,7 +31,7 @@ function makePi(shortcuts: ShortcutRegistration[], sessionStarts: SessionStartHa
 test("the composition root no longer registers the Agent Manager shortcut", () => {
   const shortcuts: ShortcutRegistration[] = [];
   const sessionStarts: SessionStartHandler[] = [];
-  piCodeExtension(makePi(shortcuts, sessionStarts));
+  piC2Extension(makePi(shortcuts, sessionStarts));
 
   assert.ok(sessionStarts.length > 0, "remaining lifecycle registrations stay active");
   const context = {

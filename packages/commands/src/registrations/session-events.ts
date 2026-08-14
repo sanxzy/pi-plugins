@@ -12,10 +12,10 @@ import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogCont
 import { currentProcessIdentity, clearAgentDiscoveryCache, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 import { createHostMessageGate, type HostMessageGate } from "./safe-host-delivery.ts";
 
-const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-code:session-reload-markers");
+const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-c2:session-reload-markers");
 type SessionReloadMarkers = Map<string, boolean>;
 
-const HOST_GATES_KEY = Symbol.for("@xzy-ai/pi-code:host-message-gates");
+const HOST_GATES_KEY = Symbol.for("@xzy-ai/pi-c2:host-message-gates");
 type HostGateRegistry = Map<string, HostMessageGate>;
 
 function hostGateRegistry(): HostGateRegistry {

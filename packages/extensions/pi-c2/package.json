@@ -1,5 +1,5 @@
 {
-  "name": "@xzy-ai/pi-code",
+  "name": "@xzy-ai/pi-c2",
   "version": "0.1.0",
   "description": "PI extension: delegate work to isolated in-process subagents through model-callable tools",
   "type": "module",

@@ -42,15 +42,15 @@ import type {
   KnowledgeSearchDetails,
 } from "@xzy-ai/tools";
 
-const extensionName = "pi-code";
+const extensionName = "pi-c2";
 
 /** PI extension entry point. */
-export default function piCodeExtension(pi: ExtensionAPI): void {
+export default function piC2Extension(pi: ExtensionAPI): void {
   // Child sessions create an isolated SDK resource loader. Register this same
   // inline factory process-wide before composing tools so those loaders can
   // construct the agent-family/web registrations; their child allowlists still
   // exclude goal and MCP root-only tools.
-  registerChildExtensionFactory(piCodeExtension);
+  registerChildExtensionFactory(piC2Extension);
 
   // The Telegram bridge dispatches extension commands with explicit expanders
   // (goal) plus prompt/skill files discovered from the Pi command catalog, and

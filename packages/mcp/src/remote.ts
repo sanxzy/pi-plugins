@@ -74,7 +74,7 @@ function authRegistrationError(error: unknown): boolean {
 }
 
 function createClient(projectRoot?: string): Client {
-  const client = new Client({ name: "pi-code", version: "0.1.0" }, { capabilities: { roots: {} } });
+  const client = new Client({ name: "pi-c2", version: "0.1.0" }, { capabilities: { roots: {} } });
   if (projectRoot) {
     client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: [{ uri: pathToFileURL(projectRoot).href }] }));
   }

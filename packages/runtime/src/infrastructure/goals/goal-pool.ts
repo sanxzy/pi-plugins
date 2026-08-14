@@ -302,17 +302,17 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
 
 declare global {
   // eslint-disable-next-line no-var
-  var piCodeGoalPools: Record<string, GoalPool> | undefined;
+  var piC2GoalPools: Record<string, GoalPool> | undefined;
 }
 
-const GOAL_POOL_SLOT_PREFIX = "pi-code-goals:";
+const GOAL_POOL_SLOT_PREFIX = "pi-c2-goals:";
 
 export function getGoalPool(projectRoot: string, rootSessionId = "root"): GoalPool {
   const slot = `${GOAL_POOL_SLOT_PREFIX}${projectRoot}:${rootSessionId}`;
-  const existing = globalThis.piCodeGoalPools?.[slot];
+  const existing = globalThis.piC2GoalPools?.[slot];
   if (existing) return existing;
   const pool = createGoalPool(projectRoot, rootSessionId);
-  globalThis.piCodeGoalPools ??= {};
-  globalThis.piCodeGoalPools[slot] = pool;
+  globalThis.piC2GoalPools ??= {};
+  globalThis.piC2GoalPools[slot] = pool;
   return pool;
 }

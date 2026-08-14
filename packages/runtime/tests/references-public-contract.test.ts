@@ -7,7 +7,7 @@ import * as runtime from "@xzy-ai/runtime";
 import type { ReferenceCatalogEntry, ReferenceMaterializationStatus } from "@xzy-ai/runtime";
 
 function root(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-public-references-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-public-references-"));
 }
 
 test("publishes a stable mixed local and degraded catalog through the runtime boundary", async () => {
@@ -45,7 +45,7 @@ test("publishes a stable mixed local and degraded catalog through the runtime bo
     "Reference 'malformedGit' is unavailable",
     "Reference 'missing' has an unavailable local path",
   ]);
-  assert.equal(existsSync(join(agentDir, "pi-code", "wikis")), false);
+  assert.equal(existsSync(join(agentDir, "pi-c2", "wikis")), false);
 });
 
 test("keeps the public catalog fresh without exposing infrastructure details", async () => {

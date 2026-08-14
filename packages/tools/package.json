@@ -1,7 +1,7 @@
 {
   "name": "@xzy-ai/tools",
   "version": "0.1.0",
-  "description": "pi-code tools: model-callable agent tool registrations, schemas, and host-aware orchestration",
+  "description": "pi-c2 tools: model-callable agent tool registrations, schemas, and host-aware orchestration",
   "type": "module",
   "main": "./src/index.ts",
   "private": true,

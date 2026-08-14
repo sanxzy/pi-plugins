@@ -37,7 +37,7 @@ test("parseTelegramTemplateArgs and substituteTelegramTemplateArgs mirror Pi tem
 });
 
 test("readTelegramExpansionFile strips frontmatter from real template files", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-channels-expansion-"));
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-channels-expansion-"));
   const file = join(dir, "tpl.md");
   writeFileSync(file, "---\ndescription: Fix\n---\nReview $@");
   const targets = discoverTelegramExpansions([{ name: "tpl", source: "prompt", sourceInfo: { path: file } }]);

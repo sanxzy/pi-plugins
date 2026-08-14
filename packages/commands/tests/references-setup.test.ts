@@ -8,7 +8,7 @@ import { registerReferencesSetup } from "../src/registrations/references-setup-c
 import { createReferencesSetupController } from "../src/registrations/references-setup.ts";
 
 test("controller adds a validated local entry through the runtime catalog", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-reference-controller-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-reference-controller-"));
   const docs = join(root, "docs");
   mkdirSync(docs, { recursive: true });
   const saved: unknown[] = [];

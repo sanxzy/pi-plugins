@@ -9,7 +9,7 @@ import { cachePath, parseRepository } from "@xzy-ai/core";
 import { createGitMaterializer } from "../src/infrastructure/references/git-materializer.ts";
 
 function root(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-git-materializer-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-git-materializer-"));
 }
 
 function git(cwd: string, ...args: string[]): string {

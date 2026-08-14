@@ -18,11 +18,11 @@ import { registerGoalTools } from "../../tools/src/registrations/goals.ts";
 type Handler = (event: unknown, ctx: unknown) => unknown;
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-phase6-root-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-phase6-root-"));
 }
 function home(): string {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-phase6-home-"));
-  process.env.PI_CODE_TEST_HOME = dir;
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-phase6-home-"));
+  process.env.PI_C2_TEST_HOME = dir;
   return dir;
 }
 function context(cwd: string, sessionId: string, sessionFile: string | undefined = join(cwd, "sessions", `${sessionId}.jsonl`)): ExtensionContext {

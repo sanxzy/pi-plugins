@@ -55,7 +55,7 @@ function addActiveGoal(cwd: string, prompt = "p", sessionId = "root"): void {
 }
 
 test("session start with a persisted active goal pauses delivery pending confirmation", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd);
     const d = registrations();
@@ -74,7 +74,7 @@ test("session start with a persisted active goal pauses delivery pending confirm
 });
 
 test("/new does not clear the current root session goal or ask to continue it", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd);
     const d = registrations();
@@ -91,7 +91,7 @@ test("/new does not clear the current root session goal or ask to continue it", 
 });
 
 test("session shutdown preserves the persisted goal while stopping delivery", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd);
     const d = registrations();
@@ -106,7 +106,7 @@ test("session shutdown preserves the persisted goal while stopping delivery", as
 });
 
 test("startup does not offer continuation for a goal from another root session", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd, "p", "old-root");
     const confirmed: string[] = [];
@@ -131,7 +131,7 @@ test("startup does not offer continuation for a goal from another root session",
 });
 
 test("startup leaves the prior root session goal untouched", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd, "p", "old-root");
     const d = registrations();
@@ -148,7 +148,7 @@ test("startup leaves the prior root session goal untouched", async () => {
 });
 
 test("startup with no session file does not offer another session's goal", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd, "p", "old-root");
     const d = registrations();
@@ -169,7 +169,7 @@ test("startup with no session file does not offer another session's goal", async
 });
 
  test("resume replacement starts with an empty goal pool for the fresh root", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     const goalPool = getGoalPool(cwd, "old");
     goalPool.setScheduler(() => ({ clear() {} }));
@@ -194,7 +194,7 @@ test("startup with no session file does not offer another session's goal", async
 });
 
 test("no-UI /new does not offer or clear another session's goal", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     const d = registrations();
     const sent: string[] = [];
@@ -222,7 +222,7 @@ test("no-UI /new does not offer or clear another session's goal", async () => {
 });
 
 test("resume replacement pauses delivery and asks continue-or-clear before switching", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd);
     const d = registrations();
@@ -239,7 +239,7 @@ test("resume replacement pauses delivery and asks continue-or-clear before switc
 });
 
 test("quit shutdown clears goal timers and bindings idempotently", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-lifecycle-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd);
     const d = registrations();

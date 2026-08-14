@@ -36,7 +36,7 @@ export interface TelegramControlDispatchOptions {
  * session_start; dispatch reads it, falling back to a freshly created context
  * through the `createCommandContext` seam when the retained one is absent.
  */
-const TELEGRAM_COMMAND_CONTEXTS_KEY = Symbol.for("@xzy-ai/pi-code:telegram-command-contexts");
+const TELEGRAM_COMMAND_CONTEXTS_KEY = Symbol.for("@xzy-ai/pi-c2:telegram-command-contexts");
 
 type TelegramCommandContextRegistry = Map<string, ExtensionCommandContext>;
 
@@ -89,7 +89,7 @@ export function clearTelegramCompactionOrigin(projectRoot: string, sessionId: st
 
 /** True only when the operator explicitly enables development mode. */
 export function isTelegramDevelopmentMode(): boolean {
-  const value = process.env.PI_CODE_DEV;
+  const value = process.env.PI_C2_DEV;
   return value === "1" || value === "true";
 }
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -254,7 +254,7 @@ export async function dispatchTelegramControl(
     case "system_prompt": {
       const isDevMode = options.isDevMode ?? isTelegramDevelopmentMode;
       if (!isDevMode()) {
-        await reply("[/system_prompt] Development mode is disabled. Set PI_CODE_DEV=1 to enable this command.");
+        await reply("[/system_prompt] Development mode is disabled. Set PI_C2_DEV=1 to enable this command.");
         return true;
       }
       await reply(`[Development] Effective system prompt:\n\n${options.context.getSystemPrompt()}`);

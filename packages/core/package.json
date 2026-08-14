@@ -1,7 +1,7 @@
 {
   "name": "@xzy-ai/core",
   "version": "0.1.0",
-  "description": "pi-code core: pure domain models, job lifecycle rules, control rules, and shared constants",
+  "description": "pi-c2 core: pure domain models, job lifecycle rules, control rules, and shared constants",
   "type": "module",
   "main": "./src/index.ts",
   "private": true,

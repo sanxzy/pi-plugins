@@ -26,11 +26,11 @@ import {
   writePrivateJson,
 } from "@xzy-ai/runtime";
 
-const testHome = mkdtempSync(join(tmpdir(), "pi-code-home-root-"));
-process.env.PI_CODE_TEST_HOME = testHome;
+const testHome = mkdtempSync(join(tmpdir(), "pi-c2-home-root-"));
+process.env.PI_C2_TEST_HOME = testHome;
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-home-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-home-"));
 }
 
 function assertDirMode(dir: string, expected: number): void {
@@ -47,7 +47,7 @@ test("project id encoding is reversible for ordinary and tricky roots", () => {
     "/Users/budi/my--project [test]",
     "/a/b-c/d",
     "/Users/budi/My Project",
-    "/tmp/pi-code-\u00e9t\u00e9/foo",
+    "/tmp/pi-c2-\u00e9t\u00e9/foo",
     "/",
     "/tmp/a\\b/c",
   ];
@@ -127,7 +127,7 @@ test("home path helpers derive distinct project paths", () => {
   const idA = encodeProjectId(join(root, "a"));
   const idB = encodeProjectId(join(root, "b"));
   assert.notEqual(homeProjectDir(idA), homeProjectDir(idB));
-  assert.ok(homeRoot().endsWith("pi-code"));
+  assert.ok(homeRoot().endsWith("pi-c2"));
   assert.ok(homeProjectsDir().includes("projects"));
 });
 
@@ -205,15 +205,15 @@ test("corrupt manifest fails closed when read", () => {
 
 test("home agent directory resolves a configured tilde override", () => {
   const previous = process.env.PI_CODING_AGENT_DIR;
-  const previousHome = process.env.PI_CODE_TEST_HOME;
+  const previousHome = process.env.PI_C2_TEST_HOME;
   try {
-    process.env.PI_CODE_TEST_HOME = "~/xzy/home";
+    process.env.PI_C2_TEST_HOME = "~/xzy/home";
     assert.ok(homeRootBase().endsWith(join("xzy", "home")));
     assert.ok(!homeRootBase().includes("~"), "tilde must be expanded, not literal");
   } finally {
     if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previous;
-    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
-    else process.env.PI_CODE_TEST_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
   }
 });

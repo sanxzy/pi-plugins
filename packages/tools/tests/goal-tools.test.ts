@@ -47,7 +47,7 @@ function text(result: { content: Array<{ type: string; text?: string }> }): stri
 }
 
 async function withCwd(run: (cwd: string, registered: Map<string, RegisteredTool>) => Promise<void>): Promise<void> {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-goal-tools-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-tools-"));
   try {
     startRootSession({ projectRoot: cwd, sessionId: "root" });
     await run(cwd, tools());

@@ -27,7 +27,7 @@ const context = {} as ExtensionContext;
 
 /** Redirect the agent directory to a temp tree so saves never touch ~/.pi. */
 function withAgentDir(run: (wikiRoot: string) => Promise<void>): Promise<void> {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-agent-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-agent-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = join(root, "agent");
   return run(join(root, "wikis")).finally(() => {
@@ -176,7 +176,7 @@ test("web_search reports malformed response bodies as tool errors", async () => 
 
 test("web_search returns the no-results fallback for a valid empty response", async () => {
   const tool = captureTool();
-  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
   mkdirSync(root, { recursive: true });
   try {
     await withFetch(
@@ -243,7 +243,7 @@ test("web_search uses the base endpoint when no API key is present", async () =>
 });
 
 test("web_search saves successful research to the query wiki topic", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
   try {
     await withFetch(async () => new Response(payload("exa results"), { status: 200 }), async () => {
       const result = await executeWebSearch(
@@ -259,8 +259,8 @@ test("web_search saves successful research to the query wiki topic", async () =>
         wiki: { saved: true, topic: "effect-typescript", pages: ["effect-typescript.md"] },
       });
       const content = readFileSync(join(root, "effect-typescript.md"), "utf8");
-      assert.ok(content.includes("<!-- pi-code-wiki-entry -->"));
-      assert.ok(content.includes("<!-- pi-code-wiki-entry-end -->"));
+      assert.ok(content.includes("<!-- pi-c2-wiki-entry -->"));
+      assert.ok(content.includes("<!-- pi-c2-wiki-entry-end -->"));
       assert.ok(content.includes("## Web Search: effect typescript"));
       assert.ok(content.includes("timestamp: 2026-01-01T00:00:00.000Z"));
       assert.ok(content.includes("source: web_search"));
@@ -274,7 +274,7 @@ test("web_search saves successful research to the query wiki topic", async () =>
 });
 
 test("web_search does not save whitespace-only result text", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
   mkdirSync(root, { recursive: true });
   try {
     await withFetch(async () => new Response(payload("  \n\t"), { status: 200 }), async () => {
@@ -294,7 +294,7 @@ test("web_search does not save whitespace-only result text", async () => {
 });
 
 test("web_search writes no wiki entry on error and malformed branches", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
   mkdirSync(root, { recursive: true });
   try {
     await withFetch(

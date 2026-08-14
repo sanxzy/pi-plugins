@@ -21,7 +21,7 @@ const context = {} as ExtensionContext;
 
 /** Redirect the agent directory to a temp tree so saves never touch ~/.pi. */
 function withAgentDir(run: (wikiRoot: string) => Promise<void>): Promise<void> {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-agent-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-agent-"));
   const previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = join(root, "agent");
   return run(join(root, "wikis")).finally(() => {
@@ -309,7 +309,7 @@ test("web_fetch returns raster images as a text note plus a base64 image block",
 });
 
 test("web_fetch does not save an empty raster image body", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
   mkdirSync(root, { recursive: true });
   try {
     await withFetch(async () => new Response(new Uint8Array(), { headers: { "content-type": "image/png" } }), async () => {
@@ -347,7 +347,7 @@ test("web_fetch keeps SVG responses as text output", async () => {
 });
 
 test("web_fetch saves text results with URL and content-type metadata", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
   try {
     await withFetch(async () => new Response("# Hello", { headers: { "content-type": "text/markdown" } }), async () => {
       const result = await executeWebFetch(
@@ -369,7 +369,7 @@ test("web_fetch saves text results with URL and content-type metadata", async ()
 });
 
 test("web_fetch does not save empty text bodies or unsupported binary responses", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
   mkdirSync(root, { recursive: true });
   try {
     await withFetch(async (input) => {
@@ -390,7 +390,7 @@ test("web_fetch does not save empty text bodies or unsupported binary responses"
 });
 
 test("web_fetch keeps a successful result when wiki persistence fails", async () => {
-  const blocker = join(tmpdir(), `pi-code-fetch-blocker-${process.pid}-${Date.now()}`);
+  const blocker = join(tmpdir(), `pi-c2-fetch-blocker-${process.pid}-${Date.now()}`);
   writeFileSync(blocker, "occupied");
   try {
     await withFetch(async () => new Response("ok", { headers: { "content-type": "text/plain" } }), async () => {

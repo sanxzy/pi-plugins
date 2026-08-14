@@ -56,7 +56,7 @@ function control(abort: () => Promise<void>): ChildSessionControl {
 }
 
 test("/new confirmation counts only running jobs owned by the active parent session", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-lifecycle-isolation-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-lifecycle-isolation-"));
   try {
     addRunningJob(cwd, "root-a", "a-running");
     addRunningJob(cwd, "root-b", "b-running");
@@ -75,7 +75,7 @@ test("/new confirmation counts only running jobs owned by the active parent sess
 });
 
 test("shutdown interrupts only running jobs rooted at the active parent session", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-lifecycle-isolation-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-lifecycle-isolation-"));
   try {
     addRunningJob(cwd, "root-a", "a-running");
     addRunningJob(cwd, "a-running", "a-grandchild", "a-running");
@@ -100,7 +100,7 @@ test("shutdown interrupts only running jobs rooted at the active parent session"
 });
 
 test("child session shutdown interrupts its recursive descendants without touching the parent or siblings", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-lifecycle-child-shutdown-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-lifecycle-child-shutdown-"));
   try {
     addRunningJob(cwd, "root-a", "a-parent");
     addRunningJob(cwd, "a-parent", "a-grandchild", "a-parent");

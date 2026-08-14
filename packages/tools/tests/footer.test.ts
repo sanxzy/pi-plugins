@@ -118,7 +118,7 @@ test("the footer heartbeat repaints once per second only while a child is runnin
 });
 
 test("the custom footer is installed for TUI sessions and restored on root shutdown", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);
@@ -145,8 +145,8 @@ test("the custom footer is installed for TUI sessions and restored on root shutd
 });
 
 test("non-TUI footer lifecycle is a silent no-op (H9)", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-noop-"));
-  const logDir = mkdtempSync(join(tmpdir(), "pi-code-footer-noop-log-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-noop-"));
+  const logDir = mkdtempSync(join(tmpdir(), "pi-c2-footer-noop-log-"));
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);
@@ -165,7 +165,7 @@ test("non-TUI footer lifecycle is a silent no-op (H9)", () => {
 });
 
 test("the custom footer is never installed for non-TUI sessions", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);
@@ -178,7 +178,7 @@ test("the custom footer is never installed for non-TUI sessions", () => {
 });
 
 test("footer management mode consumes navigation keys and passes others through", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);
@@ -220,7 +220,7 @@ test("footer management mode consumes navigation keys and passes others through"
 });
 
 test("Enter on a running child mounts the live view; cancel aborts, close does not", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);
@@ -284,7 +284,7 @@ test("Enter on a running child mounts the live view; cancel aborts, close does n
 });
 
 test("live transcript events repaint the mounted live view without steering", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);
@@ -337,7 +337,7 @@ test("live transcript events repaint the mounted live view without steering", as
 });
 
 test("the live overlay mount does not delegate height truncation to the host", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);
@@ -372,7 +372,7 @@ test("the live overlay mount does not delegate height truncation to the host", (
 });
 
 test("the footer factory is re-installed after a host UI reset", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-footer-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);

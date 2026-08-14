@@ -68,7 +68,7 @@ function job(jobId: string, parentSessionId: string, status: Job["status"], pare
 }
 
 async function withIsolationPool(run: (cwd: string) => Promise<void>): Promise<void> {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-isolation-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-tools-isolation-"));
   try {
     const pool = getChildPool(cwd, "root-a");
     pool.registry.createJob(job("a-running", "root-a", "running"));
@@ -208,7 +208,7 @@ test("agent_cancel marks an orphaned running job cancelled when no live child or
 });
 
 test("agent rejects an unknown subagent type, including the removed default", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-unknown-agent-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-tools-unknown-agent-"));
   try {
     const tool = register(registerAgentTool);
     const result = await tool.execute(
@@ -270,7 +270,7 @@ test("agent steer output names the targeted subagent type and remains allowed ou
 });
 
 test("a child agent foreground spawn derives parent lineage from the actual caller session", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-nested-agent-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-tools-nested-agent-"));
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(join(cwd, ".pi", "agents", "test-agent.md"), "---\nname: test-agent\ndescription: Test agent\n---\ntest body", "utf8");
   const pool = getChildPool(cwd, "root-a");
@@ -294,8 +294,8 @@ test("a child agent foreground spawn derives parent lineage from the actual call
 });
 
 test("agent resumes a terminal job in place with the same id and transcript", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-tools-resume-agent-"));
-  const sessionFile = join(cwd, ".pi", "pi-code", "sessions", "root-a", "original.jsonl");
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-tools-resume-agent-"));
+  const sessionFile = join(cwd, ".pi", "pi-c2", "sessions", "root-a", "original.jsonl");
   mkdirSync(dirname(sessionFile), { recursive: true });
   mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
   writeFileSync(join(cwd, ".pi", "agents", "test-agent.md"), "---\nname: test-agent\ndescription: Test agent\n---\ntest body", "utf8");

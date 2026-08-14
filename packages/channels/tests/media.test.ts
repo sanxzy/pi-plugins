@@ -19,7 +19,7 @@ import {
 } from "../src/index.ts";
 
 test("media download and resolve emit boundary records without secrets in parameters", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-media-log-"));
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-media-log-"));
   const logger = createSessionLogger({
     projectId: "project",
     rootSessionId: "root-session",

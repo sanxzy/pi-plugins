@@ -80,7 +80,7 @@ export class PiOAuthProvider implements OAuthClientProvider {
   get clientMetadata(): OAuthClientMetadata {
     return {
       redirect_uris: [this.redirectUrl],
-      client_name: "pi-code",
+      client_name: "pi-c2",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: this.options.clientSecret ? "client_secret_post" : "none",

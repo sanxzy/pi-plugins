@@ -1,7 +1,7 @@
 import Type, { type Static } from "typebox";
 
 /**
- * Parameter schemas for the pi-code tools.
+ * Parameter schemas for the pi-c2 tools.
  *
  * The `agent` schema describes background-only delegation. `agent_id` targets
  * an existing job for steering or background resume.

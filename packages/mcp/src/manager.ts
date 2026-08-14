@@ -372,7 +372,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       stderr: "pipe",
     });
     const client = new Client(
-      { name: "pi-code-mcp", version: "0.1.0" },
+      { name: "pi-c2-mcp", version: "0.1.0" },
       { capabilities: { roots: {} } },
     );
     client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: [{ uri: pathToFileURL(projectRoot).href }] }));

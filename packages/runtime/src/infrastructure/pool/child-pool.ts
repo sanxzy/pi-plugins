@@ -63,13 +63,13 @@ export interface ChildPool {
 }
 
 declare global {
-  // Projects are keyed by their resolved root. The slot uses a "pi-code:"
+  // Projects are keyed by their resolved root. The slot uses a "pi-c2:"
   // prefix so it cannot collide with other string properties on globalThis.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  var piCodePool: Record<string, ChildPool>;
+  var piC2Pool: Record<string, ChildPool>;
 }
 
-const POOL_SLOT_PREFIX = "pi-code:";
+const POOL_SLOT_PREFIX = "pi-c2:";
 
 function poolSlot(projectRoot: string): string {
   return `${POOL_SLOT_PREFIX}${canonicalProjectRoot(projectRoot)}`;
@@ -77,7 +77,7 @@ function poolSlot(projectRoot: string): string {
 
 export function getChildPool(projectRoot: string, rootSessionId?: string): ChildPool {
   const slot = poolSlot(projectRoot);
-  const shared = globalThis.piCodePool?.[slot];
+  const shared = globalThis.piC2Pool?.[slot];
   if (shared) {
     // The pool is a process singleton that must survive extension reloads,
     // but a reloaded runtime version can need capabilities the previous
@@ -90,10 +90,10 @@ export function getChildPool(projectRoot: string, rootSessionId?: string): Child
 
   const pool = createPool(projectRoot, rootSessionId);
 
-  if (!globalThis.piCodePool) {
-    globalThis.piCodePool = {};
+  if (!globalThis.piC2Pool) {
+    globalThis.piC2Pool = {};
   }
-  globalThis.piCodePool[slot] = pool;
+  globalThis.piC2Pool[slot] = pool;
   return pool;
 }
 

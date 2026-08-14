@@ -23,7 +23,7 @@ function tempRoot(prefix: string): string {
 }
 
 test("child extension factories are loaded into an isolated DefaultResourceLoader", async () => {
-  const root = tempRoot("pi-code-child-ext-");
+  const root = tempRoot("pi-c2-child-ext-");
   const agentDir = join(root, "agent");
   try {
     const registered: string[] = [];

@@ -23,7 +23,7 @@ function mode(path: string): number {
   return statSync(path).mode & 0o777;
 }
 
-function scope(prefix = "pi-code-observability-") {
+function scope(prefix = "pi-c2-observability-") {
   const root = mkdtempSync(join(tmpdir(), prefix));
   const eventsPath = join(root, "events.jsonl");
   const errorsPath = join(root, "errors.jsonl");

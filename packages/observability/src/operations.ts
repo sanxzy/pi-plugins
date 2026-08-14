@@ -1,7 +1,7 @@
 /**
  * Central registry of `processWithLog` operation identifiers.
  *
- * Every meaningful processing boundary in pi-code uses one of these constants
+ * Every meaningful processing boundary in pi-c2 uses one of these constants
  * as its `operation`. Centralizing them keeps operation names stable and
  * searchable (single source of truth), avoids typos across the many call sites,
  * and makes log rerouting/analysis predictable.

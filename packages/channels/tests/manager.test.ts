@@ -11,7 +11,7 @@ import {
 } from "../src/index.ts";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-channels-manager-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-channels-manager-"));
 }
 
 const config: ChannelConfig = { token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWX", approvedUserIds: [] };

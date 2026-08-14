@@ -28,7 +28,7 @@ function offlineMaterializer() {
 }
 
 function tempRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-references-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-references-"));
 }
 
 function withAgentDir<T>(agentDir: string, run: () => T): T {
@@ -45,7 +45,7 @@ function withAgentDir<T>(agentDir: string, run: () => T): T {
 test("derives the global references file below the active Pi agent directory", () => {
   const agentDir = join(tempRoot(), "agent");
   withAgentDir(agentDir, () => {
-    assert.equal(referenceConfigFile(), join(agentDir, "pi-code", "references.json"));
+    assert.equal(referenceConfigFile(), join(agentDir, "pi-c2", "references.json"));
   });
 });
 
@@ -117,8 +117,8 @@ test("setup save materializes every Git reference before publishing the catalog"
       preflight: async () => ({ ok: true as const }),
       ensure: async ({ reference }) => {
         materialized.push(reference.label);
-        mkdirSync(cachePath(join(root, "agent", "pi-code", "repos"), reference, "main"), { recursive: true });
-        return { localPath: cachePath(join(root, "agent", "pi-code", "repos"), reference, "main"), status: "cloned" as const, branch: "main" };
+        mkdirSync(cachePath(join(root, "agent", "pi-c2", "repos"), reference, "main"), { recursive: true });
+        return { localPath: cachePath(join(root, "agent", "pi-c2", "repos"), reference, "main"), status: "cloned" as const, branch: "main" };
       },
     },
   });
@@ -280,7 +280,7 @@ test("publishes Git materialization status through the public catalog", async ()
     materializer: {
       preflight: async () => ({ ok: true }),
       ensure: async ({ reference }) => {
-        const localPath = cachePath(join(root, "agent", "pi-code", "repos"), reference, "main");
+        const localPath = cachePath(join(root, "agent", "pi-c2", "repos"), reference, "main");
         mkdirSync(localPath, { recursive: true });
         return {
           localPath,
@@ -296,7 +296,7 @@ test("publishes Git materialization status through the public catalog", async ()
   const entry = result.entries[0]!;
   assert.equal(entry.status, "available");
   assert.equal(entry.materialization, "cached");
-  assert.equal(entry.path, realpathSync(cachePath(join(root, "agent", "pi-code", "repos"), parseRepository("owner/repo")!, "main")));
+  assert.equal(entry.path, realpathSync(cachePath(join(root, "agent", "pi-c2", "repos"), parseRepository("owner/repo")!, "main")));
 });
 
 test("save rejects invalid documents before touching the existing file", async () => {

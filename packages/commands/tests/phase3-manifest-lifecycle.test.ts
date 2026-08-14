@@ -9,7 +9,7 @@ import { encodeProjectId, homeAgentDir, homeAgentEventsFile, homeAgentManifestFi
 import { registerSessionEvents } from "../src/registrations/session-events.ts";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-phase3-command-project-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-phase3-command-project-"));
 }
 
 function registrations(): { pi: ExtensionAPI; handlers: Map<string, (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown> } {
@@ -39,9 +39,9 @@ function context(cwd: string, sessionId: string): ExtensionContext {
 }
 
 test("root session lifecycle emits correlated home-scoped session events", async () => {
-  const previousHome = process.env.PI_CODE_TEST_HOME;
-  const home = mkdtempSync(join(tmpdir(), "pi-code-phase3-log-home-"));
-  process.env.PI_CODE_TEST_HOME = home;
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-phase3-log-home-"));
+  process.env.PI_C2_TEST_HOME = home;
   const cwd = projectRoot();
   try {
     const { pi, handlers } = registrations();
@@ -61,15 +61,15 @@ test("root session lifecycle emits correlated home-scoped session events", async
     assert.equal(startAfter?.projectId, encodeProjectId(cwd));
     assert.equal(stopAfter?.rootSessionId, "root-session");
   } finally {
-    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
-    else process.env.PI_CODE_TEST_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
   }
 });
 
 test("production session lifecycle creates and finishes the home session manifest", async () => {
-  const previousHome = process.env.PI_CODE_TEST_HOME;
-  const home = mkdtempSync(join(tmpdir(), "pi-code-phase3-command-home-"));
-  process.env.PI_CODE_TEST_HOME = home;
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-phase3-command-home-"));
+  process.env.PI_C2_TEST_HOME = home;
   const cwd = projectRoot();
   try {
     const { pi, handlers } = registrations();
@@ -83,7 +83,7 @@ test("production session lifecycle creates and finishes the home session manifes
     assert.equal(manifest.pid, process.pid);
     assert.ok(manifest.processStartTime);
   } finally {
-    if (previousHome === undefined) delete process.env.PI_CODE_TEST_HOME;
-    else process.env.PI_CODE_TEST_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
   }
 });

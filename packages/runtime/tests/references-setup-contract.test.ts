@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { createReferenceCatalogWithInfrastructure } from "../src/infrastructure/references/catalog.ts";
 
 function root(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-setup-contract-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-setup-contract-"));
 }
 
 function local(

@@ -11,7 +11,7 @@ import { getChildPool } from "@xzy-ai/runtime";
 
 const SYSTEM_PROMPT_FILE = "SYSTEM.md";
 const SUBAGENT_SYSTEM_PROMPT_FILE = "subagent-system.md";
-const OPERATIONAL_PROMPT_MARKER = "<!-- pi-code:operational-system-prompt -->";
+const OPERATIONAL_PROMPT_MARKER = "<!-- pi-c2:operational-system-prompt -->";
 
 const DEFAULT_AGENT_SOUL = `You are an expert software engineering agent operating with senior-level judgment, discipline, and ownership.
 
@@ -330,8 +330,8 @@ export function buildOperationalSystemPrompt(
   ].join("\n");
 }
 
-function isPiCodeDevelopmentMode(): boolean {
-  const value = process.env.PI_CODE_DEV;
+function isPiC2DevelopmentMode(): boolean {
+  const value = process.env.PI_C2_DEV;
   return value === "1" || value === "true";
 }
 
@@ -353,7 +353,7 @@ export function registerSystemPrompt(pi: ExtensionAPI): void {
   pi.on("before_agent_start", (event, ctx) => {
     const root = isRootSession(ctx);
     const systemPrompt = buildOperationalSystemPrompt(event, ctx, pi.getAllTools() as ToolInfo[]);
-    if (isPiCodeDevelopmentMode()) {
+    if (isPiC2DevelopmentMode()) {
       capturePrompt(ctx, root ? SYSTEM_PROMPT_FILE : SUBAGENT_SYSTEM_PROMPT_FILE, systemPrompt);
     }
 

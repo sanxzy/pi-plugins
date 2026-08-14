@@ -8,8 +8,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
  * MCP manager lifecycle. The map lives on globalThis under a symbol so it
  * survives extension factory reloads without a module import cycle.
  */
-const KEY = Symbol.for("@xzy-ai/pi-code:session-mcp-names");
-const KNOWN_KEY = Symbol.for("@xzy-ai/pi-code:known-mcp-names");
+const KEY = Symbol.for("@xzy-ai/pi-c2:session-mcp-names");
+const KNOWN_KEY = Symbol.for("@xzy-ai/pi-c2:known-mcp-names");
 
 type NamesMap = Map<string, Set<string>>;
 type McpToolDefinition = { name: string; description: string; parameters: unknown };
@@ -19,8 +19,8 @@ type McpBridge = {
   listResources(server: string): unknown;
   readResource(server: string, uri: string, signal?: AbortSignal): Promise<unknown>;
 };
-const DEFINITIONS_KEY = Symbol.for("@xzy-ai/pi-code:session-mcp-definitions");
-const BRIDGES_KEY = Symbol.for("@xzy-ai/pi-code:session-mcp-bridges");
+const DEFINITIONS_KEY = Symbol.for("@xzy-ai/pi-c2:session-mcp-definitions");
+const BRIDGES_KEY = Symbol.for("@xzy-ai/pi-c2:session-mcp-bridges");
 
 function namesMap(): NamesMap {
   const root = globalThis as unknown as Record<symbol, NamesMap | undefined>;

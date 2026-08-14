@@ -4,7 +4,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parse, type ParseError } from "jsonc-parser";
 import { printParseErrorCode } from "jsonc-parser";
 
-const USER_CONFIG_RELATIVE = join("pi-code", "mcp.json");
+const USER_CONFIG_RELATIVE = join("pi-c2", "mcp.json");
 const PROJECT_CONFIG_RELATIVE = join(".pi", "mcp.json");
 
 export interface McpTimeoutConfig {
@@ -82,8 +82,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Resolve the user-level MCP config through the pi-code namespace:
- * `<agentDir>/pi-code/mcp.json`.
+ * Resolve the user-level MCP config through the pi-c2 namespace:
+ * `<agentDir>/pi-c2/mcp.json`.
  */
 export function userAgentDir(override?: string): string {
   return override ?? getAgentDir();

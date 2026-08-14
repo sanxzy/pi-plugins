@@ -22,16 +22,16 @@ import {
 } from "@xzy-ai/runtime";
 
 function setup(): string {
-  const home = mkdtempSync(join(tmpdir(), "pi-code-phase7-cleanup-home-"));
-  process.env.PI_CODE_TEST_HOME = home;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-phase7-cleanup-home-"));
+  process.env.PI_C2_TEST_HOME = home;
   return home;
 }
 function project(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-phase7-cleanup-project-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-phase7-cleanup-project-"));
 }
 
 function cleanupLog(): { eventsPath: string; errorsPath: string } {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-phase7-cleanup-log-"));
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-phase7-cleanup-log-"));
   return { eventsPath: join(dir, "events.jsonl"), errorsPath: join(dir, "errors.jsonl") };
 }
 

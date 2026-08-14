@@ -9,12 +9,12 @@ import { createSessionLogger, REGISTRY_OPERATIONS, runWithLogContext } from "@xz
 import { createRegistry, createScopedRegistry, foldLog } from "@xzy-ai/runtime";
 
 function tmpRegistryPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-registry-"));
-  return join(dir, ".pi", "pi-code", "jobs.jsonl");
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-registry-"));
+  return join(dir, ".pi", "pi-c2", "jobs.jsonl");
 }
 
 function logScope(): { eventsPath: string; errorsPath: string } {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-registry-log-"));
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-registry-log-"));
   return { eventsPath: join(dir, "events.jsonl"), errorsPath: join(dir, "errors.jsonl") };
 }
 
@@ -85,7 +85,7 @@ test("updateJob is immutable and preserves lineage", () => {
 test("registry append is logged for direct and scoped registries", () => {
   const filePath = tmpRegistryPath();
   const direct = createRegistry(filePath);
-  const projectRoot = mkdtempSync(join(tmpdir(), "pi-code-scoped-registry-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "pi-c2-scoped-registry-"));
   const scoped = createScopedRegistry(projectRoot, "root-session");
   const paths = logScope();
   const logger = createSessionLogger({ projectId: "project", rootSessionId: "root-session", ...paths });

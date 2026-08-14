@@ -361,7 +361,7 @@ test("system_prompt is blocked unless development mode is enabled", async () => 
     { projectRoot: "/tmp/project", chatId: "555", context: contextWithPi(piControl()), sendMessage: send, isDevMode: () => false },
   );
   assert.equal(handled, true);
-  assert.ok(messages.some((m) => m.includes("PI_CODE_DEV=1")));
+  assert.ok(messages.some((m) => m.includes("PI_C2_DEV=1")));
   assert.equal(messages.some((m) => m.includes("SYSTEM")), false);
 });
 

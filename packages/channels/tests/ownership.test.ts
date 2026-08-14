@@ -7,7 +7,7 @@ import { CHANNEL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy
 import { channelOwnerFile, createChannelOwner } from "../src/index.ts";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-channels-owner-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-channels-owner-"));
 }
 
 test("ownership acquire and release emit boundary records", () => {

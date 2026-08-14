@@ -37,7 +37,7 @@ if (process.env.MCP_FIXTURE_CHILD_PID_FILE) {
 const fullCatalog = mode === "full-catalog";
 const policyMode = mode === "policy";
 const server = new Server(
-  { name: "mcp-pi-code-stdio", version: "1.0.0" },
+  { name: "mcp-pi-c2-stdio", version: "1.0.0" },
   {
     capabilities: {
       ...(mode === "fail-discovery" || mode === "tools" ? { tools: {} } : {}),

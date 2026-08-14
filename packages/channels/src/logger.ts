@@ -46,7 +46,7 @@ export type ChannelLogResult = StateResult<ChannelLogger>;
 /**
  * Session-scoped channel logger.
  *
- * Writes structured JSONL to `<project>/.pi/pi-code/logs/<sessionId>.log`.
+ * Writes structured JSONL to `<project>/.pi/pi-c2/logs/<sessionId>.log`.
  * The token and API secrets are redacted by pino and by the safe-metadata
  * boundary below. Callers pass only safe metadata, never full Telegram update
  * payloads, so those values are omitted before pino serializes them.

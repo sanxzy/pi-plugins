@@ -53,7 +53,7 @@ function withUserAgentDir<T>(userDir: string, run: () => T): T {
 }
 
 test("agent_list returns distinct winning agents sorted alphabetically with only name and description", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-agent-list-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-agent-list-"));
   const userDir = join(cwd, "user");
   try {
     writeAgent(join(userDir, "agents"), "shared.md", "shared", "user shared");
@@ -80,7 +80,7 @@ test("agent_list returns distinct winning agents sorted alphabetically with only
 });
 
 test("agent_list keeps the display to the first paragraph of a long description", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-agent-list-example-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-agent-list-example-"));
   const userDir = join(cwd, "user");
   try {
     mkdirSync(join(userDir, "agents"), { recursive: true });
@@ -111,7 +111,7 @@ test("agent_list keeps the display to the first paragraph of a long description"
 });
 
 test("agent_list indents each line of a multiline description consistently", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-agent-list-multiline-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-agent-list-multiline-"));
   const userDir = join(cwd, "user");
   try {
     mkdirSync(join(userDir, "agents"), { recursive: true });
@@ -135,7 +135,7 @@ test("agent_list indents each line of a multiline description consistently", asy
 });
 
 test("agent_list reports an empty result without a built-in default agent", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-code-agent-list-empty-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-agent-list-empty-"));
   try {
     const result = await withUserAgentDir(join(cwd, "nouser"), () =>
       register().execute("call", {}, undefined, undefined, context(cwd)),

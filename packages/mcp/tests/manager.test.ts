@@ -37,10 +37,10 @@ async function startRecoveryFixture(): Promise<{ url: string; server: Server; ca
 }
 
 test("explicit reload reconciliation keeps active server status and removes removed connections", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-reconcile-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-reconcile-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const fixtureCwd = dirname(fixture);
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
@@ -59,10 +59,10 @@ test("explicit reload reconciliation keeps active server status and removes remo
 });
 
 test("manager reload, reconnect, close, and stop paths emit dedicated boundaries", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-manager-log-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-manager-log-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const exitOnce = join(root, "exit-once");
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: { reconnect: { type: "local", command: [process.execPath, fixture], cwd: dirname(fixture), environment: { MCP_FIXTURE_EXIT_ONCE_FILE: exitOnce, MCP_FIXTURE_EXIT_AFTER_MS: "25" } } } } }));
@@ -93,8 +93,8 @@ test("manager reload, reconnect, close, and stop paths emit dedicated boundaries
 });
 
 test("manager start/stop is deterministic, idempotent, and wires an injected watcher", async () => {
-  const agentDir = join(mkdtempSync(join(tmpdir(), "pi-code-mcp-mgr-agent-")), "agent");
-  const projectRoot = join(mkdtempSync(join(tmpdir(), "pi-code-mcp-mgr-")), "project");
+  const agentDir = join(mkdtempSync(join(tmpdir(), "pi-c2-mcp-mgr-agent-")), "agent");
+  const projectRoot = join(mkdtempSync(join(tmpdir(), "pi-c2-mcp-mgr-")), "project");
   mkdirSync(join(projectRoot, ".pi"), { recursive: true });
   writeFileSync(
     join(projectRoot, ".pi", "mcp.json"),
@@ -137,11 +137,11 @@ test("manager start/stop is deterministic, idempotent, and wires an injected wat
 });
 
 test("default filesystem watcher reconciles edits in user and project config files", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-default-watch-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-default-watch-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
   const projectConfigDir = join(projectRoot, ".pi");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   mkdirSync(projectConfigDir, { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const fixtureCwd = dirname(fixture);
@@ -173,10 +173,10 @@ test("default filesystem watcher reconciles edits in user and project config fil
 });
 
 test("watched configuration changes debounce and reconcile only affected servers", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-watch-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-watch-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const fixtureCwd = dirname(fixture);
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
@@ -216,10 +216,10 @@ test("watched configuration changes debounce and reconcile only affected servers
 });
 
 test("transport errors mark the affected server failed and recover independently", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-transport-error-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-transport-error-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const malformed = join(root, "malformed-once");
   const statuses: string[] = [];
@@ -242,10 +242,10 @@ test("transport errors mark the affected server failed and recover independently
 });
 
 test("connection close marks a server failed and reconnects with bounded backoff", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-reconnect-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-reconnect-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const exitOnce = join(root, "exit-once");
   const statuses: string[] = [];
@@ -284,10 +284,10 @@ test("connection close marks a server failed and reconnects with bounded backoff
 });
 
 test("remote session expiration reinitializes once and retries the request", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-session-recovery-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-session-recovery-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   const fixture = await startRecoveryFixture();
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     recovery: { type: "remote", url: fixture.url, oauth: false },
@@ -307,10 +307,10 @@ test("remote session expiration reinitializes once and retries the request", asy
 });
 
 test("close performs full watcher and reconnect cleanup", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-close-cleanup-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-close-cleanup-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     disabled: { type: "local", command: [process.execPath, "unused"], disabled: true },
   } } }));
@@ -326,10 +326,10 @@ test("close performs full watcher and reconnect cleanup", async () => {
 });
 
 test("repeated remote session expiration stays an explicit failed result", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-mcp-session-fail-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-session-fail-"));
   const agentDir = join(root, "agent");
   const projectRoot = join(root, "project");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   let callCount = 0;
   let sessionCount = 0;
   const server = createServer(async (req, res) => {
@@ -368,8 +368,8 @@ test("repeated remote session expiration stays an explicit failed result", async
 });
 
 test("manager reload updates state and invokes the reload callback", async () => {
-  const agentDir = join(mkdtempSync(join(tmpdir(), "pi-code-mcp-mgr2-agent-")), "agent");
-  const projectRoot = join(mkdtempSync(join(tmpdir(), "pi-code-mcp-mgr2-")), "project");
+  const agentDir = join(mkdtempSync(join(tmpdir(), "pi-c2-mcp-mgr2-agent-")), "agent");
+  const projectRoot = join(mkdtempSync(join(tmpdir(), "pi-c2-mcp-mgr2-")), "project");
   mkdirSync(join(projectRoot, ".pi"), { recursive: true });
   writeFileSync(join(projectRoot, ".pi", "mcp.json"), `{"mcp":{"servers":{"a":{"type":"local","command":["n","a"]}}}}`);
 

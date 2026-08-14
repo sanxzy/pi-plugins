@@ -13,10 +13,10 @@ export interface WikiEntry {
   page: string;
 }
 
-export const WIKI_ENTRY_START = "<!-- pi-code-wiki-entry -->";
-export const WIKI_ENTRY_END = "<!-- pi-code-wiki-entry-end -->";
-export const WIKI_PAGE_START = "<!-- pi-code-wiki-page -->";
-export const WIKI_PAGE_END = "<!-- pi-code-wiki-page-end -->";
+export const WIKI_ENTRY_START = "<!-- pi-c2-wiki-entry -->";
+export const WIKI_ENTRY_END = "<!-- pi-c2-wiki-entry-end -->";
+export const WIKI_PAGE_START = "<!-- pi-c2-wiki-page -->";
+export const WIKI_PAGE_END = "<!-- pi-c2-wiki-page-end -->";
 export const WIKI_MAX_SLUG_LENGTH = 80;
 export const WIKI_PAGE_SIZE = 256 * 1024;
 export const MAX_WIKI_DISCOVERY_PAGES = 500;
@@ -372,14 +372,14 @@ export function parseWikiEntries(document: string, page = ""): WikiEntry[] {
 
 function escapeMarkers(value: string): string {
   return value
-    .replaceAll(WIKI_ENTRY_START, "&lt;!-- pi-code-wiki-entry --&gt;")
-    .replaceAll(WIKI_ENTRY_END, "&lt;!-- pi-code-wiki-entry-end --&gt;");
+    .replaceAll(WIKI_ENTRY_START, "&lt;!-- pi-c2-wiki-entry --&gt;")
+    .replaceAll(WIKI_ENTRY_END, "&lt;!-- pi-c2-wiki-entry-end --&gt;");
 }
 
 function unescapeMarkers(value: string): string {
   return value
-    .replaceAll("&lt;!-- pi-code-wiki-entry --&gt;", WIKI_ENTRY_START)
-    .replaceAll("&lt;!-- pi-code-wiki-entry-end --&gt;", WIKI_ENTRY_END);
+    .replaceAll("&lt;!-- pi-c2-wiki-entry --&gt;", WIKI_ENTRY_START)
+    .replaceAll("&lt;!-- pi-c2-wiki-entry-end --&gt;", WIKI_ENTRY_END);
 }
 
 function escapeRegExp(value: string): string {

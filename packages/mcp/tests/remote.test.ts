@@ -168,7 +168,7 @@ function listResult(request: RpcRequest, tools: string[]): Record<string, unknow
 
 test("connectRemote connects over Streamable HTTP and discovers tools", async () => {
   const fixture = await startFixture("streamable", ["remote_tool"]);
-  const agentDir = tempAgent("pi-code-mcp-remote-agent-");
+  const agentDir = tempAgent("pi-c2-mcp-remote-agent-");
   const result = await connectRemote({ url: fixture.url, agentDir, oauth: false, onRedirect: () => {} });
   try {
     assert.equal(result.status.status, "connected");
@@ -183,7 +183,7 @@ test("connectRemote connects over Streamable HTTP and discovers tools", async ()
 test("connectRemote delivers configured headers to the transport", async () => {
   const capture: HeaderCapture = {};
   const fixture = await startFixture("streamable", ["header_tool"], capture);
-  const agentDir = tempAgent("pi-code-mcp-remote-headers-");
+  const agentDir = tempAgent("pi-c2-mcp-remote-headers-");
   const result = await connectRemote({
     url: fixture.url,
     agentDir,
@@ -207,7 +207,7 @@ test("connectRemote enforces a bounded startup timeout", async () => {
     // Leave the request pending; the transport startup deadline must settle.
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const agentDir = tempAgent("pi-code-mcp-remote-start-timeout-");
+  const agentDir = tempAgent("pi-c2-mcp-remote-start-timeout-");
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
   try {
     const started = Date.now();
@@ -242,7 +242,7 @@ test("connectRemote enforces the request timeout during catalog discovery", asyn
     res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const agentDir = tempAgent("pi-code-mcp-remote-request-timeout-");
+  const agentDir = tempAgent("pi-c2-mcp-remote-request-timeout-");
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`;
   try {
     const started = Date.now();
@@ -258,7 +258,7 @@ test("connectRemote enforces the request timeout during catalog discovery", asyn
 
 test("connectRemote falls back to SSE when Streamable HTTP is unavailable", async () => {
   const fixture = await startFixture("sse", ["sse_tool"]);
-  const agentDir = tempAgent("pi-code-mcp-sse-agent-");
+  const agentDir = tempAgent("pi-c2-mcp-sse-agent-");
   const result = await connectRemote({ url: fixture.url, agentDir, oauth: false, onRedirect: () => {} });
   try {
     assert.equal(result.status.status, "connected");
@@ -273,9 +273,9 @@ test("connectRemote falls back to SSE when Streamable HTTP is unavailable", asyn
 
 test("manager disconnect closes an active remote transport before logout", async () => {
   const fixture = await startFixture("streamable", ["disconnect_tool"]);
-  const agentDir = tempAgent("pi-code-mcp-manager-disconnect-agent-");
-  const projectRoot = tempAgent("pi-code-mcp-manager-disconnect-project-");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  const agentDir = tempAgent("pi-c2-mcp-manager-disconnect-agent-");
+  const projectRoot = tempAgent("pi-c2-mcp-manager-disconnect-project-");
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
     fixture: { type: "remote", url: fixture.url, oauth: false },
   } } }));
@@ -294,7 +294,7 @@ test("manager disconnect closes an active remote transport before logout", async
 });
 
 test("connectRemote reports a bounded failure for unreachable hosts", async () => {
-  const agentDir = tempAgent("pi-code-mcp-remote-failed-");
+  const agentDir = tempAgent("pi-c2-mcp-remote-failed-");
   try {
     const result = await connectRemote({
       url: "http://127.0.0.1:1/mcp",
@@ -310,7 +310,7 @@ test("connectRemote reports a bounded failure for unreachable hosts", async () =
 });
 
 test("connectRemote aborts a hanging SSE startup when the signal fires or startup times out", async () => {
-  const agentDir = tempAgent("pi-code-mcp-remote-abort-");
+  const agentDir = tempAgent("pi-c2-mcp-remote-abort-");
   // An SSE server that opens the GET stream but never completes initialization.
   const server = createServer((req, res) => {
     if (req.method === "GET") {
@@ -353,9 +353,9 @@ test("connectRemote aborts a hanging SSE startup when the signal fires or startu
 
 test("manager start() connects configured remote servers with the effective config", async () => {
   const fixture = await startFixture("streamable", ["manager_tool"]);
-  const agentDir = tempAgent("pi-code-mcp-mgr-remote-agent-");
-  const projectRoot = tempAgent("pi-code-mcp-mgr-remote-project-");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  const agentDir = tempAgent("pi-c2-mcp-mgr-remote-agent-");
+  const projectRoot = tempAgent("pi-c2-mcp-mgr-remote-project-");
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({
@@ -380,7 +380,7 @@ test("manager start() connects configured remote servers with the effective conf
 });
 
 test("connectRemote reports needs_client_registration when OAuth registration is unavailable", async () => {
-  const agentDir = tempAgent("pi-code-mcp-remote-registration-");
+  const agentDir = tempAgent("pi-c2-mcp-remote-registration-");
   const server = createServer((req, res) => {
     if (req.url?.startsWith("/.well-known/oauth-authorization-server")) {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -414,7 +414,7 @@ test("connectRemote reports needs_client_registration when OAuth registration is
 });
 
 test("connectRemote reports needs_auth when a server demands OAuth and stops fallback", async () => {
-  const agentDir = tempAgent("pi-code-mcp-remote-auth-");
+  const agentDir = tempAgent("pi-c2-mcp-remote-auth-");
   const server = createServer((req, res) => {
     res.writeHead(401, {
       "WWW-Authenticate": 'Bearer resource_metadata="https://auth.example.invalid/.well-known/oauth-protected-resource"',

@@ -73,7 +73,7 @@ function completedResult(output: string): ChildRunResult {
 }
 
 test("delivery load telemetry never persists pending result content", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-secret-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-delivery-secret-"));
   const pendingFile = pendingDeliveryFile(root, "root-a");
   const logDir = join(root, "logs");
   const logger = createSessionLogger({
@@ -102,7 +102,7 @@ test("delivery load telemetry never persists pending result content", () => {
 });
 
 test("corrupt pending delivery queue is tolerated without error records", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-corrupt-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-delivery-corrupt-"));
   const pendingFile = pendingDeliveryFile(root, "root-a");
   const logDir = join(root, "logs");
   const logger = createSessionLogger({
@@ -128,7 +128,7 @@ test("corrupt pending delivery queue is tolerated without error records", () => 
 });
 
 test("delivery load and persist emit boundary records for the durable queue", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-log-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-delivery-log-"));
   const logDir = join(root, "logs");
   const logger = createSessionLogger({
     projectId: "project",
@@ -225,7 +225,7 @@ test("delivery coordinator defers results until the parent session re-registers"
 });
 
 test("deferred results survive a coordinator restart through the durable queue", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-durable-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-delivery-durable-"));
   const pendingFile = pendingDeliveryFile(root, "root-a");
   try {
     // First coordinator instance (e.g. a parent session that is unavailable).
@@ -254,7 +254,7 @@ test("deferred results survive a coordinator restart through the durable queue",
 });
 
 test("delivery register and unregister emit boundary records around actual sink mutations (H8)", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-h8-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-delivery-h8-"));
   const logDir = join(root, "logs");
   const logger = createSessionLogger({
     projectId: "project",
@@ -281,7 +281,7 @@ test("delivery register and unregister emit boundary records around actual sink 
 });
 
 test("no-op unregister and rebind calls are silent (no boundary noise) (H8)", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-h8-silent-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-delivery-h8-silent-"));
   const logDir = join(root, "logs");
   const logger = createSessionLogger({
     projectId: "project",
@@ -306,7 +306,7 @@ test("no-op unregister and rebind calls are silent (no boundary noise) (H8)", ()
 });
 
 test("rebind records a boundary and moves only matching pending results (H8)", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-code-delivery-h8-rebind-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-delivery-h8-rebind-"));
   const logDir = join(root, "logs");
   const logger = createSessionLogger({
     projectId: "project",
@@ -471,9 +471,9 @@ test("runBackgroundJob catches an unexpected throw and marks the job failed", as
 });
 
 test("runBackgroundJob persists a real agent lifecycle in the event read model", async () => {
-  const home = mkdtempSync(join(tmpdir(), "pi-code-phase5-agent-home-"));
-  process.env.PI_CODE_TEST_HOME = home;
-  const projectRoot = mkdtempSync(join(tmpdir(), "pi-code-phase5-agent-project-"));
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-phase5-agent-home-"));
+  process.env.PI_C2_TEST_HOME = home;
+  const projectRoot = mkdtempSync(join(tmpdir(), "pi-c2-phase5-agent-project-"));
   const eventRegistry = createAgentEventRegistry(projectRoot, "root-session");
   const job = makeJob("job-live", "queued");
   eventRegistry.createJob(job);

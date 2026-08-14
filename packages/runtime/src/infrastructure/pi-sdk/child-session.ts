@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import * as PiSdk from "@earendil-works/pi-coding-agent";
-import { maxAgentDepth } from "../../shared/pi-code-config.ts";
+import { maxAgentDepth } from "../../shared/pi-c2-config.ts";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -53,7 +53,7 @@ interface ChildSessionServices {
 const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find"] as const;
 
 /**
- * pi-code extension tools appended to child allowlists. Depths below the
+ * pi-c2 extension tools appended to child allowlists. Depths below the
  * configured max receive the agent-family and web tools so they can recurse;
  * the terminal leaf keeps the web/wiki family but cannot spawn or manage
  * another agent. Goal and Telegram capabilities stay root-only; MCP resource
@@ -82,7 +82,7 @@ const MCP_RESOURCE_TOOLS = [
  * Telegram capabilities are always stripped because they belong to the main
  * host. An absent/empty list enables the full built-in set (minus `ls`) plus
  * the session-scoped MCP catalog. Depths below the configured max depth receive
- * the pi-code agent-family and web tools so they can recurse; the terminal
+ * the pi-c2 agent-family and web tools so they can recurse; the terminal
  * leaf keeps only the web/wiki family. MCP resource tools and the discovered
  * MCP catalog remain available at every depth. The `mcp` slash command is not
  * a model tool and is excluded from the allowlist.
@@ -208,8 +208,8 @@ async function createIsolatedChild(options: {
     settingsManager,
     systemPromptOverride,
     // Isolated child loaders inherit the inline extension factories that the
-    // host loaded (e.g. `pi -e packages/extensions/pi-code/index.ts`), so the
-    // agent-family and research tools registered by the pi-code composition
+    // host loaded (e.g. `pi -e packages/extensions/pi-c2/index.ts`), so the
+    // agent-family and research tools registered by the pi-c2 composition
     // root are constructible in the child. The allowlist still decides which
     // of those tools are active; goal/MCP capabilities remain root-only.
     extensionFactories: getChildExtensionFactories(),

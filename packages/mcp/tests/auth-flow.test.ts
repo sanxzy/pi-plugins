@@ -107,7 +107,7 @@ function startAuthServer(): Promise<AuthServer> {
 
 test("startRemoteAuth captures the authorization URL and registers the loopback callback", async () => {
   const auth = await startAuthServer();
-  const agentDir = tempAgent("pi-code-mcp-authflow-start-");
+  const agentDir = tempAgent("pi-c2-mcp-authflow-start-");
   const redirects: string[] = [];
   const options: ConnectRemoteOptions = {
     url: `${auth.origin}/mcp`,
@@ -133,7 +133,7 @@ test("startRemoteAuth captures the authorization URL and registers the loopback 
 
 test("full OAuth flow: start, callback redirect, finish, and commit credentials", async () => {
   const auth = await startAuthServer();
-  const agentDir = tempAgent("pi-code-mcp-authflow-full-");
+  const agentDir = tempAgent("pi-c2-mcp-authflow-full-");
   const { port, path } = await ensureCallbackServer("http://127.0.0.1:0/mcp/oauth/callback");
   let started: Awaited<ReturnType<typeof startRemoteAuth>> | undefined;
   const options: ConnectRemoteOptions = {
@@ -165,7 +165,7 @@ test("full OAuth flow: start, callback redirect, finish, and commit credentials"
 
 test("logoutRemote clears credentials and cancels pending callbacks", async () => {
   const auth = await startAuthServer();
-  const agentDir = tempAgent("pi-code-mcp-authflow-logout-");
+  const agentDir = tempAgent("pi-c2-mcp-authflow-logout-");
   const { port, path } = await ensureCallbackServer("http://127.0.0.1:0/mcp/oauth/callback");
   const options: ConnectRemoteOptions = {
     url: `${auth.origin}/mcp`,
@@ -191,14 +191,14 @@ test("logoutRemote clears credentials and cancels pending callbacks", async () =
 });
 
 test("remote auth mutation boundaries emit telemetry and preserve failure propagation", async () => {
-  const agentDir = tempAgent("pi-code-mcp-auth-boundary-");
+  const agentDir = tempAgent("pi-c2-mcp-auth-boundary-");
   const options: ConnectRemoteOptions = {
     url: "https://server.example/mcp",
     agentDir,
     ownerKey: "root-session",
     onRedirect: () => {},
   };
-  const logDir = mkdtempSync(join(tmpdir(), "pi-code-mcp-auth-log-"));
+  const logDir = mkdtempSync(join(tmpdir(), "pi-c2-mcp-auth-log-"));
   const logger = createSessionLogger({
     projectId: "project",
     rootSessionId: "root-session",
@@ -224,7 +224,7 @@ test("remote auth mutation boundaries emit telemetry and preserve failure propag
 
 test("failed finishRemoteAuth rejects and drops the pending flow", async () => {
   const auth = await startAuthServer();
-  const agentDir = tempAgent("pi-code-mcp-authflow-finishfail-");
+  const agentDir = tempAgent("pi-c2-mcp-authflow-finishfail-");
   const options: ConnectRemoteOptions = {
     url: `${auth.origin}/mcp`,
     agentDir,
@@ -245,7 +245,7 @@ test("failed finishRemoteAuth rejects and drops the pending flow", async () => {
 });
 
 test("failed startRemoteAuth stops the callback server when nothing is pending", async () => {
-  const agentDir = tempAgent("pi-code-mcp-authflow-startfail-");
+  const agentDir = tempAgent("pi-c2-mcp-authflow-startfail-");
   // No discovery endpoints: the SDK cannot proceed, so authorization fails.
   const quiet = createServer((_req, res) => {
     res.writeHead(404);
@@ -268,7 +268,7 @@ test("failed startRemoteAuth stops the callback server when nothing is pending",
 
 test("connectRemote over streamable with default oauth (true) and a preauth 401 becomes needs_auth without falling back", async () => {
   const auth = await startAuthServer();
-  const agentDir = tempAgent("pi-code-mcp-authflow-needs-");
+  const agentDir = tempAgent("pi-c2-mcp-authflow-needs-");
   // MCP server that demands auth (401 + WWW-Authenticate).
   const mcpServer = createServer((req, res) => {
     res.writeHead(401, {

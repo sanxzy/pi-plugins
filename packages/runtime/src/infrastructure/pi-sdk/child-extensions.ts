@@ -5,15 +5,15 @@ import type { InlineExtension, ExtensionFactory } from "@earendil-works/pi-codin
  * load.
  *
  * A child creates its own `DefaultResourceLoader` (`createAgentSession`) so it
- * never inherits the parent host's inline extension factories. The pi-code
+ * never inherits the parent host's inline extension factories. The pi-c2
  * extension is launched as an inline factory by the host (for example
- * `pi -e plugins/packages/extensions/pi-code/index.ts`), so without this
+ * `pi -e plugins/packages/extensions/pi-c2/index.ts`), so without this
  * registry a child loader sees an empty extension set and its allowlisted
  * extension tools (agent-family, web) are never constructible.
  *
  * The registry lives on `globalThis` under a symbol so it survives extension
  * factory reloads without a module import cycle between @xzy-ai/runtime and the
- * pi-code composition root.
+ * pi-c2 composition root.
  *
  * Reload safety: named extensions are keyed by their display name so a
  * re-registration replaces the previous entry instead of accumulating
@@ -25,8 +25,8 @@ import type { InlineExtension, ExtensionFactory } from "@earendil-works/pi-codin
  * module graphs.
  */
 
-const CHILD_EXTENSION_FACTORIES_KEY = Symbol.for("@xzy-ai/pi-code:child-extension-factories");
-const ANON_ID_KEY = Symbol.for("@xzy-ai/pi-code:anon-factory-id");
+const CHILD_EXTENSION_FACTORIES_KEY = Symbol.for("@xzy-ai/pi-c2:child-extension-factories");
+const ANON_ID_KEY = Symbol.for("@xzy-ai/pi-c2:anon-factory-id");
 
 type FactoryRegistry = Map<string, InlineExtension>;
 

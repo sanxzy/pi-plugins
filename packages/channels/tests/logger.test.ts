@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-channels-log-home-"));
+process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-channels-log-home-"));
 import { createChannelLogger, channelLogFile } from "../src/index.ts";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-channels-log-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-channels-log-"));
 }
 
 test("writes structured JSONL session logs with safe metadata and redacted secrets", () => {
@@ -71,5 +71,5 @@ test("home-scoped channel logging does not recreate project-local runtime state"
   writeFileSync(root, "not a directory");
   const result = createChannelLogger({ projectRoot: root, sessionId: "root-session" });
   assert.equal(result.ok, true);
-  if (result.ok) assert.equal(result.value.filePath.includes(".pi/pi-code"), false);
+  if (result.ok) assert.equal(result.value.filePath.includes(".pi/pi-c2"), false);
 });

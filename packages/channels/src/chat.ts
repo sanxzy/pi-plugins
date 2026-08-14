@@ -91,7 +91,7 @@ export function createChannelChatRegistry(
   return registry;
 }
 
-const CHANNEL_CHAT_REGISTRY_KEY = Symbol.for("@xzy-ai/pi-code:channel-chat-registry");
+const CHANNEL_CHAT_REGISTRY_KEY = Symbol.for("@xzy-ai/pi-c2:channel-chat-registry");
 
 /**
  * Process-wide adapter registry shared by every channel tool registration.

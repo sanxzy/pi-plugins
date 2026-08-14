@@ -36,7 +36,7 @@ function entryDocument(
 }
 
 function tempRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-wiki-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
 }
 
 test("slugify lowercases and collapses unsafe characters into dashes", () => {
@@ -171,7 +171,7 @@ test("saveWikiEntry appends repeated research in order without overwriting", asy
 });
 
 test("parseWikiEntries splits marker-delimited entries and ignores marker-like body text", () => {
-  const body = `Some text that claims <!-- pi-code-wiki-entry --> but is not a real boundary.`;
+  const body = `Some text that claims <!-- pi-c2-wiki-entry --> but is not a real boundary.`;
   const doc =
     entryDocument("Web Search: alpha", "web_search", "alpha", `introduction ${body}`, "2026-01-01T00:00:00.000Z") +
     entryDocument("Web Search: beta", "web_search", "beta", "second body", "2026-01-02T00:00:00.000Z");
@@ -301,7 +301,7 @@ test("pagination headers expose stable page metadata", () => {
 });
 
 test("saveWikiEntry tolerates write failures without throwing", async () => {
-  const blocker = join(tmpdir(), `pi-code-blocker-${process.pid}-${Date.now()}`);
+  const blocker = join(tmpdir(), `pi-c2-blocker-${process.pid}-${Date.now()}`);
   writeFileSync(blocker, "occupied");
   try {
     const result = await saveWikiEntry({

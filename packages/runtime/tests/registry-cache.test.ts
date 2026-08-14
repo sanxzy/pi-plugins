@@ -8,12 +8,12 @@ import { createJob } from "@xzy-ai/core";
 import { createAgentEventRegistry, getChildPool, encodeProjectId, homeProjectDir, homeAgentEventsFile } from "@xzy-ai/runtime";
 
 function project(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-cache-project-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-cache-project-"));
 }
 
 function setupHome(): string {
-  const home = mkdtempSync(join(tmpdir(), "pi-code-cache-home-"));
-  process.env.PI_CODE_TEST_HOME = home;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-cache-home-"));
+  process.env.PI_C2_TEST_HOME = home;
   return home;
 }
 

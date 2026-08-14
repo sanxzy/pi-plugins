@@ -48,7 +48,7 @@ function text(result: { content: Array<{ type: string; text?: string }> }): stri
 }
 
 function tempRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-wikis-search-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-wikis-search-"));
 }
 
 test("wiki save emits a boundary without persisting entry content as telemetry parameters", async () => {
@@ -275,11 +275,11 @@ test("knowledge_search retrieves a complete page with metadata without requiring
   const root = tempRoot();
   writeFileSync(
     join(root, "react.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: react\npage: 1\ntotalPages: 2\nnext: react.part-002.md\n\n[Next](./react.part-002.md)\n<!-- pi-code-wiki-page-end -->\n\nFULL PAGE ONE\n${formatWikiEntry({ topic: "react", source: "web_search", queryOrUrl: "react", format: "markdown", title: "React", text: "one", timestamp: "2026-01-01T00:00:00.000Z" })}`,
+    `<!-- pi-c2-wiki-page -->\ntopic: react\npage: 1\ntotalPages: 2\nnext: react.part-002.md\n\n[Next](./react.part-002.md)\n<!-- pi-c2-wiki-page-end -->\n\nFULL PAGE ONE\n${formatWikiEntry({ topic: "react", source: "web_search", queryOrUrl: "react", format: "markdown", title: "React", text: "one", timestamp: "2026-01-01T00:00:00.000Z" })}`,
   );
   writeFileSync(
     join(root, "react.part-002.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: react\npage: 2\ntotalPages: 2\nprevious: react.md\n\n[Previous](./react.md)\n<!-- pi-code-wiki-page-end -->\n\nFULL PAGE TWO`,
+    `<!-- pi-c2-wiki-page -->\ntopic: react\npage: 2\ntotalPages: 2\nprevious: react.md\n\n[Previous](./react.md)\n<!-- pi-c2-wiki-page-end -->\n\nFULL PAGE TWO`,
   );
   try {
     const result = await executeKnowledgeSearch({ type: "wikis", topic: "React", page: "2" }, { wikiRoot: root });
@@ -302,15 +302,15 @@ test("knowledge_search wildcard discovers topics and continuation pages without 
   const root = tempRoot();
   writeFileSync(
     join(root, "alpha.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: alpha\npage: 1\ntotalPages: 2\nnext: alpha.part-002.md\n\n<!-- pi-code-wiki-page-end -->\n\nsecret-token-never-returned`,
+    `<!-- pi-c2-wiki-page -->\ntopic: alpha\npage: 1\ntotalPages: 2\nnext: alpha.part-002.md\n\n<!-- pi-c2-wiki-page-end -->\n\nsecret-token-never-returned`,
   );
   writeFileSync(
     join(root, "alpha.part-002.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: alpha\npage: 2\ntotalPages: 2\nprevious: alpha.md\n\n<!-- pi-code-wiki-page-end -->\n\nmore-secret-content`,
+    `<!-- pi-c2-wiki-page -->\ntopic: alpha\npage: 2\ntotalPages: 2\nprevious: alpha.md\n\n<!-- pi-c2-wiki-page-end -->\n\nmore-secret-content`,
   );
   writeFileSync(
     join(root, "beta.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: beta\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nbody without a search token`,
+    `<!-- pi-c2-wiki-page -->\ntopic: beta\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nbody without a search token`,
   );
   try {
     const result = await executeKnowledgeSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
@@ -340,11 +340,11 @@ test("knowledge_search wildcard applies a topic filter without tokenizing or ran
   const root = tempRoot();
   writeFileSync(
     join(root, "react.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: react\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nno matching query terms`,
+    `<!-- pi-c2-wiki-page -->\ntopic: react\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nno matching query terms`,
   );
   writeFileSync(
     join(root, "vue.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: vue\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nno matching query terms`,
+    `<!-- pi-c2-wiki-page -->\ntopic: vue\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nno matching query terms`,
   );
   try {
     const result = await executeKnowledgeSearch({ type: "wikis", query: "*", topic: "React" }, { wikiRoot: root });
@@ -360,7 +360,7 @@ test("knowledge_search wildcard has deterministic bounded discovery output", asy
   for (let index = 55; index >= 1; index--) {
     writeFileSync(
       join(root, `topic-${String(index).padStart(2, "0")}.md`),
-      `<!-- pi-code-wiki-page -->\ntopic: topic-${String(index).padStart(2, "0")}\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->`,
+      `<!-- pi-c2-wiki-page -->\ntopic: topic-${String(index).padStart(2, "0")}\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->`,
     );
   }
   try {
@@ -449,7 +449,7 @@ test("knowledge_search default discovery groups references before wikis", async 
   mkdirSync(root, { recursive: true });
   writeFileSync(
     join(root, "solid.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: solid\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nSolid reactivity`,
+    `<!-- pi-c2-wiki-page -->\ntopic: solid\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nSolid reactivity`,
   );
   const catalog = fakeCatalog([
     {
@@ -571,7 +571,7 @@ test("knowledge_search references discovery handles missing configuration safely
   const root = tempRoot();
   writeFileSync(
     join(root, "wiki.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: wiki\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nbody`,
+    `<!-- pi-c2-wiki-page -->\ntopic: wiki\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nbody`,
   );
   try {
     const wiki = await executeKnowledgeSearch({ type: "wikis", query: "*" }, { wikiRoot: root, referenceCatalog: emptyCatalog });
@@ -694,7 +694,7 @@ test("knowledge_search traverses previous and next cursors sequentially", async 
   ] as const) {
     writeFileSync(
       join(root, file),
-      `<!-- pi-code-wiki-page -->\ntopic: cursor\npage: ${page}\ntotalPages: 3\n${previous ? `previous: ${previous}\n` : ""}${next ? `next: ${next}\n` : ""}\n<!-- pi-code-wiki-page-end -->\n\nPAGE ${page}`,
+      `<!-- pi-c2-wiki-page -->\ntopic: cursor\npage: ${page}\ntotalPages: 3\n${previous ? `previous: ${previous}\n` : ""}${next ? `next: ${next}\n` : ""}\n<!-- pi-c2-wiki-page-end -->\n\nPAGE ${page}`,
     );
   }
   try {
@@ -714,7 +714,7 @@ test("knowledge_search traverses previous and next cursors sequentially", async 
 
 test("knowledge_search returns empty results for missing or out-of-range pages", async () => {
   const root = tempRoot();
-  writeFileSync(join(root, "topic.md"), "<!-- pi-code-wiki-page -->\ntopic: topic\npage: 1\ntotalPages: 1\n<!-- pi-code-wiki-page-end -->\n\nPAGE");
+  writeFileSync(join(root, "topic.md"), "<!-- pi-c2-wiki-page -->\ntopic: topic\npage: 1\ntotalPages: 1\n<!-- pi-c2-wiki-page-end -->\n\nPAGE");
   try {
     const missing = await executeKnowledgeSearch({ type: "wikis", topic: "topic", page: "topic.part-099.md" }, { wikiRoot: root });
     assert.equal(text(missing), "No local wiki matches found.");
@@ -739,7 +739,7 @@ test("knowledge_search retrieves pages written by the paginated writer", async (
       pageSize: 512,
     });
     const result = await executeKnowledgeSearch({ type: "wikis", topic: "writer", page: "2" }, { wikiRoot: root });
-    assert.match(text(result), /<!-- pi-code-wiki-page -->/);
+    assert.match(text(result), /<!-- pi-c2-wiki-page -->/);
     assert.match(text(result), /topic: writer/);
     const details = result.details as unknown as { page: { page: number; totalPages: number } };
     assert.equal(details.page.page, 2);
@@ -803,7 +803,7 @@ test("both wiki and reference modes dispatch through the captured registration s
   mkdirSync(join(root, "wikis"), { recursive: true });
   writeFileSync(
     join(root, "wikis", "topic.md"),
-    `<!-- pi-code-wiki-page -->\ntopic: topic\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->\n\nbody`,
+    `<!-- pi-c2-wiki-page -->\ntopic: topic\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nbody`,
   );
   try {
     const wiki = await tool.execute("call", { type: "wikis", query: "*" }, undefined, undefined, context);
@@ -874,7 +874,7 @@ test("wiki discovery output stays bounded even when one topic has oversized page
     const file = index === 0 ? `${topic}.md` : `${topic}.part-${String(index).padStart(3, "0")}.md`;
     writeFileSync(
       join(root, file),
-      `<!-- pi-code-wiki-page -->\ntopic: ${topic}\npage: ${index + 1}\ntotalPages: ${MAX_WIKI_DISCOVERY_PAGES + 1}\n\n<!-- pi-code-wiki-page-end -->`,
+      `<!-- pi-c2-wiki-page -->\ntopic: ${topic}\npage: ${index + 1}\ntotalPages: ${MAX_WIKI_DISCOVERY_PAGES + 1}\n\n<!-- pi-c2-wiki-page-end -->`,
     );
   }
   try {
@@ -892,7 +892,7 @@ test("wiki discovery output is bounded to the documented byte budget", async () 
     const file = `topic-${String(index).padStart(3, "0")}.md`;
     writeFileSync(
       join(root, file),
-      `<!-- pi-code-wiki-page -->\ntopic: topic-${String(index).padStart(3, "0")}\npage: 1\ntotalPages: 1\n\n<!-- pi-code-wiki-page-end -->`,
+      `<!-- pi-c2-wiki-page -->\ntopic: topic-${String(index).padStart(3, "0")}\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->`,
     );
   }
   try {
@@ -910,7 +910,7 @@ test("wiki discovery caps pages per topic", async () => {
     const file = index === 0 ? "long.md" : `long.part-${String(index).padStart(3, "0")}.md`;
     writeFileSync(
       join(root, file),
-      `<!-- pi-code-wiki-page -->\ntopic: long\npage: ${String(index + 1).padStart(3, "0")}\ntotalPages: ${MAX_WIKI_DISCOVERY_PAGES + 5}\n\n<!-- pi-code-wiki-page-end -->`,
+      `<!-- pi-c2-wiki-page -->\ntopic: long\npage: ${String(index + 1).padStart(3, "0")}\ntotalPages: ${MAX_WIKI_DISCOVERY_PAGES + 5}\n\n<!-- pi-c2-wiki-page-end -->`,
     );
   }
   try {

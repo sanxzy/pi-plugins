@@ -1,7 +1,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 
 /**
- * Shared tool-result helpers for the pi-code tool registrations.
+ * Shared tool-result helpers for the pi-c2 tool registrations.
  *
  * Every tool returns `AgentToolResult` with a text content block plus a
  * structured `details` payload the model can inspect.

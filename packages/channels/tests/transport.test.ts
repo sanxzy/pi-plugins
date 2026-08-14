@@ -14,7 +14,7 @@ import {
 } from "../src/index.ts";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-channels-transport-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-channels-transport-"));
 }
 
 const TOKEN = "123456789:ABCDEFGHIJKLMNOPQRSTUVWX";

@@ -20,15 +20,15 @@ test("Telegram command expander combines explicit extension commands with prompt
 });
 
 test("default expander excludes system_prompt unless development mode is enabled", () => {
-  const previous = process.env.PI_CODE_DEV;
-  delete process.env.PI_CODE_DEV;
+  const previous = process.env.PI_C2_DEV;
+  delete process.env.PI_C2_DEV;
   try {
     const regular = createDefaultTelegramCommandExpander(() => []);
     const regularNames = regular.menuSources().map((command) => command.name);
-    assert.equal(regularNames.includes("system_prompt"), false, "system_prompt is hidden without PI_CODE_DEV");
+    assert.equal(regularNames.includes("system_prompt"), false, "system_prompt is hidden without PI_C2_DEV");
   } finally {
-    if (previous === undefined) delete process.env.PI_CODE_DEV;
-    else process.env.PI_CODE_DEV = previous;
+    if (previous === undefined) delete process.env.PI_C2_DEV;
+    else process.env.PI_C2_DEV = previous;
   }
 
   const dev = createTelegramCommandExpander({

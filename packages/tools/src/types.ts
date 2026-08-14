@@ -1,5 +1,5 @@
 /**
- * Structured `details` payloads returned by the four pi-code tools.
+ * Structured `details` payloads returned by the four pi-c2 tools.
  *
  * These types stay at the shared host boundary and are intentionally kept free
  * of PI SDK session handles and raw filesystem paths.

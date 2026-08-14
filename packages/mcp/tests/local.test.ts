@@ -14,9 +14,9 @@ function tempRoot(prefix: string): string {
 }
 
 test("start() auto-connects configured local servers from the effective configuration", async () => {
-  const agentDir = join(tempRoot("pi-code-mcp-local-agent3-"), "agent");
-  const projectRoot = tempRoot("pi-code-mcp-local-project3-");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  const agentDir = join(tempRoot("pi-c2-mcp-local-agent3-"), "agent");
+  const projectRoot = tempRoot("pi-c2-mcp-local-project3-");
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({
@@ -38,8 +38,8 @@ test("start() auto-connects configured local servers from the effective configur
 });
 
 test("connects a local stdio server, initializes MCP, and discovers tools", async () => {
-  const agentDir = join(tempRoot("pi-code-mcp-local-agent-"), "agent");
-  const projectRoot = tempRoot("pi-code-mcp-local-project-");
+  const agentDir = join(tempRoot("pi-c2-mcp-local-agent-"), "agent");
+  const projectRoot = tempRoot("pi-c2-mcp-local-project-");
   const manager = createMcpManager({ agentDir, projectRoot });
   const result = await manager.connectLocal("fixture", {
     type: "local",
@@ -61,8 +61,8 @@ test("connects a local stdio server, initializes MCP, and discovers tools", asyn
 });
 
 test("a disabled local server does not spawn and a failed server is isolated", async () => {
-  const agentDir = join(tempRoot("pi-code-mcp-local-agent2-"), "agent");
-  const projectRoot = tempRoot("pi-code-mcp-local-project2-");
+  const agentDir = join(tempRoot("pi-c2-mcp-local-agent2-"), "agent");
+  const projectRoot = tempRoot("pi-c2-mcp-local-project2-");
   const manager = createMcpManager({ agentDir, projectRoot });
   const disabled = await manager.connectLocal("disabled", {
     type: "local",
@@ -88,9 +88,9 @@ test("a disabled local server does not spawn and a failed server is isolated", a
 });
 
 test("full-catalog discovery follows cursors and preserves valid results when another server fails", async () => {
-  const agentDir = join(tempRoot("pi-code-mcp-local-agentf-"), "agent");
-  const projectRoot = tempRoot("pi-code-mcp-local-projectf-");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  const agentDir = join(tempRoot("pi-c2-mcp-local-agentf-"), "agent");
+  const projectRoot = tempRoot("pi-c2-mcp-local-projectf-");
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({
@@ -136,8 +136,8 @@ test("full-catalog discovery follows cursors and preserves valid results when an
 });
 
 test("startup timeout kills a hanging server and cancellation is aborted into failed status", async () => {
-  const agentDir = join(tempRoot("pi-code-mcp-local-agenth-"), "agent");
-  const projectRoot = tempRoot("pi-code-mcp-local-projecth-");
+  const agentDir = join(tempRoot("pi-c2-mcp-local-agenth-"), "agent");
+  const projectRoot = tempRoot("pi-c2-mcp-local-projecth-");
   const manager = createMcpManager({ agentDir, projectRoot });
 
   const hung = await manager.connectLocal("hung", {
@@ -169,9 +169,9 @@ test("startup timeout kills a hanging server and cancellation is aborted into fa
 });
 
 test("global timeout config applies as fallback for startup", async () => {
-  const agentDir = join(tempRoot("pi-code-mcp-local-agentg-"), "agent");
-  const projectRoot = tempRoot("pi-code-mcp-local-projectg-");
-  mkdirSync(join(agentDir, "pi-code"), { recursive: true });
+  const agentDir = join(tempRoot("pi-c2-mcp-local-agentg-"), "agent");
+  const projectRoot = tempRoot("pi-c2-mcp-local-projectg-");
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   writeFileSync(
     userConfigPath(agentDir),
     JSON.stringify({
@@ -193,9 +193,9 @@ test("global timeout config applies as fallback for startup", async () => {
 });
 
 test("session shutdown terminates local descendants in the process group", async () => {
-  const agentDir = join(tempRoot("pi-code-mcp-local-agentd-"), "agent");
-  const projectRoot = tempRoot("pi-code-mcp-local-projectd-");
-  const childPidFile = join(tempRoot("pi-code-mcp-local-child-"), "child.pid");
+  const agentDir = join(tempRoot("pi-c2-mcp-local-agentd-"), "agent");
+  const projectRoot = tempRoot("pi-c2-mcp-local-projectd-");
+  const childPidFile = join(tempRoot("pi-c2-mcp-local-child-"), "child.pid");
   mkdirSync(dirname(childPidFile), { recursive: true });
   const manager = createMcpManager({ agentDir, projectRoot });
   const result = await manager.connectLocal("fixture", {
@@ -244,7 +244,7 @@ test("local server stderr is piped and bounded on the transport", async () => {
 });
 
 test("stdio process lifecycle emits start/send/close/terminate telemetry", async () => {
-  const root = tempRoot("pi-code-mcp-stdio-log-");
+  const root = tempRoot("pi-c2-mcp-stdio-log-");
   const logDir = join(root, "logs");
   const logger = createSessionLogger({
     projectId: "project",

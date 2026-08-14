@@ -22,7 +22,7 @@ function asDiscovered(agent: DiscoveredAgent | undefined): DiscoveredAgent {
  */
 
 function tmpRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-agents-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-agents-"));
 }
 
 function processEnv(): NodeJS.Process["env"] {

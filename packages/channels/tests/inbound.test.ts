@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHANNEL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
-process.env.PI_CODE_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-code-channel-test-home-"));
+process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-channel-test-home-"));
 import {
   createTelegramInbound,
   decodeAcceptedText,
@@ -127,7 +127,7 @@ function makeListener(approved: string[], onAccepted: (id: number, chat: string,
 }
 
 test("inbound handle and drain emit correlated boundary records", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-inbound-log-"));
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-inbound-log-"));
   const logger = createSessionLogger({
     projectId: "project",
     rootSessionId: "root-session",

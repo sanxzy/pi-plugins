@@ -15,7 +15,7 @@ import {
 } from "@xzy-ai/runtime";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-phase1-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-phase1-"));
 }
 
 function liveControl(): ChildSessionControl {
@@ -50,11 +50,11 @@ function newJob(input: {
 
 test("session path helpers create parent-scoped registry and child transcript directories", () => {
   const root = projectRoot();
-  assert.equal(rootSessionDir(root, "root-session"), join(root, ".pi", "pi-code", "sessions", "root-session"));
-  assert.equal(childSessionDir(root, "parent-session"), join(root, ".pi", "pi-code", "sessions", "parent-session"));
+  assert.equal(rootSessionDir(root, "root-session"), join(root, ".pi", "pi-c2", "sessions", "root-session"));
+  assert.equal(childSessionDir(root, "parent-session"), join(root, ".pi", "pi-c2", "sessions", "parent-session"));
   assert.equal(
     sessionRegistryFile(root, "parent-session"),
-    join(root, ".pi", "pi-code", "sessions", "parent-session", "jobs-parent-session.jsonl"),
+    join(root, ".pi", "pi-c2", "sessions", "parent-session", "jobs-parent-session.jsonl"),
   );
   assert.equal(scopedRegistryFile(root, "parent-session"), sessionRegistryFile(root, "parent-session"));
 });
@@ -257,11 +257,11 @@ test("pruning caps each agent's own history recursively, so grandchildren are is
 
 test("scope API never reads legacy flat jobs or sessions", () => {
   const root = projectRoot();
-  const legacyRegistry = join(root, ".pi", "pi-code", "jobs.jsonl");
-  mkdirSync(join(root, ".pi", "pi-code"), { recursive: true });
+  const legacyRegistry = join(root, ".pi", "pi-c2", "jobs.jsonl");
+  mkdirSync(join(root, ".pi", "pi-c2"), { recursive: true });
   writeFileSync(legacyRegistry, JSON.stringify({ type: "created", job: newJob({ jobId: "legacy", parentSessionId: "root-session" }), at: "2026-01-01T00:00:00.000Z" }) + "\n");
-  mkdirSync(join(root, ".pi", "pi-code", "sessions"), { recursive: true });
-  writeFileSync(join(root, ".pi", "pi-code", "sessions", "legacy.jsonl"), "legacy transcript\n");
+  mkdirSync(join(root, ".pi", "pi-c2", "sessions"), { recursive: true });
+  writeFileSync(join(root, ".pi", "pi-c2", "sessions", "legacy.jsonl"), "legacy transcript\n");
 
   const registry = createScopedRegistry(root);
   assert.deepEqual(scopeRegistry(registry, "root-session", new Map()), []);

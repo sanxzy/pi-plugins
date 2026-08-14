@@ -19,12 +19,12 @@ import {
 } from "@xzy-ai/channels";
 
 function home(): string {
-  const dir = mkdtempSync(join(tmpdir(), "pi-code-phase7-home-"));
-  process.env.PI_CODE_TEST_HOME = dir;
+  const dir = mkdtempSync(join(tmpdir(), "pi-c2-phase7-home-"));
+  process.env.PI_C2_TEST_HOME = dir;
   return dir;
 }
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-phase7-proj-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-phase7-proj-"));
 }
 
 test("channel state (config, runtime, owner) stays project-owned under home storage", () => {

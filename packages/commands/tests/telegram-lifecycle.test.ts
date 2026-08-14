@@ -20,7 +20,7 @@ import {
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-telegram-lifecycle-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-telegram-lifecycle-"));
 }
 
 function writeValidConfig(cwd: string, token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWX"): void {

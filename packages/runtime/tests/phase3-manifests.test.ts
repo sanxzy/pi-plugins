@@ -30,19 +30,19 @@ function mode(path: string): number {
 }
 
 function project(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-phase3-project-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-phase3-project-"));
 }
 
 function setupHome(): string {
-  const home = mkdtempSync(join(tmpdir(), "pi-code-phase3-home-"));
-  process.env.PI_CODE_TEST_HOME = home;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-phase3-home-"));
+  process.env.PI_C2_TEST_HOME = home;
   return home;
 }
 
 test("writeProjectManifest emits a dedicated project-write boundary", () => {
   setupHome();
   const root = project();
-  const logDir = mkdtempSync(join(tmpdir(), "pi-code-phase3-mlog-"));
+  const logDir = mkdtempSync(join(tmpdir(), "pi-c2-phase3-mlog-"));
   const logger = createSessionLogger({
     projectId: "project",
     rootSessionId: "root-session",
@@ -93,7 +93,7 @@ test("starting and finishing a root session atomically persists private project/
 test("relative and symlinked project aliases open the same canonical project manifest", () => {
   setupHome();
   const root = project();
-  const parent = mkdtempSync(join(tmpdir(), "pi-code-phase3-alias-"));
+  const parent = mkdtempSync(join(tmpdir(), "pi-c2-phase3-alias-"));
   const alias = join(parent, "alias");
   symlinkSync(root, alias, "dir");
   const first = startRootSession({ projectRoot: root, sessionId: "root-a", now: "2026-08-11T11:00:00.000Z" });

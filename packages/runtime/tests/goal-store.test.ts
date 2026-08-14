@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { encodeProjectId, getGoalPool, homeGoalFile, normalizeGoalCwd } from "@xzy-ai/runtime";
 
 function projectRoot(): string {
-  return mkdtempSync(join(tmpdir(), "pi-code-goal-store-"));
+  return mkdtempSync(join(tmpdir(), "pi-c2-goal-store-"));
 }
 
 test("goal store persists a flat record and survives a fresh reader", () => {
