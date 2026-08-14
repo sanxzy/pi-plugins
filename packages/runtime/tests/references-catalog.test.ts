@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { cachePath, parseRepository } from "@xzy-ai/core";
 import { createReferenceCatalogWithInfrastructure } from "../src/infrastructure/references/catalog.ts";
 import { referenceConfigFile } from "../src/infrastructure/references/catalog.ts";
 import { createGitMaterializer as createInternalGitMaterializer } from "../src/infrastructure/references/git-materializer.ts";
@@ -106,6 +107,30 @@ test("reports permission-blocked local roots as unavailable", async () => {
   }
 });
 
+test("setup save materializes every Git reference before publishing the catalog", async () => {
+  const root = tempRoot();
+  const materialized: string[] = [];
+  const catalog = createReferenceCatalogWithInfrastructure({
+    agentDir: join(root, "agent"),
+    homeDir: root,
+    materializer: {
+      preflight: async () => ({ ok: true as const }),
+      ensure: async ({ reference }) => {
+        materialized.push(reference.label);
+        mkdirSync(cachePath(join(root, "agent", "pi-code", "repos"), reference, "main"), { recursive: true });
+        return { localPath: cachePath(join(root, "agent", "pi-code", "repos"), reference, "main"), status: "cloned" as const, branch: "main" };
+      },
+    },
+  });
+
+  const saved = await catalog.save({ references: {
+    sdk: { repository: "owner/repo", branch: "main" },
+    ui: { repository: "other/ui", branch: "main" },
+  } });
+  assert.deepEqual(saved, { ok: true });
+  assert.deepEqual(materialized, ["owner/repo", "other/ui"]);
+});
+
 test("resolves local paths and reports unavailable roots without throwing", async () => {
   const root = tempRoot();
   const home = join(root, "home");
@@ -140,7 +165,9 @@ test("resolves local paths and reports unavailable roots without throwing", asyn
   assert.equal(byName.get("absolute")?.status, "available");
   assert.equal(byName.get("missing")?.status, "unavailable");
   assert.equal(byName.get("file")?.status, "unavailable");
+  // Git sources are read from the recomputed cache path and reported missing when not provisioned.
   assert.equal(byName.get("sdk")?.status, "unavailable");
+  assert.equal(byName.get("sdk")?.diagnostic, "Git reference is not materialized");
 });
 
 test("keeps valid entries when strict JSON contains malformed entries", async () => {
@@ -252,20 +279,24 @@ test("publishes Git materialization status through the public catalog", async ()
     homeDir: root,
     materializer: {
       preflight: async () => ({ ok: true }),
-      ensure: async () => ({
-        localPath: join(root, "cache", "repo"),
-        status: "cloned" as const,
-        head: "abc123",
-        branch: "main",
-      }),
+      ensure: async ({ reference }) => {
+        const localPath = cachePath(join(root, "agent", "pi-code", "repos"), reference, "main");
+        mkdirSync(localPath, { recursive: true });
+        return {
+          localPath,
+          status: "cloned" as const,
+          head: "abc123",
+          branch: "main",
+        };
+      },
     },
   });
   assert.deepEqual(await catalog.save({ references: { remote: { repository: "owner/repo", branch: "main" } } }), { ok: true });
   const result = await catalog.read();
   const entry = result.entries[0]!;
   assert.equal(entry.status, "available");
-  assert.equal(entry.materialization, "cloned");
-  assert.equal(entry.path, join(root, "cache", "repo"));
+  assert.equal(entry.materialization, "cached");
+  assert.equal(entry.path, realpathSync(cachePath(join(root, "agent", "pi-code", "repos"), parseRepository("owner/repo")!, "main")));
 });
 
 test("save rejects invalid documents before touching the existing file", async () => {

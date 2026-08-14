@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { parseRepository } from "@xzy-ai/core";
+import { cachePath, parseRepository } from "@xzy-ai/core";
 import { createGitMaterializer, type GitMaterializer } from "./git-materializer.ts";
 import {
   validateReferenceAlias,
@@ -54,6 +54,7 @@ export type ReferenceCatalogOperation = ReferenceCatalogOperationResult | Refere
 
 export interface ReferenceCatalogOperationOptions {
   readonly signal?: AbortSignal;
+  readonly refresh?: boolean;
 }
 
 export interface ReferenceGitOperationInput {
@@ -154,13 +155,24 @@ export function createReferenceCatalogWithInfrastructure(
 
   return {
     filePath,
-    read: () => readReferenceCatalog(filePath, homeDir, reposDir, options.refresh, materializer),
+    // Discovery is metadata-only for Git sources. Materializing every remote
+    // while listing aliases makes one large or unavailable repository block all
+    // reference discovery; reading only inspects the already-provisioned cache.
+    read: () => readReferenceCatalog(filePath, homeDir, reposDir),
     readDocument: () => readReferenceDocument(filePath),
     preflight,
     save: async (document, operationOptions = {}) => {
       const preflightResult = await preflight(document, operationOptions);
       if (!preflightResult.ok) return preflightResult;
       if (operationOptions.signal?.aborted) return { ok: false, error: "Git materialization aborted" };
+      // /setup-references is the sole intake for new references, so persisting
+      // is a provisioning step: materialize every Git source before publishing
+      // the catalog. Nothing is written if any remote cannot be checked out.
+      try {
+        await materializeGitSources(reposDir, materializer, document, operationOptions, options.refresh);
+      } catch (error) {
+        return { ok: false, error: operationOptions.signal?.aborted ? "Git materialization aborted" : "Git reference materialization failed" };
+      }
       try {
         await atomicWrite(filePath, serializeReferenceDocument(document));
         return { ok: true };
@@ -171,6 +183,32 @@ export function createReferenceCatalogWithInfrastructure(
     testReference: (input, operationOptions = {}) => materializeReference(input, false, operationOptions, reposDir, materializer),
     refreshReference: (input, operationOptions = {}) => materializeReference(input, true, operationOptions, reposDir, materializer),
   };
+}
+
+/** Clone every configured Git reference so a saved catalog is ready for use. */
+async function materializeGitSources(
+  reposDir: string,
+  materializer: GitMaterializer,
+  document: unknown,
+  operationOptions: ReferenceCatalogOperationOptions,
+  refresh: boolean | undefined,
+): Promise<void> {
+  if (operationOptions.signal?.aborted) throw new Error("aborted");
+  const validated = validateReferenceCatalog(document);
+  if (!validated.ok) throw new Error("invalid");
+  for (const source of Object.values(validated.value.references)) {
+    if (source.type !== "git") continue;
+    if (operationOptions.signal?.aborted) throw new Error("aborted");
+    const repository = parseRepository(source.repository);
+    if (!repository) throw new Error("invalid");
+    await materializer.ensure({
+      reference: repository,
+      cacheRoot: reposDir,
+      branch: source.branch,
+      refresh: operationOptions.refresh ?? refresh,
+      signal: operationOptions.signal,
+    });
+  }
 }
 
 async function readReferenceDocument(filePath: string): Promise<ReferenceCatalogDocument> {
@@ -238,8 +276,6 @@ async function readReferenceCatalog(
   filePath: string,
   homeDir: string,
   reposDir: string,
-  refresh: boolean | undefined,
-  materializer: GitMaterializer,
 ): Promise<ReferenceCatalogReadResult> {
   let raw: string;
   try {
@@ -283,7 +319,7 @@ async function readReferenceCatalog(
       diagnostics.push(`Reference '${name}' is unavailable`);
       continue;
     }
-    const resolved = await resolveCatalogEntry(name, source.ok ? source.value : fallback!, homeDir, reposDir, refresh, materializer);
+    const resolved = await resolveCatalogEntry(name, source.ok ? source.value : fallback!, homeDir, reposDir);
     entries.push(resolved.entry);
     if (resolved.diagnostic) diagnostics.push(resolved.diagnostic);
   }
@@ -295,8 +331,6 @@ async function resolveCatalogEntry(
   source: ReferenceSource,
   homeDir: string,
   reposDir: string,
-  refresh: boolean | undefined,
-  materializer: GitMaterializer,
 ): Promise<{ readonly entry: ReferenceCatalogEntry; readonly diagnostic?: string }> {
   const metadata = referenceEntryMetadata(name, source);
   if (source.type === "git") {
@@ -307,26 +341,18 @@ async function resolveCatalogEntry(
         diagnostic: `Reference '${name}' is unavailable`,
       };
     }
+    // Discovery is read-only: setup provisions the deterministic cache, and
+    // model consumption only inspects whether that checkout is still present.
+    const localPath = cachePath(reposDir, repository, source.branch);
     try {
-      const result = await materializer.ensure({
-        reference: repository,
-        cacheRoot: reposDir,
-        branch: source.branch,
-        refresh,
-      });
+      const canonicalPath = await realpath(localPath);
+      if (!(await stat(canonicalPath)).isDirectory()) throw new Error("not a directory");
       return {
-        entry: {
-          ...metadata,
-          path: result.localPath,
-          status: "available",
-          materialization: result.status,
-          ...(result.head === undefined ? {} : { head: result.head }),
-          ...(result.branch === undefined ? {} : { branch: result.branch }),
-        },
+        entry: { ...metadata, path: canonicalPath, status: "available", materialization: "cached" },
       };
     } catch {
       return {
-        entry: { ...metadata, status: "unavailable", diagnostic: "Git reference is unavailable" },
+        entry: { ...metadata, status: "unavailable", diagnostic: "Git reference is not materialized" },
         diagnostic: `Reference '${name}' is unavailable`,
       };
     }
