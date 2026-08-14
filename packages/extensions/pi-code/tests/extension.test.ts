@@ -6,7 +6,7 @@ import piCodeExtension, {
   type QuestionDetails,
   type WebFetchDetails,
   type WebSearchDetails,
-  type LlmWikisSearchDetails,
+  type KnowledgeSearchDetails,
 } from "../index.ts";
 
 /**
@@ -45,7 +45,7 @@ test("pi-code extension registers Telegram setup and goal workflow alongside exi
   assert.ok(names.includes("telegram_chat"), "telegram_chat tool registered");
   assert.ok(names.includes("web_search"), "web_search tool registered");
   assert.ok(names.includes("web_fetch"), "web_fetch tool registered");
-  assert.ok(names.includes("llm_wikis_search"), "llm_wikis_search tool registered");
+  assert.ok(names.includes("knowledge_search"), "knowledge_search tool registered");
   assert.deepEqual(
     names.filter((name) => name.startsWith("goal_")),
     ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"],
@@ -102,7 +102,7 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "goal_clear",
     "web_fetch",
     "web_search",
-    "llm_wikis_search",
+    "knowledge_search",
     "telegram_chat",
   ]);
 });
@@ -146,7 +146,7 @@ test("parent startup activates the registered tools including web_search and web
   assert.ok(activeTools, "setActiveTools called on startup");
   assert.ok(activeTools.includes("web_search"), "web_search active in parent session");
   assert.ok(activeTools.includes("web_fetch"), "web_fetch active in parent session");
-  assert.ok(activeTools.includes("llm_wikis_search"), "llm_wikis_search active in parent session");
+  assert.ok(activeTools.includes("knowledge_search"), "knowledge_search active in parent session");
   assert.equal(activeTools.includes("ls"), false, "ls stays excluded");
 });
 
@@ -166,7 +166,7 @@ test("research tool descriptions direct local-first lookup and automatic fallbac
     sendUserMessage() {},
   } as unknown as ExtensionAPI;
   piCodeExtension(pi);
-  const wiki = descriptions.get("llm_wikis_search") ?? "";
+  const wiki = descriptions.get("knowledge_search") ?? "";
   const search = descriptions.get("web_search") ?? "";
   const fetch = descriptions.get("web_fetch") ?? "";
   assert.match(wiki, /local/i);
@@ -188,7 +188,7 @@ test("research tool descriptions direct local-first lookup and automatic fallbac
 test("extension re-exports the web and wiki search details types", () => {
   const searchDetails: WebSearchDetails = { query: "typescript", provider: "exa" };
   const fetchDetails: WebFetchDetails = {};
-  const wikiDetails: LlmWikisSearchDetails = { mode: "wikis", query: "typescript", results: [] };
+  const wikiDetails: KnowledgeSearchDetails = { mode: "wikis", query: "typescript", results: [] };
   assert.equal(searchDetails.provider, "exa");
   assert.deepEqual(fetchDetails, {});
   assert.deepEqual(wikiDetails.results, []);

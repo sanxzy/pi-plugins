@@ -160,7 +160,7 @@ export const TOOL_OPERATIONS = {
   WEB_SEARCH_EXECUTE: "tool.webSearchExecute",
   WEB_FETCH_EXECUTE: "tool.webFetchExecute",
   WIKI_EXECUTE: "tool.wikiExecute",
-  LLM_WIKIS_EXECUTE: "tool.llmWikisExecute",
+  KNOWLEDGE_SEARCH_EXECUTE: "tool.knowledgeSearchExecute",
   AGENT_LIST_EXECUTE: "tool.agentListExecute",
 } as const;
 

@@ -19,7 +19,7 @@ export const DEFAULT_RESERVED_TOOL_NAMES = new Set([
   "ls",
   "web_search",
   "web_fetch",
-  "llm_wikis_search",
+  "knowledge_search",
   "agent",
   "agent_cancel",
   "agent_status",

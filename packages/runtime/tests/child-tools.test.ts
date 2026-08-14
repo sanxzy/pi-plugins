@@ -8,7 +8,7 @@ import { getChildExtensionFactories, maxAgentDepth, registerChildExtensionFactor
 
 const ALL_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find"];
 const ALL_AGENT_TOOLS = ["agent", "agent_list", "agent_jobs", "agent_status", "agent_cancel"];
-const ALL_WEB_TOOLS = ["web_search", "web_fetch", "llm_wikis_search"];
+const ALL_WEB_TOOLS = ["web_search", "web_fetch", "knowledge_search"];
 const ALL_MCP_RESOURCE_TOOLS = ["mcp_resources_list", "mcp_resources_read"];
 const ALL_CHILD_TOOLS = [...ALL_BUILTIN_TOOLS, ...ALL_AGENT_TOOLS, ...ALL_WEB_TOOLS, ...ALL_MCP_RESOURCE_TOOLS];
 
@@ -94,7 +94,7 @@ test("an explicit list that omits agent tools still gains the agent fallback set
     "agent_cancel",
     "web_search",
     "web_fetch",
-    "llm_wikis_search",
+    "knowledge_search",
     "mcp_resources_list",
     "mcp_resources_read",
   ]);
@@ -119,7 +119,7 @@ test("the fallback allowlist includes built-in, agent, web, and MCP resource too
   assert.ok(!tools.includes("ls"), "ls must not be exposed to children");
   assert.ok(tools.includes("web_search"));
   assert.ok(tools.includes("web_fetch"));
-  assert.ok(tools.includes("llm_wikis_search"), "llm_wikis_search must be exposed to every child");
+  assert.ok(tools.includes("knowledge_search"), "knowledge_search must be exposed to every child");
   assert.ok(tools.includes("agent"));
   assert.ok(tools.includes("agent_list"));
   assert.ok(tools.includes("agent_jobs"));
@@ -138,7 +138,7 @@ test("depth 0 through 3 retain agent-family tools while depth 4 is a terminal le
     for (const name of ALL_AGENT_TOOLS) assert.ok(tools.includes(name), `${name} is available at depth ${depth}`);
     assert.ok(tools.includes("web_search"));
     assert.ok(tools.includes("web_fetch"));
-    assert.ok(tools.includes("llm_wikis_search"));
+    assert.ok(tools.includes("knowledge_search"));
     assert.ok(tools.includes("mcp_resources_list"));
     assert.ok(tools.includes("mcp_resources_read"));
     assert.ok(tools.includes("exa_web_search_exa"));

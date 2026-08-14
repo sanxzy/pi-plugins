@@ -83,6 +83,10 @@ test("web_search is registered, describes the current year, and sends a JSON-RPC
   assert.match(tool.description, /broad discovery/i);
   assert.match(tool.description, /candidate URLs/i);
   assert.match(tool.description, /narrower keyword/i);
+  assert.match(tool.description, /Search local wikis and references first with knowledge_search tool;/);
+  assert.match(tool.description, /very expensive/i);
+  assert.match(tool.description, /web_fetch.*free/i);
+  assert.doesNotMatch(tool.description, /exa/i);
   const captured: Array<{ input: string; method?: string; headers: Headers; body: unknown }> = [];
   await withAgentDir(async () => {
     await withFetch(

@@ -9,7 +9,7 @@ import {
   registerGoalTools,
   registerWebFetchTool,
   registerWebSearchTool,
-  registerLlmWikisSearchTool,
+  registerKnowledgeSearchTool,
   registerAgentFooter,
   registerTelegramChatTool,
 } from "@xzy-ai/tools";
@@ -38,7 +38,7 @@ import type {
   StatusDetails,
   WebFetchDetails,
   WebSearchDetails,
-  LlmWikisSearchDetails,
+  KnowledgeSearchDetails,
 } from "@xzy-ai/tools";
 
 const extensionName = "pi-code";
@@ -77,7 +77,7 @@ export default function piCodeExtension(pi: ExtensionAPI): void {
   registerGoalTools(pi);
   registerWebFetchTool(pi);
   registerWebSearchTool(pi);
-  registerLlmWikisSearchTool(pi);
+  registerKnowledgeSearchTool(pi);
   registerAgentFooter(pi);
   registerTelegramChatTool(pi);
   registerSessionEvents(pi);
@@ -98,5 +98,5 @@ export type {
   StatusDetails,
   WebFetchDetails,
   WebSearchDetails,
-  LlmWikisSearchDetails,
+  KnowledgeSearchDetails,
 };

@@ -73,6 +73,7 @@ test("web_fetch is registered with a narrow source-focused description", () => {
   assert.match(tool.description, /web_search/i);
   assert.match(tool.description, /candidate URL/i);
   assert.match(tool.description, /search response/i);
+  assert.match(tool.description, /Search local wikis and references first with knowledge_search tool;/);
 });
 
 test("web_fetch is registered and rejects non-http URLs before fetching", async () => {

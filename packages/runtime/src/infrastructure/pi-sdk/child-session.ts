@@ -66,7 +66,7 @@ const AGENT_FAMILY_TOOLS = [
   "agent_status",
   "agent_cancel",
 ] as const;
-const WEB_FAMILY_TOOLS = ["web_search", "web_fetch", "llm_wikis_search"] as const;
+const WEB_FAMILY_TOOLS = ["web_search", "web_fetch", "knowledge_search"] as const;
 const EXTENSION_TOOLS = [...AGENT_FAMILY_TOOLS, ...WEB_FAMILY_TOOLS] as const;
 
 /** MCP resource/prompt tools every child may expose so subagents can manage MCP. */

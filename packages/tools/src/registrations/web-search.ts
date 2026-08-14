@@ -194,7 +194,7 @@ function parseJsonPayload(payload: string):
 }
 
 function webSearchDescription(): string {
-  return `Use this tool for broad discovery: search the web using Exa and return current information beyond the knowledge cutoff. Start with a broad query to map a topic and surface candidate URLs and sources; then retry with narrower keyword combinations to narrow down the most relevant candidates. Search local LLM wikis first with llm_wikis_search; fall back to this tool when local information is absent or insufficient. Successful results from this tool are automatically saved to the local wiki for reuse. Supports configurable result counts, live crawling modes ('fallback' or 'preferred'), search types ('auto', 'fast', or 'deep'), and context length. The current year is ${new Date().getFullYear()}; use this year when searching for recent information or current events.`;
+  return `Use this tool for broad discovery: search the web and return current information beyond the knowledge cutoff. Start with a broad query to map a topic and surface candidate URLs and sources; then retry with narrower keyword combinations to narrow down the most relevant candidates. Search local wikis and references first with knowledge_search tool; fall back to this tool when local information is absent or insufficient. This tool is very expensive, so use it sparingly; once candidate URLs have been identified, prefer web_fetch for subsequent retrieval and verification because web_fetch is free. Successful results from this tool are automatically saved to the local wiki for reuse. The current year is ${new Date().getFullYear()}; use this year when searching for recent information or current events.`;
 }
 
 function toErrorMessage(error: unknown): string {
