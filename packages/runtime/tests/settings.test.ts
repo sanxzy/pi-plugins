@@ -180,6 +180,29 @@ test("a malformed home config degrades to empty rather than throwing", () => {
   }
 });
 
+test("unknown top-level and nested keys are absent from resolved settings", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, {
+      unknownTopLevel: "ignored",
+      agents: { maxConcurrency: 6, unknownAgentKey: "ignored" },
+      tools: { unknownToolGroup: { enabled: true }, web: { unknownWebKey: "ignored" } },
+      mcp: { unknownMcpKey: true },
+    });
+    withHome(home, () => {
+      const settings = resolveSettings() as unknown as Record<string, unknown>;
+      assert.equal(settings.unknownTopLevel, undefined);
+      assert.equal((settings.agents as Record<string, unknown>).unknownAgentKey, undefined);
+      assert.equal((settings.tools as Record<string, unknown>).unknownToolGroup, undefined);
+      assert.equal((settings.tools as Record<string, unknown>).web && ((settings.tools as Record<string, unknown>).web as Record<string, unknown>).unknownWebKey, undefined);
+      assert.equal((settings.mcp as Record<string, unknown>).unknownMcpKey, undefined);
+      assert.equal((settings.agents as Record<string, unknown>).maxConcurrency, 6);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("a non-object config supplies no valid fields", () => {
   const home = tempHome();
   try {
@@ -227,7 +250,7 @@ test("removing the home config falls through to defaults", () => {
   }
 });
 
-test("the Exa credential is reachable from settings but never in cache identity or diagnostics", () => {
+test("the Exa credential is reachable from settings but absent from errors, diagnostics, and cache identity", () => {
   const home = tempHome();
   try {
     const secret = "exa-secret-do-not-leak-abcdef123456";
@@ -238,6 +261,33 @@ test("the Exa credential is reachable from settings but never in cache identity 
       const global = globalThis as unknown as { __piC2SettingsDebug__?: { keys: string } };
       const keys = global.__piC2SettingsDebug__?.keys ?? "";
       assert.ok(!keys.includes(secret), "secret must not appear in settings-cache keys");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("resolution error paths do not surface the parsed secret", () => {
+  const home = tempHome();
+  const homeDir = join(home, "pi-c2");
+  mkdirSync(homeDir, { recursive: true });
+  try {
+    const secret = "exa-secret-malformed-path-123456";
+    // Malformed JSON containing the secret: the resolver must degrade to an
+    // empty source and neither throw a message nor resolve the raw secret.
+    writeFileSync(join(homeDir, "config.json"), `{ \"tools\": { \"web\": { \"exaApiKey\": \"${secret}\" } }, trailing`);
+    withHome(home, () => {
+      let threw = false;
+      let message = "";
+      try {
+        const settings = resolveSettings();
+        assert.equal(settings.tools.web.exaApiKey, undefined, "malformed file must not yield a raw secret");
+      } catch (error) {
+        threw = true;
+        message = error instanceof Error ? error.message : String(error);
+      }
+      assert.equal(threw, false, "malformed settings must degrade, not throw");
+      assert.ok(!message.includes(secret), "error text must not contain the secret");
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
