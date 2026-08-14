@@ -12,11 +12,13 @@ import {
   slugify,
   slugifyQuery,
   slugifyUrl,
+  wikiRoot,
   WIKI_ENTRY_END,
   WIKI_ENTRY_START,
   WIKI_PAGE_END,
   WIKI_PAGE_START,
 } from "../src/wiki.ts";
+import { homeRoot } from "@xzy-ai/runtime";
 
 function stripHeader(document: string): string {
   const start = document.indexOf(WIKI_PAGE_START);
@@ -38,6 +40,19 @@ function entryDocument(
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
 }
+
+test("wikiRoot defaults under the runtime home-root wikis directory", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-home-"));
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = root;
+  try {
+    assert.equal(wikiRoot(), join(homeRoot(), "wikis"));
+  } finally {
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
+  }
+  rmSync(root, { recursive: true, force: true });
+});
 
 test("slugify lowercases and collapses unsafe characters into dashes", () => {
   assert.equal(slugify("React Hooks"), "react-hooks");

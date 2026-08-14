@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { homeRoot } from "@xzy-ai/runtime";
 
 export interface WikiEntry {
   title: string;
@@ -113,9 +113,9 @@ export interface WikiSaveResult {
 
 export const WIKI_SAVE_ERROR = "Unable to save wiki entry";
 
-/** Production wiki root: parent of the PI agent directory plus `wikis`. */
+/** Production wiki root: the pi-c2 runtime home `wikis` directory. */
 export function wikiRoot(): string {
-  return join(dirname(getAgentDir()), "wikis");
+  return join(homeRoot(), "wikis");
 }
 
 /** Normalize a value into a filesystem-safe slug (lowercase, dash-separated). */

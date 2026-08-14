@@ -798,11 +798,14 @@ test("the tools barrel exposes only the model-facing knowledge_search surface", 
 test("both wiki and reference modes dispatch through the captured registration safely", async () => {
   const tool = captureTool();
   const root = tempRoot();
+  const previousTestHome = process.env.PI_C2_TEST_HOME;
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_C2_TEST_HOME = root;
   process.env.PI_CODING_AGENT_DIR = join(root, "agent");
-  mkdirSync(join(root, "wikis"), { recursive: true });
+  const wikiRoot = join(root, "pi-c2", "wikis");
+  mkdirSync(wikiRoot, { recursive: true });
   writeFileSync(
-    join(root, "wikis", "topic.md"),
+    join(wikiRoot, "topic.md"),
     `<!-- pi-c2-wiki-page -->\ntopic: topic\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nbody`,
   );
   try {
@@ -812,6 +815,8 @@ test("both wiki and reference modes dispatch through the captured registration s
     assert.match(text(refs), /no configured references/i);
     assert.deepEqual((refs.details as unknown as { aliases?: unknown }).aliases, []);
   } finally {
+    if (previousTestHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousTestHome;
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
     rmSync(root, { recursive: true, force: true });

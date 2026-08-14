@@ -19,14 +19,14 @@ type Tool = {
 
 const context = {} as ExtensionContext;
 
-/** Redirect the agent directory to a temp tree so saves never touch ~/.pi. */
+/** Redirect the pi-c2 runtime home to a temp tree so saves never touch ~/.pi. */
 function withAgentDir(run: (wikiRoot: string) => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "pi-c2-agent-"));
-  const previous = process.env.PI_CODING_AGENT_DIR;
-  process.env.PI_CODING_AGENT_DIR = join(root, "agent");
-  return run(join(root, "wikis")).finally(() => {
-    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previous;
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = root;
+  return run(join(root, "pi-c2", "wikis")).finally(() => {
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
     rmSync(root, { recursive: true, force: true });
   });
 }
