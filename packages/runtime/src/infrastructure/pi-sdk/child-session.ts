@@ -208,7 +208,7 @@ async function createIsolatedChild(options: {
     settingsManager,
     systemPromptOverride,
     // Isolated child loaders inherit the inline extension factories that the
-    // host loaded (e.g. `pi -e packages/extensions/pi-c2/index.ts`), so the
+    // host loaded (e.g. `pi -e plugins/packages/pi-c2/index.ts`), so the
     // agent-family and research tools registered by the pi-c2 composition
     // root are constructible in the child. The allowlist still decides which
     // of those tools are active; goal/MCP capabilities remain root-only.

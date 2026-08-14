@@ -83,34 +83,6 @@ importers:
         specifier: ^4.22.2
         version: 4.23.8
 
-  packages/extensions/pi-c2:
-    dependencies:
-      '@earendil-works/pi-coding-agent':
-        specifier: ^0.84.1
-        version: 0.84.1(patch_hash=1a7dbd53a71a328c0bad019d185490b91db1b058bc461f04be97c91765f6639a)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.2)(zod@4.4.3)
-      '@xzy-ai/commands':
-        specifier: workspace:*
-        version: link:../../commands
-      '@xzy-ai/core':
-        specifier: workspace:*
-        version: link:../../core
-      '@xzy-ai/mcp':
-        specifier: workspace:*
-        version: link:../../mcp
-      '@xzy-ai/runtime':
-        specifier: workspace:*
-        version: link:../../runtime
-      '@xzy-ai/tools':
-        specifier: workspace:*
-        version: link:../../tools
-    devDependencies:
-      '@types/node':
-        specifier: ^24.13.3
-        version: 24.13.3
-      tsx:
-        specifier: ^4.22.2
-        version: 4.23.8
-
   packages/mcp:
     dependencies:
       '@earendil-works/pi-coding-agent':
@@ -144,6 +116,34 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
+      tsx:
+        specifier: ^4.22.2
+        version: 4.23.8
+
+  packages/pi-c2:
+    dependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: ^0.84.1
+        version: 0.84.1(patch_hash=1a7dbd53a71a328c0bad019d185490b91db1b058bc461f04be97c91765f6639a)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.2)(zod@4.4.3)
+      '@xzy-ai/commands':
+        specifier: workspace:*
+        version: link:../commands
+      '@xzy-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@xzy-ai/mcp':
+        specifier: workspace:*
+        version: link:../mcp
+      '@xzy-ai/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@xzy-ai/tools':
+        specifier: workspace:*
+        version: link:../tools
     devDependencies:
       '@types/node':
         specifier: ^24.13.3

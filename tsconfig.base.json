@@ -29,7 +29,7 @@
       "@xzy-ai/channels/*": ["./packages/channels/src/*", "./packages/channels/src/*.ts"],
       "@xzy-ai/mcp": ["./packages/mcp/src/index.ts"],
       "@xzy-ai/mcp/*": ["./packages/mcp/src/*", "./packages/mcp/src/*.ts"],
-      "@xzy-ai/pi-c2": ["./packages/extensions/pi-c2/index.ts"]
+      "@xzy-ai/pi-c2": ["./packages/pi-c2/index.ts"]
     }
   }
 }
