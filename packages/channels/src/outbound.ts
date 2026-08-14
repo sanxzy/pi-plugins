@@ -11,10 +11,9 @@
 
 import { Bot, InputFile } from "grammy";
 import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { resolveChannelSettings } from "./settings.ts";
 import { readChannelConfig } from "./state.ts";
 import {
-  MEDIA_DOCUMENT_MAX_BYTES,
-  MEDIA_PHOTO_MAX_BYTES,
   detectMediaContentType,
   sanitizeMediaFilename,
   validateMediaContentType,
@@ -97,14 +96,14 @@ function outboundErrorCategory(error: unknown): OutboundErrorCategory {
  * Prefers a line or space boundary inside the limit; unbroken text is hard split
  * so no chunk ever exceeds the limit and no content is dropped.
  */
-export function splitTextChunks(text: string): string[] {
-  if (text.length <= MAX_TEXT_LENGTH) return [text];
+export function splitTextChunks(text: string, maximum = MAX_TEXT_LENGTH): string[] {
+  if (text.length <= maximum) return [text];
   const chunks: string[] = [];
   let rest = text;
-  while (rest.length > MAX_TEXT_LENGTH) {
-    let cut = rest.lastIndexOf("\n", MAX_TEXT_LENGTH - 1);
-    if (cut < 1) cut = rest.lastIndexOf(" ", MAX_TEXT_LENGTH - 1);
-    if (cut < 1) cut = MAX_TEXT_LENGTH;
+  while (rest.length > maximum) {
+    let cut = rest.lastIndexOf("\n", maximum - 1);
+    if (cut < 1) cut = rest.lastIndexOf(" ", maximum - 1);
+    if (cut < 1) cut = maximum;
     chunks.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
@@ -174,8 +173,9 @@ export async function sendTextChunks(
   chatId: string,
   text: string,
   send: (chatId: string, chunk: string) => Promise<number | undefined | void>,
+  maximum = MAX_TEXT_LENGTH,
 ): Promise<OutboundTextResult> {
-  const chunks = splitTextChunks(text);
+  const chunks = splitTextChunks(text, maximum);
   const sentIds: number[] = [];
   let sent = 0;
   let failed = 0;
@@ -244,7 +244,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
     const target = validateTelegramTarget(projectRoot, chatId, readConfig);
     if (!target.ok) return { ok: false, sent: 0, failed: 1, error: target.error, category: target.category };
     const format = options.format ?? "plain";
-    const chunks = containerizeText(text, format);
+    const chunks = containerizeText(text, format, resolveChannelSettings(projectRoot).maxTextLength);
     if (chunks === undefined) {
       return { ok: false, sent: 0, failed: 1, error: "Formatted text cannot be split safely within the message limit", category: "telegram_rejected" };
     }
@@ -266,7 +266,7 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
           sleep,
         });
         return readMessageId(sentMessage);
-      });
+      }, resolveChannelSettings(projectRoot).maxTextLength);
     });
     return result as OutboundTextResult;
     });
@@ -300,8 +300,9 @@ export function createTelegramOutbound(options: TelegramOutboundOptions = {}): T
     const target = validateTelegramTarget(projectRoot, chatId, readConfig);
     if (!target.ok) return { ok: false, error: target.error, category: target.category };
     if (source.kind !== "file_id" && source.kind !== "bytes") return { ok: false, error: "Unsupported media source", category: "telegram_rejected" };
+    const settings = resolveChannelSettings(projectRoot);
     if (source.kind === "bytes") {
-      const maximum = mediaType === "photo" ? MEDIA_PHOTO_MAX_BYTES : MEDIA_DOCUMENT_MAX_BYTES;
+      const maximum = mediaType === "photo" ? settings.mediaPhotoMaxBytes : settings.mediaDocumentMaxBytes;
       if (source.bytes.byteLength > maximum) return { ok: false, error: "Media source exceeds the allowed size", category: "telegram_rejected" };
       const detected = detectMediaContentType(source.bytes);
       const declared = validateMediaContentType(mediaType, source.contentType);
@@ -430,9 +431,9 @@ function classifyRetry(error: unknown): RetryDecision {
  * rejected (undefined) when it exceeds the limit, because splitting markup
  * could silently produce invalid entities.
  */
-function containerizeText(text: string, format: TelegramTextFormat): string[] | undefined {
-  if (format === "plain") return splitTextChunks(text);
-  return text.length <= MAX_TEXT_LENGTH ? [text] : undefined;
+function containerizeText(text: string, format: TelegramTextFormat, maximum = MAX_TEXT_LENGTH): string[] | undefined {
+  if (format === "plain") return splitTextChunks(text, maximum);
+  return text.length <= maximum ? [text] : undefined;
 }
 
 /** Extract a Telegram message id from an API response object, if present. */

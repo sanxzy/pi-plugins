@@ -207,6 +207,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
 
     const listener = createInbound({
       approvedUserIds,
+      projectRoot,
       ...pairingState,
       onChallenge: async (context, chatId, text) => {
         const api = (context as { api?: { sendMessage?: (target: string, content: string) => Promise<unknown> } }).api;

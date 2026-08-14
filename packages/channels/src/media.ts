@@ -1,4 +1,5 @@
 import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { resolveChannelSettings } from "./settings.ts";
 
 /** Telegram's documented upload limits. */
 export const MEDIA_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
@@ -177,7 +178,11 @@ function parseSafeHttpsUrl(value: string): URL | undefined {
   }
 }
 
-function mediaLimit(mediaType: TelegramMediaType): number {
+function mediaLimit(mediaType: TelegramMediaType, projectRoot?: string): number {
+  if (projectRoot) {
+    const settings = resolveChannelSettings(projectRoot);
+    return mediaType === "photo" ? settings.mediaPhotoMaxBytes : settings.mediaDocumentMaxBytes;
+  }
   return mediaType === "photo" ? MEDIA_PHOTO_MAX_BYTES : MEDIA_DOCUMENT_MAX_BYTES;
 }
 
@@ -270,8 +275,8 @@ export async function downloadMediaHttps(
   });
 }
 
-function validateBytes(mediaType: TelegramMediaType, bytes: Uint8Array, contentType: string): MediaContentValidation {
-  if (bytes.byteLength > mediaLimit(mediaType)) return { ok: false, error: "Media source exceeds the allowed size", category: "telegram_rejected" };
+function validateBytes(mediaType: TelegramMediaType, bytes: Uint8Array, contentType: string, projectRoot?: string): MediaContentValidation {
+  if (bytes.byteLength > mediaLimit(mediaType, projectRoot)) return { ok: false, error: "Media source exceeds the allowed size", category: "telegram_rejected" };
   const declared = normalizeContentType(contentType);
   const detected = detectMediaContentType(bytes);
   const detectedCheck = validateMediaContentType(mediaType, detected);
@@ -293,17 +298,21 @@ export async function resolveMediaSource(input: TelegramMediaInput, mediaType: T
     if (!scope) return { ok: false, error: "Media artifact is unavailable", category: "telegram_rejected" };
     const artifact = resolveMediaArtifact(input.artifact_id, scope);
     if (!artifact.ok) return artifact;
-    const check = validateBytes(mediaType, artifact.source.bytes, artifact.source.contentType);
+    const check = validateBytes(mediaType, artifact.source.bytes, artifact.source.contentType, scope.projectRoot);
     if (!check.ok) return check;
     return { ok: true, source: { kind: "bytes", bytes: artifact.source.bytes, contentType: artifact.source.contentType, filename: sanitizeMediaFilename(filename ?? artifact.source.filename) } };
   }
   if (input.kind !== "https") return { ok: false, error: "Unsupported media source", category: "telegram_rejected" };
   // The resolver intentionally nests the download boundary so one resolution
   // can be traced as MEDIA_RESOLVE -> MEDIA_DOWNLOAD without logging the URL.
-  const downloaded = await downloadMediaHttps(input.url, { maxBytes: mediaLimit(mediaType) });
+  const settings = scope ? resolveChannelSettings(scope.projectRoot) : undefined;
+  const downloaded = await downloadMediaHttps(input.url, {
+    maxBytes: settings ? (mediaType === "photo" ? settings.mediaPhotoMaxBytes : settings.mediaDocumentMaxBytes) : mediaLimit(mediaType),
+    timeoutMs: settings?.mediaTimeoutMs,
+  });
   if (!downloaded.ok) return downloaded;
   const detected = detectMediaContentType(downloaded.bytes);
-  const check = validateBytes(mediaType, downloaded.bytes, downloaded.contentType === "application/octet-stream" ? detected : downloaded.contentType);
+  const check = validateBytes(mediaType, downloaded.bytes, downloaded.contentType === "application/octet-stream" ? detected : downloaded.contentType, scope?.projectRoot);
   if (!check.ok) return check;
   return { ok: true, source: { kind: "bytes", bytes: downloaded.bytes, contentType: detected === "application/octet-stream" ? downloaded.contentType : detected, filename: sanitizeMediaFilename(filename ?? downloaded.filename) } };
   });

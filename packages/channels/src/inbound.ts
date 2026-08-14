@@ -15,6 +15,7 @@ import {
   type StateResult,
 } from "./state.ts";
 import { formatPairingChallenge, upsertPairingRequest } from "./pairing.ts";
+import { resolveChannelSettings } from "./settings.ts";
 
 /** A single accepted private text update. */
 export interface TelegramUpdate {
@@ -174,6 +175,8 @@ interface QueuedUpdate {
 export interface TelegramInboundOptions {
   /** Approved numeric sender ids read from the current channel config. */
   approvedUserIds: readonly string[];
+  /** Project root used to resolve centralized pairing settings. */
+  projectRoot?: string;
   /** Project config reader used to refresh approvals and persist pairing state. */
   readConfig?: () => StateResult<ChannelConfig>;
   /** Project config writer used for challenge creation/refresh. */
@@ -243,7 +246,13 @@ export function createTelegramInbound(options: TelegramInboundOptions): Telegram
     config: ChannelConfig | undefined,
   ): Promise<void> => {
     if (!config || !options.writeConfig || !options.onChallenge) return;
-    const pairing = upsertPairingRequest(config, update.fromId);
+    const pairing = upsertPairingRequest(
+      config,
+      update.fromId,
+      new Date(),
+      undefined,
+      options.projectRoot ? resolveChannelSettings(options.projectRoot) : undefined,
+    );
     if (pairing.kind === "capped") {
       // Do not reveal the cap or produce Telegram chatter. The host may route
       // this safe local event to its structured channel logger.

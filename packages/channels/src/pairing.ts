@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import type { ChannelConfig, PairingRequest } from "./state.ts";
+import type { ChannelSettings } from "@xzy-ai/runtime";
 
 /** OpenClaw-compatible pairing constraints for Telegram DMs. */
 export const PAIRING_CODE_LENGTH = 8;
@@ -59,17 +60,18 @@ export function upsertPairingRequest(
   userId: string,
   now = new Date(),
   randomCode: () => string = () => createPairingCode(),
+  settings?: Pick<ChannelSettings, "pairingPendingTtlMs" | "pairingPendingMax">,
 ): PairingRequestResult {
   const pending = pruneExpiredPairings(config.pendingPairings, now);
   const existing = pending.find((request) => request.userId === userId);
-  const expiresAt = new Date(now.getTime() + PAIRING_PENDING_TTL_MS).toISOString();
+  const expiresAt = new Date(now.getTime() + (settings?.pairingPendingTtlMs ?? PAIRING_PENDING_TTL_MS)).toISOString();
   if (existing) {
     const request: PairingRequest = { ...existing, expiresAt };
     const nextPending = pending.map((item) => item.userId === userId ? request : item);
     const next = cloneConfig({ ...config, pendingPairings: nextPending });
     return { kind: "reused", config: next, request };
   }
-  if (pending.length >= PAIRING_PENDING_MAX) {
+  if (pending.length >= (settings?.pairingPendingMax ?? PAIRING_PENDING_MAX)) {
     return { kind: "capped", config: cloneConfig({ ...config, pendingPairings: pending }) };
   }
 

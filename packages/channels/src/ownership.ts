@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { channelOwnerFile } from "./shared/paths.ts";
 import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { type StateResult } from "./state.ts";
+import { resolveChannelLockPolicy, type ChannelLockPolicyOverrides } from "./lock-policy.ts";
 
 /** Crash-safe per-project connection owner record. */
 export interface ChannelOwnerRecord {
@@ -38,7 +39,6 @@ interface LockfileModule {
 
 const require = createRequire(import.meta.url);
 const lockfileApi = require("proper-lockfile") as LockfileModule;
-const LOCK_STALE_MS = 10_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -112,7 +112,7 @@ function writeOwnerRecord(filePath: string, record: ChannelOwnerRecord): StateRe
 
 export function createChannelOwner(
   projectRoot: string,
-  options: { pid?: number; isAlive?: ProcessLiveness } = {},
+  options: { pid?: number; isAlive?: ProcessLiveness } & ChannelLockPolicyOverrides = {},
 ): ChannelOwner {
   const pid = options.pid ?? process.pid;
   const checkAlive = options.isAlive ?? isProcessAlive;
@@ -135,11 +135,12 @@ export function createChannelOwner(
       // proper-lockfile uses atomic mkdir and refreshes the lock mtime while
       // held; stale takeover is possible only after the original process dies
       // and its lease stops refreshing.
+      const lockPolicy = resolveChannelLockPolicy(projectRoot, options);
       release = lockfileApi.lockSync(filePath, {
         realpath: false,
-        stale: LOCK_STALE_MS,
-        update: LOCK_STALE_MS / 2,
-        retries: 0,
+        stale: lockPolicy.staleMs,
+        update: lockPolicy.updateMs,
+        retries: lockPolicy.acquireRetries,
       });
     } catch (error) {
       return ownerError(safeOwnerMessage(error, filePath));

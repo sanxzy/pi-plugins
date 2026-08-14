@@ -64,6 +64,8 @@ export {
   type ChannelManagerDeps,
   type ChannelPoller,
 } from "./manager.ts";
+export { resolveChannelLockPolicy, type ChannelLockPolicy, type ChannelLockPolicyOverrides } from "./lock-policy.ts";
+export { resolveChannelSettings } from "./settings.ts";
 export {
   createChannelOwner,
   isProcessAlive,

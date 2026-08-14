@@ -13,6 +13,8 @@ import {
 } from "@xzy-ai/runtime";
 import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { isProcessAlive } from "./ownership.ts";
+import { resolveChannelLockPolicy, type ChannelLockPolicyOverrides } from "./lock-policy.ts";
+import { resolveChannelSettings } from "./settings.ts";
 
 interface LockfileModule {
   lockSync(file: string, options?: Record<string, unknown>): () => void;
@@ -22,7 +24,7 @@ const lockfileApi = require("proper-lockfile") as LockfileModule;
 
 export const MAX_ROOT_SESSIONS = 200;
 
-export interface CleanupRootSessionsOptions {
+export interface CleanupRootSessionsOptions extends ChannelLockPolicyOverrides {
   currentPid?: number;
   currentProcessStartTime?: string;
   isAlive?: (pid: number) => boolean;
@@ -99,13 +101,15 @@ export function cleanupRootSessions(
   const currentPid = options.currentPid ?? process.pid;
   const currentProcessStartTime = options.currentProcessStartTime;
   const checkAlive = options.isAlive ?? isProcessAlive;
+  const lockPolicy = resolveChannelLockPolicy(projectRoot, options);
+  const maxRootSessions = resolveChannelSettings(projectRoot).maxRootSessions;
   let release: (() => void) | undefined;
   try {
     release = lockfileApi.lockSync(cleanupLockFile(projectRoot), {
       realpath: false,
-      stale: 10_000,
-      update: 5_000,
-      retries: 0,
+      stale: lockPolicy.staleMs,
+      update: lockPolicy.updateMs,
+      retries: lockPolicy.acquireRetries,
     });
     const sessions = discoverSessions(projectRoot);
     let reconciled = 0;
@@ -139,7 +143,7 @@ export function cleanupRootSessions(
     const inactive = refreshed
       .filter((session) => !session.active)
       .sort((a, b) => a.lastSeenAt.localeCompare(b.lastSeenAt) || a.sessionId.localeCompare(b.sessionId));
-    const removeCount = Math.max(0, refreshed.length - MAX_ROOT_SESSIONS);
+    const removeCount = Math.max(0, refreshed.length - maxRootSessions);
     // Prune oldest inactive sessions whenever the total exceeds the cap.
     // Active sessions are never removed, so when only active sessions remain
     // beyond the cap the count legitimately stays above 200 until some become
