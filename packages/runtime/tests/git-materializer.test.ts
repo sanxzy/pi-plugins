@@ -74,6 +74,37 @@ test("Git materializer uses centralized runtime timeout defaults while explicit 
   }
 });
 
+test("Git materializer applies the centralized lock-stale default and reclaims a stale lock", async () => {
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-git-lock-settings-home-"));
+  process.env.PI_C2_TEST_HOME = home;
+  mkdirSync(join(home, "pi-c2"), { recursive: true });
+  writeFileSync(join(home, "pi-c2", "config.json"), JSON.stringify({ runtime: { gitLockStaleMs: 1_000 } }));
+  const rootDir = root();
+  const remote = join(rootDir, "remote");
+  const reference = repository(remote);
+  try {
+    init(remote);
+    commit(remote, "main", "main");
+    const cacheRoot = join(rootDir, "cache");
+    const lockPath = `${cachePath(cacheRoot, reference)}.lock`;
+    mkdirSync(lockPath, { recursive: true });
+    writeFileSync(join(lockPath, "owner"), "stale-owner", "utf8");
+    // Park the lock just outside the configured stale window but well inside
+    // the 30s default, so only the centralized stale value can reclaim it.
+    const old = new Date(Date.now() - 1_500);
+    utimesSync(lockPath, old, old);
+    const materializer = createGitMaterializer();
+    const cloned = await materializer.ensure({ reference, cacheRoot });
+    assert.equal(cloned.status, "cloned", "centralized gitLockStaleMs is applied as the lock default");
+  } finally {
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("clones a local Git remote into a deterministic cache and reuses it", async () => {
   const rootDir = root();
   const remote = join(rootDir, "remote.git");
