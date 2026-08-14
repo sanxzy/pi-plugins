@@ -1,0 +1,264 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { homeRoot, resolveSettings, resolveSettingsForProject, settingsConfigPath } from "../src/index.ts";
+
+function tempHome(): string {
+  return mkdtempSync(join(tmpdir(), "pi-c2-settings-home-"));
+}
+
+function withHome(home: string, run: () => void): void {
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = home;
+  try {
+    run();
+  } finally {
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
+  }
+}
+
+function writeHomeConfig(home: string, value: unknown): void {
+  const dir = join(home, "pi-c2");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "config.json"), JSON.stringify(value));
+}
+
+function writeProjectConfig(project: string, value: unknown): void {
+  const dir = join(project, ".pi");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "pi-c2.json"), JSON.stringify(value));
+}
+
+test("settingsConfigPath resolves below homeRoot so PI_C2_HOME selects the config location", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      const expected = join(homeRoot(), "config.json");
+      assert.equal(settingsConfigPath(), expected);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("resolved settings expose all six groups with defaults filled", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      const settings = resolveSettings();
+      assert.deepEqual(settings.agents, {
+        maxAgentDepth: 4,
+        maxConcurrency: 2,
+        maxParallelAgents: 3,
+        retainedTerminalJobs: 25,
+        retainedTerminalAgents: 25,
+      });
+      assert.deepEqual(settings.runtime, {
+        deliveryRetryDelayMs: 2000,
+        gitTimeoutMs: 60_000,
+        gitLockStaleMs: 30_000,
+        gitLockAcquireTimeoutMs: 30_000,
+        gitMaxBufferBytes: 16 * 1024 * 1024,
+      });
+      assert.deepEqual(settings.channels, {
+        maxRootSessions: 200,
+        lockStaleMs: 10_000,
+        lockUpdateMs: 5_000,
+        lockAcquireRetries: 0,
+        maxTextLength: 4_000,
+        pairingPendingTtlMs: 3_600_000,
+        pairingPendingMax: 3,
+        mediaPhotoMaxBytes: 10 * 1024 * 1024,
+        mediaDocumentMaxBytes: 50 * 1024 * 1024,
+        mediaTimeoutMs: 30_000,
+      });
+      assert.deepEqual(settings.tools.web, {
+        searchTimeoutMs: 30_000,
+        fetchTimeoutSeconds: 30,
+        maxResponseBytes: 5 * 1024 * 1024,
+        defaultNumResults: 5,
+        defaultSearchType: "auto",
+        defaultLivecrawl: "fallback",
+      });
+      assert.deepEqual(settings.mcp, {
+        startupTimeoutMs: 30_000,
+        requestTimeoutMs: 30_000,
+        reconnectMaxAttempts: 5,
+        reconnectBaseDelayMs: 2_000,
+        resultMaxText: 50_000,
+        resultMaxAttachmentBytes: 5 * 1024 * 1024,
+        oauthCallbackTimeoutMs: 5 * 60 * 1000,
+      });
+      assert.deepEqual(settings.commands, {
+        telegram: { reactionTimeoutMs: 2_500 },
+        goalMaxPromptLength: 4_000,
+      });
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("home config overrides defaults per known field and applies bounds validation", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, {
+      agents: { maxConcurrency: 7, maxParallelAgents: 9 },
+      channels: { maxTextLength: 8000 },
+    });
+    withHome(home, () => {
+      const settings = resolveSettings();
+      assert.equal(settings.agents.maxConcurrency, 7);
+      assert.equal(settings.agents.maxParallelAgents, 9);
+      assert.equal(settings.channels.maxTextLength, 8000);
+      // Unrelated defaults remain.
+      assert.equal(settings.agents.maxAgentDepth, 4);
+      assert.equal(settings.mcp.startupTimeoutMs, 30_000);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("precedence is env alias > project config > home config > default per field", () => {
+  const home = tempHome();
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-project-"));
+  const previousEnv = process.env.PI_C2_MAX_AGENT_DEPTH;
+  try {
+    writeHomeConfig(home, { agents: { maxAgentDepth: 2, maxConcurrency: 5 } });
+    writeProjectConfig(project, { agents: { maxAgentDepth: 3, maxConcurrency: 6 } });
+    process.env.PI_C2_MAX_AGENT_DEPTH = "8";
+    withHome(home, () => {
+      const settings = resolveSettingsForProject(project);
+      assert.equal(settings.agents.maxAgentDepth, 8, "env alias wins");
+      assert.equal(settings.agents.maxConcurrency, 6, "project wins over home");
+      assert.equal(settings.channels.maxRootSessions, 200, "default remains");
+    });
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_C2_MAX_AGENT_DEPTH;
+    else process.env.PI_C2_MAX_AGENT_DEPTH = previousEnv;
+    rmSync(project, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("an invalid higher-precedence field falls through without erasing sibling fields", () => {
+  const home = tempHome();
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-project-"));
+  try {
+    writeHomeConfig(home, { agents: { maxConcurrency: 4, maxParallelAgents: 3 }, channels: { maxTextLength: 5000 } });
+    // Project provides a valid maxParallelAgents and an invalid maxConcurrency.
+    writeProjectConfig(project, { agents: { maxConcurrency: -1, maxParallelAgents: 9 } });
+    withHome(home, () => {
+      const settings = resolveSettingsForProject(project);
+      assert.equal(settings.agents.maxConcurrency, 4, "invalid project value falls through to home");
+      assert.equal(settings.agents.maxParallelAgents, 9, "valid sibling project value remains");
+      assert.equal(settings.channels.maxTextLength, 5000, "home value remains for untouched group");
+    });
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a malformed home config degrades to empty rather than throwing", () => {
+  const home = tempHome();
+  try {
+    const dir = join(home, "pi-c2");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "config.json"), "{ not valid json !!!");
+    withHome(home, () => {
+      const settings = resolveSettings();
+      assert.equal(settings.agents.maxAgentDepth, 4);
+      assert.equal(settings.mcp.startupTimeoutMs, 30_000);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a non-object config supplies no valid fields", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, [1, 2, 3]);
+    withHome(home, () => {
+      const settings = resolveSettings();
+      assert.equal(settings.agents.maxAgentDepth, 4);
+      assert.equal(settings.channels.maxTextLength, 4_000);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("rewriting with an equal-length different value is observed without restart", () => {
+  const home = tempHome();
+  try {
+    const file = join(home, "pi-c2", "config.json");
+    mkdirSync(join(home, "pi-c2"), { recursive: true });
+    // Both values serialize to the same byte length ("1" vs "9") so the
+    // fingerprint must observe the write rather than only the size.
+    writeFileSync(file, JSON.stringify({ agents: { maxConcurrency: 1 } }));
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.maxConcurrency, 1);
+      writeFileSync(file, JSON.stringify({ agents: { maxConcurrency: 9 } }));
+      assert.equal(resolveSettings().agents.maxConcurrency, 9, "next call observes the rewrite");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("removing the home config falls through to defaults", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, { agents: { maxConcurrency: 7 } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.maxConcurrency, 7);
+      const file = join(home, "pi-c2", "config.json");
+      rmSync(file, { force: true });
+      assert.equal(resolveSettings().agents.maxConcurrency, 2, "default after removal");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the Exa credential is reachable from settings but never in cache identity or diagnostics", () => {
+  const home = tempHome();
+  try {
+    const secret = "exa-secret-do-not-leak-abcdef123456";
+    writeHomeConfig(home, { tools: { web: { exaApiKey: secret } } });
+    withHome(home, () => {
+      const settings = resolveSettings();
+      assert.equal(settings.tools.web.exaApiKey, secret);
+      const global = globalThis as unknown as { __piC2SettingsDebug__?: { keys: string } };
+      const keys = global.__piC2SettingsDebug__?.keys ?? "";
+      assert.ok(!keys.includes(secret), "secret must not appear in settings-cache keys");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("invalid agent/runtime values are ignored per-field rather than accepted", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, {
+      agents: { maxConcurrency: 0, maxAgentDepth: -5, retainedTerminalJobs: 1000000 },
+      runtime: { gitMaxBufferBytes: -1 },
+    });
+    withHome(home, () => {
+      const settings = resolveSettings();
+      assert.equal(settings.agents.maxConcurrency, 2);
+      assert.equal(settings.agents.maxAgentDepth, 4);
+      assert.equal(settings.agents.retainedTerminalJobs, 25);
+      assert.equal(settings.runtime.gitMaxBufferBytes, 16 * 1024 * 1024);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
