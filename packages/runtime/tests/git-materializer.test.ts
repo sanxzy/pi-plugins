@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -35,6 +35,44 @@ function repository(remote: string) {
   assert.ok(parsed);
   return parsed;
 }
+
+test("Git materializer uses centralized runtime timeout defaults while explicit overrides win", async () => {
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-git-settings-home-"));
+  process.env.PI_C2_TEST_HOME = home;
+  mkdirSync(join(home, "pi-c2"), { recursive: true });
+  writeFileSync(join(home, "pi-c2", "config.json"), JSON.stringify({ runtime: { gitTimeoutMs: 1234, gitLockStaleMs: 2345, gitLockAcquireTimeoutMs: 3456, gitMaxBufferBytes: 7 * 1024 * 1024 } }));
+  const reference = repository(join(home, "remote-placeholder"));
+  const seen: Array<{ timeoutMs: number; maxBufferBytes?: number }> = [];
+  try {
+    const materializer = createGitMaterializer({
+      run: async (_args, _cwd, options) => {
+        seen.push(options);
+        return { stdout: "abc\trefs/heads/main\n", stderr: "" };
+      },
+    });
+    assert.deepEqual(await materializer.preflight({ reference, branch: "main" }), { ok: true });
+    assert.equal(seen[0]?.timeoutMs, 1234);
+    assert.equal(seen[0]?.maxBufferBytes, 7 * 1024 * 1024, "centralized Git output buffer is passed to the runner");
+
+    const overridden: Array<{ timeoutMs: number; maxBufferBytes?: number }> = [];
+    const explicit = createGitMaterializer({
+      timeoutMs: 99,
+      gitMaxBufferBytes: 4096,
+      run: async (_args, _cwd, options) => {
+        overridden.push(options);
+        return { stdout: "abc\trefs/heads/main\n", stderr: "" };
+      },
+    });
+    assert.deepEqual(await explicit.preflight({ reference, branch: "main" }), { ok: true });
+    assert.equal(overridden[0]?.timeoutMs, 99, "explicit constructor timeout wins");
+    assert.equal(overridden[0]?.maxBufferBytes, 4096, "explicit constructor buffer override wins");
+  } finally {
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 test("clones a local Git remote into a deterministic cache and reuses it", async () => {
   const rootDir = root();

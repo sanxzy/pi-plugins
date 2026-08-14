@@ -15,6 +15,7 @@ import {
   validateBranch,
   type RepositoryReference,
 } from "@xzy-ai/core";
+import { resolveSettings } from "../../shared/settings.ts";
 
 export type GitMaterializeStatus = "cached" | "cloned" | "refreshed";
 
@@ -28,13 +29,14 @@ export interface GitMaterializeResult {
 export type GitCommandRunner = (
   args: readonly string[],
   cwd: string,
-  options: { readonly timeoutMs: number; readonly signal?: AbortSignal },
+  options: { readonly timeoutMs: number; readonly signal?: AbortSignal; readonly maxBufferBytes?: number },
 ) => Promise<{ readonly stdout: string; readonly stderr: string }>;
 
 export interface GitMaterializerOptions {
   readonly timeoutMs?: number;
   readonly lockStaleMs?: number;
   readonly lockAcquireTimeoutMs?: number;
+  readonly gitMaxBufferBytes?: number;
   readonly gitExecutable?: string;
   readonly run?: GitCommandRunner;
 }
@@ -64,10 +66,13 @@ const DEFAULT_LOCK_STALE_MS = 30_000;
 const DEFAULT_LOCK_ACQUIRE_TIMEOUT_MS = 30_000;
 
 export function createGitMaterializer(options: GitMaterializerOptions = {}): GitMaterializer {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const lockStaleMs = options.lockStaleMs ?? DEFAULT_LOCK_STALE_MS;
-  const lockAcquireTimeoutMs = options.lockAcquireTimeoutMs ?? DEFAULT_LOCK_ACQUIRE_TIMEOUT_MS;
-  const run = options.run ?? ((args, cwd, opts) => runGitProcess(args, cwd, opts, options.gitExecutable));
+  const settings = resolveSettings().runtime;
+  const timeoutMs = options.timeoutMs ?? settings.gitTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const lockStaleMs = options.lockStaleMs ?? settings.gitLockStaleMs ?? DEFAULT_LOCK_STALE_MS;
+  const lockAcquireTimeoutMs = options.lockAcquireTimeoutMs ?? settings.gitLockAcquireTimeoutMs ?? DEFAULT_LOCK_ACQUIRE_TIMEOUT_MS;
+  const gitMaxBufferBytes = options.gitMaxBufferBytes ?? settings.gitMaxBufferBytes;
+  const baseRun = options.run ?? ((args, cwd, opts) => runGitProcess(args, cwd, opts, options.gitExecutable));
+  const run: GitCommandRunner = (args, cwd, opts) => baseRun(args, cwd, { ...opts, maxBufferBytes: gitMaxBufferBytes });
 
   async function ensure(input: {
     readonly reference: RepositoryReference;
@@ -378,7 +383,7 @@ function lockToken(): string {
 async function runGitProcess(
   args: readonly string[],
   cwd: string,
-  options: { readonly timeoutMs: number; readonly signal?: AbortSignal },
+  options: { readonly timeoutMs: number; readonly signal?: AbortSignal; readonly maxBufferBytes?: number },
   gitExecutable = "git",
 ): Promise<{ readonly stdout: string; readonly stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -387,7 +392,7 @@ async function runGitProcess(
     const child = execFile(
       gitExecutable,
       args.slice(1),
-      { cwd, timeout: options.timeoutMs, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+      { cwd, timeout: options.timeoutMs, encoding: "utf8", maxBuffer: options.maxBufferBytes ?? 16 * 1024 * 1024 },
       (error, stdout, stderr) => {
         settled = true;
         options.signal?.removeEventListener("abort", onAbort);

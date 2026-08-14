@@ -130,6 +130,7 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
     const coordinator = createDeliveryCoordinator({
       projectRoot,
       rootSessionId: sessionId,
+      retryDelayMs: resolveSettingsForProject(projectRoot).runtime.deliveryRetryDelayMs,
       onDelivered: (jobId) => registry.updateJob(jobId, { delivered: true }),
     });
     deliveries.set(sessionId, coordinator);
@@ -232,6 +233,7 @@ function upgradePool(pool: ChildPool, projectRoot: string, rootSessionId?: strin
       const coordinator = createDeliveryCoordinator({
         projectRoot,
         rootSessionId: sessionId,
+        retryDelayMs: resolveSettingsForProject(projectRoot).runtime.deliveryRetryDelayMs,
         onDelivered: (jobId) => registry.updateJob(jobId, { delivered: true }),
       });
       deliveries.set(sessionId, coordinator);

@@ -11,6 +11,7 @@ import {
   backgroundModeError,
   formatBackgroundResult,
   runBackgroundJob,
+  getChildPool,
 } from "@xzy-ai/runtime";
 import { createDeliveryCoordinator, encodeProjectId, homeSessionDir, pendingDeliveryFile } from "@xzy-ai/runtime";
 import { createConcurrencyGate } from "@xzy-ai/runtime";
@@ -146,6 +147,45 @@ test("delivery load and persist emit boundary records for the durable queue", ()
     assert.deepEqual(records.filter((record) => record.operation === operation && record.phase === "after").length, 1, `missing ${operation}`);
   }
   rmSync(root, { recursive: true, force: true });
+});
+
+test("pool delivery coordinator uses the centralized retry delay while explicit overrides win", async () => {
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-delivery-settings-home-"));
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-delivery-settings-project-"));
+  process.env.PI_C2_TEST_HOME = home;
+  mkdirSync(join(home, "pi-c2"), { recursive: true });
+  writeFileSync(join(home, "pi-c2", "config.json"), JSON.stringify({ runtime: { deliveryRetryDelayMs: 40 } }));
+  try {
+    const pool = getChildPool(root, "phase4-root");
+    const coordinator = pool.deliveryFor("phase4-root");
+    const started = Date.now();
+    let accept = false;
+    coordinator.register("parent.jsonl", () => {
+      if (!accept) throw new Error("busy");
+    });
+    coordinator.deliverResult("job", "parent.jsonl", "result");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(coordinator.pendingCount, 1, "configured retry has not fired after 10ms");
+    accept = true;
+    while (coordinator.pendingCount > 0 && Date.now() - started < 1000) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const elapsed = Date.now() - started;
+    assert.equal(coordinator.pendingCount, 0, "configured retry eventually redrives delivery");
+    assert.ok(elapsed < 2000, `retry should use the configured 40ms delay, not the default 2000ms (elapsed=${elapsed}ms)`);
+
+    // The public constructor override remains an explicit test/effect seam.
+    const overridden = createDeliveryCoordinator({ retryDelayMs: 7 });
+    overridden.register("override-parent.jsonl", () => { throw new Error("busy"); });
+    overridden.deliverResult("override-job", "override-parent.jsonl", "result");
+    assert.equal(overridden.pendingCount, 1);
+  } finally {
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("delivery coordinator retries a rejected sink while its parent stays registered", async () => {
