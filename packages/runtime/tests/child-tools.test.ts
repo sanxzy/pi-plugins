@@ -199,8 +199,38 @@ test("a configured max agent depth shifts the terminal leaf", () => {
   }
 });
 
+test("centralized agent depth uses nested settings, ignores the legacy root key, and preserves env precedence", () => {
+  const previousEnvDepth = process.env.PI_C2_MAX_AGENT_DEPTH;
+  const previousTestHome = process.env.PI_C2_TEST_HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-depth-centralized-home-"));
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-depth-centralized-project-"));
+  try {
+    delete process.env.PI_C2_MAX_AGENT_DEPTH;
+    process.env.PI_C2_TEST_HOME = home;
+    mkdirSync(join(home, "pi-c2"), { recursive: true });
+    mkdirSync(join(project, ".pi"), { recursive: true });
+
+    writeFileSync(join(home, "pi-c2", "config.json"), JSON.stringify({ maxAgentDepth: 2, agents: { maxAgentDepth: 3 } }));
+    assert.equal(maxAgentDepth(project), 3, "legacy root key must not override the valid nested setting");
+
+    writeFileSync(join(project, ".pi", "pi-c2.json"), JSON.stringify({ agents: { maxAgentDepth: 2 } }));
+    assert.equal(maxAgentDepth(project), 2, "project nested setting overrides home nested setting");
+
+    process.env.PI_C2_MAX_AGENT_DEPTH = "7";
+    assert.equal(maxAgentDepth(project), 7, "env overrides both nested file sources");
+  } finally {
+    if (previousEnvDepth === undefined) delete process.env.PI_C2_MAX_AGENT_DEPTH;
+    else process.env.PI_C2_MAX_AGENT_DEPTH = previousEnvDepth;
+    if (previousTestHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousTestHome;
+    rmSync(project, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("project and user pi-c2 config files set the max agent depth with precedence", () => {
   const previousEnvDepth = process.env.PI_C2_MAX_AGENT_DEPTH;
+  const previousTestHome = process.env.PI_C2_TEST_HOME;
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const root = mkdtempSync(join(tmpdir(), "pi-c2-depth-config-"));
   const cwd = join(root, "project");
@@ -210,17 +240,21 @@ test("project and user pi-c2 config files set the max agent depth with precedenc
   try {
     delete process.env.PI_C2_MAX_AGENT_DEPTH;
     process.env.PI_CODING_AGENT_DIR = agentDir;
+    // Route the centralized resolver to the agent directory so the home
+    // config.json is found at agentDir/pi-c2/config.json.
+    process.env.PI_C2_TEST_HOME = agentDir;
 
     // Default when nothing is configured.
     assert.equal(maxAgentDepth(cwd), 4);
 
-    // User-level config is applied.
-    writeFileSync(join(agentDir, "pi-c2", "config.json"), JSON.stringify({ maxAgentDepth: 3 }));
-    assert.equal(maxAgentDepth(cwd), 3, "user config applies");
+    // Centralized home config is applied through PI_C2_HOME, and legacy root
+    // keys remain ignored under the hard migration.
+    writeFileSync(join(agentDir, "pi-c2", "config.json"), JSON.stringify({ maxAgentDepth: 3, agents: { maxAgentDepth: 5 } }));
+    assert.equal(maxAgentDepth(cwd), 5, "nested home config applies while legacy root is ignored");
 
-    // Project-level overrides user.
-    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: 2 }));
-    assert.equal(maxAgentDepth(cwd), 2, "project config overrides user");
+    // Project-level nested setting overrides home.
+    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: 2, agents: { maxAgentDepth: 2 } }));
+    assert.equal(maxAgentDepth(cwd), 2, "project nested config overrides home nested config");
 
     // Env overrides both.
     process.env.PI_C2_MAX_AGENT_DEPTH = "7";
@@ -228,18 +262,20 @@ test("project and user pi-c2 config files set the max agent depth with precedenc
 
     // Invalid values in files are ignored (treated as unset).
     delete process.env.PI_C2_MAX_AGENT_DEPTH;
-    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: "2" }));
-    assert.equal(maxAgentDepth(cwd), 3, "invalid project value falls back to user config");
-    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: 0 }));
-    assert.equal(maxAgentDepth(cwd), 3, "non-positive project value falls back to user config");
+    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: "2", agents: { maxAgentDepth: "2" } }));
+    assert.equal(maxAgentDepth(cwd), 5, "invalid project nested value falls back to home nested config");
+    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: 0, agents: { maxAgentDepth: 0 } }));
+    assert.equal(maxAgentDepth(cwd), 5, "non-positive project nested value falls back to home nested config");
     writeFileSync(join(agentDir, "pi-c2", "config.json"), "{ not json");
-    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: -1 }));
+    writeFileSync(join(cwd, ".pi", "pi-c2.json"), JSON.stringify({ maxAgentDepth: -1, agents: { maxAgentDepth: -1 } }));
     assert.equal(maxAgentDepth(cwd), 4, "malformed/invalid sources fall back to the default");
   } finally {
     if (previousEnvDepth === undefined) delete process.env.PI_C2_MAX_AGENT_DEPTH;
     else process.env.PI_C2_MAX_AGENT_DEPTH = previousEnvDepth;
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (previousTestHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousTestHome;
     rmSync(root, { recursive: true, force: true });
   }
 });
