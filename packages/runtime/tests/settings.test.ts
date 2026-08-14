@@ -371,6 +371,87 @@ test("configured terminal retention caps are applied to both registry implementa
   }
 });
 
+test("a rewritten concurrency config is honored on the next pool construction while the existing gate is not resized", async () => {
+  const home = tempHome();
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-reload-pool-project-"));
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  try {
+    process.env.PI_C2_TEST_HOME = home;
+    const configFile = join(home, "pi-c2", "config.json");
+    mkdirSync(join(home, "pi-c2"), { recursive: true });
+    writeFileSync(configFile, JSON.stringify({ agents: { maxConcurrency: 2 } }));
+
+    const first = getChildPool(project, "phase3-reload-root");
+    const holds = Array.from({ length: 2 }, () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => { resolve = r; });
+      return { promise, resolve };
+    });
+    const runs = holds.map(({ promise }) => first.concurrency.run(() => promise));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(first.concurrency.activeCount, 2, "original cap 2 admitted two slots");
+
+    writeFileSync(configFile, JSON.stringify({ agents: { maxConcurrency: 5 } }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(first.concurrency.activeCount, 2, "the already-created gate is not retroactively resized");
+    for (const item of holds) item.resolve();
+    await Promise.all(runs);
+
+    const projectB = mkdtempSync(join(tmpdir(), "pi-c2-settings-reload-pool-b-"));
+    try {
+      const second = getChildPool(projectB, "phase3-reload-root");
+      const held = Array.from({ length: 5 }, () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      });
+      const newRuns = held.map(({ promise }) => second.concurrency.run(() => promise));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(second.concurrency.activeCount, 5, "new pool honors the rewritten cap 5");
+      for (const item of held) item.resolve();
+      await Promise.all(newRuns);
+    } finally {
+      rmSync(projectB, { recursive: true, force: true });
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+    rmSync(project, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a rewritten retention config is honored on the next prune without restarting", () => {
+  const home = tempHome();
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-reload-prune-project-"));
+  const directPath = join(project, "jobs.jsonl");
+  const configFile = join(home, "pi-c2", "config.json");
+  try {
+    process.env.PI_C2_TEST_HOME = home;
+    mkdirSync(join(home, "pi-c2"), { recursive: true });
+    writeFileSync(configFile, JSON.stringify({ agents: { retainedTerminalJobs: 3 } }));
+
+    const registry = createRegistry(directPath, project);
+    for (let index = 0; index < 3; index += 1) {
+      registry.createJob(createJob({
+        jobId: `reload-${index}`,
+        status: "completed",
+        description: `reload-${index}`,
+        subagentType: "test-agent",
+        createdAt: `2026-01-01T00:00:0${index}.000Z`,
+      }));
+    }
+    assert.equal(registry.all().size, 3, "initial cap 3 retains all three terminal jobs");
+
+    writeFileSync(configFile, JSON.stringify({ agents: { retainedTerminalJobs: 1 } }));
+    registry.prune();
+    assert.equal(registry.all().size, 1, "the next prune observes the rewritten cap 1");
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("invalid agent/runtime values are ignored per-field rather than accepted", () => {
   const home = tempHome();
   try {

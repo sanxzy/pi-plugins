@@ -16,7 +16,6 @@ import {
   getChildPool,
   prepareResumeSessionFile,
   recordNewJob,
-  resolveSettings,
   resolveSettingsForProject,
   runBackgroundJob,
 } from "@xzy-ai/runtime";
@@ -42,7 +41,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       "Root host: delegate work to a specialized in-process subagent in the background (immediate job id, result delivered later).",
       "Child/descendant: run the descendant subagent foreground and await its result before returning.",
       "Prefer agent_id when continuing related work: steering or resuming preserves transcript and context.",
-      `A single response may issue at most ${resolveSettings().agents.maxParallelAgents} agent calls.`,
+      "A single response may issue no more than the validated agents.maxParallelAgents setting for the active project.",
     ].join(" "),
     promptSnippet: "Delegate a focused task to a specialized subagent.",
     parameters: agentParams,
