@@ -5,6 +5,7 @@ import { canonicalAgentId, createAgentManifestStore, foldAgentEvents, type Agent
 import { ensurePrivateDirectory, homeProjectDir, homeSessionDirFromRoot, encodeProjectId } from "../../shared/paths.ts";
 import { canTransition, isTerminal } from "@xzy-ai/core";
 import { REGISTRY_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { resolveSettingsForProject } from "../../shared/settings.ts";
 
 export const MAX_RETAINED_TERMINAL_AGENTS = 25;
 
@@ -185,7 +186,8 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       const parent = job.parentSessionId ?? "";
       terminalByParent.set(parent, (terminalByParent.get(parent) ?? 0) + 1);
     }
-    if (![...terminalByParent.values()].some((count) => count > MAX_RETAINED_TERMINAL_AGENTS)) return;
+    const retainedTerminalAgents = resolveSettingsForProject(projectRoot).agents.retainedTerminalAgents;
+    if (![...terminalByParent.values()].some((count) => count > retainedTerminalAgents)) return;
 
     processWithLog({ operation: REGISTRY_OPERATIONS.AGENT_PRUNE, parameters: { projectRoot } }, () => {
     const byParent = new Map<string, Job[]>();
@@ -200,10 +202,10 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
     for (const job of jobs) if (!isTerminal(job.status)) retained.add(job.jobId);
     for (const group of byParent.values()) {
       const terminal = group.filter((job) => isTerminal(job.status));
-      if (terminal.length <= MAX_RETAINED_TERMINAL_AGENTS) continue;
+      if (terminal.length <= retainedTerminalAgents) continue;
       for (const job of group) if (!isTerminal(job.status)) retained.add(job.jobId);
       terminal.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.updatedAt.localeCompare(b.updatedAt) || a.jobId.localeCompare(b.jobId));
-      for (const job of terminal.slice(-MAX_RETAINED_TERMINAL_AGENTS)) retained.add(job.jobId);
+      for (const job of terminal.slice(-retainedTerminalAgents)) retained.add(job.jobId);
       for (const job of terminal) if (!retained.has(job.jobId)) removed.add(job.jobId);
     }
     // A retained job's whole ancestor chain survives. The walk resolves every

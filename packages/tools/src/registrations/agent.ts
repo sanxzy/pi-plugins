@@ -9,9 +9,17 @@ import {
   spawnWithControl,
 } from "../agent-execution.ts";
 import { isInSessionScope, resumeDisposition, type Job } from "@xzy-ai/core";
-import { MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
-import { backgroundModeError, createCachedAgentDiscovery, getChildPool, prepareResumeSessionFile, recordNewJob, runBackgroundJob } from "@xzy-ai/runtime";
+import {
+  backgroundModeError,
+  createCachedAgentDiscovery,
+  getChildPool,
+  prepareResumeSessionFile,
+  recordNewJob,
+  resolveSettings,
+  resolveSettingsForProject,
+  runBackgroundJob,
+} from "@xzy-ai/runtime";
 import { agentParams, type AgentParams } from "../tools.ts";
 import type { AgentDetails, AgentErrorDetails } from "../types.ts";
 import { formatResumingAgentText, formatRunningAgentText } from "./status.ts";
@@ -34,7 +42,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       "Root host: delegate work to a specialized in-process subagent in the background (immediate job id, result delivered later).",
       "Child/descendant: run the descendant subagent foreground and await its result before returning.",
       "Prefer agent_id when continuing related work: steering or resuming preserves transcript and context.",
-      `A single response may issue at most ${MAX_PARALLEL_AGENTS} agent calls.`,
+      `A single response may issue at most ${resolveSettings().agents.maxParallelAgents} agent calls.`,
     ].join(" "),
     promptSnippet: "Delegate a focused task to a specialized subagent.",
     parameters: agentParams,
@@ -62,9 +70,10 @@ async function executeAgentCall(
   const pool = getChildPool(ctx.cwd, ctx.sessionManager.getSessionId());
 
   const countAgentCall = (): AgentToolResult<AgentDetails | AgentErrorDetails> | undefined => {
-    if (pool.concurrency.countAgentCall(MAX_PARALLEL_AGENTS)) return undefined;
+    const maxParallelAgents = resolveSettingsForProject(ctx.cwd).agents.maxParallelAgents;
+    if (pool.concurrency.countAgentCall(maxParallelAgents)) return undefined;
     return errorResult(
-      `too many parallel agents in one response: at most ${MAX_PARALLEL_AGENTS} agent calls are allowed`,
+      `too many parallel agents in one response: at most ${maxParallelAgents} agent calls are allowed`,
       { jobId: undefined, reason: "parallel agent limit exceeded" },
     );
   };

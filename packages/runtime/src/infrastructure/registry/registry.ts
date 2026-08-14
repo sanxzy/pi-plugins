@@ -4,6 +4,7 @@ import { parseJobEvent, serializeJobEvent, type JobEvent } from "@xzy-ai/core";
 import { createJob, updateJob, type Job, type JobUpdate } from "@xzy-ai/core";
 import { canTransition, isTerminal } from "@xzy-ai/core";
 import { REGISTRY_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { resolveSettings, resolveSettingsForProject } from "../../shared/settings.ts";
 
 /** Maximum number of terminal (settled) jobs retained per per-parent registry. */
 export const MAX_RETAINED_TERMINAL_JOBS = 25;
@@ -84,7 +85,7 @@ function rewriteLog(filePath: string, keepJobIds: ReadonlySet<string>): void {
   renameSync(tmpPath, filePath);
 }
 
-export function createRegistry(filePath: string): Registry {
+export function createRegistry(filePath: string, projectRoot?: string): Registry {
   let index = new Map<string, Job>();
 
   // Rehydrate from any existing log so the pool and the on-disk state agree.
@@ -119,13 +120,14 @@ export function createRegistry(filePath: string): Registry {
     processWithLog({ operation: REGISTRY_OPERATIONS.PRUNE }, () => {
       const jobs = foldLog(filePath);
       const terminal = [...jobs.values()].filter((job) => isTerminal(job.status));
-      if (terminal.length <= MAX_RETAINED_TERMINAL_JOBS) return;
+      const retainedTerminalJobs = (projectRoot ? resolveSettingsForProject(projectRoot) : resolveSettings()).agents.retainedTerminalJobs;
+      if (terminal.length <= retainedTerminalJobs) return;
 
       // Keep the newest terminal jobs, then all non-terminal jobs, then any
       // ancestor of a retained job so a retained lineage stays intact.
       const newest = [...terminal]
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.updatedAt.localeCompare(b.updatedAt) || a.jobId.localeCompare(b.jobId))
-        .slice(-MAX_RETAINED_TERMINAL_JOBS);
+        .slice(-retainedTerminalJobs);
       const retainedIds = new Set<string>(newest.map((job) => job.jobId));
       for (const job of jobs.values()) {
         if (!isTerminal(job.status)) retainedIds.add(job.jobId);

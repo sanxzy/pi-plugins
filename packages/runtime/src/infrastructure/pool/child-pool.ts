@@ -1,4 +1,3 @@
-import { MAX_CONCURRENCY } from "@xzy-ai/core";
 import type { ChildSessionControl } from "@xzy-ai/core";
 import { createAgentEventRegistry, type AgentEventRegistry } from "../registry/agent-event-registry.ts";
 import { readSessionManifest } from "../manifests/manifests.ts";
@@ -6,6 +5,7 @@ import { canonicalProjectRoot } from "../../shared/paths.ts";
 import { createDeliveryCoordinator, type DeliveryCoordinator } from "./delivery.ts";
 import { createConcurrencyGate, type ConcurrencyGate } from "./concurrency-gate.ts";
 import { createInterruptionSweep } from "./interruption.ts";
+import { resolveSettingsForProject } from "../../shared/settings.ts";
 
 
 /**
@@ -157,7 +157,7 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
       // isRootSession(), which remains manifest-backed and fail-closed.
       return registry.getBySessionId(sessionId) === undefined;
     },
-    concurrency: createConcurrencyGate(MAX_CONCURRENCY),
+    concurrency: createConcurrencyGate(resolveSettingsForProject(projectRoot).agents.maxConcurrency),
     deliveryFor,
     rootSessionIdFor,
     liveChildren,

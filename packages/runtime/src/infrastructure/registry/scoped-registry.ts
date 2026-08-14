@@ -66,7 +66,7 @@ export function createScopedRegistry(projectRoot: string, rootSessionId?: string
     index.clear();
     for (const filePath of discoverScopedFiles(projectRoot)) {
       const parentSessionId = registrySessionId(filePath);
-      const registry = createRegistry(filePath);
+      const registry = createRegistry(filePath, projectRoot);
       byParent.set(parentSessionId, registry);
       for (const [jobId, job] of registry.all()) {
         index.set(jobId, job);
@@ -85,7 +85,7 @@ export function createScopedRegistry(projectRoot: string, rootSessionId?: string
     ensureSession(parentSessionId);
     let registry = byParent.get(parentSessionId);
     if (!registry) {
-      registry = createRegistry(scopedRegistryFile(projectRoot, parentSessionId));
+      registry = createRegistry(scopedRegistryFile(projectRoot, parentSessionId), projectRoot);
       byParent.set(parentSessionId, registry);
     }
     return registry;
@@ -149,5 +149,5 @@ export function createScopedRegistry(projectRoot: string, rootSessionId?: string
 }
 
 export function scopedRegistryForSession(projectRoot: string, sessionId: string): Registry {
-  return createRegistry(scopedRegistryFile(projectRoot, sessionId));
+  return createRegistry(scopedRegistryFile(projectRoot, sessionId), projectRoot);
 }

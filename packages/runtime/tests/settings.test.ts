@@ -3,7 +3,16 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { homeRoot, resolveSettings, resolveSettingsForProject, settingsConfigPath } from "../src/index.ts";
+import { createJob } from "@xzy-ai/core";
+import {
+  createAgentEventRegistry,
+  createRegistry,
+  getChildPool,
+  homeRoot,
+  resolveSettings,
+  resolveSettingsForProject,
+  settingsConfigPath,
+} from "../src/index.ts";
 
 function tempHome(): string {
   return mkdtempSync(join(tmpdir(), "pi-c2-settings-home-"));
@@ -290,6 +299,74 @@ test("resolution error paths do not surface the parsed secret", () => {
       assert.ok(!message.includes(secret), "error text must not contain the secret");
     });
   } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("configured maxConcurrency is used when a project pool is constructed", async () => {
+  const home = tempHome();
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-concurrency-project-"));
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  try {
+    process.env.PI_C2_TEST_HOME = home;
+    writeHomeConfig(home, { agents: { maxConcurrency: 4 } });
+    const pool = getChildPool(project, "phase3-root");
+    const releases = Array.from({ length: 4 }, () => {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => { release = resolve; });
+      return { promise, release };
+    });
+    const runs = releases.map(({ promise }) => pool.concurrency.run(() => promise));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(pool.concurrency.activeCount, 4);
+    assert.equal(pool.concurrency.queuedCount, 0);
+    for (const item of releases) item.release();
+    await Promise.all(runs);
+  } finally {
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+    rmSync(project, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("configured terminal retention caps are applied to both registry implementations", () => {
+  const home = tempHome();
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-retention-project-"));
+  const directPath = join(project, "jobs.jsonl");
+  try {
+    process.env.PI_C2_TEST_HOME = home;
+    writeHomeConfig(home, { agents: { retainedTerminalJobs: 2, retainedTerminalAgents: 2 } });
+
+    const direct = createRegistry(directPath);
+    for (let index = 0; index < 3; index += 1) {
+      direct.createJob(createJob({
+        jobId: `direct-${index}`,
+        status: "completed",
+        description: `direct-${index}`,
+        subagentType: "test-agent",
+        createdAt: `2026-01-01T00:00:0${index}.000Z`,
+      }));
+    }
+    assert.equal(direct.all().size, 2);
+    assert.equal(direct.get("direct-0"), undefined);
+
+    const scoped = createAgentEventRegistry(project, "phase3-root");
+    for (let index = 0; index < 3; index += 1) {
+      scoped.createJob(createJob({
+        jobId: `agent-${index}`,
+        parentSessionId: "phase3-root",
+        sessionId: `agent-${index}`,
+        status: "completed",
+        description: `agent-${index}`,
+        subagentType: "test-agent",
+        createdAt: `2026-01-01T00:00:0${index}.000Z`,
+      }));
+    }
+    assert.equal(scoped.all().size, 2);
+    assert.equal(scoped.get("agent-0"), undefined);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
 });

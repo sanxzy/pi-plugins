@@ -82,6 +82,56 @@ test("agent schema removes the redundant background parameter", () => {
   assert.match(registered.description, /foreground/);
 });
 
+test("agent description reflects the centralized maxParallelAgents cap", () => {
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-parallel-settings-home-"));
+  process.env.PI_C2_TEST_HOME = home;
+  mkdirSync(join(home, "pi-c2"), { recursive: true });
+  writeFileSync(join(home, "pi-c2", "config.json"), JSON.stringify({ agents: { maxParallelAgents: 5 } }));
+  try {
+    let registered: { description: string } | undefined;
+    registerAgentTool({
+      registerTool(tool: typeof registered) {
+        registered = tool;
+      },
+    } as unknown as ExtensionAPI);
+    assert.ok(registered);
+    assert.match(registered.description, /at most 5 agent calls/);
+  } finally {
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("agent execution enforces the centralized maxParallelAgents cap at call time", async () => {
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-parallel-enforcement-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-parallel-enforcement-project-"));
+  process.env.PI_C2_TEST_HOME = home;
+  mkdirSync(join(home, "pi-c2"), { recursive: true });
+  writeFileSync(join(home, "pi-c2", "config.json"), JSON.stringify({ agents: { maxParallelAgents: 1 } }));
+  try {
+    let registered: RegisteredAgent | undefined;
+    registerAgentTool({
+      registerTool(tool: RegisteredAgent) {
+        registered = tool;
+      },
+    } as unknown as ExtensionAPI);
+    assert.ok(registered);
+    const params = { description: "unknown", prompt: "do not spawn", subagent_type: "missing-agent" };
+    const first = await registered.execute("call-1", params, undefined, undefined, context(cwd));
+    assert.match(first.content[0]?.text ?? "", /unknown subagent_type/);
+    const second = await registered.execute("call-2", params, undefined, undefined, context(cwd));
+    assert.match(second.content[0]?.text ?? "", /at most 1 agent calls/);
+  } finally {
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("concurrent resumes of the same terminal job launch exactly one child", async () => {
   const previousHome = process.env.PI_C2_TEST_HOME;
   process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-resume-lease-home-"));
