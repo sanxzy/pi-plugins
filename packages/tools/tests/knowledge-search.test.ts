@@ -17,6 +17,7 @@ import {
   MAX_WIKI_DISCOVERY_OUTPUT_BYTES,
   MAX_WIKI_DISCOVERY_PAGES,
 } from "../src/wiki.ts";
+import { homeRoot, homeSessionDirFromRoot } from "@xzy-ai/runtime";
 
 type Tool = {
   name: string;
@@ -78,6 +79,67 @@ test("wiki save emits a boundary without persisting entry content as telemetry p
   assert.ok(!JSON.stringify(wikiRecords).includes("WIKI-SECRET-CONTENT"));
   rmSync(root, { recursive: true, force: true });
   rmSync(logRoot, { recursive: true, force: true });
+});
+
+test("knowledge_search telemetry excludes callback results and history-derived discovery metadata", async () => {
+  const projectRoot = tempRoot();
+  const previousHome = process.env.PI_C2_HOME;
+  process.env.PI_C2_HOME = projectRoot;
+  const wikiRoot = join(homeRoot(), "wikis");
+  mkdirSync(wikiRoot, { recursive: true });
+  let tool: Tool | undefined;
+  registerKnowledgeSearchTool({ registerTool(candidate: Tool) { tool = candidate; } } as unknown as ExtensionAPI);
+  const logRoot = tempRoot();
+  const logger = createSessionLogger({
+    projectId: "knowledge-search-project",
+    rootSessionId: "root-a",
+    eventsPath: join(logRoot, "events.jsonl"),
+    errorsPath: join(logRoot, "errors.jsonl"),
+  });
+  try {
+    assert.ok(tool);
+    const ctx = { cwd: projectRoot, sessionManager: { getSessionId: () => "root-a" } } as unknown as ExtensionContext;
+    await runWithLogContext(logger, async () => {
+      const saved = await saveWikiEntry({
+        topic: "telemetry",
+        source: "web_search",
+        queryOrUrl: "telemetry-query",
+        format: "markdown",
+        title: "History secret title",
+        text: "History secret body",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        root: wikiRoot,
+      });
+      assert.equal(saved.saved, true);
+      const search = await tool!.execute("search", { type: "wikis", query: "History secret body" }, undefined, undefined, ctx);
+      const searchDetails = search.details as unknown as { results: Array<Record<string, unknown>> };
+      assert.deepEqual(searchDetails.results.map((item) => item.file), ["telemetry.md"]);
+      const direct = await tool!.execute("direct", { type: "wikis", topic: "telemetry", page: "1" }, undefined, undefined, ctx);
+      assert.match(text(direct), /History secret body/);
+      const discovery = await tool!.execute("discovery", { type: "wikis", query: "*" }, undefined, undefined, ctx);
+      assert.match(text(discovery), /telemetry\.md.*title: History secret title.*openCount: 1/);
+    });
+    const historyFile = join(homeSessionDirFromRoot(projectRoot, "root-a"), "wiki-history.json");
+    const historyRecords = JSON.parse(readFileSync(historyFile, "utf8") as string) as { r: Array<[string, string, number, number]> };
+    assert.equal(historyRecords.r.length, 1);
+    assert.deepEqual(historyRecords.r[0], ["telemetry", "telemetry.md", 1, historyRecords.r[0]![3]]);
+
+    const records = readFileSync(join(logRoot, "events.jsonl"), "utf8").trim().split("\\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    const knowledgeRecords = records.filter((record) => record.operation === TOOL_OPERATIONS.KNOWLEDGE_SEARCH_EXECUTE);
+    assert.equal(knowledgeRecords.length, 6);
+    assert.equal(knowledgeRecords.every((record) => !("result" in record)), true);
+    assert.deepEqual(knowledgeRecords.filter((record) => record.phase === "before").map((record) => record.parameters), [
+      { type: "wikis", query: "History secret body" },
+      { type: "wikis" },
+      { type: "wikis", query: "*" },
+    ]);
+    const raw = JSON.stringify(knowledgeRecords);
+    assert.doesNotMatch(raw, /telemetry\.md|History secret title|History secret body|openCount|lastOpened|wiki-history\.json/);
+  } finally {
+    process.env.PI_C2_HOME = previousHome;
+    rmSync(logRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
 });
 
 test("knowledge_search is registered with an explicit type discriminator and a local-first description", () => {
