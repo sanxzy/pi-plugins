@@ -45,7 +45,7 @@ function direct(
   options: { sessionId?: string; rootSessionId?: string; nowMs?: number } = {},
 ) {
   return executeKnowledgeSearch(
-    { type: "wikis", topic, page: "1" },
+    { type: "wikis", page: `${topic}.md` },
     {
       wikiRoot,
       projectRoot,
@@ -83,7 +83,7 @@ test("failed direct lookups do not create or update history", async () => {
   try {
     const missing = await direct(wikiRoot, projectRoot, "missing", { sessionId: "root-a", rootSessionId: "root-a", nowMs: 1000 });
     const outOfRange = await executeKnowledgeSearch(
-      { type: "wikis", topic: "alpha", page: "2" },
+      { type: "wikis", page: "alpha.part-002.md" },
       { wikiRoot, projectRoot, sessionId: "root-a", rootSessionId: "root-a", nowMs: () => 2000 },
     );
     const missingText = missing.content[0]?.type === "text" ? missing.content[0].text : undefined;
@@ -257,7 +257,7 @@ test("registered context writes history under the active root session without lo
   try {
     assert.ok(tool);
     const ctx = { cwd: projectRoot, sessionManager: { getSessionId: () => "root-a" } } as unknown as ExtensionContext;
-    await runWithLogContext(logger, () => tool!.execute("call", { type: "wikis", topic: "alpha", page: "1" }, undefined, undefined, ctx));
+    await runWithLogContext(logger, () => tool!.execute("call", { type: "wikis", page: "alpha.md" }, undefined, undefined, ctx));
     assert.deepEqual(history(projectRoot, "root-a").r, [["alpha", "alpha.md", 1, history(projectRoot, "root-a").r[0]![3]]]);
     const logs = readFileSync(join(logRoot, "events.jsonl"), "utf8");
     assert.equal(logs.includes("wiki-history.json"), false);

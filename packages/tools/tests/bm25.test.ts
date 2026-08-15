@@ -265,7 +265,7 @@ test("web_search and web_fetch persistence feeds the same local BM25 corpus", as
   }
 });
 
-test("BM25 corpus statistics follow the active topic filter", async () => {
+test("BM25 corpus statistics include all matching wiki pages", async () => {
   const wikiRoot = root();
   writeFileSync(
     join(wikiRoot, "target.md"),
@@ -292,13 +292,10 @@ test("BM25 corpus statistics follow the active topic filter", async () => {
     }),
   );
   try {
-    const filtered = await executeKnowledgeSearch({ type: "wikis", query: "needle", topic: "target" }, { wikiRoot });
-    const unfiltered = await executeKnowledgeSearch({ type: "wikis", query: "needle" }, { wikiRoot });
-    const filteredScore = Number(details(filtered).results[0]?.score);
-    const unfilteredScore = Number(details(unfiltered).results[0]?.score);
-    assert.ok(filteredScore > 0);
-    assert.ok(unfilteredScore > 0);
-    assert.notEqual(filteredScore, unfilteredScore);
+    const result = await executeKnowledgeSearch({ type: "wikis", query: "needle" }, { wikiRoot });
+    const score = Number(details(result).results[0]?.score);
+    assert.ok(score > 0);
+    assert.equal(details(result).results[0]?.file, "target.md");
   } finally {
     rmSync(wikiRoot, { recursive: true, force: true });
   }

@@ -7,20 +7,20 @@ import { errorResult, textResult } from "../results.ts";
 import {
   discoverWikiTopics,
   MAX_WIKI_DISCOVERY_OUTPUT_BYTES,
-  retrieveWikiPage,
+  retrieveWikiPageByFile,
+  topicFromPageFile,
   searchWikis,
   wikiRoot,
 } from "../wiki.ts";
 
-const commonQuery = Type.Optional(Type.String({ description: "Search query, or \"*\" for deterministic discovery. Not required for page/root selection." }));
+const commonQuery = Type.Optional(Type.String({ description: "Search query, or \"*\" for deterministic discovery; omit when opening a page directly." }));
 const discoveryQuery = Type.Optional(Type.String({ description: "Grouped discovery/search query; omitted or \"*\" discovers both configured references and wiki topics." }));
 const maxResults = Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum results or topics to return" }));
 const knowledgeSearchParams = Type.Union([
   Type.Object({
     type: Type.Literal("wikis", { description: "Search, discover, or retrieve pages from the local wiki corpus" }),
     query: commonQuery,
-    topic: Type.Optional(Type.String({ description: "Optional wiki topic filter" })),
-    page: Type.Optional(Type.String({ description: "Optional wiki page selector" })),
+    page: Type.Optional(Type.String({ description: "Open a saved page directly by its file path (topic is derived from the file name), e.g. 'react-notes.md' or 'react-notes.part-002.md'; do not combine with a search query" })),
     maxResults,
   }, { additionalProperties: false }),
   Type.Object({
@@ -40,7 +40,6 @@ type KnowledgeSearchParams =
   | {
       type: "wikis";
       query?: string;
-      topic?: string;
       page?: string;
       maxResults?: number;
       alias?: never;
@@ -49,7 +48,6 @@ type KnowledgeSearchParams =
       type: "references";
       query?: string;
       alias?: string;
-      topic?: never;
       page?: never;
       maxResults?: never;
     }
@@ -57,7 +55,6 @@ type KnowledgeSearchParams =
       type?: null;
       query?: string;
       alias?: never;
-      topic?: never;
       page?: never;
       maxResults?: never;
     };
@@ -91,6 +88,7 @@ export interface ReferenceCatalogReader {
 type WikiSearchDetails = {
   mode: "wikis";
   query?: string;
+  /** Topic of the opened page when the request used the page selector. */
   topic?: string;
   results: KnowledgeSearchResultItem[];
   page?: {
@@ -174,7 +172,7 @@ export function registerKnowledgeSearchTool(pi: ExtensionAPI): void {
     name: "knowledge_search",
     label: "Knowledge search",
     description:
-      "Use this tool first to search local wikis and references for reusable research before any web research. It searches the local knowledge cache and configured reference roots. Call with no type (or query=\"*\") for grouped discovery (broad-to-specific): --references-- first, --wikis-- second. Use type=\"wikis\" with query=\"*\" to browse topics, a normal query for ranked files, or topic/page to open the full saved page. Use type=\"references\" to list aliases or to select a root for read/grep/find inspection. Search output is identification only - never reason from excerpts, snippets, or fragments; always open and read the complete page or source root first, because incomplete portions can cause hallucinations. Only when local results are absent, insufficient, or time-sensitive should you fall back to web_search; then use web_fetch to retrieve and verify candidate URLs, since web_fetch is free. Treat cached results as potentially stale and verify sensitive claims against current web sources.",
+      "Use this tool first to search local wikis and references for reusable research before any web research. It searches the local knowledge cache and configured reference roots. Call with no type (or query=\"*\") for grouped discovery (broad-to-specific): --references-- first, --wikis-- second. Use type=\"wikis\" with query=\"*\" to browse topics, a normal query for ranked files, or page (without query) to open the full saved page directly by its returned file path; the response includes the relevant topic and page path. Use type=\"references\" to list aliases or to select a root for read/grep/find inspection. Search output is identification only - never reason from excerpts, snippets, or fragments; always open and read the complete page or source root first, because incomplete portions can cause hallucinations. Only when local results are absent, insufficient, or time-sensitive should you fall back to web_search; then use web_fetch to retrieve and verify candidate URLs, since web_fetch is free. Treat cached results as potentially stale and verify sensitive claims against current web sources.",
     parameters: knowledgeSearchParams,
     async execute(
       _toolCallId: string,
@@ -258,10 +256,28 @@ export async function executeKnowledgeSearch(
       message: "The 'alias' field is only valid for type=references.",
     });
   }
-  if (params.type === "references" && (params.topic !== undefined || params.page !== undefined)) {
-    return errorResult("The 'topic' and 'page' fields are only valid for type=wikis.", {
+  if (params.type === "references" && params.page !== undefined) {
+    return errorResult("The 'page' field is only valid for type=wikis.", {
       mode: "error",
-      message: "The 'topic' and 'page' fields are only valid for type=wikis.",
+      message: "The 'page' field is only valid for type=wikis.",
+    });
+  }
+  if (params.type === "references" && (params as { topic?: unknown }).topic !== undefined) {
+    return errorResult("The 'topic' field is not supported; use query or page.", {
+      mode: "error",
+      message: "The 'topic' field is not supported; use query or page.",
+    });
+  }
+  if (params.type === "wikis" && (params as { topic?: unknown }).topic !== undefined) {
+    return errorResult("The 'topic' field is not supported; use query or page.", {
+      mode: "error",
+      message: "The 'topic' field is not supported; use query or page.",
+    });
+  }
+  if (params.type === "wikis" && params.page !== undefined && params.query !== undefined) {
+    return errorResult("The 'query' field cannot be combined with direct page opening.", {
+      mode: "error",
+      message: "The 'query' field cannot be combined with direct page opening.",
     });
   }
   if (params.type === "references") {
@@ -384,20 +400,20 @@ export async function executeKnowledgeSearch(
     return errorResult("Wiki research aborted.", { mode: "error", message: "Wiki research aborted." });
   }
   const root = options?.wikiRoot ?? wikiRoot();
-  if (params.topic !== undefined && params.page !== undefined) {
-    const page = await retrieveWikiPage(root, params.topic, params.page, options);
+  if (params.page !== undefined) {
+    const page = await retrieveWikiPageByFile(root, params.page, options);
     if (!page) {
       return textResult("No local wiki matches found.", {
         mode: "wikis",
         ...(params.query === undefined ? {} : { query: params.query }),
-        topic: params.topic,
+        topic: topicFromPageFile(params.page),
         results: [],
       });
     }
     return textResult(page.content, {
       mode: "wikis",
       ...(params.query === undefined ? {} : { query: params.query }),
-      topic: params.topic,
+      topic: page.topic,
       results: [],
       page: {
         file: page.file,
@@ -412,7 +428,6 @@ export async function executeKnowledgeSearch(
   const query = params.query ?? "";
   if (query === "*") {
     const topics = await discoverWikiTopics(root, {
-      topic: params.topic,
       maxResults: params.maxResults,
       history: options,
     });
@@ -420,7 +435,6 @@ export async function executeKnowledgeSearch(
       return textResult("No local wiki pages found.", {
         mode: "wikis",
         query,
-        ...(params.topic === undefined ? {} : { topic: params.topic }),
         results: [],
         discovery: { topics: [] },
       });
@@ -447,7 +461,8 @@ export async function executeKnowledgeSearch(
         for (const page of topic.pages) {
           const metadata = page.openCount === undefined ? "" : `openCount: ${page.openCount}`;
           const prefix = topic.pages.length > 1 ? "  - " : "- ";
-          if (!appendLine(`${prefix}${page.file}${metadata ? ` (${metadata})` : ""}`)) break outer;
+          const topicPrefix = topic.pages.length > 1 ? "" : `${topic.topic}: `;
+          if (!appendLine(`${prefix}${topicPrefix}${page.file}${metadata ? ` (${metadata})` : ""}`)) break outer;
         }
       }
     }
@@ -464,28 +479,24 @@ export async function executeKnowledgeSearch(
     return textResult(textRendered, {
       mode: "wikis",
       query,
-      ...(params.topic === undefined ? {} : { topic: params.topic }),
       results: [],
       discovery: { topics },
     });
   }
   const results = await searchWikis(root, query, {
-    topic: params.topic,
     max: params.maxResults,
   });
   if (results.length === 0) {
     return textResult("No local wiki matches found.", {
       mode: "wikis",
       ...(params.query === undefined ? {} : { query: params.query }),
-      ...(params.topic === undefined ? {} : { topic: params.topic }),
       results: [],
     });
   }
-  const rendered = results.map((item) => `- ${item.file} (${item.score})`).join("\n");
+  const rendered = results.map((item) => `- ${item.topic}: ${item.file} (${item.score})`).join("\n");
   return textResult(rendered, {
     mode: "wikis",
     ...(params.query === undefined ? {} : { query: params.query }),
-    ...(params.topic === undefined ? {} : { topic: params.topic }),
     results,
   });
 }

@@ -446,6 +446,28 @@ export async function retrieveWikiPage(
   }
 }
 
+/**
+ * Derive the topic slug from a page file path, e.g. 'react.part-002.md' → 'react'.
+ * Page files always embed their topic as the file-name prefix, so callers never
+ * need to supply a topic separately.
+ */
+export function topicFromPageFile(file: string): string {
+  return slugify(file.replace(/\.part-\d{3}\.md$/, "").replace(/\.md$/, ""));
+}
+
+/**
+ * Open a saved wiki page directly by its file path (for example the page path
+ * returned by a search, discovery, or previous-page navigation result). The
+ * topic is derived from the file name.
+ */
+export async function retrieveWikiPageByFile(
+  root: string,
+  file: string,
+  historyOptions?: WikiHistoryOptions,
+): Promise<WikiPageResult | undefined> {
+  return retrieveWikiPage(root, topicFromPageFile(file), file, historyOptions);
+}
+
 export function parsePageHeader(document: string): WikiPageHeader {
   const end = document.indexOf(WIKI_PAGE_END);
   const header = end >= 0 ? document.slice(0, end) : "";

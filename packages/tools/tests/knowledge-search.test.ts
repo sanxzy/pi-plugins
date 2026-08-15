@@ -114,7 +114,7 @@ test("knowledge_search telemetry excludes callback results and history-derived d
       const search = await tool!.execute("search", { type: "wikis", query: "telemetry query terms" }, undefined, undefined, ctx);
       const searchDetails = search.details as unknown as { results: Array<Record<string, unknown>> };
       assert.deepEqual(searchDetails.results.map((item) => item.file), ["telemetry.md"]);
-      const direct = await tool!.execute("direct", { type: "wikis", topic: "telemetry", page: "1" }, undefined, undefined, ctx);
+      const direct = await tool!.execute("direct", { type: "wikis", page: "telemetry.md" }, undefined, undefined, ctx);
       assert.match(text(direct), /History secret body/);
       const discovery = await tool!.execute("discovery", { type: "wikis", query: "*" }, undefined, undefined, ctx);
       assert.match(text(discovery), /telemetry\.md.*openCount: 1/);
@@ -165,7 +165,8 @@ test("knowledge_search is registered with an explicit type discriminator and a l
   assert.match(tool.description, /web_fetch/);
   assert.match(tool.description, /web_fetch.*free/i);
   assert.match(tool.description, /broad-to-specific/i);
-  assert.match(tool.description, /topic\/page/);
+  assert.match(tool.description, /page.*returned file path/i);
+  assert.match(tool.description, /without query/);
   assert.match(tool.description, /local knowledge cache/i);
   assert.match(tool.description, /time-sensitive/i);
   assert.match(tool.description, /never reason from excerpts/i);
@@ -193,11 +194,11 @@ test("knowledge_search returns an empty structured result for an empty wiki dire
   mkdirSync(root, { recursive: true });
   try {
     const result = await executeKnowledgeSearch(
-      { type: "wikis", query: "typescript", topic: "TypeScript Notes", page: "001", maxResults: 50 },
+      { type: "wikis", page: "typescript-notes.md", maxResults: 50 },
       { wikiRoot: root },
     );
     assert.equal(text(result), "No local wiki matches found.");
-    assert.deepEqual(result.details, { mode: "wikis", query: "typescript", topic: "TypeScript Notes", results: [] });
+    assert.deepEqual(result.details, { mode: "wikis", topic: "typescript-notes", results: [] });
     assert.deepEqual(readdirSync(root), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -243,7 +244,7 @@ test("knowledge_search returns deterministically ranked excerpts with scores and
   }
 });
 
-test("knowledge_search accepts natural-language topic filters and searches continuation filenames", async () => {
+test("knowledge_search searches natural-language queries and continuation pages", async () => {
   const root = tempRoot();
   writeFileSync(
     join(root, "react-notes.md"),
@@ -255,10 +256,10 @@ test("knowledge_search accepts natural-language topic filters and searches conti
   );
   writeFileSync(
     join(root, "vue-notes.md"),
-    formatWikiEntry({ topic: "vue-notes", source: "web_search", queryOrUrl: "vue", format: "markdown", title: "Vue", text: "hooks", timestamp: "2026-01-03T00:00:00.000Z" }),
+    formatWikiEntry({ topic: "vue-notes", source: "web_search", queryOrUrl: "vue", format: "markdown", title: "Vue", text: "composition", timestamp: "2026-01-03T00:00:00.000Z" }),
   );
   try {
-    const result = await executeKnowledgeSearch({ type: "wikis", query: "hooks", topic: "React Notes" }, { wikiRoot: root });
+    const result = await executeKnowledgeSearch({ type: "wikis", query: "hooks" }, { wikiRoot: root });
     const details = result.details as unknown as unknown as { results: Array<Record<string, unknown>> };
     assert.equal(details.results.length, 2);
     assert.deepEqual(details.results.map((item) => item.file), ["react-notes.md", "react-notes.part-002.md"]);
@@ -336,6 +337,32 @@ test("knowledge_search breaks equal scores by newest timestamp then filename", a
   }
 });
 
+test("knowledge_search opens a saved page directly via its file path without a query or topic", async () => {
+  const root = tempRoot();
+  writeFileSync(
+    join(root, "alpha.md"),
+    `<!-- pi-c2-wiki-page -->\ntopic: alpha\npage: 1\ntotalPages: 2\nnext: alpha.part-002.md\n\n<!-- pi-c2-wiki-page-end -->\n\nFULL ALPHA PAGE`,
+  );
+  writeFileSync(
+    join(root, "alpha.part-002.md"),
+    `<!-- pi-c2-wiki-page -->\ntopic: alpha\npage: 2\ntotalPages: 2\nprevious: alpha.md\n\n<!-- pi-c2-wiki-page-end -->\n\nFULL SECOND PAGE`,
+  );
+  try {
+    const first = await executeKnowledgeSearch({ type: "wikis", page: "alpha.md" }, { wikiRoot: root });
+    assert.match(text(first), /FULL ALPHA PAGE/);
+    const firstDetails = first.details as unknown as { topic: string; page: { topic: string; file: string } };
+    assert.equal(firstDetails.topic, "alpha");
+    assert.equal(firstDetails.page.topic, "alpha");
+    assert.equal(firstDetails.page.file, "alpha.md");
+    const second = await executeKnowledgeSearch({ type: "wikis", page: "alpha.part-002.md" }, { wikiRoot: root });
+    assert.match(text(second), /FULL SECOND PAGE/);
+    const missing = await executeKnowledgeSearch({ type: "wikis", page: "alpha.part-099.md" }, { wikiRoot: root });
+    assert.equal(text(missing), "No local wiki matches found.");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("knowledge_search retrieves a complete page with metadata without requiring a query", async () => {
   const root = tempRoot();
   writeFileSync(
@@ -347,7 +374,7 @@ test("knowledge_search retrieves a complete page with metadata without requiring
     `<!-- pi-c2-wiki-page -->\ntopic: react\npage: 2\ntotalPages: 2\nprevious: react.md\n\n[Previous](./react.md)\n<!-- pi-c2-wiki-page-end -->\n\nFULL PAGE TWO`,
   );
   try {
-    const result = await executeKnowledgeSearch({ type: "wikis", topic: "React", page: "2" }, { wikiRoot: root });
+    const result = await executeKnowledgeSearch({ type: "wikis", page: "react.part-002.md" }, { wikiRoot: root });
     assert.equal(text(result), readFileSync(join(root, "react.part-002.md"), "utf8"));
     const details = result.details as unknown as Record<string, unknown>;
     assert.deepEqual(details.page, {
@@ -398,25 +425,6 @@ test("knowledge_search wildcard discovers topics and continuation pages without 
     });
     assert.match(text(result), /alpha\.part-002\.md/);
     assert.doesNotMatch(text(result), /secret-token|more-secret-content/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("knowledge_search wildcard applies a topic filter without tokenizing or ranking pages", async () => {
-  const root = tempRoot();
-  writeFileSync(
-    join(root, "react.md"),
-    `<!-- pi-c2-wiki-page -->\ntopic: react\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nno matching query terms`,
-  );
-  writeFileSync(
-    join(root, "vue.md"),
-    `<!-- pi-c2-wiki-page -->\ntopic: vue\npage: 1\ntotalPages: 1\n\n<!-- pi-c2-wiki-page-end -->\n\nno matching query terms`,
-  );
-  try {
-    const result = await executeKnowledgeSearch({ type: "wikis", query: "*", topic: "React" }, { wikiRoot: root });
-    const details = result.details as unknown as { discovery: { topics: Array<{ topic: string }> } };
-    assert.deepEqual(details.discovery.topics.map((topic) => topic.topic), ["react"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -765,14 +773,14 @@ test("knowledge_search traverses previous and next cursors sequentially", async 
     );
   }
   try {
-    const first = await executeKnowledgeSearch({ type: "wikis", topic: "cursor", page: "1" }, { wikiRoot: root });
+    const first = await executeKnowledgeSearch({ type: "wikis", page: "cursor.md" }, { wikiRoot: root });
     const firstDetails = first.details as unknown as { page: { next?: string } };
     assert.equal(firstDetails.page.next, "cursor.part-002.md");
-    const second = await executeKnowledgeSearch({ type: "wikis", topic: "cursor", page: firstDetails.page.next }, { wikiRoot: root });
+    const second = await executeKnowledgeSearch({ type: "wikis", page: firstDetails.page.next }, { wikiRoot: root });
     const secondDetails = second.details as unknown as { page: { previous?: string; next?: string } };
     assert.equal(secondDetails.page.previous, "cursor.md");
     assert.equal(secondDetails.page.next, "cursor.part-003.md");
-    const previous = await executeKnowledgeSearch({ type: "wikis", topic: "cursor", page: secondDetails.page.previous }, { wikiRoot: root });
+    const previous = await executeKnowledgeSearch({ type: "wikis", page: secondDetails.page.previous }, { wikiRoot: root });
     assert.match(text(previous), /PAGE 1/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -783,9 +791,9 @@ test("knowledge_search returns empty results for missing or out-of-range pages",
   const root = tempRoot();
   writeFileSync(join(root, "topic.md"), "<!-- pi-c2-wiki-page -->\ntopic: topic\npage: 1\ntotalPages: 1\n<!-- pi-c2-wiki-page-end -->\n\nPAGE");
   try {
-    const missing = await executeKnowledgeSearch({ type: "wikis", topic: "topic", page: "topic.part-099.md" }, { wikiRoot: root });
+    const missing = await executeKnowledgeSearch({ type: "wikis", page: "topic.part-099.md" }, { wikiRoot: root });
     assert.equal(text(missing), "No local wiki matches found.");
-    const outOfRange = await executeKnowledgeSearch({ type: "wikis", topic: "topic", page: "99" }, { wikiRoot: root });
+    const outOfRange = await executeKnowledgeSearch({ type: "wikis", page: "99.md" }, { wikiRoot: root });
     assert.equal(text(outOfRange), "No local wiki matches found.");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -805,7 +813,7 @@ test("knowledge_search retrieves pages written by the paginated writer", async (
       text: `${"writer content.\n\n".repeat(100)}END`,
       pageSize: 512,
     });
-    const result = await executeKnowledgeSearch({ type: "wikis", topic: "writer", page: "2" }, { wikiRoot: root });
+    const result = await executeKnowledgeSearch({ type: "wikis", page: "writer.part-002.md" }, { wikiRoot: root });
     assert.match(text(result), /<!-- pi-c2-wiki-page -->/);
     assert.match(text(result), /topic: writer/);
     const details = result.details as unknown as { page: { page: number; totalPages: number } };
@@ -824,7 +832,7 @@ test("registered knowledge_search accepts the fixed type-discriminated parameter
   try {
     const result = await tool.execute(
       "call",
-      { type: "wikis", query: "typescript", topic: "typescript", page: "001", maxResults: 20 },
+      { type: "wikis", page: "typescript.md", maxResults: 20 },
       undefined,
       undefined,
       context,
@@ -970,7 +978,7 @@ test("wiki discovery output is bounded to the documented byte budget", async () 
   try {
     const result = await executeKnowledgeSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
     assert.ok(Buffer.byteLength(text(result), "utf8") <= MAX_WIKI_DISCOVERY_OUTPUT_BYTES);
-    assert.match(text(result), /- topic-\d{3}\.md/);
+    assert.match(text(result), /- topic-\d{3}: topic-\d{3}\.md/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

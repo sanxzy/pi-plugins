@@ -113,7 +113,7 @@ test("wildcard selection caps pages globally before regrouping topics", async ()
     assert.deepEqual(topics.map((topic) => topic.topic), ["alpha", "beta"]);
     assert.deepEqual(topics[0]?.pages.map((page) => page.file), ["alpha.part-002.md"]);
     assert.deepEqual(topics[1]?.pages.map((page) => page.file), ["beta.md"]);
-    assert.match(text(result), /alpha\.part-002\.md \(openCount: 4\)[\s\S]*- beta\.md \(openCount: 3\)/);
+    assert.match(text(result), /alpha\.part-002\.md \(openCount: 4\)[\s\S]*beta: beta\.md \(openCount: 3\)/);
   } finally {
     rmSync(wikiRoot, { recursive: true, force: true });
     rmSync(projectRoot, { recursive: true, force: true });
@@ -213,7 +213,7 @@ test("unreadable wiki roots do not touch history and direct non-wildcard validit
 
     writeFileSync(join(wikiRoot, "direct-only.md"), "direct page content without a wiki page marker");
     const direct = await executeKnowledgeSearch(
-      { type: "wikis", topic: "direct-only", page: "1" },
+      { type: "wikis", page: "direct-only.md" },
       { wikiRoot, projectRoot, sessionId: "root-a", rootSessionId: "root-a", nowMs: () => 4000 },
     );
     assert.notEqual(text(direct), "No local wiki matches found.");
