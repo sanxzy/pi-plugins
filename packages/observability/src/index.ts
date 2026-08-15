@@ -52,6 +52,8 @@ export interface LogContext {
 export interface ProcessLogInput {
   operation: string;
   parameters?: unknown;
+  /** Map the callback result before it is persisted in the after record; the caller still receives the original result. */
+  sanitizeResult?: (result: unknown) => unknown;
 }
 
 const contextStorage = new AsyncLocalStorage<LogContext>();
@@ -260,14 +262,14 @@ export function processWithLog<T>(
     if ((typeof result === "object" || typeof result === "function") && result !== null && typeof (result as unknown as PromiseLike<unknown>).then === "function") {
       const captured = result as unknown as PromiseLike<unknown>;
       return Promise.resolve(captured).then((value) => {
-        logger.write({ ...common, timestamp: new Date().toISOString(), phase: "after", result: value, durationMs: Date.now() - started });
+        logger.write({ ...common, timestamp: new Date().toISOString(), phase: "after", result: input.sanitizeResult ? input.sanitizeResult(value) : value, durationMs: Date.now() - started });
         return value;
       }).catch((error) => {
         logger.write({ ...common, timestamp: new Date().toISOString(), level: "error", phase: "error", error: safeError(error), durationMs: Date.now() - started });
         throw error;
       }) as T;
     }
-    logger.write({ ...common, timestamp: new Date().toISOString(), phase: "after", result, durationMs: Date.now() - started });
+    logger.write({ ...common, timestamp: new Date().toISOString(), phase: "after", result: input.sanitizeResult ? input.sanitizeResult(result) : result, durationMs: Date.now() - started });
     return result;
   } catch (error) {
     logger.write({ ...common, timestamp: new Date().toISOString(), level: "error", phase: "error", error: safeError(error), durationMs: Date.now() - started });

@@ -183,15 +183,17 @@ export function registerKnowledgeSearchTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<AgentToolResult<KnowledgeSearchDetails>> {
-      return processWithLog({ operation: TOOL_OPERATIONS.KNOWLEDGE_SEARCH_EXECUTE, parameters: { type: params.type, query: (params as { query?: unknown }).query } }, async () =>
-        executeKnowledgeSearch(params, {
-          signal,
-          ...(_ctx?.cwd ? { projectRoot: _ctx.cwd } : {}),
-          ...(_ctx?.sessionManager?.getSessionId?.() ? { sessionId: _ctx.sessionManager.getSessionId() } : {}),
-          ...(_ctx?.cwd && _ctx?.sessionManager?.getSessionId?.()
-            ? { rootSessionId: getChildPool(_ctx.cwd, _ctx.sessionManager.getSessionId()).rootSessionIdFor(_ctx.sessionManager.getSessionId()) }
-            : {}),
-        }),
+      return processWithLog(
+        { operation: TOOL_OPERATIONS.KNOWLEDGE_SEARCH_EXECUTE, parameters: { type: params.type, query: (params as { query?: unknown }).query }, sanitizeResult: omitKnowledgeSearchResult },
+        async () =>
+          executeKnowledgeSearch(params, {
+            signal,
+            ...(_ctx?.cwd ? { projectRoot: _ctx.cwd } : {}),
+            ...(_ctx?.sessionManager?.getSessionId?.() ? { sessionId: _ctx.sessionManager.getSessionId() } : {}),
+            ...(_ctx?.cwd && _ctx?.sessionManager?.getSessionId?.()
+              ? { rootSessionId: getChildPool(_ctx.cwd, _ctx.sessionManager.getSessionId()).rootSessionIdFor(_ctx.sessionManager.getSessionId()) }
+              : {}),
+          }),
       );
     },
   });
@@ -199,6 +201,15 @@ export function registerKnowledgeSearchTool(pi: ExtensionAPI): void {
 
 function signalAborted(options?: KnowledgeSearchExecutionOptions): boolean {
   return Boolean(options?.signal?.aborted);
+}
+
+/**
+ * Keep callback results out of telemetry: the knowledge-search result embeds
+ * wiki bodies, search excerpts, reference roots, and history-derived discovery
+ * metadata (titles, counts, timestamps) that must never be persisted.
+ */
+function omitKnowledgeSearchResult(_result: unknown): undefined {
+  return undefined;
 }
 
 export async function executeKnowledgeSearch(

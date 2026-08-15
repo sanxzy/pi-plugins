@@ -111,7 +111,7 @@ test("knowledge_search telemetry excludes callback results and history-derived d
         root: wikiRoot,
       });
       assert.equal(saved.saved, true);
-      const search = await tool!.execute("search", { type: "wikis", query: "History secret body" }, undefined, undefined, ctx);
+      const search = await tool!.execute("search", { type: "wikis", query: "telemetry query terms" }, undefined, undefined, ctx);
       const searchDetails = search.details as unknown as { results: Array<Record<string, unknown>> };
       assert.deepEqual(searchDetails.results.map((item) => item.file), ["telemetry.md"]);
       const direct = await tool!.execute("direct", { type: "wikis", topic: "telemetry", page: "1" }, undefined, undefined, ctx);
@@ -124,12 +124,12 @@ test("knowledge_search telemetry excludes callback results and history-derived d
     assert.equal(historyRecords.r.length, 1);
     assert.deepEqual(historyRecords.r[0], ["telemetry", "telemetry.md", 1, historyRecords.r[0]![3]]);
 
-    const records = readFileSync(join(logRoot, "events.jsonl"), "utf8").trim().split("\\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+    const records = readFileSync(join(logRoot, "events.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
     const knowledgeRecords = records.filter((record) => record.operation === TOOL_OPERATIONS.KNOWLEDGE_SEARCH_EXECUTE);
     assert.equal(knowledgeRecords.length, 6);
     assert.equal(knowledgeRecords.every((record) => !("result" in record)), true);
     assert.deepEqual(knowledgeRecords.filter((record) => record.phase === "before").map((record) => record.parameters), [
-      { type: "wikis", query: "History secret body" },
+      { type: "wikis", query: "telemetry query terms" },
       { type: "wikis" },
       { type: "wikis", query: "*" },
     ]);

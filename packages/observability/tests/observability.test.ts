@@ -142,6 +142,26 @@ test("processWithLog emits correlated before/after records to events.jsonl", asy
   assert.equal(records(paths.errorsPath).length, 0);
 });
 
+test("sanitizeResult maps only the persisted after record, never the business result", async () => {
+  const paths = scope();
+  const logger = createSessionLogger({
+    projectId: "project-a",
+    rootSessionId: "root-a",
+    eventsPath: paths.eventsPath,
+    errorsPath: paths.errorsPath,
+  });
+  const secret = { file: "wiki-history.json", title: "History secret title", openCount: 3 };
+  const result = await runWithLogContext(logger, () => processWithLog(
+    { operation: "privacy.boundary", sanitizeResult: () => undefined },
+    async () => secret,
+  ));
+  assert.equal(result, secret, "the caller must receive the full result");
+  const after = records(paths.eventsPath).find((record) => record.phase === "after");
+  assert.ok(after);
+  assert.equal("result" in after, false, "the persisted after record must not carry the result");
+  assert.equal(JSON.stringify(after).includes("openCount"), false);
+});
+
 test("nested processWithLog inherits the ambient parent correlation", async () => {
   const paths = scope();
   const logger = createSessionLogger({ projectId: "project-a", rootSessionId: "root-a", eventsPath: paths.eventsPath, errorsPath: paths.errorsPath });
