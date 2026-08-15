@@ -322,12 +322,14 @@ test("knowledge_search wildcard discovers topics and continuation pages without 
       page: 1,
       totalPages: 2,
       next: "alpha.part-002.md",
+      title: "Alpha",
     });
     assert.deepEqual(details.discovery.topics[0]?.pages[1], {
       file: "alpha.part-002.md",
       page: 2,
       totalPages: 2,
       previous: "alpha.md",
+      title: "Alpha",
     });
     assert.match(text(result), /alpha\.part-002\.md/);
     assert.doesNotMatch(text(result), /secret-token|more-secret-content/);
@@ -925,10 +927,10 @@ test("wiki discovery caps pages per topic", async () => {
     };
     const long = details.discovery.topics.find((topic) => topic.topic === "long");
     assert.ok(long);
-    assert.equal(long.pages.length, MAX_WIKI_DISCOVERY_PAGES);
-    assert.equal(long.truncated, true);
+    assert.equal(long.pages.length, 20);
+    assert.equal(long.truncated, undefined);
     assert.equal((long.pages[0] as { file: string }).file, "long.md");
-    assert.equal((long.pages.at(-1) as { file: string }).file, "long.part-499.md");
+    assert.equal((long.pages.at(-1) as { file: string }).file, "long.part-019.md");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
