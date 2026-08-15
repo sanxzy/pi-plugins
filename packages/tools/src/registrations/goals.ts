@@ -4,8 +4,10 @@ import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { getChildPool, getGoalPool } from "@xzy-ai/runtime";
 import {
   goalCreateParams,
+  goalClearParams,
   goalNoArgsParams,
   goalPauseParams,
+  type GoalClearParams,
   type GoalCreateParams,
   type GoalPauseParams,
 } from "../tools.ts";
@@ -48,6 +50,13 @@ function formatGoal(goal: Goal): string {
     `Updated: ${goal.updatedAt}`,
     pause,
   ].filter(Boolean).join("\n");
+}
+
+function notCompleteAdvice(goal: Goal): string {
+  return [
+    "Goal not cleared. The goal is not yet complete and should be finished before it can be cleared.",
+    `Run \`goal_clear({ isComplete: true })\` once the goal is complete. Current goal context:\n${formatGoal(goal)}`,
+  ].join("\n");
 }
 
 function success<T extends GoalToolDetails>(text: string, details: T): AgentToolResult<T> {
@@ -123,14 +132,15 @@ export function registerGoalTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "goal_clear",
     label: "Clear goal",
-    description: "Clear my current goal when I decide it is complete.",
-    parameters: goalNoArgsParams,
-    async execute(_toolCallId: string, _params: unknown, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
-      return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "clear" } }, async () => {
+    description: "Clear my current goal only when I decide it is complete. Set isComplete to false to keep the goal and inspect its current context.",
+    parameters: goalClearParams,
+    async execute(_toolCallId: string, params: GoalClearParams, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
+      return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "clear", isComplete: params.isComplete } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
       const goal = target.pool.get(target.cwd);
       if (!goal) return errorResult("no goal exists to clear for this cwd", { reason: "no goal exists to clear for this cwd" });
+      if (!params.isComplete) return success(notCompleteAdvice(goal), { goal });
       if (!target.pool.clear(target.cwd)) return errorResult("no goal exists to clear for this cwd", { reason: "no goal exists to clear for this cwd" });
       return success("Congratulations, the goal was completed and cleared.", { goal });
       });

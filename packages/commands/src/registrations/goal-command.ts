@@ -9,7 +9,7 @@ export const GOAL_WORKFLOW_PROMPT = [
   "- goal_pause({ reason }): pause a blocked goal with the exact non-empty reason.",
   "- goal_resume({}): resume a paused goal.",
   "- goal_status({}): inspect the full current goal record.",
-  "- goal_clear({}): clear the goal when you decide it is complete or no longer relevant.",
+  "- goal_clear({ isComplete }): clear the goal only when it is actually complete (isComplete: true); set isComplete to false to keep the goal and inspect its context.",
   "If the request starts with a simple duration such as 2m, treat that leading duration as interval metadata: pass it as interval and remove it from prompt. The remaining text is the exact goal prompt. Persist and deliver only that exact prompt; do not include the interval in the prompt.",
   "I decide when to create, pause, resume, or clear my goal. Do not rewrite or summarize the user's goal prompt. If a goal already exists, inspect it and clear it before intentionally replacing it.",
   "If the user supplies text after /goal, treat that exact text as the proposed goal request and decide which goal tool to use. If /goal has no text, propose next steps without directly mutating goal state.",

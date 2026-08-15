@@ -34,6 +34,8 @@ test("the workflow describes a self-managed goal and separates leading interval 
   assert.match(GOAL_WORKFLOW_PROMPT, /your own persistent goal/i);
   assert.match(GOAL_WORKFLOW_PROMPT, /duration.*interval|interval.*duration/i);
   assert.match(GOAL_WORKFLOW_PROMPT, /remaining text.*prompt|prompt.*remaining text/i);
+  assert.match(GOAL_WORKFLOW_PROMPT, /goal_clear.*isComplete.*false/i);
+  assert.match(GOAL_WORKFLOW_PROMPT, /isComplete.*true.*complete/i);
 });
 
 test("registerGoalCommand forwards the workflow prompt and exact text as a steer", () => {

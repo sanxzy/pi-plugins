@@ -129,6 +129,10 @@ export const goalPauseParams = Type.Object({
   reason: Type.String({ description: "Exact reason the goal is blocked or paused." }),
 });
 
+export const goalClearParams = Type.Object({
+  isComplete: Type.Boolean({ description: "Whether the goal is complete. False keeps the goal active and returns its current context; true clears it." }),
+});
+
 export const goalNoArgsParams = Type.Object({});
 export type QuestionParams = Static<typeof questionParams>;
 export type AgentParams = Static<typeof agentParams>;
@@ -136,4 +140,5 @@ export type CancelParams = Static<typeof cancelParams>;
 export type StatusParams = Static<typeof statusParams>;
 export type TelegramChatParams = Static<typeof telegramChatParams>;
 export type GoalCreateParams = Static<typeof goalCreateParams>;
+export type GoalClearParams = Static<typeof goalClearParams>;
 export type GoalPauseParams = Static<typeof goalPauseParams>;

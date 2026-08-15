@@ -28,6 +28,6 @@ export const DEFAULT_MAX_AGENT_DEPTH = 4;
  */
 export const GOAL_DELIVERY_FOOTER = [
   "---",
-  "If this message is no longer relevant or the goal has been completed, run the `goal_clear` tool.",
+  "If this message is no longer relevant or the goal has been completed, run the `goal_clear` tool with `isComplete: true`. To keep working on the goal, call `goal_clear({ isComplete: false })` to inspect its current context.",
   "---",
 ].join("\n");
