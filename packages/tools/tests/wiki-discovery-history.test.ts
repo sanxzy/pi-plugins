@@ -113,7 +113,7 @@ test("wildcard selection caps pages globally before regrouping topics", async ()
     assert.deepEqual(topics.map((topic) => topic.topic), ["alpha", "beta"]);
     assert.deepEqual(topics[0]?.pages.map((page) => page.file), ["alpha.part-002.md"]);
     assert.deepEqual(topics[1]?.pages.map((page) => page.file), ["beta.md"]);
-    assert.match(text(result), /Topic: alpha[\s\S]*alpha\.part-002\.md[\s\S]*Topic: beta[\s\S]*beta\.md/);
+    assert.match(text(result), /alpha\.part-002\.md \(openCount: 4\)[\s\S]*- beta\.md \(openCount: 3\)/);
   } finally {
     rmSync(wikiRoot, { recursive: true, force: true });
     rmSync(projectRoot, { recursive: true, force: true });
@@ -186,7 +186,8 @@ test("markerless-only roots prune stale history and discovery text shows additiv
       { type: "wikis", query: "*" },
       { wikiRoot, projectRoot, sessionId: "root-a", rootSessionId: "root-a" },
     );
-    assert.match(text(discovered), /alpha\.md.*title: Visible title.*openCount: 2.*lastOpened: 2000/);
+    assert.match(text(discovered), /alpha\.md.*openCount: 2/);
+    assert.doesNotMatch(text(discovered), /Visible title|lastOpened/);
     assert.doesNotMatch(text(discovered), /SECRET_BODY/);
     assert.deepEqual(JSON.parse(readFileSync(historyPath(projectRoot, "root-a"), "utf8")), { v: 1, r: [["alpha", "alpha.md", 2, 2000]] });
   } finally {

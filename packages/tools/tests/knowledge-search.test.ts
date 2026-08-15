@@ -117,7 +117,8 @@ test("knowledge_search telemetry excludes callback results and history-derived d
       const direct = await tool!.execute("direct", { type: "wikis", topic: "telemetry", page: "1" }, undefined, undefined, ctx);
       assert.match(text(direct), /History secret body/);
       const discovery = await tool!.execute("discovery", { type: "wikis", query: "*" }, undefined, undefined, ctx);
-      assert.match(text(discovery), /telemetry\.md.*title: History secret title.*openCount: 1/);
+      assert.match(text(discovery), /telemetry\.md.*openCount: 1/);
+      assert.doesNotMatch(text(discovery), /History secret title|lastOpened/);
     });
     const historyFile = join(homeSessionDirFromRoot(projectRoot, "root-a"), "wiki-history.json");
     const historyRecords = JSON.parse(readFileSync(historyFile, "utf8") as string) as { r: Array<[string, string, number, number]> };
@@ -167,6 +168,8 @@ test("knowledge_search is registered with an explicit type discriminator and a l
   assert.match(tool.description, /topic\/page/);
   assert.match(tool.description, /local knowledge cache/i);
   assert.match(tool.description, /time-sensitive/i);
+  assert.match(tool.description, /never reason from excerpts/i);
+  assert.match(tool.description, /complete page or source root/i);
 });
 
 test("knowledge_search routes an unsupported type to a safe error", async () => {
@@ -838,11 +841,11 @@ test("knowledge_search description distinguishes wiki and reference modes and ha
   const tool = captureTool();
   assert.match(tool.description, /type=\"wikis\"/);
   assert.match(tool.description, /type=\"references\"/);
-  assert.match(tool.description, /read, grep, and find/);
+  assert.match(tool.description, /read\/grep\/find inspection/);
   assert.match(tool.description, /query=\"\*\"/);
-  assert.match(tool.description, /source code/);
-  assert.match(tool.description, /relevant Markdown documentation/);
-  assert.match(tool.description, /referenced project materials/);
+  assert.match(tool.description, /full saved page/);
+  assert.match(tool.description, /complete page or source root/);
+  assert.match(tool.description, /never reason from excerpts/);
   assert.match(tool.description, /Only when local results are absent, insufficient, or time-sensitive/i);
   assert.match(tool.description, /candidate URLs/i);
   assert.match(tool.description, /web_fetch.*free/i);
@@ -967,7 +970,7 @@ test("wiki discovery output is bounded to the documented byte budget", async () 
   try {
     const result = await executeKnowledgeSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
     assert.ok(Buffer.byteLength(text(result), "utf8") <= MAX_WIKI_DISCOVERY_OUTPUT_BYTES);
-    assert.match(text(result), /Topic: topic-/);
+    assert.match(text(result), /- topic-\d{3}\.md/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

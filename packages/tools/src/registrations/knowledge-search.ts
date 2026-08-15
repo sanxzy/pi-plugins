@@ -174,7 +174,7 @@ export function registerKnowledgeSearchTool(pi: ExtensionAPI): void {
     name: "knowledge_search",
     label: "Knowledge search",
     description:
-      "Use this tool first to search local wikis and references for reusable research. It searches the local knowledge cache and configured reference roots before any web research. Call with {} (or just query=\"*\", no type) for grouped discovery: the response renders a --references-- section first and a --wikis-- section second, so you can see available reference aliases and wiki topics in one call. Use type=\"wikis\" to search the local wiki cache with a broad-to-specific workflow: first run a broad query without topic/page (for example, query=\"pi\") to discover available topics and page identifiers; use query=\"*\" to list available wiki topics and pages; then use the returned topic and page values with a narrower query or direct topic/page lookup to retrieve targeted evidence. Use type=\"references\" to work with configured reference aliases representing the actual codebase or repository source code and relevant Markdown documentation, so you can learn directly from the referenced project materials. Use query=\"*\" to list discoverable aliases (descriptions and source kinds included), then call again with the chosen alias to select its readable root; after a root is selected, inspect the project materials with normal filesystem tools such as read, grep, and find rather than searching it here. Only when local results are absent, insufficient, or time-sensitive should you fall back to web_search for broad web discovery. Once web_search identifies candidate URLs, use web_fetch for subsequent retrieval and verification because web_fetch is free. Successful web results are saved automatically for future wiki searches. Treat cached content as potentially stale and verify version-sensitive claims against current web sources.",
+      "Use this tool first to search local wikis and references for reusable research before any web research. It searches the local knowledge cache and configured reference roots. Call with no type (or query=\"*\") for grouped discovery (broad-to-specific): --references-- first, --wikis-- second. Use type=\"wikis\" with query=\"*\" to browse topics, a normal query for ranked files, or topic/page to open the full saved page. Use type=\"references\" to list aliases or to select a root for read/grep/find inspection. Search output is identification only - never reason from excerpts, snippets, or fragments; always open and read the complete page or source root first, because incomplete portions can cause hallucinations. Only when local results are absent, insufficient, or time-sensitive should you fall back to web_search; then use web_fetch to retrieve and verify candidate URLs, since web_fetch is free. Treat cached results as potentially stale and verify sensitive claims against current web sources.",
     parameters: knowledgeSearchParams,
     async execute(
       _toolCallId: string,
@@ -366,7 +366,7 @@ export async function executeKnowledgeSearch(
     const rendered = aliases
       .map((alias) =>
         [
-          `- ${alias.alias} (${alias.type}) ${alias.description ?? ""}`.trimEnd(),
+          `- ${alias.alias} (${alias.type})`,
           alias.status === "unavailable" ? `  status: unavailable${alias.diagnostic ? ` (${alias.diagnostic})` : ""}` : "",
         ]
           .filter(Boolean)
@@ -443,14 +443,11 @@ export async function executeKnowledgeSearch(
     };
     outer: {
       for (const topic of topics) {
-        if (!appendLine(`Topic: ${topic.topic}`)) break outer;
+        if (topic.pages.length > 1 && !appendLine(`Topic: ${topic.topic}`)) break outer;
         for (const page of topic.pages) {
-          const metadata = [
-            page.title ? `title: ${page.title}` : "",
-            page.openCount === undefined ? "" : `openCount: ${page.openCount}`,
-            page.lastOpened === undefined ? "" : `lastOpened: ${page.lastOpened}`,
-          ].filter(Boolean).join(", ");
-          if (!appendLine(`  - ${page.file}${metadata ? ` (${metadata})` : ""}`)) break outer;
+          const metadata = page.openCount === undefined ? "" : `openCount: ${page.openCount}`;
+          const prefix = topic.pages.length > 1 ? "  - " : "- ";
+          if (!appendLine(`${prefix}${page.file}${metadata ? ` (${metadata})` : ""}`)) break outer;
         }
       }
     }
@@ -484,9 +481,7 @@ export async function executeKnowledgeSearch(
       results: [],
     });
   }
-  const rendered = results
-    .map((item) => `- [${item.file}] (${item.score}) ${item.excerpt}`)
-    .join("\n");
+  const rendered = results.map((item) => `- ${item.file} (${item.score})`).join("\n");
   return textResult(rendered, {
     mode: "wikis",
     ...(params.query === undefined ? {} : { query: params.query }),
