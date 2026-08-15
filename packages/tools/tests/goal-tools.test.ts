@@ -145,9 +145,10 @@ test("goal_clear false preserves paused context and explains how to finish", asy
     await registered.get("goal_pause")!.execute("call", { reason: "waiting for verification" }, undefined, undefined, ctx);
 
     const result = await registered.get("goal_clear")!.execute("call", { isComplete: false }, undefined, undefined, ctx);
-    assert.match(text(result), /not yet complete/i);
-    assert.match(text(result), /waiting for verification/);
-    assert.match(text(result), /isComplete: true|isComplete.*true/i);
+    assert.equal(
+      text(result),
+      "Goal not cleared. The goal is not yet complete and should be finished before it can be cleared.\nCurrent goal context: finish the migration",
+    );
     const status = await registered.get("goal_status")!.execute("call", {}, undefined, undefined, ctx);
     assert.match(text(status), /paused/);
     assert.match(text(status), /finish the migration/);

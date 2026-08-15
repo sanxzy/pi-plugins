@@ -55,7 +55,7 @@ function formatGoal(goal: Goal): string {
 function notCompleteAdvice(goal: Goal): string {
   return [
     "Goal not cleared. The goal is not yet complete and should be finished before it can be cleared.",
-    `Run \`goal_clear({ isComplete: true })\` once the goal is complete. Current goal context:\n${formatGoal(goal)}`,
+    `Current goal context: ${goal.prompt}`,
   ].join("\n");
 }
 
