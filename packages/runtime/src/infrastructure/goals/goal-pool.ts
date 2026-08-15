@@ -190,9 +190,10 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         const split = input.intervalMs === undefined && input.interval === undefined
           ? splitGoalPromptInterval(input.prompt)
           : { prompt: input.prompt, interval: input.interval };
+        const maxPromptLength = resolveSettingsForProject(projectRoot).commands.goalMaxPromptLength;
         const validation = input.intervalMs === undefined
-          ? validateGoalInput(split, resolveSettingsForProject(cwd).commands.goalMaxPromptLength)
-          : validateGoalInput({ prompt: split.prompt }, resolveSettingsForProject(cwd).commands.goalMaxPromptLength);
+          ? validateGoalInput(split, maxPromptLength)
+          : validateGoalInput({ prompt: split.prompt }, maxPromptLength);
         if (!validation.ok) return validation;
         const intervalMs = input.intervalMs ?? validation.value.intervalMs;
         if (!Number.isSafeInteger(intervalMs) || intervalMs <= 0) {

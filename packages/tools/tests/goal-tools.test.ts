@@ -60,6 +60,11 @@ test("registers exactly the five cwd-scoped goal tools", () => {
   const registered = tools();
   assert.deepEqual([...registered.keys()], ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"]);
   assert.deepEqual(Object.keys(registered.get("goal_create")?.parameters.properties ?? {}), ["prompt", "interval"]);
+  // AC2: the schema exposes the hard safety ceiling that bounds the resolved value.
+  assert.equal(
+    (registered.get("goal_create")?.parameters.properties as Record<string, { maxLength?: number }>).prompt?.maxLength,
+    1_000_000,
+  );
   assert.deepEqual(Object.keys(registered.get("goal_pause")?.parameters.properties ?? {}), ["reason"]);
   for (const name of ["goal_resume", "goal_status", "goal_clear"]) {
     assert.deepEqual(Object.keys(registered.get(name)?.parameters.properties ?? {}), []);

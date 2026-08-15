@@ -26,6 +26,18 @@ test("goal pool enforces the project-scoped centralized prompt-length setting", 
   }
 });
 
+test("nested goal cwd uses the pool project prompt-length setting", () => {
+  const root = projectRoot();
+  const nested = join(root, "nested");
+  mkdirSync(join(root, ".pi"), { recursive: true });
+  mkdirSync(nested, { recursive: true });
+  writeFileSync(join(root, ".pi", "pi-c2.json"), JSON.stringify({ commands: { goalMaxPromptLength: 5 } }));
+  const pool = getGoalPool(root);
+  assert.equal(pool.create({ cwd: nested, prompt: "12345" }).ok, true);
+  pool.clear(nested);
+  assert.equal(pool.create({ cwd: nested, prompt: "123456" }).ok, false);
+});
+
 test("an invalid centralized prompt-length setting falls through to the safe default", () => {
   const root = projectRoot();
   const configRoot = mkdtempSync(join(tmpdir(), "pi-c2-goal-bad-settings-home-"));
