@@ -153,6 +153,10 @@ test("knowledge_search is registered with an explicit type discriminator and a l
     return typeField?.const;
   });
   assert.deepEqual(literals, ["wikis", "references", undefined]);
+  const wiki = variants[0] as { properties?: Record<string, { const?: string; type?: string; anyOf?: unknown[] }> };
+  assert.equal(wiki.properties?.query?.type, "string");
+  assert.equal(wiki.properties?.page?.type, "string");
+  assert.equal(wiki.properties?.topic, undefined);
   const grouped = variants[2] as { properties?: Record<string, { const?: string; type?: string; anyOf?: unknown[] }> };
   assert.equal(grouped.properties?.query?.type, "string");
   assert.equal(grouped.properties?.type?.type, "null");
@@ -236,6 +240,7 @@ test("knowledge_search returns deterministically ranked excerpts with scores and
     assert.equal(details.results[0]?.score, 0.254095);
     assert.equal(details.results[1]?.score, 0.178838);
     assert.equal(details.results[0]?.file, "typescript-notes.md");
+    assert.match(text(result), /typescript-notes: typescript-notes\.md/);
     assert.equal(details.results[0]?.source, "web_search");
     assert.equal(typeof details.results[0]?.excerpt, "string");
     assert.match(text(result), /typescript-notes\.md/);
@@ -909,6 +914,10 @@ test("knowledge_search short-circuits reference research on an aborted signal", 
 test("knowledge_search rejects mode-inconsistent fields with safe errors", async () => {
   const wikiWithAlias = await executeKnowledgeSearch({ type: "wikis", query: "typescript", alias: "docs" } as never);
   assert.match(text(wikiWithAlias), /Error/);
+  const wikiWithTopic = await executeKnowledgeSearch({ type: "wikis", topic: "docs", page: "docs.md" } as never);
+  assert.match(text(wikiWithTopic), /Error/);
+  const wikiQueryAndPage = await executeKnowledgeSearch({ type: "wikis", query: "docs", page: "docs.md" } as never);
+  assert.match(text(wikiQueryAndPage), /Error/);
   const referenceWithTopic = await executeKnowledgeSearch({ type: "references", query: "*", topic: "docs" } as never);
   assert.match(text(referenceWithTopic), /Error/);
 });
