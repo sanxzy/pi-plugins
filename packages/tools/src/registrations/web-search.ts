@@ -1,6 +1,7 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { resolveSettingsForProject, type WebSettings } from "@xzy-ai/runtime";
 import { readBoundedResponseBody } from "../http-body.ts";
 import { errorResult, textResult } from "../results.ts";
 import { saveWikiEntry, slugifyQuery, type WikiSaveResult, wikiRoot } from "../wiki.ts";
@@ -8,11 +9,7 @@ import { saveWikiEntry, slugifyQuery, type WikiSaveResult, wikiRoot } from "../w
 export const EXA_URL = "https://mcp.exa.ai/mcp";
 export const NO_RESULTS = "No search results found. Please try a different query.";
 export const SEARCH_TIMEOUT_MS = 30_000;
-const DEFAULT_NUM_RESULTS = 8;
 const MAX_NUM_RESULTS = 20;
-const DEFAULT_LIVECRAWL = "fallback";
-const DEFAULT_SEARCH_TYPE = "auto";
-const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 const webSearchParams = Type.Object({
   query: Type.String({ description: "Web search query" }),
@@ -44,6 +41,13 @@ export interface WebSearchDetails {
 export interface WebSearchExecutionOptions {
   wikiRoot?: string;
   now?: () => Date;
+  /** Project root used to resolve centralized web settings (defaults when omitted). */
+  projectRoot?: string;
+}
+
+/** Resolve the effective web settings for a project, or the default context when omitted. */
+function resolveWebSettings(projectRoot?: string): WebSettings {
+  return resolveSettingsForProject(projectRoot).tools.web;
 }
 
 /** Register the Exa-backed `web_search` tool. */
@@ -58,9 +62,9 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
       params: WebSearchParams,
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
-      _ctx: ExtensionContext,
+      ctx: ExtensionContext,
     ): Promise<AgentToolResult<WebSearchDetails>> {
-      return executeWebSearch(params, signal);
+      return executeWebSearch(params, signal, undefined, { projectRoot: ctx.cwd });
     },
   });
 }
@@ -68,22 +72,27 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 export async function executeWebSearch(
   params: WebSearchParams,
   signal?: AbortSignal,
-  timeoutMs = SEARCH_TIMEOUT_MS,
+  timeoutMs?: number,
   options?: WebSearchExecutionOptions,
 ): Promise<AgentToolResult<WebSearchDetails>> {
-  return processWithLog({ operation: TOOL_OPERATIONS.WEB_SEARCH_EXECUTE, parameters: { query: params.query } }, async () => executeWebSearchInner(params, signal, timeoutMs, options));
+  return processWithLog({ operation: TOOL_OPERATIONS.WEB_SEARCH_EXECUTE, parameters: { query: params.query } }, async () => {
+    const settings = resolveWebSettings(options?.projectRoot);
+    // An explicit timeout override wins over the centralized search timeout.
+    const effectiveSettings: WebSettings = timeoutMs === undefined ? settings : { ...settings, searchTimeoutMs: timeoutMs };
+    return executeWebSearchInner(params, signal, effectiveSettings, options);
+  });
 }
 
 async function executeWebSearchInner(
   params: WebSearchParams,
-  signal?: AbortSignal,
-  timeoutMs = SEARCH_TIMEOUT_MS,
+  signal: AbortSignal | undefined,
+  settings: WebSettings,
   options?: WebSearchExecutionOptions,
 ): Promise<AgentToolResult<WebSearchDetails>> {
   try {
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const timeoutSignal = AbortSignal.timeout(settings.searchTimeoutMs);
     const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-    const apiKey = process.env.EXA_API_KEY;
+    const apiKey = process.env.EXA_API_KEY || settings.exaApiKey;
     const url = exaUrl(apiKey);
     const response = await fetch(url, {
       method: "POST",
@@ -99,9 +108,9 @@ async function executeWebSearchInner(
           name: "web_search_exa",
           arguments: {
             query: params.query,
-            type: params.type ?? DEFAULT_SEARCH_TYPE,
-            numResults: params.numResults ?? DEFAULT_NUM_RESULTS,
-            livecrawl: params.livecrawl ?? DEFAULT_LIVECRAWL,
+            type: params.type ?? settings.defaultSearchType,
+            numResults: params.numResults ?? settings.defaultNumResults,
+            livecrawl: params.livecrawl ?? settings.defaultLivecrawl,
             ...(params.contextMaxCharacters === undefined ? {} : { contextMaxCharacters: params.contextMaxCharacters }),
           },
         },
@@ -110,7 +119,11 @@ async function executeWebSearchInner(
     });
 
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText || "Request failed"}`);
-    const body = await readBoundedResponseBody(response, MAX_RESPONSE_BYTES);
+    const body = await readBoundedResponseBody(
+      response,
+      settings.maxResponseBytes,
+      responseLimitMessage(settings.maxResponseBytes),
+    );
     const output = parseSearchResponse(new TextDecoder().decode(body));
     if (output.malformed) throw new Error("Malformed search response body");
     if (output.error) throw new Error(`Search request failed: ${output.error}`);
@@ -126,6 +139,12 @@ async function executeWebSearchInner(
   } catch (error) {
     return errorResult(toErrorMessage(error), { query: params.query, provider: "exa" });
   }
+}
+
+function responseLimitMessage(maximumBytes: number): string {
+  return maximumBytes === 5 * 1024 * 1024
+    ? "Response too large (exceeds 5MB limit)"
+    : "Response too large (exceeds configured response limit)";
 }
 
 function exaUrl(apiKey: string | undefined): string {

@@ -144,7 +144,7 @@ test("web_search applies Exa defaults and parses SSE frames, ignoring non-JSON f
     await withFetch(
       async (_input, init) => {
         const body = JSON.parse(String(init?.body)) as { params: { arguments: Record<string, unknown> } };
-        assert.deepEqual(body.params.arguments, { query: "hello", type: "auto", numResults: 8, livecrawl: "fallback" });
+        assert.deepEqual(body.params.arguments, { query: "hello", type: "auto", numResults: 5, livecrawl: "fallback" });
         return new Response(`data: [DONE]\nevent: message\ndata: ${payload("search results")}\n\n`, { status: 200 });
       },
       async () => {

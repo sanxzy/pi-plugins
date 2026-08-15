@@ -3,12 +3,13 @@ import { Parser } from "htmlparser2";
 import TurndownService from "turndown";
 import { Type } from "typebox";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { resolveSettingsForProject, type WebSettings } from "@xzy-ai/runtime";
+import { MAX_RESPONSE_BYTES, readBoundedResponseBody } from "../http-body.ts";
 import { errorResult, textResult } from "../results.ts";
 import { saveWikiEntry, slugifyUrl, type WikiSaveResult, wikiRoot } from "../wiki.ts";
 
-const MAX_RESPONSE_SIZE = 5 * 1024 * 1024;
 const DEFAULT_TIMEOUT_SECONDS = 30;
-const MAX_TIMEOUT_SECONDS = 120;
+const MAX_TIMEOUT_SECONDS = 3600;
 const MIN_TIMEOUT_SECONDS = 1;
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
@@ -21,7 +22,7 @@ const webFetchParams = Type.Object({
       default: "markdown",
     }),
   ),
-  timeout: Type.Optional(Type.Number({ description: "Optional timeout in seconds (maximum 120)" })),
+  timeout: Type.Optional(Type.Number({ description: "Optional timeout in seconds (maximum 3600; centralized default is 30)" })),
 });
 
 type WebFetchParams = {
@@ -42,6 +43,13 @@ export interface WebFetchDetails {
 export interface WebFetchExecutionOptions {
   wikiRoot?: string;
   now?: () => Date;
+  /** Project root used to resolve centralized web settings (defaults when omitted). */
+  projectRoot?: string;
+}
+
+/** Resolve the project-scoped web settings, or the default context when omitted. */
+function resolveWebSettings(projectRoot?: string): WebSettings {
+  return resolveSettingsForProject(projectRoot).tools.web;
 }
 
 /** Register the HTTP `web_fetch` tool; successful research is saved to the local wiki. */
@@ -57,10 +65,10 @@ export function registerWebFetchTool(pi: ExtensionAPI): void {
       params: WebFetchParams,
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
-      _ctx: ExtensionContext,
+      ctx: ExtensionContext,
     ): Promise<AgentToolResult<WebFetchDetails>> {
       try {
-        return await executeWebFetch(params, signal);
+        return await executeWebFetch(params, signal, { projectRoot: ctx.cwd });
       } catch (error) {
         return errorResult(toErrorMessage(error), {});
       }
@@ -83,7 +91,8 @@ async function executeWebFetchInner(
 ): Promise<AgentToolResult<WebFetchDetails>> {
   const url = normalizeHttpUrl(params.url);
   const format = params.format ?? "markdown";
-  const timeoutSeconds = normalizeTimeout(params.timeout);
+  const settings = resolveWebSettings(options?.projectRoot);
+  const timeoutSeconds = normalizeTimeout(params.timeout, settings.fetchTimeoutSeconds);
   const timeoutSignal = AbortSignal.timeout(timeoutSeconds * 1000);
   const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
   const browserHeaders = {
@@ -115,7 +124,7 @@ async function executeWebFetchInner(
     throw new Error(`HTTP ${response.status}: ${response.statusText || "Request failed"}`);
   }
 
-  const body = await readResponseBody(response, MAX_RESPONSE_SIZE);
+  const body = await readBoundedResponseBody(response, settings.maxResponseBytes, responseLimitMessage(settings.maxResponseBytes));
   const contentType = response.headers.get("content-type") ?? "";
   const mime = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   const title = `${url} (${contentType})`;
@@ -182,8 +191,9 @@ function normalizeHttpUrl(value: string): string {
   }
 }
 
-function normalizeTimeout(value: number | undefined): number {
-  if (value === undefined || !Number.isFinite(value)) return DEFAULT_TIMEOUT_SECONDS;
+function normalizeTimeout(value: number | undefined, configuredDefault = DEFAULT_TIMEOUT_SECONDS): number {
+  if (value === undefined || !Number.isFinite(value)) return configuredDefault;
+  // Explicit per-call values retain their existing bounded override behavior.
   return Math.min(Math.max(value, MIN_TIMEOUT_SECONDS), MAX_TIMEOUT_SECONDS);
 }
 
@@ -194,50 +204,10 @@ function acceptHeader(format: "markdown" | "text"): string {
   return "text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.1";
 }
 
-async function readResponseBody(response: Response, maximumBytes: number): Promise<Uint8Array> {
-  const declaredLength = response.headers.get("content-length");
-  const parsedLength = declaredLength === null ? undefined : Number.parseInt(declaredLength, 10);
-  if (parsedLength !== undefined && Number.isSafeInteger(parsedLength) && parsedLength > maximumBytes) {
-    throw new Error("Response too large (exceeds 5MB limit)");
-  }
-
-  if (!response.body) {
-    const body = new Uint8Array(await response.arrayBuffer());
-    if (body.byteLength > maximumBytes) throw new Error("Response too large (exceeds 5MB limit)");
-    return body;
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value || value.byteLength === 0) continue;
-      size += value.byteLength;
-      if (size > maximumBytes) {
-        await reader.cancel("Response too large (exceeds 5MB limit)");
-        throw new Error("Response too large (exceeds 5MB limit)");
-      }
-      chunks.push(value);
-    }
-  } catch (error) {
-    try {
-      await reader.cancel(error);
-    } catch {
-      // The stream may already be closed by the transport.
-    }
-    throw error;
-  }
-
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
+function responseLimitMessage(maximumBytes: number): string {
+  return maximumBytes === MAX_RESPONSE_BYTES
+    ? "Response too large (exceeds 5MB limit)"
+    : "Response too large (exceeds configured response limit)";
 }
 
 function decodeBody(body: Uint8Array, contentType: string): string {
@@ -340,4 +310,6 @@ function toWikiDetails(saved: WikiSaveResult): { saved: boolean; topic: string; 
   return { saved: saved.saved, topic: saved.topic, pages: saved.pages };
 }
 
-export { MAX_RESPONSE_SIZE, DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS };
+// `MAX_RESPONSE_SIZE` remains a compatibility alias; the effective fetch
+// response budget now comes from the shared centralized `tools.web.maxResponseBytes`.
+export { MAX_RESPONSE_BYTES as MAX_RESPONSE_SIZE, DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS };
