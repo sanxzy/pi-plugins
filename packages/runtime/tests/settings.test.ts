@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,6 +12,7 @@ import {
   resolveSettings,
   resolveSettingsForProject,
   settingsConfigPath,
+  bootstrapSettingsConfig,
 } from "../src/index.ts";
 
 function tempHome(): string {
@@ -40,6 +41,58 @@ function writeProjectConfig(project: string, value: unknown): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "pi-c2.json"), JSON.stringify(value));
 }
+
+test("first-start bootstrap creates every settings key with resolver defaults", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      assert.equal(bootstrapSettingsConfig(), true);
+      const file = settingsConfigPath();
+      assert.equal(existsSync(file), true);
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      assert.deepEqual(parsed, {
+        agents: { maxAgentDepth: 4, maxConcurrency: 2, maxParallelAgents: 3, retainedTerminalJobs: 25, retainedTerminalAgents: 25 },
+        runtime: { deliveryRetryDelayMs: 2_000, gitTimeoutMs: 60_000, gitLockStaleMs: 30_000, gitLockAcquireTimeoutMs: 30_000, gitMaxBufferBytes: 16 * 1024 * 1024 },
+        channels: { maxRootSessions: 200, lockStaleMs: 10_000, lockUpdateMs: 5_000, lockAcquireRetries: 0, maxTextLength: 4_000, pairingPendingTtlMs: 3_600_000, pairingPendingMax: 3, mediaPhotoMaxBytes: 10 * 1024 * 1024, mediaDocumentMaxBytes: 50 * 1024 * 1024, mediaTimeoutMs: 30_000 },
+        tools: { web: { searchTimeoutMs: 30_000, fetchTimeoutSeconds: 30, maxResponseBytes: 5 * 1024 * 1024, defaultNumResults: 5, defaultSearchType: "auto", defaultLivecrawl: "fallback", exaApiKey: "" } },
+        mcp: { startupTimeoutMs: 30_000, requestTimeoutMs: 30_000, reconnectMaxAttempts: 5, reconnectBaseDelayMs: 2_000, resultMaxText: 50_000, resultMaxAttachmentBytes: 5 * 1024 * 1024, oauthCallbackTimeoutMs: 5 * 60 * 1000 },
+        commands: { telegram: { reactionTimeoutMs: 2_500 }, goalMaxPromptLength: 4_000 },
+      });
+      assert.equal(statSync(file).isFile(), true);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("first-start bootstrap is idempotent and never overwrites an existing config", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      assert.equal(bootstrapSettingsConfig(), true);
+      const file = settingsConfigPath();
+      const original = readFileSync(file, "utf8");
+      writeFileSync(file, JSON.stringify({ custom: true }));
+      assert.equal(bootstrapSettingsConfig(), false);
+      assert.equal(readFileSync(file, "utf8"), JSON.stringify({ custom: true }));
+      assert.equal(original.length > 0, true);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap failure is non-fatal", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      assert.equal(bootstrapSettingsConfig(join(home, "not-a-file")), false);
+      assert.equal(resolveSettings().agents.maxAgentDepth, 4);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 test("settingsConfigPath resolves below homeRoot so PI_C2_HOME selects the config location", () => {
   const home = tempHome();

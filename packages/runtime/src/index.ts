@@ -39,19 +39,7 @@ export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type Goal
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
 export { createChildSessionManager, resolveChildTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 export { maxAgentDepth } from "./shared/pi-c2-config.ts";
-export {
-  clearSettingsCache,
-  resolveSettings,
-  resolveSettingsForProject,
-  settingsConfigPath,
-  type AgentSettings,
-  type ChannelSettings,
-  type CommandSettings,
-  type McpSettings,
-  type ResolvedSettings,
-  type RuntimeSettings,
-  type WebSettings,
-} from "./shared/settings.ts";
+export { clearSettingsCache, resolveSettings, resolveSettingsForProject, settingsConfigPath, bootstrapSettingsConfig, type AgentSettings, type ChannelSettings, type CommandSettings, type McpSettings, type ResolvedSettings, type RuntimeSettings, type WebSettings } from "./shared/settings.ts";
 export { getChildExtensionFactories, registerChildExtensionFactory } from "./infrastructure/pi-sdk/child-extensions.ts";
 export {
   attachAgentSessionLiveFeed,
