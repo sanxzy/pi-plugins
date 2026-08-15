@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { approvePairingAt, canonicalProjectRoot, channelConfigFile, channelLogFile, clearTelegramChoiceState, createTelegramChoice, createTelegramInbound, formatTelegramCommandSignature, formatTelegramSignature, readChannelConfig, readChannelRuntime, writeChannelConfig, type TelegramInboundListener } from "@xzy-ai/channels";
-import { getChildPool } from "@xzy-ai/runtime";
+import { getChildPool, settingsConfigPath } from "@xzy-ai/runtime";
 import { createJob } from "@xzy-ai/core";
 import { TELEGRAM_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
@@ -527,6 +527,29 @@ test("default reaction failures are written to the production channel log", asyn
   const log = readFileSync(channelLogFile(cwd, "root-a"), "utf8");
   assert.match(log, /telegram_reaction_failed/);
   assert.match(log, /Telegram rejected reaction/);
+});
+
+test("centralized reaction timeout is used when no per-registration override is supplied", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  mkdirSync(dirname(settingsConfigPath()), { recursive: true });
+  writeFileSync(settingsConfigPath(), JSON.stringify({ commands: { telegram: { reactionTimeoutMs: 5 } } }), "utf8");
+  const { pi, handlers } = registrations();
+  let logged: unknown;
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async () => new Promise<void>(() => undefined),
+    onReactionError: (error) => { logged = error; },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } }],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(logged, "centralized reaction timeout is logged");
 });
 
 test("agent_start reaction timeout is logged and does not block", async () => {

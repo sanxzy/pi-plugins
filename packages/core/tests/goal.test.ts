@@ -37,6 +37,12 @@ test("goal validation preserves prompt and rejects empty or overlong input", () 
   assert.equal(validateGoalInput({ prompt: "😀".repeat(4_001) }).ok, false);
 });
 
+test("goal validation accepts a centralized prompt-length bound", () => {
+  assert.equal(validateGoalInput({ prompt: "12345" }, 4).ok, false);
+  assert.equal(validateGoalInput({ prompt: "12345" }, 5).ok, true);
+  assert.equal(validateGoalInput({ prompt: "😀😀😀" }, 2).ok, false);
+});
+
 test("goal records transition immutably and retain exact pause reason", () => {
   const created = createGoalRecord({
     goalId: "goal-1",

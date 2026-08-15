@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -8,6 +8,23 @@ import { encodeProjectId, getGoalPool, homeGoalFile, normalizeGoalCwd } from "@x
 function projectRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-c2-goal-store-"));
 }
+
+test("goal pool enforces the project-scoped centralized prompt-length setting", () => {
+  const root = projectRoot();
+  const configRoot = mkdtempSync(join(tmpdir(), "pi-c2-goal-settings-home-"));
+  process.env.PI_C2_TEST_HOME = configRoot;
+  mkdirSync(join(root, ".pi"), { recursive: true });
+  writeFileSync(join(root, ".pi", "pi-c2.json"), JSON.stringify({ commands: { goalMaxPromptLength: 5 } }));
+  try {
+    const pool = getGoalPool(root);
+    assert.equal(pool.create({ cwd: root, prompt: "12345" }).ok, true);
+    pool.clear(root);
+    assert.equal(pool.create({ cwd: root, prompt: "123456" }).ok, false);
+  } finally {
+    delete process.env.PI_C2_TEST_HOME;
+    rmSync(configRoot, { recursive: true, force: true });
+  }
+});
 
 test("goal store persists a flat record and survives a fresh reader", () => {
   const root = projectRoot();
