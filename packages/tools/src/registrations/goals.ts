@@ -76,7 +76,7 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       if ("content" in target) return target;
       const result = target.pool.create({ cwd: target.cwd, prompt: params.prompt, interval: params.interval });
       if (!result.ok) return errorResult(result.error, { reason: result.error });
-      return success(`Goal created: ${result.goal.prompt}\n${formatGoal(result.goal)}`, { goal: result.goal });
+      return success(`Goal created successfully! Please proceed carefully and complete the work correctly.\n${formatGoal(result.goal)}`, { goal: result.goal });
       });
     },
   });
