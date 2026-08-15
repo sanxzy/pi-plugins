@@ -1,5 +1,8 @@
 export const DEFAULT_GOAL_INTERVAL_MS = 10 * 60 * 1_000;
-export const MAX_GOAL_PROMPT_LENGTH = 4_000;
+/** The default cap used when setting up a bound; a positive safe upper ceiling. */
+export const DEFAULT_MAX_GOAL_PROMPT_LENGTH = 4_000;
+/** Backward-compatible name for the default goal prompt safety cap. */
+export const MAX_GOAL_PROMPT_LENGTH = DEFAULT_MAX_GOAL_PROMPT_LENGTH;
 
 export type GoalValidationError = { readonly ok: false; readonly error: string };
 export type GoalValidationResult =
@@ -42,15 +45,18 @@ export function splitGoalPromptInterval(prompt: string): {
 }
 
 /** Validate a goal prompt while preserving every accepted character exactly. */
-export function validateGoalInput(input: {
-  readonly prompt: string;
-  readonly interval?: string;
-}): GoalValidationResult {
+export function validateGoalInput(
+  input: {
+    readonly prompt: string;
+    readonly interval?: string;
+  },
+  maxPromptLength = DEFAULT_MAX_GOAL_PROMPT_LENGTH,
+): GoalValidationResult {
   if (input.prompt.trim().length === 0) {
     return { ok: false, error: "prompt must contain non-whitespace text" };
   }
-  if ([...input.prompt].length > MAX_GOAL_PROMPT_LENGTH) {
-    return { ok: false, error: `prompt must be at most ${MAX_GOAL_PROMPT_LENGTH} Unicode characters` };
+  if ([...input.prompt].length > maxPromptLength) {
+    return { ok: false, error: `prompt must be at most ${maxPromptLength} Unicode characters` };
   }
   const interval = parseGoalInterval(input.interval);
   if (!interval.ok) return interval;

@@ -552,6 +552,29 @@ test("centralized reaction timeout is used when no per-registration override is 
   assert.ok(logged, "centralized reaction timeout is logged");
 });
 
+test("invalid centralized reaction timeout falls through to the safe default", async () => {
+  const cwd = projectRoot();
+  writeConfig(cwd);
+  mkdirSync(dirname(settingsConfigPath()), { recursive: true });
+  writeFileSync(settingsConfigPath(), JSON.stringify({ commands: { telegram: { reactionTimeoutMs: 0 } } }), "utf8");
+  const { pi, handlers } = registrations();
+  let logged: unknown;
+  registerTelegramInbound(pi, {
+    reactTelegramMessage: async () => new Promise<void>(() => undefined),
+    onReactionError: (error) => { logged = error; },
+  });
+  const agentContext = {
+    ...context(cwd, "root-a"),
+    sessionManager: {
+      getSessionId: () => "root-a",
+      getBranch: () => [{ type: "message", message: { role: "user", content: "hello" + formatTelegramSignature("777", 42) } }],
+    },
+  } as unknown as ExtensionContext;
+  await handlers.get("agent_start")?.({ type: "agent_start" }, agentContext);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(logged, undefined, "the invalid zero setting must not create an immediate zero-timeout path");
+});
+
 test("agent_start reaction timeout is logged and does not block", async () => {
   const cwd = projectRoot();
   writeConfig(cwd);

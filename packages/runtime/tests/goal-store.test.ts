@@ -26,6 +26,21 @@ test("goal pool enforces the project-scoped centralized prompt-length setting", 
   }
 });
 
+test("an invalid centralized prompt-length setting falls through to the safe default", () => {
+  const root = projectRoot();
+  const configRoot = mkdtempSync(join(tmpdir(), "pi-c2-goal-bad-settings-home-"));
+  process.env.PI_C2_TEST_HOME = configRoot;
+  mkdirSync(join(root, ".pi"), { recursive: true });
+  writeFileSync(join(root, ".pi", "pi-c2.json"), JSON.stringify({ commands: { goalMaxPromptLength: 0 } }));
+  try {
+    const pool = getGoalPool(root);
+    assert.equal(pool.create({ cwd: root, prompt: "x".repeat(4_001) }).ok, false, "a zero/invalid bound never widens the cap");
+  } finally {
+    delete process.env.PI_C2_TEST_HOME;
+    rmSync(configRoot, { recursive: true, force: true });
+  }
+});
+
 test("goal store persists a flat record and survives a fresh reader", () => {
   const root = projectRoot();
   const store = getGoalPool(root);

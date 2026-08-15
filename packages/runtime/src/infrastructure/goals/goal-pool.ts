@@ -7,6 +7,7 @@ import {
   type Goal,
 } from "@xzy-ai/core";
 import { GOAL_OPERATIONS, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
+import { resolveSettingsForProject } from "../../shared/settings.ts";
 import { encodeProjectId, homeGoalFile } from "../../shared/paths.ts";
 import { createGoalStore, type GoalStore } from "./goal-store.ts";
 
@@ -190,8 +191,8 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
           ? splitGoalPromptInterval(input.prompt)
           : { prompt: input.prompt, interval: input.interval };
         const validation = input.intervalMs === undefined
-          ? validateGoalInput(split)
-          : validateGoalInput({ prompt: split.prompt });
+          ? validateGoalInput(split, resolveSettingsForProject(cwd).commands.goalMaxPromptLength)
+          : validateGoalInput({ prompt: split.prompt }, resolveSettingsForProject(cwd).commands.goalMaxPromptLength);
         if (!validation.ok) return validation;
         const intervalMs = input.intervalMs ?? validation.value.intervalMs;
         if (!Number.isSafeInteger(intervalMs) || intervalMs <= 0) {

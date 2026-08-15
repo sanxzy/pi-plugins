@@ -121,7 +121,7 @@ const telegramReactAction = Type.Object({
 export const telegramChatParams = Type.Union([telegramSendTextAction, telegramReactAction, telegramSendChoicesAction, telegramSendMediaAction]);
 
 export const goalCreateParams = Type.Object({
-  prompt: Type.String({ description: "Exact goal prompt to deliver on each interval." }),
+  prompt: Type.String({ description: "Exact goal prompt to deliver on each interval.", maxLength: 1_000_000 }),
   interval: Type.Optional(Type.String({ description: "Optional positive duration such as 30s, 10m, 2h, or 1d; defaults to 10m." })),
 });
 

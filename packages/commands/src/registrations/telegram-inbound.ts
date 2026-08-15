@@ -7,7 +7,7 @@ import type {
   SessionShutdownEvent,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { getChildPool } from "@xzy-ai/runtime";
+import { getChildPool, resolveSettingsForProject } from "@xzy-ai/runtime";
 import { AGENT_OPERATIONS, SESSION_OPERATIONS, TELEGRAM_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   canonicalProjectRoot,
@@ -93,7 +93,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
     const result = await createTelegramOutbound().react(projectRoot, origin.chatId, origin.messageId, [{ type: "emoji", emoji: "👍" }]);
     if (!result.ok) throw new Error(result.error);
   });
-  const reactionTimeoutMs = deps.reactionTimeoutMs ?? 2500;
+  const reactionTimeoutMs = (projectRoot: string): number => deps.reactionTimeoutMs ?? resolveSettingsForProject(projectRoot).commands.telegram.reactionTimeoutMs;
   const onReactionError = deps.onReactionError ?? ((error: unknown, projectRoot?: string, sessionId?: string) => {
     if (!projectRoot || !sessionId) return;
     try {
@@ -135,7 +135,7 @@ export function registerTelegramInbound(pi: ExtensionAPI, deps: TelegramInboundD
       await Promise.race([
         reactTelegramMessage(projectRoot, origin),
         new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new Error("Telegram reaction timed out")), reactionTimeoutMs);
+          timer = setTimeout(() => reject(new Error("Telegram reaction timed out")), reactionTimeoutMs(projectRoot));
         }),
       ]);
     } catch (error: unknown) {
