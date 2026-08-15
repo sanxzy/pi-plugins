@@ -30,8 +30,7 @@ import {
 } from "./config.ts";
 import { ProcessStdioTransport } from "./stdio.ts";
 import { connectRemote as connectRemoteTransport, teardownRemoteAuth, type RemoteStatus } from "./remote.ts";
-const DEFAULT_STARTUP_TIMEOUT = 30_000;
-const DEFAULT_REQUEST_TIMEOUT = 30_000;
+import { resolveMcpSettings } from "./settings.ts";
 
 export type McpErrorCategory =
   | "none"
@@ -91,7 +90,7 @@ export interface McpManagerOptions extends McpConfigLoadOptions {
   reloadDebounceMs?: number;
   /** Base backoff delay (ms) for reconnect retries. Defaults to 2_000. */
   reconnectBaseDelayMs?: number;
-  /** Max reconnect attempts before giving up. Defaults to 5. */
+  /** Max reconnect attempts before giving up. Defaults to the centralized setting (5). */
   reconnectMaxAttempts?: number;
 }
 
@@ -221,14 +220,15 @@ async function closeConnection(connection: ActiveConnection): Promise<void> {
   ]);
 }
 
-/** Resolve a timeout from server, then global config, then default. */
+/** Resolve a timeout from server, then global config, then centralized default. */
 function resolveTimeout(
   serverTimeout: McpTimeoutConfig | undefined,
   globalTimeout: McpTimeoutConfig | undefined,
   which: "startup" | "request",
+  defaultMs: number,
 ): number {
   const value = serverTimeout?.[which] ?? globalTimeout?.[which];
-  return value ?? (which === "startup" ? DEFAULT_STARTUP_TIMEOUT : DEFAULT_REQUEST_TIMEOUT);
+  return value ?? defaultMs;
 }
 
 /** Create the session-scoped MCP manager and its Phase 2 local connection boundary. */
@@ -236,6 +236,10 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const agentDir = userAgentDir(options.agentDir);
   const projectRoot = options.projectRoot;
   const configPaths = [userConfigPath(agentDir), projectConfigPath(projectRoot)] as const;
+  // Centralized settings act as manager-level defaults; mcp.json per-server and
+  // global timeouts still win over the startup/request defaults. Resolve at
+  // call time so changed settings are honored without restart (hot reload).
+  const settings = (): ReturnType<typeof resolveMcpSettings> => resolveMcpSettings(projectRoot);
   let state: McpManagerState = { issues: [], servers: {}, running: false };
   let unsubscribe: (() => void) | undefined;
   let operation: Promise<unknown> = Promise.resolve();
@@ -247,8 +251,8 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
   const reconnectTimers = new Map<string, NodeJS.Timeout>();
   const reconnectAttempts = new Map<string, number>();
   const reloadDebounceMs = options.reloadDebounceMs ?? 500;
-  const reconnectBaseDelayMs = options.reconnectBaseDelayMs ?? 2_000;
-  const reconnectMaxAttempts = options.reconnectMaxAttempts ?? 5;
+  const reconnectBaseDelayMs = (): number => options.reconnectBaseDelayMs ?? settings().reconnectBaseDelayMs;
+  const reconnectMaxAttempts = (): number => options.reconnectMaxAttempts ?? settings().reconnectMaxAttempts;
 
   const serialize = <T>(task: () => Promise<T>): Promise<T> => {
     const next = operation.then(task, task);
@@ -276,8 +280,8 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     if (stopped || reconnectTimers.has(name)) return;
     const scheduledGeneration = generation;
     const attempt = reconnectAttempts.get(name) ?? 0;
-    if (attempt >= reconnectMaxAttempts) return;
-    const delay = reconnectBaseDelayMs * 2 ** attempt;
+    if (attempt >= reconnectMaxAttempts()) return;
+    const delay = reconnectBaseDelayMs() * 2 ** attempt;
     reconnectAttempts.set(name, attempt + 1);
     const timer = setTimeout(() => {
       reconnectTimers.delete(name);
@@ -377,8 +381,9 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
     );
     client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: [{ uri: pathToFileURL(projectRoot).href }] }));
     const candidate: ActiveConnection = { client, transport, catalog: emptyCatalog() };
-    const startupTimeout = resolveTimeout(server.timeout, state.config?.timeout, "startup");
-    const requestTimeout = resolveTimeout(server.timeout, state.config?.timeout, "request");
+    const defaults = settings();
+    const startupTimeout = resolveTimeout(server.timeout, state.config?.timeout, "startup", defaults.startupTimeoutMs);
+    const requestTimeout = resolveTimeout(server.timeout, state.config?.timeout, "request", defaults.requestTimeoutMs);
     try {
       await withTimeout(client.connect(transport, { signal: signalFor(signal) }), startupTimeout, () =>
         closeConnection(candidate),
@@ -427,6 +432,13 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       setStatus(name, disabled);
       return { status: disabled, tools: [], catalog: emptyCatalog() };
     }
+    const defaults = settings();
+    const mergedTimeout: McpTimeoutConfig = {
+      ...(state.config?.timeout ?? {}),
+      ...(server.timeout ?? {}),
+      startup: resolveTimeout(server.timeout, state.config?.timeout, "startup", defaults.startupTimeoutMs),
+      request: resolveTimeout(server.timeout, state.config?.timeout, "request", defaults.requestTimeoutMs),
+    };
     const result = await connectRemoteTransport({
       url: server.url,
       agentDir,
@@ -434,7 +446,8 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
       ownerKey: options.ownerKey,
       headers: server.headers,
       oauth: server.oauth,
-      timeout: server.timeout ?? state.config?.timeout,
+      timeout: mergedTimeout,
+      oauthCallbackTimeoutMs: defaults.oauthCallbackTimeoutMs,
       signal: signalFor(signal),
       onRedirect: () => {},
     });
@@ -556,6 +569,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
           : undefined,
       state.config?.timeout,
       "request",
+      settings().requestTimeoutMs,
     );
     return callWithRecovery(name, connection, (current) =>
       current.client.callTool(
@@ -588,6 +602,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
           : undefined,
       state.config?.timeout,
       "request",
+      settings().requestTimeoutMs,
     ),
     resetTimeoutOnProgress: true,
     onprogress: () => undefined,
@@ -644,6 +659,7 @@ export function createMcpManager(options: McpManagerOptions): McpManager {
           : undefined,
       state.config?.timeout,
       "request",
+      settings().requestTimeoutMs,
     );
     const catalog = await discoverCatalog(connection.client, requestTimeout, signalFor(signal));
     connection.catalog = catalog;

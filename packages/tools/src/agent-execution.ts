@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { Job } from "@xzy-ai/core";
-import { sessionMcpBridge, sessionMcpDefinitions, sessionMcpNames, type ChildRunResult } from "@xzy-ai/core";
+import { sessionMcpActive, sessionMcpBridge, sessionMcpDefinitions, sessionMcpNames, type ChildRunResult } from "@xzy-ai/core";
 import { getChildPool, type ChildPool } from "@xzy-ai/runtime";
 import { spawnChildSession } from "@xzy-ai/runtime";
 import type { AgentParams } from "./tools.ts";
@@ -43,6 +43,7 @@ export async function spawnWithControl(
       },
       mcpToolNames: sessionMcpNames(ctx.cwd, options.parentSessionId),
       mcpToolDefs: sessionMcpDefinitions(ctx.cwd, options.parentSessionId),
+      mcpEnabled: sessionMcpActive(ctx.cwd, options.parentSessionId),
       mcpBridge: sessionMcpBridge(ctx.cwd, options.parentSessionId),
       run: (operation) => {
         if (options.useConcurrencyGate === false) {

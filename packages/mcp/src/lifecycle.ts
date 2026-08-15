@@ -6,9 +6,10 @@ import { normalizePromptResult, normalizeResourceResult } from "./prompts-resour
 import { evaluatePolicy, policyFromConfig, type PolicyTarget } from "./policy.ts";
 import { redactDiagnostic } from "./diagnostics.ts";
 import { userAgentDir } from "./config.ts";
-import { publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames, clearSessionMcpBridge, sessionMcpBridge } from "@xzy-ai/core";
+import { publishSessionMcpActive, publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames, clearSessionMcpBridge, sessionMcpBridge } from "@xzy-ai/core";
 import { MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { createMcpManager, type McpManager, type McpManagerOptions } from "./manager.ts";
+import { resolveMcpSettings } from "./settings.ts";
 import {
   startRemoteAuth,
   finishRemoteAuth,
@@ -36,6 +37,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
   const reconciles = new Map<string, () => void>();
   const disposed = new Set<string>();
   const knownMcpToolNames = new Set<string>();
+  const resourceToolNames = ["mcp_resources_list", "mcp_resources_read"] as const;
   const sharedExposer = new McpToolExposer(pi, { manageActiveTools: false });
   const sharedPromptResourceExposer = new McpPromptsResourcesExposer(pi, {
     authorize: async (kind, serverName, itemName, ctx) => {
@@ -63,9 +65,13 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     try {
       const active = new Set(pi.getActiveTools());
       for (const name of knownMcpToolNames) active.delete(name);
+      for (const name of resourceToolNames) active.delete(name);
       for (const mapping of sharedExposer.mappingsSnapshot()) {
         knownMcpToolNames.add(mapping.piName);
         active.add(mapping.piName);
+      }
+      if (sharedPromptResourceExposer.hasActive()) {
+        for (const name of resourceToolNames) active.add(name);
       }
       pi.setActiveTools([...active]);
     } catch {
@@ -94,7 +100,13 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     }
     try {
       const raw = await manager.callTool(mapping.serverName, mapping.nativeName, args, signal);
-      return normalizeCallToolResult(raw, { server: mapping.serverName, tool: mapping.nativeName });
+      const limits = resolveMcpSettings(invokeCtx.cwd);
+      return normalizeCallToolResult(raw, {
+        server: mapping.serverName,
+        tool: mapping.nativeName,
+        maxText: limits.resultMaxText,
+        maxAttachmentBytes: limits.resultMaxAttachmentBytes,
+      });
     } catch (error) {
       return normalizeCallToolResult(undefined, { server: mapping.serverName, tool: mapping.nativeName, cancelled: signal?.aborted, transportError: error instanceof Error ? error.message : String(error) });
     }
@@ -103,6 +115,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
   pi.on("session_start", async (_event, ctx) => {
     return processWithLog({ operation: MCP_OPERATIONS.LIFECYCLE_START, parameters: { cwd: ctx.cwd } }, async () => {
     const key = managerKey(ctx);
+    const centralized = resolveMcpSettings(ctx.cwd);
     const existing = managers.get(key);
     if (existing) return;
     disposed.delete(key);
@@ -154,7 +167,8 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     const readPrompt = async (serverName: string, nativeName: string, args: Record<string, string>, signal?: AbortSignal) => {
       return processWithLog({ operation: MCP_OPERATIONS.GET_PROMPT, parameters: { server: serverName, prompt: nativeName } }, async () => {
       try {
-        return normalizePromptResult(serverName, nativeName, await manager.getPrompt(serverName, nativeName, args, signal));
+        const limits = resolveMcpSettings(ctx.cwd);
+        return normalizePromptResult(serverName, nativeName, await manager.getPrompt(serverName, nativeName, args, signal), { maxText: limits.resultMaxText });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return normalizePromptResult(serverName, nativeName, undefined, {
@@ -168,7 +182,11 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     const readResource = async (serverName: string, uri: string, signal?: AbortSignal) => {
       return processWithLog({ operation: MCP_OPERATIONS.READ_RESOURCE, parameters: { server: serverName, uri } }, async () => {
       try {
-        return normalizeResourceResult(serverName, uri, await manager.readResource(serverName, uri, signal));
+        const limits = resolveMcpSettings(ctx.cwd);
+        return normalizeResourceResult(serverName, uri, await manager.readResource(serverName, uri, signal), {
+          maxText: limits.resultMaxText,
+          maxAttachmentBytes: limits.resultMaxAttachmentBytes,
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return normalizeResourceResult(serverName, uri, undefined, {
@@ -206,8 +224,12 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
       publishSessionMcpNames(ctx, childNames);
       publishSessionMcpDefinitions(ctx, definitions);
       sharedPromptResourceExposer.syncSession(key);
+      const mcpActive = manager.serverNames().length > 0;
+      publishSessionMcpActive(ctx, mcpActive);
+      sharedPromptResourceExposer.setActive(key, mcpActive);
       reconcileActiveTools();
     };
+    publishSessionMcpActive(ctx, manager.serverNames().length > 0);
     publishSessionMcpBridge(ctx, {
       invokeTool: async (name, args, signal) => {
         const mapping = sharedExposer.mapping(name);
@@ -234,6 +256,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
     sharedPromptResourceExposer.removeSession(key);
     clearMcpNames(ctx);
     clearSessionMcpBridge(ctx);
+    sharedPromptResourceExposer.setActive(key, false);
     reconciles.delete(key);
     await manager.stop();
     reconcileActiveTools();
@@ -267,6 +290,7 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
               agentDir,
               ownerKey: managerKey(ctx),
               oauth: server.oauth,
+              oauthCallbackTimeoutMs: resolveMcpSettings(ctx.cwd).oauthCallbackTimeoutMs,
               onRedirect: async (url) => {
                 notify(ctx, `MCP auth \"${name}\": open ${redactDiagnostic(url.toString())}`);
               },

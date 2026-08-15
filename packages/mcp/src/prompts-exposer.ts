@@ -57,6 +57,7 @@ export class McpPromptsResourcesExposer {
   private readonly identityNames = new Map<string, string>();
   private readonly promptRegistry = new NameRegistry();
   private readonly sessions = new Map<string, McpSessionBinding>();
+  private readonly activeSessions = new Map<string, boolean>();
   private legacyBinding?: McpSessionBinding;
   private resourcesRegistered = false;
 
@@ -80,6 +81,17 @@ export class McpPromptsResourcesExposer {
     this.resourcesRegistered = true;
   }
 
+  /** Set whether one session currently has an active MCP server. */
+  setActive(sessionKey: string, active: boolean): void {
+    if (active) this.activeSessions.set(sessionKey, true);
+    else this.activeSessions.delete(sessionKey);
+  }
+
+  /** Whether any session currently exposes an active MCP surface. */
+  hasActive(): boolean {
+    return this.activeSessions.size > 0;
+  }
+
   register(
     manager: McpManagerLike,
     readPrompt: McpReadPrompt,
@@ -99,6 +111,7 @@ export class McpPromptsResourcesExposer {
 
   removeSession(sessionKey: string): void {
     this.sessions.delete(sessionKey);
+    this.activeSessions.delete(sessionKey);
     this.syncAllPrompts();
   }
 

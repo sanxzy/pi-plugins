@@ -198,6 +198,8 @@ export type SpawnChildSession = (options: {
   mcpToolNames?: readonly string[];
   /** MCP tool definitions registered by the parent's MCP lifecycle, for child inheritance. */
   mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>;
+  /** Whether the parent session has an active MCP server; hides the empty surface when false. */
+  mcpEnabled?: boolean;
   /** Process-local bridge used by inherited dynamic MCP tools/resources. */
   mcpBridge?: {
     invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;

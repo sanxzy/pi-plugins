@@ -7,13 +7,14 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import ../../test-setup.mjs --import tsx tests/config.test.ts tests/manager.test.ts tests/lifecycle.test.ts tests/local.test.ts tests/catalog.test.ts tests/auth-store.test.ts tests/remote.test.ts tests/oauth.test.ts tests/auth-flow.test.ts tests/naming.test.ts tests/schema.test.ts tests/results.test.ts tests/expose.test.ts tests/prompts.test.ts tests/refresh.test.ts tests/policy.test.ts tests/diagnostics.test.ts"
+    "test": "node --test --import ../../test-setup.mjs --import tsx tests/config.test.ts tests/manager.test.ts tests/lifecycle.test.ts tests/local.test.ts tests/catalog.test.ts tests/auth-store.test.ts tests/remote.test.ts tests/oauth.test.ts tests/auth-flow.test.ts tests/naming.test.ts tests/schema.test.ts tests/results.test.ts tests/expose.test.ts tests/prompts.test.ts tests/refresh.test.ts tests/policy.test.ts tests/diagnostics.test.ts tests/settings.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.1",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@xzy-ai/core": "workspace:*",
     "@xzy-ai/observability": "workspace:*",
+    "@xzy-ai/runtime": "workspace:*",
     "typebox": "^1.3.7",
     "jsonc-parser": "^3.3.1"
   },

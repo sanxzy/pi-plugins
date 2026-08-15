@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
-import { publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
+import { publishSessionMcpActive, publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
 import { childSessionPaths, ensurePrivateDirectory, sessionDir } from "../../shared/paths.ts";
 import type {
   ChildSessionControl,
@@ -101,6 +101,7 @@ export function resolveChildTools(
   mcpToolNames: readonly string[] = [],
   depth = 0,
   cwd?: string,
+  mcpEnabled = true,
 ): readonly string[] {
   const requested = agent.tools && agent.tools.length > 0 ? [...agent.tools] : [...ALL_BUILTIN_TOOLS];
   const extensionNames = EXTENSION_TOOLS as readonly string[];
@@ -118,8 +119,8 @@ export function resolveChildTools(
   return [...new Set([
     ...filtered.filter((name) => !extensionNames.includes(name)),
     ...extensionTools,
-    ...MCP_RESOURCE_TOOLS,
-    ...mcpToolNames,
+    ...(mcpEnabled ? MCP_RESOURCE_TOOLS : []),
+    ...(mcpEnabled ? mcpToolNames : []),
   ])];
 }
 
@@ -186,6 +187,7 @@ async function createIsolatedChild(options: {
   sessionFile?: string;
   mcpToolNames?: readonly string[];
   mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>;
+  mcpEnabled?: boolean;
   mcpBridge?: {
     invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
     listResources(server: string): unknown;
@@ -228,7 +230,8 @@ async function createIsolatedChild(options: {
   const childContext = { cwd: options.cwd, sessionManager };
   // Publish the inherited MCP catalog under this child session id so its own
   // foreground descendants can inherit it recursively.
-  publishSessionMcpNames(childContext, options.mcpToolNames ?? []);
+  publishSessionMcpNames(childContext, options.mcpEnabled === false ? [] : options.mcpToolNames ?? []);
+  publishSessionMcpActive(childContext, options.mcpEnabled !== false);
   publishSessionMcpDefinitions(childContext, options.mcpToolDefs ?? []);
   if (options.mcpBridge) publishSessionMcpBridge(childContext, options.mcpBridge);
 
@@ -250,13 +253,13 @@ async function createIsolatedChild(options: {
   // Tool mapping: an explicit non-empty `tools` list becomes the child
   // allowlist; an absent/empty list enables the full built-in set (excluding
   // `ls`) plus the depth-aware extension/MCP policy.
-  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames, options.depth, options.cwd);
-  sessionOptions.mcpToolNames = options.mcpToolNames ?? [];
+  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames, options.depth, options.cwd, options.mcpEnabled ?? true);
+  sessionOptions.mcpToolNames = options.mcpEnabled === false ? [] : options.mcpToolNames ?? [];
   // Dynamic MCP definitions are supplied by the parent composition root. The
   // child loader cannot discover the parent's MCP manager, so register the
   // inherited definitions as isolated local tools whose execution is routed
   // through the parent's stable MCP tool bridge.
-  if (options.mcpToolDefs?.length) {
+  if (options.mcpToolDefs?.length && options.mcpEnabled !== false) {
     sessionOptions.customTools = options.mcpToolDefs.map((definition) => ({
       name: definition.name,
       label: definition.name,
@@ -375,7 +378,7 @@ function findLastAssistantMessage(session: AgentSession): {
 export const spawnChildSession: SpawnChildSession & {
   /** Test seam: override isolated child construction without AI credentials. */
   __createChild?: (
-    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; depth?: number; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[]; mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>; mcpBridge?: { invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>; listResources(server: string): unknown; readResource(server: string, uri: string, signal?: AbortSignal): Promise<unknown> }; },
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; depth?: number; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[]; mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>; mcpEnabled?: boolean; mcpBridge?: { invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>; listResources(server: string): unknown; readResource(server: string, uri: string, signal?: AbortSignal): Promise<unknown> }; },
   ) => Promise<ChildSessionServices>;
 } = (async (options) => {
   // Wrap the whole foreground child lifecycle as one correlated boundary.
@@ -405,6 +408,7 @@ export const spawnChildSession: SpawnChildSession & {
         sessionFile: options.sessionFile,
         mcpToolNames: options.mcpToolNames,
         mcpToolDefs: options.mcpToolDefs,
+        mcpEnabled: options.mcpEnabled,
         mcpBridge: options.mcpBridge,
       });
       const live = attachAgentSessionLiveFeed(child.session);
@@ -479,7 +483,7 @@ export const spawnChildSession: SpawnChildSession & {
   });
 }) as SpawnChildSession & {
   __createChild?: (
-    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; depth?: number; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[] },
+    options: { jobId: string; cwd: string; model: unknown; agent: ResolvedAgent; depth?: number; parentSessionId: string; rootSessionId?: string; parentAgentIds?: readonly string[]; sessionFile?: string; mcpToolNames?: readonly string[]; mcpEnabled?: boolean },
   ) => Promise<ChildSessionServices>;
 };
 

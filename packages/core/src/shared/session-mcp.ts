@@ -21,6 +21,7 @@ type McpBridge = {
 };
 const DEFINITIONS_KEY = Symbol.for("@xzy-ai/pi-c2:session-mcp-definitions");
 const BRIDGES_KEY = Symbol.for("@xzy-ai/pi-c2:session-mcp-bridges");
+const ACTIVE_KEY = Symbol.for("@xzy-ai/pi-c2:session-mcp-active");
 
 function namesMap(): NamesMap {
   const root = globalThis as unknown as Record<symbol, NamesMap | undefined>;
@@ -38,6 +39,12 @@ function bridgesMap(): Map<string, McpBridge> {
   const root = globalThis as unknown as Record<symbol, Map<string, McpBridge> | undefined>;
   root[BRIDGES_KEY] ??= new Map<string, McpBridge>();
   return root[BRIDGES_KEY]!;
+}
+
+function activeMap(): Map<string, boolean> {
+  const root = globalThis as unknown as Record<symbol, Map<string, boolean> | undefined>;
+  root[ACTIVE_KEY] ??= new Map<string, boolean>();
+  return root[ACTIVE_KEY]!;
 }
 
 function knownNames(): Set<string> {
@@ -60,6 +67,16 @@ export function publishSessionMcpNames(ctx: Pick<ExtensionContext, "cwd" | "sess
 /** Read the session-scoped MCP catalog for a child that inherits from this session. */
 export function sessionMcpNames(cwd: string, sessionId: string): readonly string[] {
   return [...(namesMap().get(`${cwd}\u0000${sessionId}`) ?? [])];
+}
+
+/** Publish whether this session has at least one active MCP server. */
+export function publishSessionMcpActive(ctx: Pick<ExtensionContext, "cwd" | "sessionManager">, active: boolean): void {
+  activeMap().set(keyOf(ctx), active);
+}
+
+/** Read whether an MCP-enabled parent exposes an active server. */
+export function sessionMcpActive(cwd: string, sessionId: string): boolean {
+  return activeMap().get(`${cwd}\u0000${sessionId}`) ?? false;
 }
 
 /** Publish dynamic MCP definitions so isolated children can construct them. */
@@ -98,6 +115,7 @@ export function clearMcpNames(ctx: Pick<ExtensionContext, "cwd" | "sessionManage
   namesMap().delete(keyOf(ctx));
   definitionsMap().delete(keyOf(ctx));
   bridgesMap().delete(keyOf(ctx));
+  activeMap().delete(keyOf(ctx));
 }
 
 /** Union of every registered (or previously registered) MCP name for activation. */

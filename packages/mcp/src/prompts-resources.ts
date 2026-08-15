@@ -7,6 +7,7 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { RESULT_LIMITS } from "./results.ts";
 
 /** Result payloads for prompt and resource operations. */
 export interface McpPromptResult {
@@ -15,6 +16,8 @@ export interface McpPromptResult {
   messages: Array<{ role: string; text: string }>;
   isError: boolean;
   failure?: "mcp_error" | "transport_error" | "cancelled" | "policy_denied" | "unavailable";
+  /** Effective per-call text cap, retained for command rendering. */
+  maxText?: number;
   missing?: string[];
 }
 
@@ -28,8 +31,8 @@ export interface McpResourceResult {
   omitted?: string[];
 }
 
-const MAX_TEXT = 50_000;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MCP_RESULT_MAX_TEXT: number = RESULT_LIMITS.maxText;
+export const MCP_RESULT_MAX_ATTACHMENT_BYTES: number = RESULT_LIMITS.maxAttachmentBytes;
 
 export interface ResourceContentBlock {
   type: "text" | "image";
@@ -38,9 +41,9 @@ export interface ResourceContentBlock {
   mimeType?: string;
 }
 
-function bounded(value: string | undefined): string {
+function bounded(value: string | undefined, maxText = MCP_RESULT_MAX_TEXT): string {
   if (!value) return "";
-  return value.length > MAX_TEXT ? `${value.slice(0, MAX_TEXT)}\n[output truncated]` : value;
+  return value.length > maxText ? `${value.slice(0, maxText)}\n[output truncated]` : value;
 }
 
 /** Flatten a prompt result's messages into bounded text/content. */
@@ -48,7 +51,7 @@ export function normalizePromptResult(
   server: string,
   prompt: string,
   raw: unknown,
-  context: { cancelled?: boolean; transportError?: string; policyDenied?: boolean; unavailable?: boolean } = {},
+  context: { cancelled?: boolean; transportError?: string; policyDenied?: boolean; unavailable?: boolean; maxText?: number } = {},
 ): McpPromptResult {
   if (context.policyDenied) {
     return { server, prompt, messages: [], isError: true, failure: "policy_denied" };
@@ -68,11 +71,11 @@ export function normalizePromptResult(
   const messages = (result.messages ?? []).map((message) => {
     const block = message.content;
     const text = block && typeof block === "object" && (block as { type?: string }).type === "text"
-      ? bounded((block as { text?: string }).text)
+      ? bounded((block as { text?: string }).text, context.maxText)
       : "";
     return { role: message.role ?? "user", text };
   });
-  return { server, prompt, messages, isError: false };
+  return { server, prompt, messages, isError: false, ...(context.maxText === undefined ? {} : { maxText: context.maxText }) };
 }
 
 /** Flatten a read-resource result into bounded text/images plus omission notes. */
@@ -80,7 +83,7 @@ export function normalizeResourceResult(
   server: string,
   uri: string,
   raw: unknown,
-  context: { cancelled?: boolean; transportError?: string; policyDenied?: boolean; unavailable?: boolean } = {},
+  context: { cancelled?: boolean; transportError?: string; policyDenied?: boolean; unavailable?: boolean; maxText?: number; maxAttachmentBytes?: number } = {},
 ): McpResourceResult {
   if (context.policyDenied) {
     return { server, uri, text: "", isError: true, failure: "policy_denied" };
@@ -98,15 +101,17 @@ export function normalizeResourceResult(
   const parts: string[] = [];
   const contentBlocks: ResourceContentBlock[] = [];
   const omitted: string[] = [];
+  const maxText = context.maxText ?? MCP_RESULT_MAX_TEXT;
+  const maxAttachmentBytes = context.maxAttachmentBytes ?? MCP_RESULT_MAX_ATTACHMENT_BYTES;
   let total = 0;
   let truncated = false;
   const push = (part: string): void => {
-    if (truncated || total >= MAX_TEXT) {
+    if (truncated || total >= maxText) {
       truncated = true;
       return;
     }
     const separator = parts.length > 0 ? 1 : 0;
-    const available = MAX_TEXT - total - separator;
+    const available = maxText - total - separator;
     if (available <= 0) {
       truncated = true;
       return;
@@ -115,7 +120,7 @@ export function normalizeResourceResult(
     if (part.length > available) {
       const bodyLimit = Math.max(0, available - marker.length);
       parts.push(`${part.slice(0, bodyLimit)}${marker}`);
-      total = MAX_TEXT;
+      total = maxText;
       truncated = true;
       return;
     }
@@ -125,15 +130,15 @@ export function normalizeResourceResult(
   for (const content of result.contents ?? []) {
     if (typeof content.text === "string") {
       push(content.text);
-      contentBlocks.push({ type: "text", text: bounded(content.text) });
+      contentBlocks.push({ type: "text", text: bounded(content.text, maxText) });
       continue;
     }
     if (typeof content.blob === "string") {
       const mime = typeof content.mimeType === "string" ? content.mimeType : "";
       if (mime.startsWith("image/")) {
         const bytes = Math.floor(content.blob.replace(/\s/g, "").length * 3 / 4);
-        if (bytes > MAX_IMAGE_BYTES) {
-          push(`[image omitted: attachment exceeds ${MAX_IMAGE_BYTES} bytes]`);
+        if (bytes > maxAttachmentBytes) {
+          push(`[image omitted: attachment exceeds ${maxAttachmentBytes} bytes]`);
           omitted.push(content.uri ? String(content.uri) : uri);
         } else {
           push(`[image: ${mime} ${content.uri ?? uri}]`);
@@ -172,7 +177,7 @@ export function promptResultToText(result: McpPromptResult): string {
     return `Error: ${reason}`;
   }
   const joined = result.messages.map((m) => `${m.role}: ${m.text}`).join("\n");
-  return joined ? limit(joined, MAX_TEXT) : "(no prompt output)";
+  return joined ? limit(joined, result.maxText ?? MCP_RESULT_MAX_TEXT) : "(no prompt output)";
 }
 
 export function resourceResultToText(result: McpResourceResult): string {

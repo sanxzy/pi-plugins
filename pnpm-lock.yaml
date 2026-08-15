@@ -97,6 +97,9 @@ importers:
       '@xzy-ai/observability':
         specifier: workspace:*
         version: link:../observability
+      '@xzy-ai/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1

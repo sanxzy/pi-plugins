@@ -37,6 +37,8 @@ export interface ConnectRemoteOptions {
   signal?: AbortSignal;
   onRedirect: (url: URL) => void | Promise<void>;
   store?: ReturnType<typeof createDefaultAuthStore>;
+  /** Per-flow OAuth callback timeout (ms); falls back to the module default. */
+  oauthCallbackTimeoutMs?: number;
 }
 
 type RemoteTransport = StreamableHTTPClientTransport | SSEClientTransport;
@@ -290,7 +292,7 @@ export async function startRemoteAuth(
   // Register the loopback callback so the browser redirect resolves the
   // authorization code for finishRemoteAuth. Swallow cancellation so a logout
   // or shutdown never surfaces an unhandled rejection.
-  const callback = waitForOAuthCallback(state, options.url, options.ownerKey);
+  const callback = waitForOAuthCallback(state, options.url, options.ownerKey, options.oauthCallbackTimeoutMs);
   callback.catch(() => undefined);
   pendingRemoteAuth.set(key, {
     provider: redirecting,

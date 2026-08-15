@@ -73,6 +73,13 @@ test("an empty tools list enables all built-in tools plus agent, web, and MCP re
   assert.deepEqual(resolveChildTools(discoveredAgent([])), ALL_CHILD_TOOLS);
 });
 
+test("an empty MCP surface does not grant resource tools or discovered MCP tools to children", () => {
+  const tools = resolveChildTools(discoveredAgent(), ["alpha_lookup"], 0, undefined, false);
+  assert.equal(tools.includes("mcp_resources_list"), false);
+  assert.equal(tools.includes("mcp_resources_read"), false);
+  assert.equal(tools.includes("alpha_lookup"), false);
+});
+
 test("an explicit tools list is filtered so ls is never exposed to children", () => {
   assert.deepEqual(resolveChildTools(discoveredAgent(["read", "ls", "grep", "write"])), [
     "read",

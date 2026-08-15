@@ -27,6 +27,7 @@ export {
   type McpErrorCategory,
 } from "./manager.ts";
 export { registerMcpLifecycle, type McpLifecycleRegistrationOptions } from "./lifecycle.ts";
+export { resolveMcpSettings } from "./settings.ts";
 export { NameRegistry, collisionSuffix, resolvePiName, serverToolPiName, slugify } from "./naming.ts";
 export { McpToolExposer, DEFAULT_RESERVED_TOOL_NAMES, type McpToolInvokeHandler, type McpToolMapping, type McpToolSnapshotEntry } from "./expose.ts";
 export { objectSchemaFromMcp, toTypeBoxSchema } from "./schema.ts";

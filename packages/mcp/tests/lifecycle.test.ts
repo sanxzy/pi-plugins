@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { registerMcpLifecycle } from "../src/index.ts";
 import { userConfigPath, projectConfigPath, createDefaultAuthStore } from "../src/index.ts";
-import { publishSessionMcpBridge, clearSessionMcpBridge } from "@xzy-ai/core";
+import { sessionMcpActive } from "@xzy-ai/core";
+import { publishSessionMcpBridge, clearSessionMcpBridge, sessionMcpNames } from "@xzy-ai/core";
 import { dirname } from "node:path";
 import { MCP_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 
@@ -130,6 +131,80 @@ test("one logical prompt/resource read emits exactly one telemetry record pair (
     assert.equal(spans.length, 2, `${operation} must emit exactly one before+after pair, got ${spans.length}`);
     assert.deepEqual(spans.map((record) => record.phase), ["before", "after"]);
     assert.equal(spans[0]?.correlationId, spans[1]?.correlationId);
+  }
+});
+
+test("empty or disabled-only MCP configuration hides resource tools and child MCP grants", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-empty-hide-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    disabled: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, disabled: true },
+  } } }));
+  const activeSnapshots: string[][] = [];
+  const pi = fakePi();
+  const realPi = {
+    ...pi,
+    getAllTools() { return [...pi.tools.values()].map((tool) => ({ name: tool.name })); },
+    getActiveTools() { return activeSnapshots.at(-1) ?? []; },
+    setActiveTools(names: string[]) { activeSnapshots.push([...names]); },
+    sendUserMessage() {},
+  };
+  registerMcpLifecycle(realPi as never, { agentDir });
+  const ctx = { ...context(projectRoot, "empty"), hasUI: false, ui: {} };
+  const start = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  try {
+    await start({ reason: "startup" }, ctx);
+    assert.equal(activeSnapshots.at(-1)?.includes("mcp_resources_list"), false);
+    assert.equal(activeSnapshots.at(-1)?.includes("mcp_resources_read"), false);
+    assert.equal(sessionMcpNames(projectRoot, "empty").includes("mcp_resources_list"), false);
+    assert.equal(sessionMcpActive(projectRoot, "empty"), false);
+  } finally {
+    await shutdown({ reason: "quit" }, ctx);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("lifecycle applies centralized MCP result text limits to exposed tool results", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-mcp-result-limit-"));
+  const agentDir = join(root, "agent");
+  const projectRoot = join(root, "project");
+  mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
+  mkdirSync(join(projectRoot, ".pi"), { recursive: true });
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: {
+    limited: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_MODE: "policy" } },
+  } } }));
+  writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ mcp: { servers: {} } }));
+  mkdirSync(join(root, "pi-c2"), { recursive: true });
+  writeFileSync(join(root, "pi-c2", "config.json"), JSON.stringify({ mcp: { resultMaxText: 3 } }));
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = root;
+  const pi = fakePi();
+  const realPi = { ...pi, getAllTools() { return [...pi.tools.values()].map((tool) => ({ name: tool.name })); }, getActiveTools() { return []; }, setActiveTools() {}, sendUserMessage() {} };
+  registerMcpLifecycle(realPi as never, { agentDir });
+  const ctx = { ...context(projectRoot, "limited"), hasUI: false, ui: {} };
+  const start = pi.handlers.get("session_start")!;
+  const shutdown = pi.handlers.get("session_shutdown")!;
+  try {
+    // The project mcp.json is empty, so the user server is intentionally
+    // overridden away; rewrite it after startup to use the fixture and keep
+    // the settings home independent from mcp.json precedence.
+    writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ mcp: { servers: {
+      limited: { type: "local", command: [process.execPath, fixture], cwd: fixtureCwd, environment: { MCP_FIXTURE_MODE: "policy" } },
+    } } }));
+    await start({ reason: "startup" }, ctx);
+    const tool = pi.tools.get("limited_allowed_read");
+    assert.ok(tool);
+    const result = await tool.execute("id", { value: "abcdef" }, undefined, undefined, ctx) as { content: Array<{ text: string }> };
+    assert.match(result.content[0]?.text ?? "", /output truncated/);
+    assert.equal(result.content[0]?.text, "too\n[output truncated]");
+  } finally {
+    await shutdown({ reason: "quit" }, ctx);
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

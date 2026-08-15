@@ -371,7 +371,7 @@ export async function ensureCallbackServer(redirectUri?: string): Promise<{ port
 }
 
 /** Register a pending callback for an OAuth state; resolves with the auth code. */
-export function waitForOAuthCallback(state: string, url: string, ownerKey?: string): Promise<string> {
+export function waitForOAuthCallback(state: string, url: string, ownerKey?: string, timeoutMs = oauthCallbackTimeoutMs): Promise<string> {
   stateToUrl.set(state, { url, ownerKey });
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -381,7 +381,7 @@ export function waitForOAuthCallback(state: string, url: string, ownerKey?: stri
         reject(new Error("OAuth callback timeout - authorization took too long"));
         stopIfIdle();
       }
-    }, oauthCallbackTimeoutMs);
+    }, timeoutMs);
     pendingAuths.set(state, { resolve, reject, timeout });
   });
 }
