@@ -399,7 +399,8 @@ export async function executeKnowledgeSearch(
   if (query === "*") {
     const topics = await discoverWikiTopics(root, {
       topic: params.topic,
-      maxTopics: params.maxResults,
+      maxResults: params.maxResults,
+      history: options,
     });
     if (topics.length === 0) {
       return textResult("No local wiki pages found.", {

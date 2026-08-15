@@ -126,25 +126,42 @@ export function recordWikiPageOpen(options: WikiHistoryOptions, topic: string, f
   writeWikiHistory(options, normalizeWikiHistory(history));
 }
 
+export interface WikiDiscoveryPage extends Omit<WikiPageHeader, "topic"> {
+  file: string;
+  title: string;
+  openCount?: number;
+  lastOpened?: number;
+}
+
 export interface WikiTopicDiscovery {
   topic: string;
-  pages: Array<Omit<WikiPageHeader, "topic"> & { file: string }>;
+  pages: WikiDiscoveryPage[];
   truncated?: boolean;
 }
 
-/** Discover wiki topics and page metadata without parsing or ranking entry content. */
-export async function discoverWikiTopics(
-  root: string,
-  options: { topic?: string; maxTopics?: number } = {},
-): Promise<WikiTopicDiscovery[]> {
+interface CurrentWikiPage {
+  topic: string;
+  file: string;
+  page: number;
+  totalPages: number;
+  previous?: string;
+  next?: string;
+  title: string;
+}
+
+interface DiscoveryHistoryState {
+  usable: boolean;
+  history: WikiHistoryEnvelope;
+}
+
+async function currentWikiPages(root: string, topicFilter?: string): Promise<CurrentWikiPage[] | undefined> {
   let names: string[];
   try {
     names = (await readdir(root)).filter((name) => name.endsWith(".md"));
   } catch {
-    return [];
+    return undefined;
   }
-  const topicFilter = options.topic === undefined ? undefined : slugify(options.topic);
-  const topics = new Map<string, WikiTopicDiscovery>();
+  const pages: CurrentWikiPage[] = [];
   for (const file of names.sort((left, right) => left.localeCompare(right))) {
     const topic = file.replace(/\.part-\d{3}\.md$/, "").replace(/\.md$/, "");
     if (topicFilter !== undefined && topic !== topicFilter) continue;
@@ -156,32 +173,96 @@ export async function discoverWikiTopics(
     }
     if (!document.includes(WIKI_PAGE_START) || !document.includes(WIKI_PAGE_END)) continue;
     const header = parsePageHeader(document);
-    let discovery = topics.get(topic);
-    if (!discovery) {
-      discovery = { topic, pages: [] };
-      topics.set(topic, discovery);
-    }
-    discovery.pages.push({
+    const firstEntry = parseWikiEntries(document, file)[0];
+    pages.push({
+      topic,
       file,
       page: header.page,
       totalPages: header.totalPages,
       ...(header.previous ? { previous: header.previous } : {}),
       ...(header.next ? { next: header.next } : {}),
+      title: firstEntry?.title || humanizeTopic(topic),
     });
   }
-  const maxTopics = Math.min(Math.max(options.maxTopics ?? Number.MAX_SAFE_INTEGER, 0), 50);
-  return [...topics.values()]
-    .sort((left, right) => left.topic.localeCompare(right.topic))
-    .slice(0, maxTopics)
-    .map((topic) => {
-      const pages = topic.pages.sort((left, right) => pageNumber(left.file) - pageNumber(right.file) || left.file.localeCompare(right.file));
-      if (pages.length <= MAX_WIKI_DISCOVERY_PAGES) return { ...topic, pages };
-      return {
-        ...topic,
-        pages: pages.slice(0, MAX_WIKI_DISCOVERY_PAGES),
-        truncated: true,
-      };
+  return pages;
+}
+
+async function readDiscoveryHistory(options: WikiHistoryOptions): Promise<DiscoveryHistoryState> {
+  const path = historyPath(options);
+  if (!path) return { usable: false, history: { v: 1, r: [] } };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(path, "utf8")) as unknown;
+  } catch {
+    return { usable: false, history: { v: 1, r: [] } };
+  }
+  if (!raw || typeof raw !== "object" || (raw as { v?: unknown }).v !== 1 || !Array.isArray((raw as { r?: unknown }).r)) {
+    return { usable: false, history: { v: 1, r: [] } };
+  }
+  const valid = (raw as { r: unknown[] }).r.filter(validHistoryRecord);
+  if (valid.length === 0) return { usable: false, history: { v: 1, r: [] } };
+  return { usable: true, history: normalizeWikiHistory(raw) };
+}
+
+/** Discover current wiki pages, optionally projecting root-session open history. */
+export async function discoverWikiTopics(
+  root: string,
+  options: { topic?: string; maxResults?: number; history?: WikiHistoryOptions } = {},
+): Promise<WikiTopicDiscovery[]> {
+  const topicFilter = options.topic === undefined ? undefined : slugify(options.topic);
+  const current = await currentWikiPages(root, topicFilter);
+  if (!current || current.length === 0) return [];
+
+  const historyState = options.history ? await readDiscoveryHistory(options.history) : { usable: false, history: { v: 1, r: [] } };
+  const currentByKey = new Map(current.map((page) => [`${page.topic}\u0000${page.file}`, page]));
+  const hasMarkerValidHistory = historyState.usable && historyState.history.r.some((record) => currentByKey.has(`${record[0]}\u0000${record[1]}`));
+  let selected: Array<CurrentWikiPage & { openCount?: number; lastOpened?: number }>;
+  if (historyState.usable) {
+    const retained = historyState.history.r
+      .filter((record) => currentByKey.has(`${record[0]}\u0000${record[1]}`));
+    if (retained.length > 0) {
+      selected = retained.map((record) => ({
+        ...currentByKey.get(`${record[0]}\u0000${record[1]}`)!,
+        openCount: record[2],
+        lastOpened: record[3],
+      }));
+    } else {
+      selected = current;
+    }
+    const normalized = { v: 1 as const, r: retained };
+    if (options.history && JSON.stringify(normalized) !== JSON.stringify(historyState.history)) writeWikiHistory(options.history, normalized);
+  } else {
+    selected = current;
+  }
+
+  if (hasMarkerValidHistory && selected.some((page) => page.openCount !== undefined)) {
+    selected.sort((left, right) => (right.openCount ?? 0) - (left.openCount ?? 0) || (right.lastOpened ?? 0) - (left.lastOpened ?? 0) || left.file.localeCompare(right.file));
+  } else {
+    selected.sort((left, right) => left.topic.localeCompare(right.topic) || pageNumber(left.file) - pageNumber(right.file) || left.file.localeCompare(right.file));
+  }
+  const maxResults = Math.min(Math.max(options.maxResults ?? 20, 1), 50);
+  const topics = new Map<string, WikiTopicDiscovery>();
+  for (const page of selected.slice(0, maxResults)) {
+    let topic = topics.get(page.topic);
+    if (!topic) {
+      topic = { topic: page.topic, pages: [] };
+      topics.set(page.topic, topic);
+    }
+    topic.pages.push({
+      file: page.file,
+      page: page.page,
+      totalPages: page.totalPages,
+      ...(page.previous ? { previous: page.previous } : {}),
+      ...(page.next ? { next: page.next } : {}),
+      title: page.title,
+      ...(page.openCount === undefined ? {} : { openCount: page.openCount }),
+      ...(page.lastOpened === undefined ? {} : { lastOpened: page.lastOpened }),
     });
+  }
+  return [...topics.values()].map((topic) => {
+    if (!hasMarkerValidHistory) topic.pages.sort((left, right) => pageNumber(left.file) - pageNumber(right.file) || left.file.localeCompare(right.file));
+    return topic;
+  });
 }
 
 export interface WikiEntryInput {
