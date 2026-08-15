@@ -108,7 +108,7 @@ export function normalizeCallToolResult(raw: unknown, context: NormalizeContext)
   const result = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const normalized = normalizeMcpContent(result.content, context);
   if (normalized.content.length === 0 && result.structuredContent !== undefined) {
-    normalized.content.push({ type: "text", text: boundedText(JSON.stringify(result.structuredContent)) });
+    normalized.content.push({ type: "text", text: boundedText(JSON.stringify(result.structuredContent), context.maxText) });
   }
   if (normalized.content.length === 0) normalized.content.push({ type: "text", text: "MCP tool returned no content" });
   const isError = result.isError === true;

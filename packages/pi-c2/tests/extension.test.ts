@@ -147,6 +147,8 @@ test("parent startup activates the registered tools including web_search and web
   assert.ok(activeTools.includes("web_search"), "web_search active in parent session");
   assert.ok(activeTools.includes("web_fetch"), "web_fetch active in parent session");
   assert.ok(activeTools.includes("knowledge_search"), "knowledge_search active in parent session");
+  assert.equal(activeTools.includes("mcp_resources_list"), false, "empty MCP surface hides resource listing");
+  assert.equal(activeTools.includes("mcp_resources_read"), false, "empty MCP surface hides resource reads");
   assert.equal(activeTools.includes("ls"), false, "ls stays excluded");
 });
 

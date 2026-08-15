@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createJob } from "@xzy-ai/core";
+import { clearMcpNames, createJob, publishSessionMcpActive } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
 import {
   markSessionReload,
@@ -76,6 +76,38 @@ test("a reload marker makes the fresh root session_start steer the model", async
     assert.deepEqual(steers, ["Your session was reloaded."]);
     assert.equal(takeSessionReload(cwd), false, "the marker must be consumed by session_start");
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("startup does not reactivate MCP resource tools when the session surface is inactive", async () => {
+  const cwd = projectRoot();
+  try {
+    const activeSnapshots: string[][] = [];
+    const handlers = new Map<string, Handler>();
+    const pi = {
+      on(event: string, handler: Handler) {
+        handlers.set(event, handler);
+      },
+      sendUserMessage() {},
+      setActiveTools(names: string[]) {
+        activeSnapshots.push(names);
+      },
+      getAllTools() {
+        return [
+          { name: "read" },
+          { name: "mcp_resources_list" },
+          { name: "mcp_resources_read" },
+        ];
+      },
+    } as unknown as ExtensionAPI;
+    const ctx = context(cwd, "root-a");
+    publishSessionMcpActive(ctx, false);
+    registerSessionEvents(pi);
+    await handlers.get("session_start")!({ reason: "startup" }, ctx);
+    assert.deepEqual(activeSnapshots.at(-1), ["read"]);
+  } finally {
+    clearMcpNames(context(cwd, "root-a"));
     rmSync(cwd, { recursive: true, force: true });
   }
 });

@@ -115,7 +115,6 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
   pi.on("session_start", async (_event, ctx) => {
     return processWithLog({ operation: MCP_OPERATIONS.LIFECYCLE_START, parameters: { cwd: ctx.cwd } }, async () => {
     const key = managerKey(ctx);
-    const centralized = resolveMcpSettings(ctx.cwd);
     const existing = managers.get(key);
     if (existing) return;
     disposed.delete(key);
@@ -161,8 +160,6 @@ export function registerMcpLifecycle(pi: ExtensionAPI, options: McpLifecycleRegi
         return false;
       }
     };
-    authorizers.set(key, authorize);
-
     authorizers.set(key, authorize);
     const readPrompt = async (serverName: string, nativeName: string, args: Record<string, string>, signal?: AbortSignal) => {
       return processWithLog({ operation: MCP_OPERATIONS.GET_PROMPT, parameters: { server: serverName, prompt: nativeName } }, async () => {

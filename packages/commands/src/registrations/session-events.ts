@@ -6,7 +6,7 @@ import type {
   SessionStartEvent,
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { allMcpNames, sessionMcpNames } from "@xzy-ai/core";
+import { allMcpNames, sessionMcpActive, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
 import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
 import { currentProcessIdentity, clearAgentDiscoveryCache, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
@@ -164,11 +164,13 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     // excluded — the model should list files via `find`/`grep` instead.
     const managedNames = new Set(allMcpNames());
     const currentSessionNames = new Set(sessionMcpNames(ctx.cwd, sessionId));
+    const mcpActive = sessionMcpActive(ctx.cwd, sessionId);
+    const mcpResourceTools = new Set(["mcp_resources_list", "mcp_resources_read"]);
     pi.setActiveTools(
       pi
         .getAllTools()
         .map((tool) => tool.name)
-        .filter((name) => name !== "ls" && (!managedNames.has(name) || currentSessionNames.has(name))),
+        .filter((name) => name !== "ls" && (mcpActive || !mcpResourceTools.has(name)) && (!managedNames.has(name) || currentSessionNames.has(name))),
     );
 
     // Bind the goal pool to the fresh host. Goals are strictly per-root
