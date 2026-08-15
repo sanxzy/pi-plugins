@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
-import { createReferenceCatalog, type ReferenceCatalogReadResult } from "@xzy-ai/runtime";
+import { createReferenceCatalog, getChildPool, type ReferenceCatalogReadResult } from "@xzy-ai/runtime";
 import { errorResult, textResult } from "../results.ts";
 import {
   discoverWikiTopics,
@@ -157,6 +157,10 @@ export type KnowledgeSearchDetails =
 
 export interface KnowledgeSearchExecutionOptions {
   wikiRoot?: string;
+  projectRoot?: string;
+  sessionId?: string;
+  rootSessionId?: string;
+  nowMs?: () => number;
   referenceCatalog?: ReferenceCatalogReader;
   signal?: AbortSignal;
 }
@@ -177,7 +181,14 @@ export function registerKnowledgeSearchTool(pi: ExtensionAPI): void {
       _ctx: ExtensionContext,
     ): Promise<AgentToolResult<KnowledgeSearchDetails>> {
       return processWithLog({ operation: TOOL_OPERATIONS.KNOWLEDGE_SEARCH_EXECUTE, parameters: { type: params.type, query: (params as { query?: unknown }).query } }, async () =>
-        executeKnowledgeSearch(params, { signal }),
+        executeKnowledgeSearch(params, {
+          signal,
+          ...(_ctx?.cwd ? { projectRoot: _ctx.cwd } : {}),
+          ...(_ctx?.sessionManager?.getSessionId?.() ? { sessionId: _ctx.sessionManager.getSessionId() } : {}),
+          ...(_ctx?.cwd && _ctx?.sessionManager?.getSessionId?.()
+            ? { rootSessionId: getChildPool(_ctx.cwd, _ctx.sessionManager.getSessionId()).rootSessionIdFor(_ctx.sessionManager.getSessionId()) }
+            : {}),
+        }),
       );
     },
   });
@@ -360,7 +371,7 @@ export async function executeKnowledgeSearch(
   }
   const root = options?.wikiRoot ?? wikiRoot();
   if (params.topic !== undefined && params.page !== undefined) {
-    const page = await retrieveWikiPage(root, params.topic, params.page);
+    const page = await retrieveWikiPage(root, params.topic, params.page, options);
     if (!page) {
       return textResult("No local wiki matches found.", {
         mode: "wikis",

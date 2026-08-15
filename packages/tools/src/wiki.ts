@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
-import { homeRoot } from "@xzy-ai/runtime";
+import { homeRoot, homeSessionDirFromRoot, ensurePrivateDirectory, readPrivateJson, writePrivateJson } from "@xzy-ai/runtime";
 
 export interface WikiEntry {
   title: string;
@@ -21,6 +21,13 @@ export const WIKI_MAX_SLUG_LENGTH = 80;
 export const WIKI_PAGE_SIZE = 256 * 1024;
 export const MAX_WIKI_DISCOVERY_PAGES = 500;
 export const MAX_WIKI_DISCOVERY_OUTPUT_BYTES = 64 * 1024;
+export const WIKI_HISTORY_FILE = "wiki-history.json";
+export const MAX_WIKI_HISTORY_RECORDS = 50;
+export type WikiHistoryRecord = [topic: string, file: string, openCount: number, lastOpenedMs: number];
+export interface WikiHistoryEnvelope {
+  v: 1;
+  r: WikiHistoryRecord[];
+}
 
 export interface WikiPageHeader {
   topic: string;
@@ -33,6 +40,90 @@ export interface WikiPageHeader {
 export interface WikiPageResult extends WikiPageHeader {
   file: string;
   content: string;
+}
+
+export interface WikiHistoryOptions {
+  projectRoot?: string;
+  sessionId?: string;
+  rootSessionId?: string;
+  nowMs?: () => number;
+}
+
+function historyPath(options: WikiHistoryOptions): string | undefined {
+  if (!options.projectRoot || !options.sessionId && !options.rootSessionId) return undefined;
+  const rootSessionId = options.rootSessionId ?? options.sessionId;
+  if (!rootSessionId) return undefined;
+  try {
+    return join(homeSessionDirFromRoot(options.projectRoot, rootSessionId), WIKI_HISTORY_FILE);
+  } catch {
+    return undefined;
+  }
+}
+
+function validHistoryRecord(value: unknown): value is WikiHistoryRecord {
+  return Array.isArray(value) && value.length === 4 &&
+    typeof value[0] === "string" && value[0].length > 0 &&
+    typeof value[1] === "string" && value[1].length > 0 &&
+    Number.isSafeInteger(value[2]) && value[2] >= 1 &&
+    Number.isSafeInteger(value[3]) && value[3] >= 0;
+}
+
+export function normalizeWikiHistory(raw: unknown): WikiHistoryEnvelope {
+  if (!raw || typeof raw !== "object" || (raw as { v?: unknown }).v !== 1 || !Array.isArray((raw as { r?: unknown }).r)) {
+    return { v: 1, r: [] };
+  }
+  const merged = new Map<string, WikiHistoryRecord>();
+  for (const candidate of (raw as { r: unknown[] }).r) {
+    if (!validHistoryRecord(candidate)) continue;
+    const key = `${candidate[0]}\u0000${candidate[1]}`;
+    const prior = merged.get(key);
+    if (!prior) {
+      merged.set(key, [...candidate]);
+      continue;
+    }
+    prior[2] += candidate[2];
+    prior[3] = Math.max(prior[3], candidate[3]);
+  }
+  const records = [...merged.values()]
+    .sort((left, right) => right[3] - left[3] || left[1].localeCompare(right[1]))
+    .slice(0, MAX_WIKI_HISTORY_RECORDS);
+  return { v: 1, r: records };
+}
+
+function readWikiHistory(options: WikiHistoryOptions): WikiHistoryEnvelope {
+  const path = historyPath(options);
+  if (!path) return { v: 1, r: [] };
+  try {
+    return normalizeWikiHistory(readPrivateJson<unknown>(path));
+  } catch {
+    return { v: 1, r: [] };
+  }
+}
+
+function writeWikiHistory(options: WikiHistoryOptions, history: WikiHistoryEnvelope): void {
+  const path = historyPath(options);
+  if (!path) return;
+  try {
+    ensurePrivateDirectory(dirname(path));
+    writePrivateJson(path, history);
+  } catch {
+    // History is a best-effort side effect of a successful wiki operation.
+  }
+}
+
+export function recordWikiPageOpen(options: WikiHistoryOptions, topic: string, file: string): void {
+  if (!historyPath(options)) return;
+  const history = readWikiHistory(options);
+  const nowMs = options.nowMs?.() ?? Date.now();
+  const index = history.r.findIndex((record) => record[0] === topic && record[1] === file);
+  if (index >= 0) {
+    const record = history.r[index]!;
+    record[2] += 1;
+    record[3] = nowMs;
+  } else {
+    history.r.push([topic, file, 1, nowMs]);
+  }
+  writeWikiHistory(options, normalizeWikiHistory(history));
 }
 
 export interface WikiTopicDiscovery {
@@ -247,7 +338,12 @@ function pageFilename(topic: string, page: number): string {
   return page === 1 ? `${topic}.md` : `${topic}.part-${String(page).padStart(3, "0")}.md`;
 }
 
-export async function retrieveWikiPage(root: string, topicInput: string, selector: string): Promise<WikiPageResult | undefined> {
+export async function retrieveWikiPage(
+  root: string,
+  topicInput: string,
+  selector: string,
+  historyOptions?: WikiHistoryOptions,
+): Promise<WikiPageResult | undefined> {
   const topic = slugify(topicInput);
   const pages = await listTopicPages(root, topic);
   if (pages.length === 0) return undefined;
@@ -257,7 +353,9 @@ export async function retrieveWikiPage(root: string, topicInput: string, selecto
   try {
     const content = await readFile(join(root, file), "utf8");
     const header = parsePageHeader(content);
-    return { ...header, file, content, topic: header.topic || topic, totalPages: header.totalPages || pages.length };
+    const result = { ...header, file, content, topic: header.topic || topic, totalPages: header.totalPages || pages.length };
+    if (historyOptions) recordWikiPageOpen(historyOptions, result.topic, file);
+    return result;
   } catch {
     return undefined;
   }
