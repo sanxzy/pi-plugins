@@ -85,7 +85,7 @@ export function normalizeWikiHistory(raw: unknown): WikiHistoryEnvelope {
     prior[3] = Math.max(prior[3], candidate[3]);
   }
   const records = [...merged.values()]
-    .sort((left, right) => right[3] - left[3] || left[1].localeCompare(right[1]))
+    .sort((left, right) => right[3] - left[3] || right[1].localeCompare(left[1]))
     .slice(0, MAX_WIKI_HISTORY_RECORDS);
   return { v: 1, r: records };
 }

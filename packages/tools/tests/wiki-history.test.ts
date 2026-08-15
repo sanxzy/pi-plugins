@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { homeSessionDirFromRoot } from "@xzy-ai/runtime";
-import { executeKnowledgeSearch } from "../src/registrations/knowledge-search.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { homeRoot, homeSessionDirFromRoot } from "@xzy-ai/runtime";
+import { createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
+import { executeKnowledgeSearch, registerKnowledgeSearchTool } from "../src/registrations/knowledge-search.ts";
 import { formatWikiEntry } from "../src/wiki.ts";
 
 function root(): string {
@@ -144,6 +146,125 @@ test("history normalization preserves valid tuples, drops invalid records, and u
     assert.equal(readFileSync(historyPath(projectRoot, "root-a"), "utf8").includes("openCount"), false);
   } finally {
     rmSync(wikiRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("history evicts the lexicographically first page when the oldest timestamps tie", async () => {
+  const wikiRoot = root();
+  const projectRoot = root();
+  for (let index = 0; index < 51; index++) page(wikiRoot, `tie-${String(index).padStart(2, "0")}`);
+  try {
+    for (let index = 0; index < 51; index++) {
+      await direct(wikiRoot, projectRoot, `tie-${String(index).padStart(2, "0")}`, {
+        sessionId: "root-a",
+        rootSessionId: "root-a",
+        nowMs: 1000,
+      });
+    }
+    const records = history(projectRoot, "root-a").r;
+    assert.equal(records.length, 50);
+    assert.equal(records.some((record) => record[1] === "tie-00.md"), false);
+    assert.equal(records.some((record) => record[1] === "tie-50.md"), true);
+  } finally {
+    rmSync(wikiRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("invalid history envelopes fall back to empty before a successful open rewrites valid state", async () => {
+  for (const invalid of [[], { v: 2, r: [] }, { v: 1, r: {} }]) {
+    const wikiRoot = root();
+    const projectRoot = root();
+    page(wikiRoot, "alpha");
+    const sessionDir = join(homeSessionDirFromRoot(projectRoot, "root-a"));
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(join(sessionDir, "wiki-history.json"), JSON.stringify(invalid));
+    try {
+      await direct(wikiRoot, projectRoot, "alpha", { sessionId: "root-a", rootSessionId: "root-a", nowMs: 2000 });
+      assert.deepEqual(history(projectRoot, "root-a"), { v: 1, r: [["alpha", "alpha.md", 1, 2000]] });
+    } finally {
+      rmSync(wikiRoot, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("unreadable selected pages do not update history", async () => {
+  const wikiRoot = root();
+  const projectRoot = root();
+  mkdirSync(join(wikiRoot, "alpha.md"));
+  try {
+    const result = await direct(wikiRoot, projectRoot, "alpha", { sessionId: "root-a", rootSessionId: "root-a", nowMs: 1000 });
+    assert.equal(result.content[0]?.type, "text");
+    assert.equal(result.content[0]?.text, "No local wiki matches found.");
+    assert.equal(existsSync(historyPath(projectRoot, "root-a")), false);
+  } finally {
+    rmSync(wikiRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("history writes fail soft and leave no temporary artifacts", async () => {
+  const wikiRoot = root();
+  const projectRoot = root();
+  page(wikiRoot, "alpha");
+  const sessionDir = join(homeSessionDirFromRoot(projectRoot, "root-a"));
+  mkdirSync(join(sessionDir, "wiki-history.json"), { recursive: true });
+  try {
+    const result = await direct(wikiRoot, projectRoot, "alpha", { sessionId: "root-a", rootSessionId: "root-a", nowMs: 1000 });
+    assert.equal(result.content[0]?.type, "text");
+    assert.equal(readdirSync(sessionDir).some((name) => name.includes(".tmp")), false);
+  } finally {
+    rmSync(wikiRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("history is isolated across projects and private history persistence is atomic", async () => {
+  const wikiRoot = root();
+  const projectA = root();
+  const projectB = root();
+  page(wikiRoot, "alpha");
+  try {
+    await direct(wikiRoot, projectA, "alpha", { sessionId: "root-a", rootSessionId: "root-a", nowMs: 1000 });
+    await direct(wikiRoot, projectB, "alpha", { sessionId: "root-a", rootSessionId: "root-a", nowMs: 2000 });
+    const pathA = historyPath(projectA, "root-a");
+    const pathB = historyPath(projectB, "root-a");
+    assert.notEqual(pathA, pathB);
+    assert.equal(statSync(pathA).mode & 0o077, 0);
+    assert.equal(readdirSync(join(pathA, ".."), { withFileTypes: true }).some((entry) => entry.name.includes(".tmp")), false);
+    assert.deepEqual(history(projectA, "root-a").r[0], ["alpha", "alpha.md", 1, 1000]);
+    assert.deepEqual(history(projectB, "root-a").r[0], ["alpha", "alpha.md", 1, 2000]);
+  } finally {
+    rmSync(wikiRoot, { recursive: true, force: true });
+    rmSync(projectA, { recursive: true, force: true });
+    rmSync(projectB, { recursive: true, force: true });
+  }
+});
+
+test("registered context writes history under the active root session without logging history data", async () => {
+  const projectRoot = root();
+  const previousHome = process.env.PI_C2_HOME;
+  process.env.PI_C2_HOME = projectRoot;
+  const wikiRoot = join(homeRoot(), "wikis");
+  mkdirSync(wikiRoot, { recursive: true });
+  page(wikiRoot, "alpha");
+  let tool: { execute: (...args: unknown[]) => Promise<{ content: Array<{ type: string; text?: string }> }> } | undefined;
+  registerKnowledgeSearchTool({ registerTool(candidate: unknown) { tool = candidate as typeof tool; } } as unknown as ExtensionAPI);
+  const logRoot = root();
+  const logger = createSessionLogger({ projectId: "history-project", rootSessionId: "root-a", eventsPath: join(logRoot, "events.jsonl"), errorsPath: join(logRoot, "errors.jsonl") });
+  try {
+    assert.ok(tool);
+    const ctx = { cwd: projectRoot, sessionManager: { getSessionId: () => "root-a" } } as unknown as ExtensionContext;
+    await runWithLogContext(logger, () => tool!.execute("call", { type: "wikis", topic: "alpha", page: "1" }, undefined, undefined, ctx));
+    assert.deepEqual(history(projectRoot, "root-a").r, [["alpha", "alpha.md", 1, history(projectRoot, "root-a").r[0]![3]]]);
+    const logs = readFileSync(join(logRoot, "events.jsonl"), "utf8");
+    assert.equal(logs.includes("wiki-history.json"), false);
+    assert.equal(logs.includes("openCount"), false);
+  } finally {
+    process.env.PI_C2_HOME = previousHome;
+    rmSync(logRoot, { recursive: true, force: true });
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
