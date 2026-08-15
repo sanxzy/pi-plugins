@@ -9,8 +9,8 @@ import { errorResult, textResult } from "../results.ts";
 import { saveWikiEntry, slugifyUrl, type WikiSaveResult, wikiRoot } from "../wiki.ts";
 
 const DEFAULT_TIMEOUT_SECONDS = 30;
+const MIN_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
-const MIN_TIMEOUT_SECONDS = 1;
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
 
@@ -22,7 +22,7 @@ const webFetchParams = Type.Object({
       default: "markdown",
     }),
   ),
-  timeout: Type.Optional(Type.Number({ description: "Optional timeout in seconds (maximum 3600; centralized default is 30)" })),
+  timeout: Type.Optional(Type.Number({ description: "Optional timeout in seconds (minimum 30, maximum 3600; centralized default is 30)" })),
 });
 
 type WebFetchParams = {

@@ -227,6 +227,32 @@ test("web_fetch maxResponseBytes is shared via the resolver", async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
+test("web_fetch clamps an explicit sub-30 timeout up to the enforced 30s floor", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wiki-"));
+  const originalAbortTimeout = AbortSignal.timeout;
+  const observed: number[] = [];
+  const replacement = ((ms: number) => {
+    observed.push(ms);
+    return originalAbortTimeout(50); // short real timer so the request completes fast
+  }) as typeof AbortSignal.timeout;
+  (AbortSignal as unknown as { timeout: typeof AbortSignal.timeout }).timeout = replacement;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("ok", { headers: { "content-type": "text/plain" } })) as typeof globalThis.fetch;
+  try {
+    const result = await executeWebFetch(
+      { url: "https://example.com/floor", timeout: 1 },
+      undefined,
+      { wikiRoot: root },
+    );
+    assert.equal(text(result).includes("ok"), true);
+    assert.equal(observed[0], 30_000, "explicit sub-30 timeout is clamped to the 30s floor");
+  } finally {
+    globalThis.fetch = original;
+    (AbortSignal as unknown as { timeout: typeof AbortSignal.timeout }).timeout = originalAbortTimeout;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("invalid web settings fall through to defaults and do not break tool execution", async () => {
   const home = tempHome();
   homeWith(home, { defaultNumResults: -1, fetchTimeoutSeconds: 0, searchTimeoutMs: 0, defaultSearchType: "invalid" });

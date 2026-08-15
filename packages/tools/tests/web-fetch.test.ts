@@ -189,24 +189,30 @@ test("web_fetch turns HTTP and network failures into tool errors", async () => {
 
 test("web_fetch times out stalled requests with a tool error", async () => {
   const tool = captureTool();
-  await withFetch(
-    (_input, init) =>
-      new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => {
-          reject(new DOMException("The operation was aborted", "TimeoutError"));
-        });
-      }),
-    async () => {
-      const result = await tool.execute(
-        "call",
-        { url: "https://example.com/slow", timeout: 1 },
-        undefined,
-        undefined,
-        context,
-      );
-      assert.equal(text(result), "Error: Request timed out");
-    },
-  );
+  const originalAbortTimeout = AbortSignal.timeout;
+  (AbortSignal as unknown as { timeout: typeof AbortSignal.timeout }).timeout = (() => originalAbortTimeout(10)) as typeof AbortSignal.timeout;
+  try {
+    await withFetch(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted", "TimeoutError"));
+          });
+        }),
+      async () => {
+        const result = await tool.execute(
+          "call",
+          { url: "https://example.com/slow", timeout: 30 },
+          undefined,
+          undefined,
+          context,
+        );
+        assert.equal(text(result), "Error: Request timed out");
+      },
+    );
+  } finally {
+    (AbortSignal as unknown as { timeout: typeof AbortSignal.timeout }).timeout = originalAbortTimeout;
+  }
 });
 
 test("web_fetch rejects a declared content length over 5 MB before reading the body", async () => {
