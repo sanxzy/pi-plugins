@@ -66,9 +66,10 @@ test("registers exactly the five cwd-scoped goal tools", () => {
     1_000_000,
   );
   assert.deepEqual(Object.keys(registered.get("goal_pause")?.parameters.properties ?? {}), ["reason"]);
-  for (const name of ["goal_resume", "goal_status", "goal_clear"]) {
+  for (const name of ["goal_resume", "goal_status"]) {
     assert.deepEqual(Object.keys(registered.get(name)?.parameters.properties ?? {}), []);
   }
+  assert.deepEqual(Object.keys(registered.get("goal_clear")?.parameters.properties ?? {}), ["isComplete"]);
 });
 
 test("goal_create preserves the exact prompt and returns an active record", async () => {
@@ -120,11 +121,33 @@ test("goal lifecycle tools return text-only success and precise errors", async (
     const resumed = await registered.get("goal_resume")!.execute("call", {}, undefined, undefined, ctx);
     assert.equal(text(resumed), "Goal resumed: active");
 
-    const cleared = await registered.get("goal_clear")!.execute("call", {}, undefined, undefined, ctx);
+    const declined = await registered.get("goal_clear")!.execute("call", { isComplete: false }, undefined, undefined, ctx);
+    assert.match(text(declined), /not yet complete|not cleared/i);
+    assert.match(text(declined), /first|goal context/i);
+    const stillPresent = await registered.get("goal_status")!.execute("call", {}, undefined, undefined, ctx);
+    assert.match(text(stillPresent), /active/);
+
+    const cleared = await registered.get("goal_clear")!.execute("call", { isComplete: true }, undefined, undefined, ctx);
     assert.match(text(cleared), /completed|congrat/i);
 
-    const missing = await registered.get("goal_clear")!.execute("call", {}, undefined, undefined, ctx);
+    const missing = await registered.get("goal_clear")!.execute("call", { isComplete: true }, undefined, undefined, ctx);
     assert.match(text(missing), /no goal/i);
+  });
+});
+
+test("goal_clear false preserves paused context and explains how to finish", async () => {
+  await withCwd(async (cwd, registered) => {
+    const ctx = context(cwd);
+    await registered.get("goal_create")!.execute("call", { prompt: "finish the migration" }, undefined, undefined, ctx);
+    await registered.get("goal_pause")!.execute("call", { reason: "waiting for verification" }, undefined, undefined, ctx);
+
+    const result = await registered.get("goal_clear")!.execute("call", { isComplete: false }, undefined, undefined, ctx);
+    assert.match(text(result), /not yet complete/i);
+    assert.match(text(result), /waiting for verification/);
+    assert.match(text(result), /isComplete: true|isComplete.*true/i);
+    const status = await registered.get("goal_status")!.execute("call", {}, undefined, undefined, ctx);
+    assert.match(text(status), /paused/);
+    assert.match(text(status), /finish the migration/);
   });
 });
 
