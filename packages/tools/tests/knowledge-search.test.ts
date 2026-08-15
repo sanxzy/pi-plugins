@@ -240,7 +240,9 @@ test("knowledge_search returns deterministically ranked excerpts with scores and
     assert.equal(details.results[0]?.score, 0.254095);
     assert.equal(details.results[1]?.score, 0.178838);
     assert.equal(details.results[0]?.file, "typescript-notes.md");
-    assert.match(text(result), /typescript-notes: typescript-notes\.md/);
+    assert.match(text(result), /- typescript-notes\.md \(/);
+    assert.equal((text(result).match(/typescript-notes\.md/g) ?? []).length, 1);
+    assert.doesNotMatch(text(result), /typescript-notes: typescript-notes\.md/);
     assert.equal(details.results[0]?.source, "web_search");
     assert.equal(typeof details.results[0]?.excerpt, "string");
     assert.match(text(result), /typescript-notes\.md/);
@@ -269,6 +271,23 @@ test("knowledge_search searches natural-language queries and continuation pages"
     assert.equal(details.results.length, 2);
     assert.deepEqual(details.results.map((item) => item.file), ["react-notes.md", "react-notes.part-002.md"]);
     assert.equal(details.results.every((item) => String(item.file).startsWith("react-notes")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("knowledge_search compact search output deduplicates files with multiple matching entries", async () => {
+  const root = tempRoot();
+  writeFileSync(
+    join(root, "repeated.md"),
+    formatWikiEntry({ topic: "repeated", source: "web_search", queryOrUrl: "repeated", format: "markdown", title: "Repeated", text: "meaning meaning", timestamp: "2026-01-01T00:00:00.000Z" }) +
+      formatWikiEntry({ topic: "repeated", source: "web_fetch", queryOrUrl: "https://example.com/repeated", format: "markdown", title: "Repeated again", text: "meaning meaning", timestamp: "2026-01-02T00:00:00.000Z" }),
+  );
+  try {
+    const result = await executeKnowledgeSearch({ type: "wikis", query: "meaning" }, { wikiRoot: root });
+    const details = result.details as unknown as { results: Array<Record<string, unknown>> };
+    assert.ok(details.results.length > 1);
+    assert.equal((text(result).match(/repeated\.md/g) ?? []).length, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -987,7 +1006,8 @@ test("wiki discovery output is bounded to the documented byte budget", async () 
   try {
     const result = await executeKnowledgeSearch({ type: "wikis", query: "*" }, { wikiRoot: root });
     assert.ok(Buffer.byteLength(text(result), "utf8") <= MAX_WIKI_DISCOVERY_OUTPUT_BYTES);
-    assert.match(text(result), /- topic-\d{3}: topic-\d{3}\.md/);
+    assert.match(text(result), /- topic-\d{3}\.md/);
+    assert.doesNotMatch(text(result), /topic-\d{3}: topic-\d{3}\.md/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

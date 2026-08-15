@@ -461,8 +461,7 @@ export async function executeKnowledgeSearch(
         for (const page of topic.pages) {
           const metadata = page.openCount === undefined ? "" : `openCount: ${page.openCount}`;
           const prefix = topic.pages.length > 1 ? "  - " : "- ";
-          const topicPrefix = topic.pages.length > 1 ? "" : `${topic.topic}: `;
-          if (!appendLine(`${prefix}${topicPrefix}${page.file}${metadata ? ` (${metadata})` : ""}`)) break outer;
+          if (!appendLine(`${prefix}${page.file}${metadata ? ` (${metadata})` : ""}`)) break outer;
         }
       }
     }
@@ -493,7 +492,9 @@ export async function executeKnowledgeSearch(
       results: [],
     });
   }
-  const rendered = results.map((item) => `- ${item.topic}: ${item.file} (${item.score})`).join("\n");
+  const rendered = [...new Map(results.map((item) => [item.file, item])).values()]
+    .map((item) => `- ${item.file} (${item.score})`)
+    .join("\n");
   return textResult(rendered, {
     mode: "wikis",
     ...(params.query === undefined ? {} : { query: params.query }),

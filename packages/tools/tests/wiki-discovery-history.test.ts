@@ -113,7 +113,8 @@ test("wildcard selection caps pages globally before regrouping topics", async ()
     assert.deepEqual(topics.map((topic) => topic.topic), ["alpha", "beta"]);
     assert.deepEqual(topics[0]?.pages.map((page) => page.file), ["alpha.part-002.md"]);
     assert.deepEqual(topics[1]?.pages.map((page) => page.file), ["beta.md"]);
-    assert.match(text(result), /alpha\.part-002\.md \(openCount: 4\)[\s\S]*beta: beta\.md \(openCount: 3\)/);
+    assert.match(text(result), /alpha\.part-002\.md \(openCount: 4\)[\s\S]*- beta\.md \(openCount: 3\)/);
+    assert.doesNotMatch(text(result), /alpha: alpha\.part|beta: beta\.md/);
   } finally {
     rmSync(wikiRoot, { recursive: true, force: true });
     rmSync(projectRoot, { recursive: true, force: true });
