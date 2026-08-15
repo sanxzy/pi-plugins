@@ -386,23 +386,70 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Tokenize a value into normalized query terms. */
+/** BM25 defaults for the local wiki corpus. */
+const BM25_K1 = 1.2;
+const BM25_B = 0.75;
+const TITLE_WEIGHT = 3;
+const METADATA_WEIGHT = 2;
+const BODY_WEIGHT = 1;
+const ENGLISH_STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "but", "by", "does", "for", "from", "how", "if", "in", "into", "is", "it",
+  "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these", "they", "this", "to", "was", "will", "with",
+]);
+
+/** Tokenize text using the shared exact-search normalization contract. */
 function tokenize(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 0);
+  const normalized = value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z\d])([A-Z])/g, "$1 $2")
+    .toLowerCase();
+  return normalized
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length > 0 && !ENGLISH_STOPWORDS.has(token));
 }
 
-/** Score how strongly an entry matches a query token. */
-function matchWeight(token: string, entry: WikiEntry): number {
-  const heading = tokenize(entry.title);
-  const metadata = tokenize(`${entry.title} ${entry.queryOrUrl} ${entry.format} ${entry.source}`);
-  const body = tokenize(entry.text);
-  if (heading.includes(token)) return 3;
-  if (metadata.includes(token)) return 2;
-  if (body.includes(token)) return 1;
-  return 0;
+interface WeightedDocument {
+  terms: Map<string, number>;
+  length: number;
+}
+
+function weightedDocument(entry: WikiEntry): WeightedDocument {
+  const terms = new Map<string, number>();
+  let length = 0;
+  const addField = (value: string, weight: number): void => {
+    for (const token of tokenize(value)) {
+      terms.set(token, (terms.get(token) ?? 0) + weight);
+      length += weight;
+    }
+  };
+  addField(entry.title, TITLE_WEIGHT);
+  addField(`${entry.queryOrUrl} ${entry.format} ${entry.source}`, METADATA_WEIGHT);
+  addField(entry.text, BODY_WEIGHT);
+  return { terms, length };
+}
+
+function idf(documentCount: number, documentFrequency: number): number {
+  return Math.log(1 + (documentCount - documentFrequency + 0.5) / (documentFrequency + 0.5));
+}
+
+function bm25Score(
+  queryTokens: readonly string[],
+  document: WeightedDocument,
+  corpus: readonly WeightedDocument[],
+): number {
+  const averageLength = corpus.reduce((total, item) => total + item.length, 0) / corpus.length;
+  const safeAverageLength = averageLength > 0 ? averageLength : 1;
+  let score = 0;
+  for (const token of queryTokens) {
+    const termFrequency = document.terms.get(token) ?? 0;
+    if (termFrequency === 0) continue;
+    const documentFrequency = corpus.reduce((count, item) => count + (item.terms.has(token) ? 1 : 0), 0);
+    const normalization = termFrequency + BM25_K1 * (1 - BM25_B + BM25_B * document.length / safeAverageLength);
+    score += idf(corpus.length, documentFrequency) * (termFrequency * (BM25_K1 + 1)) / normalization;
+  }
+  return score;
 }
 
 /** Wrap a snippet around the first token occurrence. */
@@ -412,14 +459,14 @@ function makeExcerpt(text: string, maxLength: number): string {
   return `${normalized.slice(0, maxLength - 3)}\u2026`;
 }
 
-/**
- * Search the wiki corpus for the best matching entries.
- *
- * Reads every `.md` page under the root, parses entries, ranks them with the
- * fixed heading/metadata/body weights, and returns the top results capped by
- * `max`. Topic filters match the slugified base topic (including continuation
- * pages). Returns an empty array for absent or empty storage.
- */
+function humanizeTopic(topic: string): string {
+  return topic
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+/** Search the wiki corpus for the best matching entries with exact BM25. */
 export async function searchWikis(
   root: string,
   query: string,
@@ -432,6 +479,7 @@ export async function searchWikis(
     totalPages: number;
     timestamp?: string;
     source: string;
+    title?: string;
     score: number;
     excerpt: string;
   }>
@@ -454,8 +502,7 @@ export async function searchWikis(
       } catch {
         return;
       }
-      const parsed = parseWikiEntries(document, file);
-      for (const entry of parsed) entries.push({ entry, file });
+      for (const entry of parseWikiEntries(document, file)) entries.push({ entry, file });
     }),
   );
 
@@ -464,14 +511,21 @@ export async function searchWikis(
     const topic = file.replace(/\.part-\d{3}\.md$/, "").replace(/\.md$/, "");
     pageCounts.set(topic, (pageCounts.get(topic) ?? 0) + 1);
   }
-  const tokens = tokenize(query);
+  const queryTokens = [...new Set(tokenize(query))];
+  const documents = entries.map(({ entry }) => weightedDocument(entry));
   const matches = entries
-    .map(({ entry, file }) => {
-      const score = tokens.reduce((total, token) => total + matchWeight(token, entry), 0);
+    .map(({ entry, file }, index) => {
       const topic = file.replace(/\.part-\d{3}\.md$/, "").replace(/\.md$/, "");
       const part = /\.part-(\d{3})\.md$/.exec(file);
       const page = part ? Number(part[1]) : 1;
-      return { entry, file, topic, page, totalPages: pageCounts.get(topic) ?? 1, score };
+      return {
+        entry,
+        file,
+        topic,
+        page,
+        totalPages: pageCounts.get(topic) ?? 1,
+        score: documents.length === 0 ? 0 : bm25Score(queryTokens, documents[index]!, documents),
+      };
     })
     .filter((match) => match.score > 0)
     .sort((left, right) => {
@@ -491,6 +545,7 @@ export async function searchWikis(
     totalPages: number;
     timestamp?: string;
     source: string;
+    title?: string;
     score: number;
     excerpt: string;
   }> = [];
@@ -503,7 +558,8 @@ export async function searchWikis(
       totalPages,
       timestamp: entry.timestamp,
       source: entry.source,
-      score,
+      title: entry.title || humanizeTopic(topic),
+      score: Number(score.toFixed(6)),
       excerpt: makeExcerpt(entry.text, 2048),
     };
     const nextLength = JSON.stringify(result).length;

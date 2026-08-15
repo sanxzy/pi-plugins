@@ -70,6 +70,7 @@ export interface KnowledgeSearchResultItem {
   timestamp?: string;
   source: string;
   score: number;
+  title?: string;
   excerpt: string;
 }
 

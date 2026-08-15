@@ -167,8 +167,8 @@ test("knowledge_search returns deterministically ranked excerpts with scores and
     const result = await executeKnowledgeSearch({ type: "wikis", query: "typescript" }, { wikiRoot: root });
     const details = result.details as unknown as unknown as { results: Array<Record<string, unknown>> };
     assert.equal(details.results.length, 2);
-    assert.equal(details.results[0]?.score, 3);
-    assert.equal(details.results[1]?.score, 1);
+    assert.equal(details.results[0]?.score, 0.254095);
+    assert.equal(details.results[1]?.score, 0.178838);
     assert.equal(details.results[0]?.file, "typescript-notes.md");
     assert.equal(details.results[0]?.source, "web_search");
     assert.equal(typeof details.results[0]?.excerpt, "string");
@@ -196,7 +196,7 @@ test("knowledge_search accepts natural-language topic filters and searches conti
     const result = await executeKnowledgeSearch({ type: "wikis", query: "hooks", topic: "React Notes" }, { wikiRoot: root });
     const details = result.details as unknown as unknown as { results: Array<Record<string, unknown>> };
     assert.equal(details.results.length, 2);
-    assert.deepEqual(details.results.map((item) => item.file), ["react-notes.part-002.md", "react-notes.md"]);
+    assert.deepEqual(details.results.map((item) => item.file), ["react-notes.md", "react-notes.part-002.md"]);
     assert.equal(details.results.every((item) => String(item.file).startsWith("react-notes")), true);
   } finally {
     rmSync(root, { recursive: true, force: true });

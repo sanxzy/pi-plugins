@@ -63,7 +63,7 @@ test("BM25 includes title, metadata, and body-only matches with field priority",
     const items = details(result).results;
     assert.equal(items.length, 3);
     assert.ok(items.every((item) => Number(item.score) > 0));
-    assert.deepEqual(items.map((item) => item.score > 0), [true, true, true]);
+    assert.deepEqual(items.map((item) => Number(item.score) > 0), [true, true, true]);
     assert.ok(Number(items[0]?.score) > Number(items[1]?.score));
     assert.ok(Number(items[1]?.score) > Number(items[2]?.score));
   } finally {
@@ -90,7 +90,8 @@ test("BM25 normalizes accents and camelCase, removes fixed stopwords, and stays 
     const camel = await executeKnowledgeSearch({ type: "wikis", query: "signal" }, { wikiRoot });
     assert.equal(details(camel).results.length, 1);
     const stopwords = await executeKnowledgeSearch({ type: "wikis", query: "how does the and of" }, { wikiRoot });
-    assert.equal(stopwords.content[0]?.text, "No local wiki matches found.");
+    const stopwordText = stopwords.content[0]?.type === "text" ? stopwords.content[0].text : undefined;
+    assert.equal(stopwordText, "No local wiki matches found.");
     const typo = await executeKnowledgeSearch({ type: "wikis", query: "sigmal" }, { wikiRoot });
     assert.equal(details(typo).results.length, 0);
     const stem = await executeKnowledgeSearch({ type: "wikis", query: "technicals" }, { wikiRoot });
