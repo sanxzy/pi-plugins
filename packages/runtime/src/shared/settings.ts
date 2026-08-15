@@ -1,5 +1,6 @@
-import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { DEFAULT_MAX_AGENT_DEPTH, MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import { homeRoot } from "./paths.ts";
 
@@ -113,7 +114,8 @@ export const WEB_RESULTS_UPPER = 20;
 export const FETCH_SECONDS_MAX = 3_600;
 export const FETCH_SECONDS_MIN = 30;
 
-function defaultSettings(): ResolvedSettings {
+/** Build-time defaults shared by resolution and first-start config generation. */
+export function defaultSettings(): ResolvedSettings {
   return {
     agents: {
       maxAgentDepth: DEFAULT_MAX_AGENT_DEPTH,
@@ -165,6 +167,52 @@ function defaultSettings(): ResolvedSettings {
       goalMaxPromptLength: 4_000,
     },
   };
+}
+
+/**
+ * Create the canonical settings file once, without exposing a partially written
+ * file or replacing an existing user-owned file. The temporary file is fully
+ * written and synced before an exclusive hard-link publishes it at the target.
+ * A concurrent creator wins the link race; all failures are intentionally
+ * non-fatal so the extension can continue with resolver defaults.
+ */
+export function bootstrapSettingsConfig(filePath = settingsConfigPath()): boolean {
+  const directory = dirname(filePath);
+  let temporaryPath: string | undefined;
+  try {
+    mkdirSync(directory, { recursive: true });
+    const defaults = defaultSettings();
+    const template: ResolvedSettings = {
+      ...defaults,
+      agents: { ...defaults.agents },
+      runtime: { ...defaults.runtime },
+      channels: { ...defaults.channels },
+      tools: { web: { ...defaults.tools.web, exaApiKey: "" } },
+      mcp: { ...defaults.mcp },
+      commands: { ...defaults.commands, telegram: { ...defaults.commands.telegram } },
+    };
+    temporaryPath = join(directory, `.${filePath.split(/[\\/]/).pop() ?? "config.json"}.${randomUUID()}.tmp`);
+    const fd = openSync(temporaryPath, "wx");
+    try {
+      writeFileSync(fd, `${JSON.stringify(template, null, 2)}
+`, "utf8");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    try {
+      linkSync(temporaryPath, filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  } catch {
+    return false;
+  } finally {
+    if (temporaryPath) {
+      try { unlinkSync(temporaryPath); } catch { /* another cleanup or failed create */ }
+    }
+  }
 }
 
 /** Read a config file; malformed or missing input degrades to an empty source. */

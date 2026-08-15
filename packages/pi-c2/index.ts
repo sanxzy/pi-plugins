@@ -27,6 +27,7 @@ import {
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import { registerChildExtensionFactory } from "@xzy-ai/runtime";
+import { bootstrapSettingsConfig } from "@xzy-ai/runtime";
 import { registerMcpLifecycle } from "@xzy-ai/mcp";
 import type {
   AgentDetails,
@@ -46,6 +47,12 @@ const extensionName = "pi-c2";
 
 /** PI extension entry point. */
 export default function piC2Extension(pi: ExtensionAPI): void {
+  // First run after installation auto-materials the canonical settings file so
+  // all keys and defaults are immediately present and user-editable. It is
+  // idempotent and never overwrites an existing user-owned or malformed file;
+  // a failure is non-fatal and startup continues on resolver defaults.
+  bootstrapSettingsConfig();
+
   // Child sessions create an isolated SDK resource loader. Register this same
   // inline factory process-wide before composing tools so those loaders can
   // construct the agent-family/web registrations; their child allowlists still

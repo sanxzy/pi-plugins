@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { settingsConfigPath } from "@xzy-ai/runtime";
 import piC2Extension, {
   extensionName,
   type QuestionDetails,
@@ -8,6 +12,51 @@ import piC2Extension, {
   type WebSearchDetails,
   type KnowledgeSearchDetails,
 } from "../index.ts";
+
+function tempHome(): string {
+  return mkdtempSync(join(tmpdir(), "pi-c2-bootstrap-home-"));
+}
+
+function withHome(home: string, run: () => void): void {
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = home;
+  try {
+    run();
+  } finally {
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
+  }
+}
+
+test("extension startup bootstraps the canonical settings file on first start", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      assert.equal(existsSync(settingsConfigPath()), false, "fixture starts without a config");
+      const pi = {
+        registerTool() {},
+        registerShortcut() {},
+        registerCommand() {},
+        on() {},
+        setActiveTools() {},
+        getAllTools() {
+          return [];
+        },
+        sendUserMessage() {},
+      } as unknown as ExtensionAPI;
+      piC2Extension(pi);
+      assert.equal(existsSync(settingsConfigPath()), true, "first start creates the canonical config");
+      const parsed = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as { commands?: { goalMaxPromptLength?: number } };
+      assert.equal(parsed.commands?.goalMaxPromptLength, 4_000);
+      // A customized config is never overwritten by a later start.
+      writeFileSync(settingsConfigPath(), JSON.stringify({ commands: { goalMaxPromptLength: 9 } }));
+      piC2Extension(pi);
+      assert.equal(JSON.parse(readFileSync(settingsConfigPath(), "utf8")).commands?.goalMaxPromptLength, 9);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 /**
  * Phase 4 extension-wiring tests.

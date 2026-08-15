@@ -65,6 +65,23 @@ test("first-start bootstrap creates every settings key with resolver defaults", 
   }
 });
 
+test("concurrent first-start bootstraps publish one complete valid config", async () => {
+  const home = tempHome();
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = home;
+  try {
+    const results = await Promise.all(Array.from({ length: 8 }, () => Promise.resolve(bootstrapSettingsConfig())));
+    assert.equal(results.filter(Boolean).length, 1);
+    const parsed = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as Record<string, unknown>;
+    assert.equal(typeof parsed.agents, "object");
+    assert.equal(typeof parsed.commands, "object");
+  } finally {
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("first-start bootstrap is idempotent and never overwrites an existing config", () => {
   const home = tempHome();
   try {
@@ -82,11 +99,31 @@ test("first-start bootstrap is idempotent and never overwrites an existing confi
   }
 });
 
-test("bootstrap failure is non-fatal", () => {
+test("bootstrap preserves malformed and partially populated existing configs", () => {
   const home = tempHome();
   try {
     withHome(home, () => {
-      assert.equal(bootstrapSettingsConfig(join(home, "not-a-file")), false);
+      const file = settingsConfigPath();
+      mkdirSync(join(home, "pi-c2"), { recursive: true });
+      writeFileSync(file, "{ malformed");
+      assert.equal(bootstrapSettingsConfig(), false);
+      assert.equal(readFileSync(file, "utf8"), "{ malformed");
+      writeFileSync(file, JSON.stringify({ agents: { maxConcurrency: 9 } }));
+      assert.equal(bootstrapSettingsConfig(), false);
+      assert.equal(readFileSync(file, "utf8"), JSON.stringify({ agents: { maxConcurrency: 9 } }));
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap failure is non-fatal", () => {
+  const home = tempHome();
+  try {
+    const blocked = join(home, "blocked");
+    writeFileSync(blocked, "not a directory");
+    withHome(home, () => {
+      assert.equal(bootstrapSettingsConfig(join(blocked, "config.json")), false);
       assert.equal(resolveSettings().agents.maxAgentDepth, 4);
     });
   } finally {
