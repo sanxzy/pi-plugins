@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "pnpm -r --if-present run typecheck",
-    "test": "pnpm -r --if-present run test"
+    "test": "pnpm -r --if-present run test",
+    "test:all": "bash scripts/test-all.sh"
   },
   "engines": {
     "node": ">=22.19.0",
