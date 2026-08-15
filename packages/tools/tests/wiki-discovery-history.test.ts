@@ -81,7 +81,7 @@ test("wildcard discovery follows usable root history order, prunes stale records
     assert.equal(pages[0]?.title, "Alpha stored title");
     assert.equal(pages[0]?.openCount, 3);
     assert.equal(pages[0]?.lastOpened, 1000);
-    assert.doesNotMatch(text(result), /stale|markerless|Alpha stored title|alpha body/);
+    assert.doesNotMatch(text(result), /stale|markerless|alpha body/);
     const persisted = JSON.parse(readFileSync(historyPath(projectRoot, "root-a"), "utf8")) as { r: unknown[] };
     assert.deepEqual(persisted.r, [["beta", "beta.md", 2, 2000], ["alpha", "alpha.md", 3, 1000]]);
   } finally {
@@ -160,7 +160,35 @@ test("continuation pages use their own entry titles and entryless pages use a ti
     const pages = discovery(result).topics.flatMap((topic) => topic.pages);
     assert.equal(pages.find((page) => page.file === "react-hooks.part-002.md")?.title, "React continuation");
     assert.equal(pages.find((page) => page.file === "plain-topic.md")?.title, "Plain Topic");
-    assert.doesNotMatch(text(result), /React overview|React continuation|plain-topic body/);
+    assert.doesNotMatch(text(result), /plain-topic body/);
+  } finally {
+    rmSync(wikiRoot, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("markerless-only roots prune stale history and discovery text shows additive metadata without bodies", async () => {
+  const wikiRoot = root();
+  const projectRoot = root();
+  writeFileSync(join(wikiRoot, "markerless.md"), "not marker-valid");
+  writeHistory(projectRoot, "root-a", [["markerless", "markerless.md", 9, 9000], ["stale", "stale.md", 8, 8000]]);
+  try {
+    const result = await executeKnowledgeSearch(
+      { type: "wikis", query: "*" },
+      { wikiRoot, projectRoot, sessionId: "root-a", rootSessionId: "root-a" },
+    );
+    assert.equal(text(result), "No local wiki pages found.");
+    assert.deepEqual(JSON.parse(readFileSync(historyPath(projectRoot, "root-a"), "utf8")), { v: 1, r: [] });
+
+    writePage(wikiRoot, "alpha", "alpha.md", { title: "Visible title", body: "SECRET_BODY" });
+    writeHistory(projectRoot, "root-a", [["alpha", "alpha.md", 2, 2000], ["bad", "bad.md", 1, 1]]);
+    const discovered = await executeKnowledgeSearch(
+      { type: "wikis", query: "*" },
+      { wikiRoot, projectRoot, sessionId: "root-a", rootSessionId: "root-a" },
+    );
+    assert.match(text(discovered), /alpha\.md.*title: Visible title.*openCount: 2.*lastOpened: 2000/);
+    assert.doesNotMatch(text(discovered), /SECRET_BODY/);
+    assert.deepEqual(JSON.parse(readFileSync(historyPath(projectRoot, "root-a"), "utf8")), { v: 1, r: [["alpha", "alpha.md", 2, 2000]] });
   } finally {
     rmSync(wikiRoot, { recursive: true, force: true });
     rmSync(projectRoot, { recursive: true, force: true });

@@ -110,6 +110,9 @@ type WikiSearchDetails = {
         totalPages: number;
         previous?: string;
         next?: string;
+        title?: string;
+        openCount?: number;
+        lastOpened?: number;
       }>;
       truncated?: boolean;
     }>;
@@ -431,7 +434,12 @@ export async function executeKnowledgeSearch(
       for (const topic of topics) {
         if (!appendLine(`Topic: ${topic.topic}`)) break outer;
         for (const page of topic.pages) {
-          if (!appendLine(`  - ${page.file}`)) break outer;
+          const metadata = [
+            page.title ? `title: ${page.title}` : "",
+            page.openCount === undefined ? "" : `openCount: ${page.openCount}`,
+            page.lastOpened === undefined ? "" : `lastOpened: ${page.lastOpened}`,
+          ].filter(Boolean).join(", ");
+          if (!appendLine(`  - ${page.file}${metadata ? ` (${metadata})` : ""}`)) break outer;
         }
       }
     }

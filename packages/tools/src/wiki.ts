@@ -152,6 +152,7 @@ interface CurrentWikiPage {
 interface DiscoveryHistoryState {
   usable: boolean;
   history: WikiHistoryEnvelope;
+  needsRewrite: boolean;
 }
 
 async function currentWikiPages(root: string, topicFilter?: string): Promise<CurrentWikiPage[] | undefined> {
@@ -189,19 +190,21 @@ async function currentWikiPages(root: string, topicFilter?: string): Promise<Cur
 
 async function readDiscoveryHistory(options: WikiHistoryOptions): Promise<DiscoveryHistoryState> {
   const path = historyPath(options);
-  if (!path) return { usable: false, history: { v: 1, r: [] } };
+  if (!path) return { usable: false, history: { v: 1, r: [] }, needsRewrite: false };
   let raw: unknown;
   try {
     raw = JSON.parse(await readFile(path, "utf8")) as unknown;
   } catch {
-    return { usable: false, history: { v: 1, r: [] } };
+    return { usable: false, history: { v: 1, r: [] }, needsRewrite: false };
   }
   if (!raw || typeof raw !== "object" || (raw as { v?: unknown }).v !== 1 || !Array.isArray((raw as { r?: unknown }).r)) {
-    return { usable: false, history: { v: 1, r: [] } };
+    return { usable: false, history: { v: 1, r: [] }, needsRewrite: false };
   }
-  const valid = (raw as { r: unknown[] }).r.filter(validHistoryRecord);
-  if (valid.length === 0) return { usable: false, history: { v: 1, r: [] } };
-  return { usable: true, history: normalizeWikiHistory(raw) };
+  const rawRecords = (raw as { r: unknown[] }).r;
+  const valid = rawRecords.filter(validHistoryRecord);
+  if (valid.length === 0) return { usable: false, history: { v: 1, r: [] }, needsRewrite: rawRecords.length > 0 };
+  const history = normalizeWikiHistory(raw);
+  return { usable: true, history, needsRewrite: JSON.stringify({ v: 1, r: valid }) !== JSON.stringify(history) };
 }
 
 /** Discover current wiki pages, optionally projecting root-session open history. */
@@ -211,9 +214,9 @@ export async function discoverWikiTopics(
 ): Promise<WikiTopicDiscovery[]> {
   const topicFilter = options.topic === undefined ? undefined : slugify(options.topic);
   const current = await currentWikiPages(root, topicFilter);
-  if (!current || current.length === 0) return [];
+  if (!current) return [];
 
-  const historyState = options.history ? await readDiscoveryHistory(options.history) : { usable: false, history: { v: 1, r: [] } };
+  const historyState = options.history ? await readDiscoveryHistory(options.history) : { usable: false, history: { v: 1, r: [] }, needsRewrite: false };
   const currentByKey = new Map(current.map((page) => [`${page.topic}\u0000${page.file}`, page]));
   const hasMarkerValidHistory = historyState.usable && historyState.history.r.some((record) => currentByKey.has(`${record[0]}\u0000${record[1]}`));
   let selected: Array<CurrentWikiPage & { openCount?: number; lastOpened?: number }>;
@@ -230,9 +233,10 @@ export async function discoverWikiTopics(
       selected = current;
     }
     const normalized = { v: 1 as const, r: retained };
-    if (options.history && JSON.stringify(normalized) !== JSON.stringify(historyState.history)) writeWikiHistory(options.history, normalized);
+    if (options.history && (historyState.needsRewrite || JSON.stringify(normalized) !== JSON.stringify(historyState.history))) writeWikiHistory(options.history, normalized);
   } else {
     selected = current;
+    if (options.history && historyState.needsRewrite) writeWikiHistory(options.history, { v: 1, r: [] });
   }
 
   if (hasMarkerValidHistory && selected.some((page) => page.openCount !== undefined)) {
