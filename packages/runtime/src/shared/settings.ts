@@ -176,10 +176,11 @@ export function defaultSettings(): ResolvedSettings {
  * A concurrent creator wins the link race; all failures are intentionally
  * non-fatal so the extension can continue with resolver defaults.
  */
-export function bootstrapSettingsConfig(filePath = settingsConfigPath()): boolean {
-  const directory = dirname(filePath);
+export function bootstrapSettingsConfig(filePath?: string): boolean {
   let temporaryPath: string | undefined;
   try {
+    const targetPath = filePath ?? settingsConfigPath();
+    const directory = dirname(targetPath);
     mkdirSync(directory, { recursive: true });
     const defaults = defaultSettings();
     const template: ResolvedSettings = {
@@ -191,8 +192,8 @@ export function bootstrapSettingsConfig(filePath = settingsConfigPath()): boolea
       mcp: { ...defaults.mcp },
       commands: { ...defaults.commands, telegram: { ...defaults.commands.telegram } },
     };
-    temporaryPath = join(directory, `.${filePath.split(/[\\/]/).pop() ?? "config.json"}.${randomUUID()}.tmp`);
-    const fd = openSync(temporaryPath, "wx");
+    temporaryPath = join(directory, `.${targetPath.split(/[\\/]/).pop() ?? "config.json"}.${randomUUID()}.tmp`);
+    const fd = openSync(temporaryPath, "wx", 0o600);
     try {
       writeFileSync(fd, `${JSON.stringify(template, null, 2)}
 `, "utf8");
@@ -201,7 +202,7 @@ export function bootstrapSettingsConfig(filePath = settingsConfigPath()): boolea
       closeSync(fd);
     }
     try {
-      linkSync(temporaryPath, filePath);
+      linkSync(temporaryPath, targetPath);
       return true;
     } catch {
       return false;
