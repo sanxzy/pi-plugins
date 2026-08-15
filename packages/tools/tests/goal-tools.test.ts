@@ -76,9 +76,12 @@ test("goal_create preserves the exact prompt and returns an active record", asyn
   await withCwd(async (cwd, registered) => {
     const prompt = "  Keep this exact text.\nDo not rewrite me.  ";
     const result = await registered.get("goal_create")!.execute("call", { prompt, interval: "30s" }, undefined, undefined, context(cwd));
-    assert.match(text(result), /Goal created/);
-    assert.match(text(result), /active/);
-    assert.match(text(result), new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(text(result), /^Goal created successfully!/);
+    assert.match(text(result), /Please proceed carefully and complete the work correctly/);
+    // AC: prompt appears exactly once — only in the formatted Prompt: field, not duplicated in a header line.
+    assert.equal((text(result).match(new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length, 1);
+    assert.match(text(result), /^Prompt: /m);
+    assert.match(text(result), /Status: active|Goal status: active/);
     const goal = (result.details as { goal: { prompt: string; intervalMs: number; status: string } }).goal;
     assert.equal(goal.prompt, prompt);
     assert.equal(goal.intervalMs, 30_000);
