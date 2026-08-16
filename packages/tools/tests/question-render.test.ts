@@ -15,7 +15,7 @@ import type { QuestionDetails } from "../src/types.ts";
  */
 
 interface Renderers {
-  renderCall: (args: QuestionParams, theme: Theme) => { render(width: number): string[] };
+  renderCall?: (args: QuestionParams, theme: Theme) => { render(width: number): string[] };
   renderResult: (
     result: { content: Array<{ type: string; text?: string }>; details?: QuestionDetails },
     options: unknown,
@@ -37,7 +37,7 @@ function captureRenderers(): Renderers {
     },
   } as unknown as Parameters<typeof registerQuestionTool>[0];
   registerQuestionTool(pi);
-  assert.ok(tool?.renderCall && tool.renderResult, "question tool renderers present");
+  assert.ok(tool?.renderResult, "question tool result renderer present");
   return { renderCall: tool.renderCall, renderResult: tool.renderResult };
 }
 
@@ -61,14 +61,12 @@ const params: QuestionParams = {
   ],
 };
 
-test("renderCall shows the question and numbered options including Type something", () => {
+test("question uses the host default call renderer", () => {
   const { renderCall } = captureRenderers();
-  const lines = stripVTControlCharacters(renderCall(params, theme).render(80).join("\n"));
-  assert.match(lines, /Proceed\?/);
-  assert.doesNotMatch(lines, /Yes|No|Type something/);
+  assert.equal(renderCall, undefined);
 });
 
-test("renderResult shows a selected answer with its display position", () => {
+test("renderResult shows a selected answer only when expanded", () => {
   const { renderResult } = captureRenderers();
   const details: QuestionDetails = {
     question: "Proceed?",
@@ -77,12 +75,14 @@ test("renderResult shows a selected answer with its display position", () => {
     wasCustom: false,
     index: 2,
   };
-  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError: false }).render(80).join(""));
-  assert.match(lines, /question answered/);
-  assert.doesNotMatch(lines, /No/);
+  const collapsed = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError: false }).render(80).join(""));
+  const expanded = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: true, isPartial: false }, theme, { expanded: true, isError: false }).render(80).join(""));
+  assert.match(collapsed, /question answered/);
+  assert.doesNotMatch(collapsed, /No/);
+  assert.match(expanded, /No/);
 });
 
-test("renderResult shows a custom answer as written", () => {
+test("renderResult shows a custom answer only when expanded", () => {
   const { renderResult } = captureRenderers();
   const details: QuestionDetails = {
     question: "Proceed?",
@@ -90,9 +90,11 @@ test("renderResult shows a custom answer as written", () => {
     answer: "Maybe later",
     wasCustom: true,
   };
-  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError: false }).render(80).join(""));
-  assert.match(lines, /question answered/);
-  assert.doesNotMatch(lines, /Maybe later|wrote/);
+  const collapsed = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError: false }).render(80).join(""));
+  const expanded = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: true, isPartial: false }, theme, { expanded: true, isError: false }).render(80).join(""));
+  assert.match(collapsed, /question answered/);
+  assert.doesNotMatch(collapsed, /Maybe later|wrote/);
+  assert.match(expanded, /Maybe later/);
 });
 
 test("renderResult shows Cancelled for a null answer", () => {

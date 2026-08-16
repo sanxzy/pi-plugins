@@ -12,7 +12,7 @@ import {
   type GoalPauseParams,
 } from "../tools.ts";
 import { errorResult, textResult } from "../results.ts";
-import { renderToolCall, renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
+import { renderToolOutcome, toolResultFailed } from "../render.ts";
 
 interface GoalToolDetails {
   readonly goal?: Goal;
@@ -80,11 +80,12 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return success(`Goal created successfully! Please proceed carefully and complete the work correctly.\n${formatGoal(result.goal)}`, { goal: result.goal });
       });
     },
-    renderCall(args, theme) {
-      return renderToolCall(theme, "goal_create", "creating persistent goal");
-    },
     renderResult(result, options, theme, context) {
-      return renderToolResult(theme, "goal created", toolResultFailed(result, context), options.isPartial);
+      const failed = toolResultFailed(result, context);
+      const goal = result.details?.goal;
+      const label = "Goal created";
+      const detail = goal ? `Goal created • every ${goal.intervalMs}ms\nPrompt: ${goal.prompt}` : "";
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, detail);
     },
   });
 
@@ -102,11 +103,10 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return success(`Goal paused: ${params.reason}`, { goal: result.goal });
       });
     },
-    renderCall(_args, theme) {
-      return renderToolCall(theme, "goal_pause", "pausing goal");
-    },
     renderResult(result, options, theme, context) {
-      return renderToolResult(theme, "goal paused", toolResultFailed(result, context), options.isPartial);
+      const failed = toolResultFailed(result, context);
+      const goal = result.details?.goal;
+      return renderToolOutcome(theme, "Goal paused", { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, goal?.pauseReason ?? "");
     },
   });
 
@@ -124,11 +124,10 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return success(`Goal resumed: ${result.goal.status}`, { goal: result.goal });
       });
     },
-    renderCall(_args, theme) {
-      return renderToolCall(theme, "goal_resume", "resuming goal");
-    },
     renderResult(result, options, theme, context) {
-      return renderToolResult(theme, "goal resumed", toolResultFailed(result, context), options.isPartial);
+      const failed = toolResultFailed(result, context);
+      const goal = result.details?.goal;
+      return renderToolOutcome(theme, "Goal resumed", { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, goal?.prompt ?? "");
     },
   });
 
@@ -146,12 +145,12 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return success(formatGoal(goal), { goal });
       });
     },
-    renderCall(_args, theme) {
-      return renderToolCall(theme, "goal_status", "checking goal status");
-    },
     renderResult(result, options, theme, context) {
-      const hasGoal = Boolean(result.details && "goal" in result.details && result.details.goal);
-      return renderToolResult(theme, hasGoal ? "goal status available" : "no active goal", toolResultFailed(result, context), options.isPartial);
+      const failed = toolResultFailed(result, context);
+      const goal = result.details?.goal;
+      const label = goal ? `Goal status • ${goal.status}` : "Goal status • none";
+      const detail = goal ? formatGoal(goal) : "";
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, detail);
     },
   });
 
@@ -171,12 +170,11 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return success("Congratulations, the goal was completed and cleared.", { goal });
       });
     },
-    renderCall(args, theme) {
-      return renderToolDetail(theme, "goal_clear", args.isComplete ? "clearing completed goal" : "checking goal completion");
-    },
     renderResult(result, options, theme, context) {
-      const retained = Boolean(result.details && "goal" in result.details && result.details.goal) && !Boolean(result.content?.[0] && "text" in result.content[0] && typeof result.content[0].text === "string" && result.content[0].text.includes("completed and cleared"));
-      return renderToolResult(theme, retained ? "goal retained" : "goal cleared", toolResultFailed(result, context), options.isPartial);
+      const failed = toolResultFailed(result, context);
+      const retained = Boolean(result.details?.goal) && !Boolean(result.content?.[0] && "text" in result.content[0] && typeof result.content[0].text === "string" && result.content[0].text.includes("completed and cleared"));
+      const goal = result.details?.goal;
+      return renderToolOutcome(theme, retained ? "Goal retained" : "Goal cleared", { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, goal?.prompt ?? "");
     },
   });
 }

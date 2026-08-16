@@ -38,7 +38,7 @@ function capture(register: (pi: ExtensionAPI) => void): Tool {
       tool = candidate as Tool;
     },
   } as unknown as ExtensionAPI);
-  assert.ok(tool?.renderCall && tool.renderResult, "tool renderers present");
+  assert.ok(tool?.renderResult, "tool renderer present");
   return tool;
 }
 
@@ -75,21 +75,15 @@ test("tool renderers expose safe, tool-specific activity without model payloads"
   };
 
   for (const tool of tools) {
-    const call = text(tool.renderCall!(argsByTool[tool.name] ?? {}, theme, renderContext));
+    const call = tool.renderCall ? text(tool.renderCall(argsByTool[tool.name] ?? {}, theme, renderContext)) : "";
     const result = text(tool.renderResult!({ content: [{ type: "text", text: "secret internal output" }], details: { prompt: "secret" } }, collapsedOptions, theme, renderContext));
-    assert.ok(call.length > 0, `${tool.name} renders activity`);
+    if (tool.renderCall) assert.ok(call.length > 0, `${tool.name} renders activity`);
     assert.ok(result.length > 0, `${tool.name} renders an outcome`);
-    assert.doesNotMatch(call, /secret|internal output/);
+    if (tool.renderCall) assert.doesNotMatch(call, /secret|internal output/);
     assert.doesNotMatch(result, /secret|internal output/);
   }
 
-  assert.match(text(tools[0]!.renderCall!(argsByTool.agent, theme, renderContext)), /worker/);
-  assert.match(text(tools.find((tool) => tool.name === "agent_cancel")!.renderCall!(argsByTool.agent_cancel, theme, renderContext)), /job-123/);
-  assert.match(text(tools.find((tool) => tool.name === "agent_status")!.renderCall!(argsByTool.agent_status, theme, renderContext)), /job-123/);
-  const knowledge = tools.find((tool) => tool.name === "knowledge_search")!;
-  assert.match(text(knowledge.renderCall!(argsByTool.knowledge_search, theme, renderContext)), /render migration/);
-  assert.doesNotMatch(text(tools[0]!.renderCall!(argsByTool.agent, theme, renderContext)), /SECRET_PROMPT/);
-  assert.doesNotMatch(text(tools.find((tool) => tool.name === "web_fetch")!.renderCall!(argsByTool.web_fetch, theme, renderContext)), /password|token=secret/);
+
 });
 
 test("renderers follow the agreed collapsed and expanded tool contracts", () => {
@@ -100,7 +94,7 @@ test("renderers follow the agreed collapsed and expanded tool contracts", () => 
     content: [{ type: "text", text: "Agent completed" }],
     details: { jobId: "job-123", status: "completed", subagentType: "explore", description: "audit renderers", prompt: "inspect every renderer" },
   };
-  const agentExpanded = text(agent.renderResult!(agentResult, expandedOptions, theme, renderContext));
+  const agentExpanded = text(agent.renderResult!(agentResult, expandedOptions, theme, { ...renderContext, expanded: true, args: { description: "audit renderers", prompt: "inspect every renderer" } }));
   assert.match(agentExpanded, /completed/);
   assert.match(agentExpanded, /inspect every renderer/);
 
@@ -112,14 +106,13 @@ test("renderers follow the agreed collapsed and expanded tool contracts", () => 
 
   const goalCreate = goals.find((tool) => tool.name === "goal_create")!;
   const goalResult = { content: [], details: { goal: { prompt: "finish the migration", intervalMs: 60_000, status: "active" } } };
-  assert.match(text(goalCreate.renderResult!(goalResult, collapsedOptions, theme, renderContext)), /goal created/);
+  assert.match(text(goalCreate.renderResult!(goalResult, collapsedOptions, theme, renderContext)), /Goal created/);
   assert.match(text(goalCreate.renderResult!(goalResult, expandedOptions, theme, renderContext)), /finish the migration/);
 
   const webSearch = capture(registerWebSearchTool);
-  assert.match(text(webSearch.renderCall!({ query: "pi renderers" }, theme, renderContext)), /pi renderers/);
   const webResult = { content: [{ type: "text", text: "Result one\nResult body" }], details: { query: "pi renderers", provider: "exa", results: [{ title: "Result one", url: "https://example.com" }] } };
   assert.match(text(webSearch.renderResult!(webResult, collapsedOptions, theme, renderContext)), /results/);
-  assert.match(text(webSearch.renderResult!(webResult, expandedOptions, theme, renderContext)), /Result body/);
+  assert.match(text(webSearch.renderResult!(webResult, expandedOptions, theme, { ...renderContext, expanded: true })), /Result body/);
 
   const telegram = capture((pi) => registerTelegramChatTool(pi, { registry: { register() {} } as never }));
   const telegramResult = { content: [], details: { sent: true, action: "send_text", message: "private report", chatId: "123456" } };

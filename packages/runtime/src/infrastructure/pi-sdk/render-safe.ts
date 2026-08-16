@@ -5,8 +5,27 @@ function compact(value: unknown, maxLength = 80): string {
   const withoutCredentials = text
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
     .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]");
-  const singleLine = withoutCredentials.replace(/[\u001b\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  const singleLine = withoutCredentials.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   return singleLine.length <= maxLength ? singleLine : `${singleLine.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function expandedPayload(result: unknown): string {
+  if (!result || typeof result !== "object") return "";
+  const record = result as { content?: unknown; details?: unknown };
+  const content = Array.isArray(record.content)
+    ? record.content.map((block) => {
+      if (!block || typeof block !== "object") return "";
+      const item = block as { text?: unknown; type?: unknown; mimeType?: unknown };
+      if (typeof item.text === "string") return item.text;
+      if (item.type === "image" && typeof item.mimeType === "string") return `[image: ${item.mimeType}]`;
+      return "";
+    }).filter(Boolean).join("\n")
+    : "";
+  if (content) return content;
+  const structured = record.details && typeof record.details === "object" && "structuredContent" in record.details
+    ? (record.details as { structuredContent?: unknown }).structuredContent
+    : undefined;
+  try { return structured === undefined ? "" : JSON.stringify(structured, null, 2); } catch { return ""; }
 }
 
 function failed(result: unknown, context: { isError?: boolean }): boolean {
@@ -27,8 +46,11 @@ export function inheritedMcpRenderCall(name: string, label: string, theme: { fg(
   return new Text(theme.fg("toolTitle", theme.bold(compact(label))) + theme.fg("muted", ` ${compact(name)}`), 0, 0);
 }
 
-export function inheritedMcpRenderResult(result: unknown, options: { isPartial: boolean }, theme: { fg(color: string, text: string): string }, context: { isError?: boolean }): Text {
+export function inheritedMcpRenderResult(result: unknown, options: { expanded?: boolean; isPartial: boolean }, theme: { fg(color: string, text: string): string }, context: { isError?: boolean }): Text {
   if (options.isPartial) return new Text(theme.fg("dim", "…"), 0, 0);
   const isFailed = failed(result, context);
-  return new Text(theme.fg(isFailed ? "warning" : "success", isFailed ? "✗ MCP tool failed" : "✓ MCP tool complete"), 0, 0);
+  const line = theme.fg(isFailed ? "warning" : "success", isFailed ? "✗ MCP tool failed" : "✓ MCP tool complete");
+  if (isFailed || !options.expanded) return new Text(line, 0, 0);
+  const payload = expandedPayload(result);
+  return new Text(payload ? `${line}\n${compact(payload, 50_000)}` : line, 0, 0);
 }

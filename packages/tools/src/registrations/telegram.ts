@@ -24,7 +24,7 @@ import {
 } from "@xzy-ai/channels";
 import { telegramChatParams, type TelegramChatParams } from "../tools.ts";
 import { errorResult, textResult } from "../results.ts";
-import { renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
+import { renderToolOutcome, toolResultFailed } from "../render.ts";
 import type { TelegramChatDetails } from "../types.ts";
 
 export type { TelegramChatDetails } from "../types.ts";
@@ -288,23 +288,19 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
         action: params.action,
         sent: true,
         chatId: target.targetId,
+        message: params.text,
         chunks: result.sent,
         messageIds: result.messageIds,
       });
       });
     },
-    renderCall(args: TelegramChatParams, theme) {
-      const activity = args.action === "send_text"
-        ? "sending a Telegram message"
-        : args.action === "react"
-          ? "reacting to a Telegram message"
-          : args.action === "send_choices"
-            ? "sending Telegram choices"
-            : "sending Telegram media";
-      return renderToolDetail(theme, "telegram_chat", activity);
-    },
-    renderResult(_result, options, theme, context) {
-      return renderToolResult(theme, "Telegram action complete", toolResultFailed(_result, context), options.isPartial);
+    renderResult(result, options, theme, context) {
+      const details = result.details as TelegramChatDetails | undefined;
+      const failed = toolResultFailed(result, context);
+      const action = details?.action ?? "action";
+      const label = `Telegram • ${action} • ${failed ? "failed" : "sent"}`;
+      const message = !failed && details?.action === "send_text" ? details.message ?? "" : "";
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, message);
     },
   });
 }

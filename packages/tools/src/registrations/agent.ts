@@ -3,7 +3,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { renderToolCall, renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
+import { renderToolDetail, renderToolOutcome, toolResultFailed } from "../render.ts";
 import {
   makeJobId,
   runForegroundAgent,
@@ -60,14 +60,21 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       );
     },
     renderCall(args, theme) {
-      return renderToolDetail(theme, "agent", `${args.subagent_type} — ${args.description}`);
+      return renderToolDetail(theme, "agent", `${args.subagent_type} • ${args.description}`);
     },
     renderResult(result, options, theme, context) {
       const details = result.details;
-      const jobId = details && "jobId" in details ? details.jobId : undefined;
-      const status = details && "status" in details ? details.status : undefined;
-      const label = status === "queued" ? "agent queued" : status === "running" ? "agent running" : status === "completed" ? "agent finished" : status ? `agent ${status}` : "agent finished";
-      return renderToolResult(theme, jobId ? `${label} (${jobId})` : label, toolResultFailed(result, context), options.isPartial);
+      const failed = toolResultFailed(result, context);
+      const status = details && "status" in details ? details.status : failed ? "failed" : "completed";
+      const detailsRecord = details && typeof details === "object" ? details as unknown as Record<string, unknown> : undefined;
+      const jobTitle = context.args && typeof context.args === "object" && "description" in context.args
+        ? String((context.args as { description?: unknown }).description ?? "")
+        : detailsRecord && typeof detailsRecord.description === "string" ? detailsRecord.description : "agent";
+      const label = `Agent ${status} • ${jobTitle}`;
+      const prompt = !failed && context.expanded && context.args && typeof context.args === "object" && "prompt" in context.args
+        ? `Instructions: ${String((context.args as { prompt?: unknown }).prompt ?? "")}`
+        : detailsRecord && context.expanded && typeof detailsRecord.prompt === "string" ? `Instructions: ${detailsRecord.prompt}` : "";
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, prompt);
     },
   });
 }
@@ -132,6 +139,9 @@ async function executeAgentCall(
         `Steered agent ${job.subagentType} (${params.agent_id}). The agent keeps its running context and will notify you when it settles. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.`,
         {
           jobId: job.jobId,
+          subagentType: job.subagentType,
+          description: job.description,
+          prompt: params.prompt,
           status: "running",
         },
       );
@@ -142,7 +152,7 @@ async function executeAgentCall(
     if (pool.launchingJobs.has(job.jobId)) {
       return textResult(
         `Agent ${job.subagentType} (${params.agent_id}) is already being started or resumed; its result will arrive when it settles.`,
-        { jobId: job.jobId, status: job.status },
+        { jobId: job.jobId, subagentType: job.subagentType, description: job.description, prompt: params.prompt, status: job.status },
       );
     }
     // Resume (or retry a created job) in place. Its job id, lineage, and
@@ -291,6 +301,9 @@ async function startAgentInner(
     const prefix = existingJob ? "Resumed" : "Agent";
     return textResult(`${prefix} ${job.subagentType} (${job.jobId}) ${status}.\n${result.output}`, {
       jobId: job.jobId,
+      subagentType: job.subagentType,
+      description: job.description,
+      prompt: params.prompt,
       status,
       result: result.output,
     });
@@ -330,6 +343,9 @@ async function startAgentInner(
 
   return textResult(existingJob ? formatResumingAgentText(job.subagentType, job.jobId) : formatRunningAgentText(job.subagentType, job.jobId), {
     jobId: job.jobId,
+    subagentType: job.subagentType,
+    description: job.description,
+    prompt: params.prompt,
     status: "queued",
   });
 }

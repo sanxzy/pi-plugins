@@ -273,7 +273,7 @@ async function createIsolatedChild(options: {
         ? await options.mcpBridge.invokeTool(definition.name, args, signal)
         : { content: [{ type: "text", text: "Inherited MCP execution bridge is unavailable" }], details: { error: "mcp bridge unavailable" } }),
       renderCall: (_args: unknown, theme: { fg(color: string, text: string): string; bold(text: string): string }) => inheritedMcpRenderCall(definition.name, definition.name, theme),
-      renderResult: (result: unknown, renderOptions: { isPartial: boolean }, theme: { fg(color: string, text: string): string }, context: { isError?: boolean }) => inheritedMcpRenderResult(result, renderOptions, theme, context),
+      renderResult: (result: unknown, renderOptions: { expanded?: boolean; isPartial: boolean }, theme: { fg(color: string, text: string): string }, context: { isError?: boolean }) => inheritedMcpRenderResult(result, renderOptions, theme, context),
     }));
   }
 

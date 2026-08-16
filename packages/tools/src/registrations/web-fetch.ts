@@ -1,5 +1,5 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
+import { renderToolDetail, renderToolOutcome, toolResultFailed, toolResultText } from "../render.ts";
 import { Parser } from "htmlparser2";
 import TurndownService from "turndown";
 import { Type } from "typebox";
@@ -77,8 +77,12 @@ export function registerWebFetchTool(pi: ExtensionAPI): void {
     renderCall(args, theme) {
       return renderToolDetail(theme, "web_fetch", args.url);
     },
-    renderResult(_result, options, theme, context) {
-      return renderToolResult(theme, "web fetch complete", toolResultFailed(_result, context), options.isPartial);
+    renderResult(result, options, theme, context) {
+      const failed = toolResultFailed(result, context);
+      const output = toolResultText(result);
+      const lineCount = output ? output.split("\n").length : 0;
+      const contentType = output.includes("#") ? "markdown" : "text";
+      return renderToolOutcome(theme, `Web fetch • ${contentType} • ${lineCount} lines`, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, output);
     },
   });
 }

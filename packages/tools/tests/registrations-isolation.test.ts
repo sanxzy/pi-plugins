@@ -174,7 +174,7 @@ test("agent_cancel cancels a queued job by aborting its gate controller", async 
     const tool = register(registerCancelTool);
     const result = await tool.execute("call", { job_id: "a-queued" }, undefined, undefined, context(cwd, "root-a"));
     assert.equal(result.content[0]?.text, "Agent a-queued was cancelled.");
-    assert.deepEqual(result.details, { jobId: "a-queued", success: true, status: "cancelled" });
+    assert.deepEqual(result.details, { jobId: "a-queued", subagentType: "test-agent", success: true, status: "cancelled" });
     assert.equal(controller.signal.aborted, true);
     assert.equal(pool.registry.get("a-queued")?.status, "cancelled");
   });
@@ -188,7 +188,7 @@ test("agent_cancel aborts a running job that has a job-level controller but no l
     const tool = register(registerCancelTool);
     const result = await tool.execute("call", { job_id: "a-running" }, undefined, undefined, context(cwd, "root-a"));
     assert.equal(result.content[0]?.text, "Agent a-running was cancelled.");
-    assert.deepEqual(result.details, { jobId: "a-running", success: true, status: "cancelled" });
+    assert.deepEqual(result.details, { jobId: "a-running", subagentType: "test-agent", success: true, status: "cancelled" });
     assert.equal(controller.signal.aborted, true);
     assert.equal(pool.registry.get("a-running")?.status, "cancelled");
   });
@@ -202,7 +202,7 @@ test("agent_cancel marks an orphaned running job cancelled when no live child or
     const tool = register(registerCancelTool);
     const result = await tool.execute("call", { job_id: "a-running" }, undefined, undefined, context(cwd, "root-a"));
     assert.equal(result.content[0]?.text, "Agent a-running was cancelled.");
-    assert.deepEqual(result.details, { jobId: "a-running", success: true, status: "cancelled" });
+    assert.deepEqual(result.details, { jobId: "a-running", subagentType: "test-agent", success: true, status: "cancelled" });
     assert.equal(pool.registry.get("a-running")?.status, "cancelled");
   });
 });
@@ -264,7 +264,7 @@ test("agent steer output names the targeted subagent type and remains allowed ou
       result.content[0]?.text,
       "Steered agent test-agent (a-running). The agent keeps its running context and will notify you when it settles. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.",
     );
-    assert.deepEqual(result.details, { jobId: "a-running", status: "running" });
+    assert.deepEqual(result.details, { jobId: "a-running", subagentType: "test-agent", description: "root-a:a-running", prompt: "new direction", status: "running" });
     assert.equal(steers, 1);
   });
 });

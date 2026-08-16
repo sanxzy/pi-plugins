@@ -32,6 +32,9 @@ export interface JobSummary {
 export interface AgentDetails {
   jobId: string;
   status: JobStatus;
+  subagentType?: string;
+  description?: string;
+  prompt?: string;
   result?: string;
 }
 
@@ -77,6 +80,7 @@ export interface QuestionDetails {
 /** Details payload for the `agent_cancel` tool. */
 export interface CancelDetails {
   jobId: string;
+  subagentType?: string;
   success: boolean;
   status?: JobStatus;
   reason?: string;

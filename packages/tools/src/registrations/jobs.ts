@@ -7,7 +7,7 @@ import type { JobsDetails } from "../types.ts";
 import { callerFor } from "../caller.ts";
 import { toJobSummary } from "../job-summary.ts";
 import { textResult } from "../results.ts";
-import { renderToolCall, renderToolResult, toolResultFailed } from "../render.ts";
+import { renderToolOutcome, toolResultFailed } from "../render.ts";
 
 export function registerJobsTool(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -38,11 +38,12 @@ export function registerJobsTool(pi: ExtensionAPI): void {
       return textResult(`Subagent jobs:\n${lines}${guidance}`, { jobs });
       });
     },
-    renderCall(_args, theme) {
-      return renderToolCall(theme, "agent_jobs", "listing agent jobs");
-    },
-    renderResult(_result, options, theme, context) {
-      return renderToolResult(theme, "agent jobs ready", toolResultFailed(_result, context), options.isPartial);
+    renderResult(result, options, theme, context) {
+      const details = result.details as JobsDetails | undefined;
+      const jobs = details?.jobs ?? [];
+      const label = `Agent jobs • ${jobs.length} jobs`;
+      const expanded = jobs.map((job) => `• ${job.subagentType} • ${job.jobId} • ${job.status} • ${job.description}`).join("\n");
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, toolResultFailed(result, context), expanded);
     },
   });
 }

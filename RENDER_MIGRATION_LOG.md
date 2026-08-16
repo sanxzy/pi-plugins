@@ -1,6 +1,6 @@
 # TUI Tool Rendering Migration Log
 
-This document records the per-tool migration from raw tool payload rendering to concise, user-facing activity rendering. The model continues to receive the full tool arguments and result; the TUI exposes only the high-level action and safe identifiers needed to understand progress.
+This document records the per-tool migration from raw tool payload rendering to concise, user-facing activity rendering. Collapsed rows expose only high-level activity and safe identifiers; Pi's built-in expanded state reveals explicitly approved prompts, answers, bodies, and MCP payloads after credential and unsafe-identifier sanitization. The model continues to receive the full tool arguments and result.
 
 ## Status legend
 
@@ -20,24 +20,24 @@ This document records the per-tool migration from raw tool payload rendering to 
 
 | Tool | Scope | Visible call details | Visible result details | Status |
 |---|---|---|---|---|
-| `agent` | tools | subagent type and short delegation description; never prompt | completion marker and job ID when returned | Changed; verification pending |
-| `agent_cancel` | tools | target job ID | cancellation outcome | Changed; verification pending |
-| `agent_status` | tools | target job ID | current status | Changed; verification pending |
-| `agent_jobs` | tools | listing action only | completion marker; job list stays model-only | Changed; verification pending |
-| `agent_list` | tools | listing action only | completion marker; definitions stay model-only | Changed; verification pending |
-| `question` | tools | asking action only; question/options are user-facing dialog content, not duplicated in tool row | completion marker; answer remains in dialog/result flow | Changed; verification pending |
-| `goal_create` | tools | create action only; goal prompt stays model-only | completion marker | Changed; verification pending |
-| `goal_pause` | tools | pause action only; pause reason stays model-only | completion marker | Changed; verification pending |
-| `goal_resume` | tools | resume action | completion marker | Changed; verification pending |
-| `goal_status` | tools | status action | completion marker; full goal record stays model-only | Changed; verification pending |
-| `goal_clear` | tools | clear action | completion marker | Changed; verification pending |
-| `web_search` | tools | search query | completion marker; web result body stays model-only | Changed; verification pending |
-| `web_fetch` | tools | requested URL (bounded) | completion marker; fetched body stays model-only | Changed; verification pending |
-| `knowledge_search` | tools | query or discovery mode (bounded) | completion marker; excerpts/reference bodies stay model-only | Changed; verification pending |
-| `telegram_chat` | tools | action type only; message, target, media source, and reaction payload stay hidden | delivery outcome only | Changed; verification pending |
-| `mcp_*` dynamic tools | mcp | stable registered tool label and server name | completion/failure marker | Changed; verification pending |
-| `mcp_resources_list` | mcp | server name | list outcome | Changed; verification pending |
-| `mcp_resources_read` | mcp | server and URI | read outcome | Changed; verification pending |
+| `agent` | tools | `agent • <subagent type> • <job title>` | collapsed status/title; expanded full `Instructions: <prompt>` on success; errors omit prompt | Changed; verification pending |
+| `agent_cancel` | tools | host default | `Agent <subagent type> • <job ID> cancelled`; errors remain simple | Changed; verification pending |
+| `agent_status` | tools | host default | `Agent <subagent type> • <job ID> <status>` | Changed; verification pending |
+| `agent_jobs` | tools | host default | collapsed count; expanded subagent type, job ID, status, and job title | Changed; verification pending |
+| `agent_list` | tools | host default | collapsed count; expanded names and descriptions | Changed; verification pending |
+| `question` | tools | host default | collapsed answered/cancelled; expanded answer; unsafe details remain sanitized | Changed; verification pending |
+| `goal_create` | tools | host default | collapsed `Goal created`; expanded interval and exact prompt; errors omit prompt | Changed; verification pending |
+| `goal_pause` | tools | host default | collapsed `Goal paused`; expanded reason; errors omit reason | Changed; verification pending |
+| `goal_resume` | tools | host default | collapsed `Goal resumed`; expanded prompt; errors omit prompt | Changed; verification pending |
+| `goal_status` | tools | host default | collapsed status; expanded prompt, interval, status, and pause reason | Changed; verification pending |
+| `goal_clear` | tools | host default | collapsed cleared/retained; expanded prompt; errors omit prompt | Changed; verification pending |
+| `web_search` | tools | `web_search • <query>` | collapsed result count; expanded full returned body; persistence metadata omitted | Changed; verification pending |
+| `web_fetch` | tools | `web_fetch • <url>` | collapsed content type and line count; expanded full fetched body | Changed; verification pending |
+| `knowledge_search` | tools | `knowledge_search • <query/mode>` | collapsed count; expanded excerpts/page body | Changed; verification pending |
+| `telegram_chat` | tools | host default | collapsed action/sent; expanded approved message text and safe metadata; tokens, chat IDs, and media credentials remain hidden | Changed; verification pending |
+| `mcp_*` dynamic tools | mcp | MCP tool and server | collapsed completed/failed; expanded sanitized response payload | Changed; verification pending |
+| `mcp_resources_list` | mcp | MCP resource list and server | collapsed outcome; expanded sanitized resource payload | Changed; verification pending |
+| `mcp_resources_read` | mcp | MCP resource read, server, URI | collapsed outcome; expanded sanitized resource body | Changed; verification pending |
 
 ## Verification record
 
@@ -46,14 +46,14 @@ This document records the per-tool migration from raw tool payload rendering to 
 - `agent`: shows subagent type plus bounded description; result shows returned job ID when available. Verified with focused tool-render test.
 - `agent_cancel` / `agent_status`: show the target job ID; status shows the current status. Verified with focused tool-render test.
 - `agent_jobs` / `agent_list`: retain concise list activity and hide full lists from the tool row. Verified with focused tool-render test.
-- `question`: shows the question text because it is explicitly user-facing, while options and answer are not duplicated into the tool row. Existing renderer tests updated and passed.
-- `goal_create` / `goal_pause` / `goal_resume` / `goal_status`: show the specific lifecycle action while exact prompts, pause reasons, and full records remain model-facing. `goal_clear` distinguishes clearing a completed goal from evaluating an incomplete one. Verified with focused tool-render test.
-- `web_search` / `web_fetch`: show bounded query/URL; bodies remain hidden. Verified with focused tool-render test.
-- `knowledge_search`: shows bounded query or discovery mode; excerpts and reference content remain hidden. Verified with focused tool-render test.
-- `telegram_chat`: shows the action type only; target IDs, message text, media sources, and reaction payloads remain hidden. Verified with focused tool-render test.
-- Dynamic MCP tools: show stable tool label and server name; MCP payloads/results remain hidden. MCP focused tests passed.
-- MCP resource tools: show server and resource URI at a bounded high level. MCP focused tests passed.
-- Added focused renderer regression coverage for pi-c2 tools and updated the existing question renderer expectations.
+- `question`: uses the host default call renderer; result shows answered/cancelled state and expanded successful answer. Existing renderer tests updated and passed.
+- `goal_create` / `goal_pause` / `goal_resume` / `goal_status`: show the specific lifecycle action while exact prompts, pause reasons, and full records are available only in expanded successful views. `goal_clear` distinguishes clearing a completed goal from evaluating an incomplete one. Verified with focused tool-render test.
+- `web_search` / `web_fetch`: show bounded query/URL; collapsed bodies remain hidden and expanded successful views reveal sanitized bodies. Verified with focused tool-render test.
+- `knowledge_search`: shows bounded query or discovery mode; collapsed excerpts remain hidden and expanded successful views reveal sanitized excerpts/page content. Verified with focused tool-render test.
+- `telegram_chat`: uses the host default call renderer; collapsed results show action/outcome, while expanded successful text may show the message with credentials and unsafe identifiers sanitized. Verified with focused tool-render test.
+- Dynamic MCP tools: show stable tool label and server name; payloads are available only in expanded results after sanitization. MCP focused tests passed.
+- MCP resource tools: show server and resource URI at a bounded high level; expanded results may show sanitized bodies. MCP focused tests passed.
+- Added focused renderer regression coverage for pi-c2 tools, MCP tools/resources, and updated the existing question renderer expectations.
 
 ### 2026-08-16 — review remediation
 
@@ -70,7 +70,7 @@ The explore review identified gaps beyond ordinary tool rows. Addressed in this 
 
 ### Verification
 
-- `pnpm test:all --tests-only` — passed before the review remediation.
+- `pnpm test:all --tests-only` — passed before the expanded MCP renderer pass; rerun after final changes.
 - `pnpm --filter @xzy-ai/runtime typecheck` — passed after child MCP renderer changes.
 - `pnpm --filter @xzy-ai/tui typecheck` — passed after live/footer changes.
 - `pnpm --filter @xzy-ai/tools typecheck` — passed after result-aware rendering changes.

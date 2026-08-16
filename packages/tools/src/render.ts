@@ -7,7 +7,7 @@ export function compactToolText(value: unknown, maxLength = 80): string {
   const withoutCredentials = text
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
     .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]");
-  const singleLine = withoutCredentials.replace(/[\u001b\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  const singleLine = withoutCredentials.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (singleLine.length <= maxLength) return singleLine;
   return `${singleLine.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
@@ -26,6 +26,8 @@ export function renderToolDetail(theme: Theme, label: string, value: unknown, ma
 /** Render a compact outcome without exposing the tool's model-facing result. */
 export interface ToolRenderContextLike {
   readonly isError?: boolean;
+  readonly expanded?: boolean;
+  readonly args?: unknown;
 }
 
 /** Detect resolved tool failures without rendering their model-facing details. */
@@ -57,8 +59,64 @@ export function toolResultFailed(
   return false;
 }
 
-export function renderToolResult(theme: Theme, label: string, failed = false, partial = false): Text {
-  if (partial) return new Text(theme.fg("dim", "…"), 0, 0);
+export interface ToolRenderResultOptionsLike {
+  readonly expanded?: boolean;
+  readonly isPartial?: boolean;
+}
+
+/** Preserve expanded model-facing text while removing terminal controls and credentials. */
+export function expandedToolText(value: unknown): string {
+  const text = typeof value === "string" ? value : String(value ?? "");
+  return text
+    .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
+    .replace(/(\b(?:bot\d+:[A-Za-z0-9_-]+|chat[_-]?id\s*[:=]\s*)\d+\b)/gi, "[redacted]")
+    .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+    .replace(/\u001b/g, "");
+}
+
+/** Extract text-like tool output for an explicitly expanded result view. */
+export function toolResultText(result: { content?: unknown; details?: unknown } | undefined): string {
+  const blocks = Array.isArray(result?.content) ? result.content : [];
+  const text = blocks
+    .filter((block): block is Record<string, unknown> => Boolean(block && typeof block === "object"))
+    .map((block) => {
+      if (typeof block.text === "string") return block.text;
+      if (block.type === "image" && typeof block.mimeType === "string") return `[image: ${block.mimeType}]`;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+  if (text) return expandedToolText(text);
+  const structured = result?.details && typeof result.details === "object" && "structuredContent" in result.details
+    ? (result.details as { structuredContent?: unknown }).structuredContent
+    : undefined;
+  if (structured === undefined) return "";
+  try {
+    return expandedToolText(JSON.stringify(structured, null, 2));
+  } catch {
+    return "";
+  }
+}
+
+/** Render a collapsed outcome and optionally append full safe detail when expanded. */
+export function renderToolOutcome(
+  theme: Theme,
+  label: string,
+  options: ToolRenderResultOptionsLike,
+  failed = false,
+  expandedDetail = "",
+): Text {
+  if (options.isPartial) return new Text(theme.fg("dim", "…"), 0, 0);
   const marker = failed ? "✗" : "✓";
-  return new Text(theme.fg(failed ? "warning" : "success", `${marker} ${compactToolText(label, 120)}`), 0, 0);
+  const line = theme.fg(failed ? "warning" : "success", `${marker} ${compactToolText(label, 160)}`);
+  if (!failed && options.expanded && expandedDetail) {
+    return new Text(`${line}\n${expandedToolText(expandedDetail)}`, 0, 0);
+  }
+  return new Text(line, 0, 0);
+}
+
+export function renderToolResult(theme: Theme, label: string, failed = false, partial = false): Text {
+  return renderToolOutcome(theme, label, { isPartial: partial, expanded: false }, failed);
 }

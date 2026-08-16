@@ -106,7 +106,7 @@ test("send_text with an approved chat sends and returns safe metadata", async ()
   });
   const result = await tool.execute("call", sendText, undefined, undefined, context());
   assert.equal(target, "777");
-  assert.deepEqual(result.details, { action: "send_text", sent: true, chatId: "777", chunks: 2, messageIds: [1, 2] });
+  assert.deepEqual(result.details, { action: "send_text", sent: true, chatId: "777", message: "hello", chunks: 2, messageIds: [1, 2] });
   assert.match(result.content[0].text, /2 messages/);
 });
 

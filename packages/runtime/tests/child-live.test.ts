@@ -27,12 +27,19 @@ test("inherited MCP renderers hide payload output while retaining the tool activ
   const call = stripVTControlCharacters(inheritedMcpRenderCall("server_lookup", "server_lookup", identityTheme).render(100).join(""));
   const result = stripVTControlCharacters(inheritedMcpRenderResult(
     { content: [{ type: "text", text: "SECRET_MCP_OUTPUT" }], details: { isError: false } },
-    { isPartial: false },
+    { expanded: false, isPartial: false },
     identityTheme,
     { isError: false },
   ).render(100).join(""));
   assert.match(call, /server_lookup/);
   assert.doesNotMatch(result, /SECRET_MCP_OUTPUT/);
+  const expanded = stripVTControlCharacters(inheritedMcpRenderResult(
+    { content: [{ type: "text", text: "SAFE_MCP_OUTPUT" }] },
+    { expanded: true, isPartial: false },
+    identityTheme,
+    { isError: false },
+  ).render(100).join(""));
+  assert.match(expanded, /SAFE_MCP_OUTPUT/);
 });
 
 test("maps SDK message and tool events to the core live feed", () => {
