@@ -23,6 +23,7 @@ import { AGENT_OPERATIONS, MCP_OPERATIONS, processWithLog } from "@xzy-ai/observ
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
 import { getChildExtensionFactories } from "./child-extensions.ts";
+import { inheritedMcpRenderCall, inheritedMcpRenderResult } from "./render-safe.ts";
 
 /**
  * In-process child-session adapter.
@@ -271,6 +272,8 @@ async function createIsolatedChild(options: {
       }, async () => options.mcpBridge
         ? await options.mcpBridge.invokeTool(definition.name, args, signal)
         : { content: [{ type: "text", text: "Inherited MCP execution bridge is unavailable" }], details: { error: "mcp bridge unavailable" } }),
+      renderCall: (_args: unknown, theme: { fg(color: string, text: string): string; bold(text: string): string }) => inheritedMcpRenderCall(definition.name, definition.name, theme),
+      renderResult: (result: unknown, renderOptions: { isPartial: boolean }, theme: { fg(color: string, text: string): string }, context: { isError?: boolean }) => inheritedMcpRenderResult(result, renderOptions, theme, context),
     }));
   }
 

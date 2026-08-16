@@ -2,11 +2,17 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 export type HostDeliverAs = "steer" | "followUp";
 
+const HIDDEN_HOST_MESSAGE_TYPE = "pi-c2:internal-context";
+
 export interface HostMessageGate {
-  /** Queue a host-bound model message for a safe idle boundary. */
+  /** Queue a user-visible host message for a safe idle boundary. */
   send(content: string, deliverAs?: HostDeliverAs): void;
-  /** Attempt delivery without retaining the message; false means retry later. */
+  /** Queue model-only context for a safe idle boundary. */
+  sendHidden(content: string, deliverAs?: HostDeliverAs): void;
+  /** Attempt visible delivery without retaining the message; false means retry later. */
   trySend(content: string, deliverAs?: HostDeliverAs): boolean;
+  /** Attempt hidden delivery without retaining the message; false means retry later. */
+  trySendHidden(content: string, deliverAs?: HostDeliverAs): boolean;
   /** Whether the host can accept a new prompt without racing an active run. */
   ready(): boolean;
   /**
@@ -22,6 +28,7 @@ export interface HostMessageGate {
 interface QueuedMessage {
   readonly content: string;
   readonly deliverAs: HostDeliverAs;
+  readonly hidden: boolean;
 }
 
 /** Backoff for re-delivery while the host run settles (agent_end / reload). */
@@ -113,6 +120,17 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     retryTimer.unref?.();
   };
 
+  const deliver = (message: QueuedMessage): void => {
+    if (message.hidden) {
+      pi.sendMessage(
+        { customType: HIDDEN_HOST_MESSAGE_TYPE, content: message.content, display: false },
+        { triggerTurn: true, deliverAs: message.deliverAs },
+      );
+      return;
+    }
+    pi.sendUserMessage(message.content, { deliverAs: message.deliverAs });
+  };
+
   const flush = (): void => {
     if (disposed || queue.length === 0) return;
     if (!hostIsReady()) {
@@ -125,7 +143,7 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     // that run before the host state becomes observable.
     const next = queue.shift()!;
     try {
-      pi.sendUserMessage(next.content, { deliverAs: next.deliverAs });
+      deliver(next);
       sendInFlight = true;
     } catch {
       queue.unshift(next);
@@ -210,21 +228,33 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
   if (typeof agentEndUnsubscribe === "function") unsubscribeLifecycle.push(agentEndUnsubscribe);
   if (typeof agentSettledUnsubscribe === "function") unsubscribeLifecycle.push(agentSettledUnsubscribe);
 
+  const tryDeliver = (content: string, deliverAs: HostDeliverAs, hidden: boolean): boolean => {
+    if (disposed || !hostIsReady()) return false;
+    try {
+      deliver({ content, deliverAs, hidden });
+      sendInFlight = true;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   return {
     send(content: string, deliverAs: HostDeliverAs = "steer"): void {
       if (disposed) return;
-      queue.push({ content, deliverAs });
+      queue.push({ content, deliverAs, hidden: false });
+      flush();
+    },
+    sendHidden(content: string, deliverAs: HostDeliverAs = "steer"): void {
+      if (disposed) return;
+      queue.push({ content, deliverAs, hidden: true });
       flush();
     },
     trySend(content: string, deliverAs: HostDeliverAs = "steer"): boolean {
-      if (disposed || !hostIsReady()) return false;
-      try {
-        pi.sendUserMessage(content, { deliverAs });
-        sendInFlight = true;
-        return true;
-      } catch {
-        return false;
-      }
+      return tryDeliver(content, deliverAs, false);
+    },
+    trySendHidden(content: string, deliverAs: HostDeliverAs = "steer"): boolean {
+      return tryDeliver(content, deliverAs, true);
     },
     ready: () => !disposed && hostIsReady(),
     onSettled(listener: () => void): void {

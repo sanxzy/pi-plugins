@@ -12,6 +12,7 @@ import {
   type GoalPauseParams,
 } from "../tools.ts";
 import { errorResult, textResult } from "../results.ts";
+import { renderToolCall, renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
 
 interface GoalToolDetails {
   readonly goal?: Goal;
@@ -79,6 +80,12 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return success(`Goal created successfully! Please proceed carefully and complete the work correctly.\n${formatGoal(result.goal)}`, { goal: result.goal });
       });
     },
+    renderCall(args, theme) {
+      return renderToolCall(theme, "goal_create", "creating persistent goal");
+    },
+    renderResult(result, options, theme, context) {
+      return renderToolResult(theme, "goal created", toolResultFailed(result, context), options.isPartial);
+    },
   });
 
   pi.registerTool({
@@ -94,6 +101,12 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       if (!result.ok) return errorResult(result.error, { reason: result.error });
       return success(`Goal paused: ${params.reason}`, { goal: result.goal });
       });
+    },
+    renderCall(_args, theme) {
+      return renderToolCall(theme, "goal_pause", "pausing goal");
+    },
+    renderResult(result, options, theme, context) {
+      return renderToolResult(theme, "goal paused", toolResultFailed(result, context), options.isPartial);
     },
   });
 
@@ -111,6 +124,12 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return success(`Goal resumed: ${result.goal.status}`, { goal: result.goal });
       });
     },
+    renderCall(_args, theme) {
+      return renderToolCall(theme, "goal_resume", "resuming goal");
+    },
+    renderResult(result, options, theme, context) {
+      return renderToolResult(theme, "goal resumed", toolResultFailed(result, context), options.isPartial);
+    },
   });
 
   pi.registerTool({
@@ -126,6 +145,13 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       if (!goal) return errorResult("no goal exists for this cwd", { reason: "no goal exists for this cwd" });
       return success(formatGoal(goal), { goal });
       });
+    },
+    renderCall(_args, theme) {
+      return renderToolCall(theme, "goal_status", "checking goal status");
+    },
+    renderResult(result, options, theme, context) {
+      const hasGoal = Boolean(result.details && "goal" in result.details && result.details.goal);
+      return renderToolResult(theme, hasGoal ? "goal status available" : "no active goal", toolResultFailed(result, context), options.isPartial);
     },
   });
 
@@ -144,6 +170,13 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       if (!target.pool.clear(target.cwd)) return errorResult("no goal exists to clear for this cwd", { reason: "no goal exists to clear for this cwd" });
       return success("Congratulations, the goal was completed and cleared.", { goal });
       });
+    },
+    renderCall(args, theme) {
+      return renderToolDetail(theme, "goal_clear", args.isComplete ? "clearing completed goal" : "checking goal completion");
+    },
+    renderResult(result, options, theme, context) {
+      const retained = Boolean(result.details && "goal" in result.details && result.details.goal) && !Boolean(result.content?.[0] && "text" in result.content[0] && typeof result.content[0].text === "string" && result.content[0].text.includes("completed and cleared"));
+      return renderToolResult(theme, retained ? "goal retained" : "goal cleared", toolResultFailed(result, context), options.isPartial);
     },
   });
 }

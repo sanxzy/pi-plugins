@@ -1,4 +1,15 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+
+function compactResource(value: unknown, maxLength = 96): string {
+  const text = String(value ?? "")
+    .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
+    .replace(/[\u001b\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
 import type { Prompt } from "@modelcontextprotocol/sdk/types.js";
 import { sessionMcpBridge } from "@xzy-ai/core";
 import { MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
@@ -223,6 +234,8 @@ export class McpPromptsResourcesExposer {
           : "(no resources)";
         return { content: [{ type: "text", text }], details: { server, count: resources.length } };
       }),
+      renderCall: (args, theme) => new Text(theme.fg("toolTitle", theme.bold("mcp_resources_list")) + theme.fg("muted", ` ${compactResource((args as { server?: unknown }).server)}`), 0, 0),
+      renderResult: (_result, options, theme, context) => new Text(theme.fg(options.isPartial ? "dim" : context.isError ? "warning" : "success", options.isPartial ? "…" : context.isError ? "✗ MCP resources unavailable" : "✓ MCP resources listed"), 0, 0),
     });
     this.pi.registerTool({
       name: "mcp_resources_read",
@@ -256,6 +269,8 @@ export class McpPromptsResourcesExposer {
         }
         return { content, details: result };
       }),
+      renderCall: (args, theme) => new Text(theme.fg("toolTitle", theme.bold("mcp_resources_read")) + theme.fg("muted", ` ${compactResource((args as { server?: unknown; uri?: unknown }).server)}/${compactResource((args as { uri?: unknown }).uri)}`), 0, 0),
+      renderResult: (_result, options, theme, context) => new Text(theme.fg(options.isPartial ? "dim" : context.isError ? "warning" : "success", options.isPartial ? "…" : context.isError ? "✗ MCP resource unavailable" : "✓ MCP resource read"), 0, 0),
     });
   }
 

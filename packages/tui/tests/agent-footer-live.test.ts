@@ -234,7 +234,7 @@ function longLive(count: number): AgentLiveSession {
   };
 }
 
-test("a long transcript starts at the tail and scrolls to earlier lines while keeping chrome", () => {
+test("a long transcript shows activity markers without transcript bodies", () => {
   const view = new AgentLiveManager({
     tui: fakeTUI(12),
     theme: textTheme,
@@ -242,27 +242,26 @@ test("a long transcript starts at the tail and scrolls to earlier lines while ke
     done: () => {},
   });
   let output = render(view).join("\n");
-  assert.match(output, /message line 29/, "tail message is visible by default");
-  assert.doesNotMatch(output, /message line 0/, "oldest message is off-screen initially");
+  assert.match(output, /assistant activity/, "tail activity is visible by default");
+  assert.doesNotMatch(output, /message line/, "transcript bodies stay hidden");
   assert.match(output, /╭/, "top border chrome remains");
   assert.match(output, /╰/, "bottom border chrome remains");
 
   view.handleInput(END);
   output = render(view).join("\n");
-  assert.match(output, /message line 0/, "End reveals the oldest message");
-  assert.doesNotMatch(output, /message line 29/, "tail is off-screen at the top");
+  assert.match(output, /assistant activity/, "activity remains visible when scrolled");
 
   view.handleInput(HOME);
   output = render(view).join("\n");
-  assert.match(output, /message line 29/, "Home returns to the tail");
+  assert.match(output, /assistant activity/, "Home returns to the activity tail");
 
   view.handleInput(END);
   view.handleInput(PAGE_DOWN);
   output = render(view).join("\n");
-  assert.doesNotMatch(output, /message line 0/, "PageDown moves off the very top");
+  assert.doesNotMatch(output, /message line/, "PageDown does not reveal transcript bodies");
   view.handleInput(PAGE_UP);
   output = render(view).join("\n");
-  assert.match(output, /message line 0/, "PageUp returns toward the oldest message");
+  assert.match(output, /assistant activity/, "PageUp retains activity markers");
 });
 
 test("Up/Down scroll line by line and scroll indicator appears only when away from the tail", () => {
@@ -281,10 +280,10 @@ test("Up/Down scroll line by line and scroll indicator appears only when away fr
 
   view.handleInput(UP);
   output = render(view).join("\n");
-  assert.match(output, /message line 0/, "Up reveals an earlier line");
+  assert.match(output, /assistant activity/, "Up retains an earlier activity marker");
   view.handleInput(DOWN);
   output = render(view).join("\n");
-  assert.doesNotMatch(output, /message line 0/, "Down moves back toward the tail");
+  assert.doesNotMatch(output, /message line/, "Down never reveals transcript bodies");
 });
 
 test("scrolling keys never enter the steering draft and steering still works after scrolling", async () => {
@@ -320,7 +319,7 @@ test("scrolling keys never enter the steering draft and steering still works aft
   assert.deepEqual(steers, ["hi"], "scroll keys never enter the draft; typed text still steers");
 });
 
-test("long messages wrap across rows and tool args respect the content width", () => {
+test("live activity rows respect the content width without rendering tool args", () => {
   const view = new AgentLiveManager({
     tui: fakeTUI(24),
     theme: textTheme,
@@ -340,7 +339,8 @@ test("long messages wrap across rows and tool args respect the content width", (
   });
   const lines = render(view, 40);
   for (const line of lines) assert.ok(line.length <= 40, `line fits within width: ${line}`);
-  assert.ok(lines.length > 4, "wrapped message and tool args expand beyond a single row");
+  assert.ok(lines.length > 4, "activity rows remain visible alongside panel chrome");
+  assert.doesNotMatch(lines.join("\n"), /printf|repeat|very long sentence/);
 });
 
 test("End reaches the oldest row at a narrow rendered overlay width", () => {
@@ -354,8 +354,8 @@ test("End reaches the oldest row at a narrow rendered overlay width", () => {
   render(view, 30);
   view.handleInput(END);
   const lines = render(view, 30);
-  assert.match(lines.join("\n"), /message line 0/, "End reaches the oldest row at the rendered overlay width");
-  assert.doesNotMatch(lines.join("\n"), /message line 29/, "the tail is off-screen at the oldest position");
+  assert.match(lines.join("\n"), /assistant activity/, "End retains activity markers");
+  assert.doesNotMatch(lines.join("\n"), /message line/, "End does not reveal transcript bodies");
   assert.match(lines.join("\n"), /╭/, "top border chrome remains");
   assert.match(lines.join("\n"), /╰/, "bottom border chrome remains");
 });
@@ -376,7 +376,7 @@ test("very short heights keep chrome and height changes re-clamp the panel", () 
   (tui.terminal as unknown as { rows: number }).rows = 12;
   const expanded = render(view, 30);
   assert.equal(expanded.length, 10, "12-row terminal renders the ~80% panel floor");
-  assert.match(expanded.join("\n"), /message line 29/, "tail content re-lays out at the larger height");
+  assert.match(expanded.join("\n"), /assistant activity/, "activity re-lays out at the larger height");
 });
 
 test("the panel is bounded to ~80% of the terminal height with the newest activity always visible", () => {
@@ -389,14 +389,14 @@ test("the panel is bounded to ~80% of the terminal height with the newest activi
   });
   const lines = render(view, 100);
   assert.equal(lines.length, 19, "24-row terminal renders a fixed ~80% panel");
-  assert.match(lines.join("\n"), /message line 59/, "the newest message is always visible at the tail");
+  assert.match(lines.join("\n"), /assistant activity/, "newest activity is always visible at the tail");
   assert.match(lines.join("\n"), /╰/, "the bottom border is never truncated");
   assert.match(lines.join("\n"), /╭/, "the top border is never truncated");
 
   (tui.terminal as unknown as { rows: number }).rows = 30;
   const taller = render(view, 100);
   assert.equal(taller.length, 24, "30-row terminal renders a fixed ~80% panel");
-  assert.match(taller.join("\n"), /message line 59/, "newest message stays visible on resize");
+  assert.match(taller.join("\n"), /assistant activity/, "newest activity stays visible on resize");
   assert.match(taller.join("\n"), /╰/, "bottom border stays visible on resize");
 });
 
@@ -412,8 +412,8 @@ test("scrolling reaches the oldest message while keeping chrome and the panel he
   view.handleInput(END);
   const lines = render(view, 100);
   assert.equal(lines.length, 19, "panel height is stable while scrolled");
-  assert.match(lines.join("\n"), /message line 0/, "End still reveals the oldest message");
-  assert.doesNotMatch(lines.join("\n"), /message line 59/, "the tail is off-screen at the oldest position");
+  assert.match(lines.join("\n"), /assistant activity/, "End still shows activity markers");
+  assert.doesNotMatch(lines.join("\n"), /message line/, "the transcript body remains hidden");
   assert.match(lines.join("\n"), /╭/, "top border survives scrolling");
   assert.match(lines.join("\n"), /╰/, "bottom border survives scrolling");
 });
@@ -442,7 +442,7 @@ test("a settled view with a long transcript never truncates its newest line or b
   });
   const lines = render(view, 100);
   assert.equal(lines.length, 19, "settled panel stays at the fixed ~80% height");
-  assert.match(lines.join("\n"), /message line 59/, "the settled newest line is visible at the tail");
+  assert.match(lines.join("\n"), /assistant activity/, "the settled activity is visible at the tail");
   assert.match(lines.join("\n"), /╰/, "the settled bottom border is visible");
 });
 
@@ -474,7 +474,7 @@ test("a settled live view remains scrollable while ignoring steering and cancell
   });
   view.handleInput(END);
   let output = render(view).join("\n");
-  assert.match(output, /message line 0/, "settled transcript scrolls to its oldest line");
+  assert.match(output, /assistant activity/, "settled view retains activity markers");
   assert.match(output, /read-only/, "settled view remains read-only");
   assert.match(output, /← back • Esc close/, "settled legend keeps its navigation actions");
   view.handleInput("x");
@@ -742,5 +742,6 @@ test("a settled live view is read-only and ignores steering and cancellation", a
   assert.equal(aborted, 0, "settled views never abort");
   const output = render(view).join("\n");
   assert.match(output, /read-only/, "input is described as disabled");
-  assert.match(output, /failed/, "terminal status and retained transcript remain visible");
+  assert.match(output, /failed/, "terminal status remains visible");
+  assert.doesNotMatch(output, /failed.*message|message.*failed/);
 });

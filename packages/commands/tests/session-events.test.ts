@@ -44,11 +44,13 @@ function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler> } {
   };
 }
 
-function registrationsWithSteer(): { pi: ExtensionAPI; handlers: Map<string, Handler>; steers: string[] } {
+function registrationsWithSteer(): { pi: ExtensionAPI; handlers: Map<string, Handler>; steers: string[]; hidden: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }> } {
   const handlers = new Map<string, Handler>();
   const steers: string[] = [];
+  const hidden: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }> = [];
   return {
     steers,
+    hidden,
     handlers,
     pi: {
       on(event: string, handler: Handler) {
@@ -57,6 +59,9 @@ function registrationsWithSteer(): { pi: ExtensionAPI; handlers: Map<string, Han
       sendUserMessage(content: string | { type: string; text: string }[], options?: { deliverAs?: string }) {
         const text = typeof content === "string" ? content : content.map((p) => p.text).join("");
         steers.push(text);
+      },
+      sendMessage(message: { customType: string; content: string; display: boolean }, options?: unknown) {
+        hidden.push({ message, options });
       },
       setActiveTools() {},
       getAllTools() {
@@ -343,7 +348,7 @@ test("a disposed host gate releases its lifecycle listeners", () => {
 test("a background result raced into an active run is delivered after the run settles", async () => {
   const cwd = projectRoot();
   try {
-    const { pi, handlers, steers } = registrationsWithSteer();
+    const { pi, handlers, steers, hidden } = registrationsWithSteer();
     const ctx = {
       ...context(cwd, "root-a"),
       isIdle: () => true,
@@ -365,7 +370,10 @@ test("a background result raced into an active run is delivered after the run se
     // an extension event. The stable-idle fallback must redrive the durable
     // result without requiring a reload or a second user turn.
     await new Promise((resolve) => setTimeout(resolve, 250));
-    assert.deepEqual(steers, ["result-a"], "the result reaches the host after stable idle fallback");
+    assert.equal(steers.length, 0, "hidden result must not use the visible user-message channel");
+    assert.equal(hidden.at(-1)?.message.customType, "pi-c2:internal-context");
+    assert.equal(hidden.at(-1)?.message.display, false);
+    assert.equal(hidden.at(-1)?.message.content, "result-a");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

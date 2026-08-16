@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { stripVTControlCharacters } from "node:util";
 import { createChildLiveFeed } from "@xzy-ai/core";
 import {
   attachAgentSessionLiveFeed,
@@ -7,6 +8,7 @@ import {
   mapAgentSessionEvent,
   spawnChildSession,
 } from "@xzy-ai/runtime";
+import { inheritedMcpRenderCall, inheritedMcpRenderResult } from "../src/infrastructure/pi-sdk/render-safe.ts";
 
 type MessageShape = {
   role: "user" | "assistant";
@@ -16,6 +18,22 @@ type MessageShape = {
 };
 
 const NOOP = () => {};
+const identityTheme = {
+  fg: (_color: string, text: string) => text,
+  bold: (text: string) => text,
+};
+
+test("inherited MCP renderers hide payload output while retaining the tool activity label", () => {
+  const call = stripVTControlCharacters(inheritedMcpRenderCall("server_lookup", "server_lookup", identityTheme).render(100).join(""));
+  const result = stripVTControlCharacters(inheritedMcpRenderResult(
+    { content: [{ type: "text", text: "SECRET_MCP_OUTPUT" }], details: { isError: false } },
+    { isPartial: false },
+    identityTheme,
+    { isError: false },
+  ).render(100).join(""));
+  assert.match(call, /server_lookup/);
+  assert.doesNotMatch(result, /SECRET_MCP_OUTPUT/);
+});
 
 test("maps SDK message and tool events to the core live feed", () => {
   const message = {
@@ -87,7 +105,7 @@ test("maps SDK message and tool events to the core live feed", () => {
   );
 });
 
-test("live feed retains tool-call args in the transcript entry", () => {
+test("live feed retains tool-call args for runtime control but UI must not render them", () => {
   const feed = createChildLiveFeed();
   feed.emit({
     type: "tool",
@@ -321,7 +339,7 @@ test("spawn adapter publishes a controllable live handle, retains settlement, an
     assert.equal(disposeCalls, 1, "child session is disposed after settlement");
     liveChildren.delete("job-live");
     assert.equal(control!.live!.snapshot.settled, true, "retained control remains usable after pool removal");
-    assert.equal(abortCalls, 0, "settlement cleanup does not abort the child");
+      assert.equal(abortCalls, 0, "settlement cleanup does not abort the child");
   } finally {
     spawnChildSession.__createChild = previousFactory;
   }

@@ -1,5 +1,4 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import {
   clearTelegramChoiceTokens,
@@ -25,6 +24,7 @@ import {
 } from "@xzy-ai/channels";
 import { telegramChatParams, type TelegramChatParams } from "../tools.ts";
 import { errorResult, textResult } from "../results.ts";
+import { renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
 import type { TelegramChatDetails } from "../types.ts";
 
 export type { TelegramChatDetails } from "../types.ts";
@@ -294,20 +294,17 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       });
     },
     renderCall(args: TelegramChatParams, theme) {
-      const summary = args.action === "send_text"
-        ? args.text
+      const activity = args.action === "send_text"
+        ? "sending a Telegram message"
         : args.action === "react"
-          ? `react ${args.emoji} → ${args.chat_id}:${args.message_id}`
+          ? "reacting to a Telegram message"
           : args.action === "send_choices"
-            ? `choices ${args.question}`
-            : `media ${args.media_type} → ${args.chat_id}`;
-      return new Text(theme.fg("toolTitle", theme.bold("telegram_chat ")) + theme.fg("muted", summary), 0, 0);
+            ? "sending Telegram choices"
+            : "sending Telegram media";
+      return renderToolDetail(theme, "telegram_chat", activity);
     },
-    renderResult(result: AgentToolResult<TelegramChatDetails>, _options, theme) {
-      const details = result.details;
-      if (!details?.sent) return new Text(theme.fg("warning", "Telegram delivery unavailable"), 0, 0);
-      const suffix = details.chunks && details.chunks > 1 ? ` (${details.chunks} chunks)` : "";
-      return new Text(theme.fg("success", `✓ Sent to Telegram${suffix}`), 0, 0);
+    renderResult(_result, options, theme, context) {
+      return renderToolResult(theme, "Telegram action complete", toolResultFailed(_result, context), options.isPartial);
     },
   });
 }

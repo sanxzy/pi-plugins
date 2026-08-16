@@ -99,6 +99,7 @@ test("renders a depth-first tree with status glyphs, time, and latest leaf", () 
   assert.match(output, /◯/, "queued indicator drawn");
   assert.match(output, /Wait for slot/);
   for (const line of lines) assert.ok(line.length <= 100, `line fits: ${line}`);
+  assert.match(output, /found 3 files/);
 });
 
 test("does not add a spacer between main and its only child", () => {

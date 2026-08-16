@@ -223,14 +223,13 @@ function liveChildFor(
 }
 
 function latestLeaf(
-  control: { live?: { snapshot: { transcript: readonly { kind: "message" | "tool"; text: string; toolName?: string }[] } } } | undefined,
+  control: { live?: { snapshot: { transcript: readonly { kind: "message" | "tool"; text: string; role?: "user" | "assistant"; toolName?: string }[] } } } | undefined,
 ): string | undefined {
   const transcript = control?.live?.snapshot?.transcript;
   const entry = transcript?.[transcript.length - 1];
   if (!entry) return undefined;
   if (entry.kind === "tool") return `⌘ ${entry.toolName ?? "tool"}`;
-  const text = entry.text.replace(/[\r\n\t]+/g, " ").replace(/ +/g, " ").trim();
-  return text || undefined;
+  return entry.role === "user" ? "user activity" : "assistant activity";
 }
 
 function settledMs(job: { updatedAt: string } | undefined): number | undefined {

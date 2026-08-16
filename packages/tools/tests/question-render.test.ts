@@ -20,6 +20,7 @@ interface Renderers {
     result: { content: Array<{ type: string; text?: string }>; details?: QuestionDetails },
     options: unknown,
     theme: Theme,
+    context?: unknown,
   ) => { render(width: number): string[] };
 }
 
@@ -64,9 +65,7 @@ test("renderCall shows the question and numbered options including Type somethin
   const { renderCall } = captureRenderers();
   const lines = stripVTControlCharacters(renderCall(params, theme).render(80).join("\n"));
   assert.match(lines, /Proceed\?/);
-  assert.match(lines, /1\. Yes/);
-  assert.match(lines, /2\. No/);
-  assert.match(lines, /3\. Type something\./);
+  assert.doesNotMatch(lines, /Yes|No|Type something/);
 });
 
 test("renderResult shows a selected answer with its display position", () => {
@@ -78,10 +77,9 @@ test("renderResult shows a selected answer with its display position", () => {
     wasCustom: false,
     index: 2,
   };
-  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme).render(80).join(""));
-  assert.match(lines, /No/);
-  assert.match(lines, /2\. No/);
-  assert.doesNotMatch(lines, /✓ \(wrote\)/);
+  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError: false }).render(80).join(""));
+  assert.match(lines, /question answered/);
+  assert.doesNotMatch(lines, /No/);
 });
 
 test("renderResult shows a custom answer as written", () => {
@@ -92,9 +90,9 @@ test("renderResult shows a custom answer as written", () => {
     answer: "Maybe later",
     wasCustom: true,
   };
-  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme).render(80).join(""));
-  assert.match(lines, /Maybe later/);
-  assert.match(lines, /wrote/);
+  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError: false }).render(80).join(""));
+  assert.match(lines, /question answered/);
+  assert.doesNotMatch(lines, /Maybe later|wrote/);
 });
 
 test("renderResult shows Cancelled for a null answer", () => {
@@ -104,6 +102,6 @@ test("renderResult shows Cancelled for a null answer", () => {
     options: ["Yes", "No"],
     answer: null,
   };
-  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme).render(80).join(""));
-  assert.match(lines, /Cancelled/);
+  const lines = stripVTControlCharacters(renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError: false }).render(80).join(""));
+  assert.match(lines, /question cancelled/);
 });

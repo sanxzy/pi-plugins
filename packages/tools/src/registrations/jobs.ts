@@ -7,6 +7,7 @@ import type { JobsDetails } from "../types.ts";
 import { callerFor } from "../caller.ts";
 import { toJobSummary } from "../job-summary.ts";
 import { textResult } from "../results.ts";
+import { renderToolCall, renderToolResult, toolResultFailed } from "../render.ts";
 
 export function registerJobsTool(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -36,6 +37,12 @@ export function registerJobsTool(pi: ExtensionAPI): void {
           : "";
       return textResult(`Subagent jobs:\n${lines}${guidance}`, { jobs });
       });
+    },
+    renderCall(_args, theme) {
+      return renderToolCall(theme, "agent_jobs", "listing agent jobs");
+    },
+    renderResult(_result, options, theme, context) {
+      return renderToolResult(theme, "agent jobs ready", toolResultFailed(_result, context), options.isPartial);
     },
   });
 }

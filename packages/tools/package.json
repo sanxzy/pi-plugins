@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import ../../test-setup.mjs --import tsx tests/question.test.ts tests/question-render.test.ts tests/background-gate.test.ts tests/footer.test.ts tests/registrations-isolation.test.ts tests/telegram.test.ts tests/telegram-hardening.test.ts tests/goal-tools.test.ts tests/web-fetch.test.ts tests/web-search.test.ts tests/web-settings.test.ts tests/wiki.test.ts tests/knowledge-search.test.ts tests/bm25.test.ts tests/wiki-history.test.ts tests/wiki-discovery-history.test.ts tests/agent-list.test.ts"
+    "test": "node --test --import ../../test-setup.mjs --import tsx tests/question.test.ts tests/question-render.test.ts tests/tool-render.test.ts tests/background-gate.test.ts tests/footer.test.ts tests/registrations-isolation.test.ts tests/telegram.test.ts tests/telegram-hardening.test.ts tests/goal-tools.test.ts tests/web-fetch.test.ts tests/web-search.test.ts tests/web-settings.test.ts tests/wiki.test.ts tests/knowledge-search.test.ts tests/bm25.test.ts tests/wiki-history.test.ts tests/wiki-discovery-history.test.ts tests/agent-list.test.ts"
   },
   "dependencies": {
     "@xzy-ai/channels": "workspace:*",

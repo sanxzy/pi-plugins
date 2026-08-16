@@ -3,6 +3,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { renderToolCall, renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
 import {
   makeJobId,
   runForegroundAgent,
@@ -57,6 +58,16 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       return processWithLog({ operation: TOOL_OPERATIONS.AGENT_EXECUTE, parameters: { subagentType: params.subagent_type, prompt: params.prompt } }, () =>
         executeAgentCall(params, ctx, _signal),
       );
+    },
+    renderCall(args, theme) {
+      return renderToolDetail(theme, "agent", `${args.subagent_type} — ${args.description}`);
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details;
+      const jobId = details && "jobId" in details ? details.jobId : undefined;
+      const status = details && "status" in details ? details.status : undefined;
+      const label = status === "queued" ? "agent queued" : status === "running" ? "agent running" : status === "completed" ? "agent finished" : status ? `agent ${status}` : "agent finished";
+      return renderToolResult(theme, jobId ? `${label} (${jobId})` : label, toolResultFailed(result, context), options.isPartial);
     },
   });
 }

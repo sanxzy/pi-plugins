@@ -72,7 +72,7 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLog
   return {
     cwd: ctx.cwd,
     hasUI: ctx.hasUI,
-    sendUserMessage: (content, options) => gate.send(content, options?.deliverAs ?? "steer"),
+    sendUserMessage: (content, options) => gate.sendHidden(content, options?.deliverAs ?? "steer"),
     notify: (message, type) => {
       if (ctx.hasUI) ctx.ui.notify(message, type);
     },
@@ -202,7 +202,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
       // pi's "already processing a prompt" error. The gate's settled hook
       // redrives this coordinator the moment agent_end fires, so the result
       // does not wait for the coordinator's polling retry.
-      if (!gate.trySend(content, "steer")) {
+      if (!gate.trySendHidden(content, "steer")) {
         throw new Error("host agent is busy; defer result delivery");
       }
     });

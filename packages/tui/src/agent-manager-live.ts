@@ -156,18 +156,10 @@ export class AgentLiveManager implements Component {
     for (const entry of snapshot.transcript) {
       if (entry.kind === "tool") {
         const name = entry.toolName ?? "tool";
-        lines.push(this.theme.fg("muted", `⌘ ${name}${entry.complete ? "" : " (running)"}`));
-        for (const argLine of renderToolArgs(entry.args, contentWidth)) {
-          lines.push(this.theme.fg("dim", argLine));
-        }
+        lines.push(this.theme.fg(entry.isError ? "warning" : "muted", `⌘ ${name}${entry.complete ? "" : " (running)"}${entry.isError ? " (failed)" : ""}`));
         continue;
       }
-      const prefix = entry.role === "user" ? "› you: " : "· ";
-      const wrapped = wrapTextWithAnsi(`${prefix}${entry.text}`, contentWidth);
-      for (let index = 0; index < wrapped.length; index++) {
-        const line = index === 0 ? wrapped[index]! : `      ${wrapped[index]!}`;
-        lines.push(this.theme.fg("text", truncateToWidth(line, contentWidth)));
-      }
+      lines.push(this.theme.fg("dim", entry.role === "user" ? "› user activity" : "· assistant activity"));
     }
     return lines;
   }
@@ -330,26 +322,4 @@ export class AgentLiveManager implements Component {
   }
 }
 
-/** Render a tool call's arguments as compact `key: value` lines. */
-function renderToolArgs(args: unknown, width: number): string[] {
-  if (args === undefined || args === null) return [];
-  const entries =
-    typeof args === "object" && !Array.isArray(args)
-      ? Object.entries(args as Record<string, unknown>)
-      : [["value", args]];
-  if (entries.length === 0) return [];
-  const lines: string[] = [];
-  for (const [key, value] of entries) {
-    const line = `  ${key}: ${formatArgValue(value)}`;
-    lines.push(...wrapTextWithAnsi(line, width));
-  }
-  return lines;
-}
-
-function formatArgValue(value: unknown): string {
-  if (value === null) return "null";
-  if (value === undefined) return "undefined";
-  if (typeof value === "string") return value === "" ? '""' : value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value);
-}
+/** Tool arguments are intentionally omitted from the focused live view. */

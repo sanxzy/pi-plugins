@@ -1,4 +1,5 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
 import { Type } from "typebox";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { resolveSettingsForProject, type WebSettings } from "@xzy-ai/runtime";
@@ -65,6 +66,12 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<WebSearchDetails>> {
       return executeWebSearch(params, signal, undefined, { projectRoot: ctx.cwd });
+    },
+    renderCall(args, theme) {
+      return renderToolDetail(theme, "web_search", args.query);
+    },
+    renderResult(_result, options, theme, context) {
+      return renderToolResult(theme, "web search complete", toolResultFailed(_result, context), options.isPartial);
     },
   });
 }

@@ -3,7 +3,16 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
+
+function compactMcpActivity(value: string, maxLength = 80): string {
+  const withoutCredentials = value
+    .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]");
+  const text = withoutCredentials.replace(/[\u001b\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
 import { NameRegistry } from "./naming.ts";
 import { objectSchemaFromMcp } from "./schema.ts";
 import { normalizeCallToolResult, type NormalizedDetails } from "./results.ts";
@@ -274,6 +283,11 @@ export class McpToolExposer {
       description: mapping.description ?? `MCP tool ${mapping.nativeName}`,
       parameters: mapping.parameters as never,
       execute: invoke,
+      renderCall: (_args, theme) => new Text(theme.fg("toolTitle", theme.bold(mapping.label)) + theme.fg("muted", ` ${compactMcpActivity(mapping.serverName)}`), 0, 0),
+      renderResult: (_result, options, theme, context) => {
+        if (options.isPartial) return new Text(theme.fg("dim", "…"), 0, 0);
+        return new Text(theme.fg(context.isError ? "warning" : "success", context.isError ? "✗ MCP tool failed" : "✓ MCP tool complete"), 0, 0);
+      },
     });
   }
 }

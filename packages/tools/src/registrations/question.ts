@@ -4,12 +4,12 @@ import type {
   ExtensionContext,
   ThemeColor,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { DISMISSED, QuestionDialog, type QuestionDialogResult, type QuestionDialogTheme } from "@xzy-ai/tui";
 import { questionParams, type QuestionParams } from "../tools.ts";
 import type { QuestionDetails } from "../types.ts";
 import { errorResult, textResult } from "../results.ts";
+import { renderToolCall, renderToolResult, toolResultFailed } from "../render.ts";
 
 /**
  * Register the `question` tool.
@@ -107,38 +107,16 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
       });
     },
 
-    renderCall(args: QuestionParams, theme, _context) {
-      let text = theme.fg("toolTitle", theme.bold("question ")) + theme.fg("muted", args.question);
-      const opts = Array.isArray(args.options) ? args.options : [];
-      if (opts.length) {
-        const labels = opts.map((o) => o.label);
-        const numbered = [...labels, "Type something."].map((o, i) => `${i + 1}. ${o}`);
-        text += `\n${theme.fg("dim", `  Options: ${numbered.join(", ")}`)}`;
-      }
-      return new Text(text, 0, 0);
+    renderCall(args, theme) {
+      return renderToolCall(theme, "question", args.question);
     },
 
-    renderResult(result: AgentToolResult<QuestionDetails>, _options, theme, _context) {
-      const details = result.details;
-      if (!details) {
-        const text = result.content[0];
-        return new Text(text?.type === "text" ? text.text : "", 0, 0);
-      }
-
-      if (details.answer === null) {
-        return new Text(theme.fg("warning", "Cancelled"), 0, 0);
-      }
-
-      if (details.wasCustom) {
-        return new Text(
-          theme.fg("success", "✓ ") + theme.fg("muted", "(wrote) ") + theme.fg("accent", details.answer),
-          0,
-          0,
-        );
-      }
-      const idx = details.options.indexOf(details.answer) + 1;
-      const display = idx > 0 ? `${idx}. ${details.answer}` : details.answer;
-      return new Text(theme.fg("success", "✓ ") + theme.fg("accent", display), 0, 0);
+    renderResult(result, options, theme, context) {
+      const answer = result.details?.answer;
+      const activity = toolResultFailed(result, context)
+        ? "question unavailable"
+        : answer === null ? "question cancelled" : answer ? "question answered" : "question complete";
+      return renderToolResult(theme, activity, toolResultFailed(result, context), options.isPartial);
     },
   });
 }

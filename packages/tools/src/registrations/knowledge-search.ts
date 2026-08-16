@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { renderToolDetail, renderToolResult, toolResultFailed } from "../render.ts";
 import { Type } from "typebox";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { createReferenceCatalog, getChildPool, type ReferenceCatalogReadResult } from "@xzy-ai/runtime";
@@ -193,6 +194,13 @@ export function registerKnowledgeSearchTool(pi: ExtensionAPI): void {
               : {}),
           }),
       );
+    },
+    renderCall(args, theme) {
+      const query = typeof args.query === "string" ? args.query : "discovering local knowledge";
+      return renderToolDetail(theme, "knowledge_search", query);
+    },
+    renderResult(_result, options, theme, context) {
+      return renderToolResult(theme, "knowledge search complete", toolResultFailed(_result, context), options.isPartial);
     },
   });
 }

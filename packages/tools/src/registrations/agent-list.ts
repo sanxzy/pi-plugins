@@ -4,6 +4,7 @@ import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { agentNoArgsParams } from "../tools.ts";
 import type { AgentListDetails } from "../types.ts";
 import { textResult } from "../results.ts";
+import { renderToolCall, renderToolResult, toolResultFailed } from "../render.ts";
 
 /**
  * Keep the displayed description to its first paragraph so each section stays
@@ -49,6 +50,12 @@ export function registerAgentListTool(pi: ExtensionAPI): void {
       );
       return textResult(`Available agents:\n${sections.join("\n")}`, { agents });
       });
+    },
+    renderCall(_args, theme) {
+      return renderToolCall(theme, "agent_list", "listing available agents");
+    },
+    renderResult(_result, options, theme, context) {
+      return renderToolResult(theme, "agent list ready", toolResultFailed(_result, context), options.isPartial);
     },
   });
 }
