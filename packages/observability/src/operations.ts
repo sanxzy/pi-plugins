@@ -169,6 +169,8 @@ export const TOOL_OPERATIONS = {
   AGENT_LIST_EXECUTE: "tool.agentListExecute",
   WRITE_MARKDOWN_EXECUTE: "tool.writeMarkdownExecute",
   WRITE_MARKDOWN_REJECT: "tool.writeMarkdownReject",
+  EDIT_MARKDOWN_EXECUTE: "tool.editMarkdownExecute",
+  EDIT_MARKDOWN_REJECT: "tool.editMarkdownReject",
 } as const;
 
 /**

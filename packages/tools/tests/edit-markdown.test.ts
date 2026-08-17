@@ -62,7 +62,7 @@ test("edit_markdown preserves BOM and CRLF line endings through host normalizati
     mkdirSync(join(canonicalProjectRoot(root), "docs"), { recursive: true });
     writeFileSync(file, "\uFEFFalpha\r\nbeta\r\ngamma\r\n", "utf8");
     const result = await executeEditMarkdown({ path: "docs/bom.txt", edits: [{ oldText: "beta", newText: "BETA" }] }, context(root));
-    assert.equal(result.content[0]?.text.includes("Error"), false);
+    assert.equal(result.content.some((block) => block.type === "text" && block.text.includes("Error")), false);
     const written = readFileSync(file, "utf8");
     assert.equal(written.startsWith("\uFEFF"), true, "BOM preserved");
     assert.equal(written.includes("alpha\r\nBETA\r\ngamma\r\n"), true, "CRLF preserved");

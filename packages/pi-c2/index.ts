@@ -4,6 +4,7 @@ import {
   registerCancelTool,
   registerQuestionTool,
   registerWriteMarkdownTool,
+  registerEditMarkdownTool,
   registerWriteEditTicketTool,
   registerStatusTool,
   registerJobsTool,
@@ -82,6 +83,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerMcpLifecycle(pi);
   registerQuestionTool(pi);
   registerWriteMarkdownTool(pi);
+  registerEditMarkdownTool(pi);
   registerWriteEditTicketTool(pi);
   registerAgentTool(pi);
   registerCancelTool(pi);
