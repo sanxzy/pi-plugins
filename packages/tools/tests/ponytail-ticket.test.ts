@@ -174,6 +174,23 @@ test("accepts missing nested directories under the project and retains independe
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("concurrent ticket creation retains every independent ticket", async () => {
+  const h = home(); const root = project(); mkdirSync(join(root, "src")); mkdirSync(join(root, "other"));
+  try { withHome(h, () => setup(root)); activateHome(h);
+    const results = await Promise.all([
+      executeCreateWriteEditTicket(input(["src"]), context(root), { now: () => 1_000 }),
+      executeCreateWriteEditTicket(input(["other"]), context(root), { now: () => 1_000 }),
+    ]);
+    assert.equal(results.filter((result) => result.details?.mode === "issued").length, 2);
+    const state = withHome(h, () => loadPonytailState("root-ticket", 1_001));
+    assert.equal(state?.tickets.length, 2);
+    assert.deepEqual(new Set(state?.tickets.flatMap((ticket) => ticket.scopes)), new Set([
+      join(canonicalProjectRoot(root), "src"),
+      join(canonicalProjectRoot(root), "other"),
+    ]));
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("persistence failure returns a safe error and leaves the prior ticket set active", async () => {
   const h = home(); const root = project(); mkdirSync(join(root, "src"));
   try { withHome(h, () => setup(root)); activateHome(h);

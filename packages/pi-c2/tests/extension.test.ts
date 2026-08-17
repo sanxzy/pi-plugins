@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { settingsConfigPath } from "@xzy-ai/runtime";
+import { clearSettingsCache, settingsConfigPath } from "@xzy-ai/runtime";
 import piC2Extension, {
   extensionName,
   type QuestionDetails,
@@ -139,6 +139,7 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "mcp_resources_list",
     "mcp_resources_read",
     "question",
+    "create_write_edit_ticket",
     "agent",
     "agent_cancel",
     "agent_status",
@@ -199,6 +200,51 @@ test("parent startup activates the registered tools including web_search and web
   assert.equal(activeTools.includes("mcp_resources_list"), false, "empty MCP surface hides resource listing");
   assert.equal(activeTools.includes("mcp_resources_read"), false, "empty MCP surface hides resource reads");
   assert.equal(activeTools.includes("ls"), false, "ls stays excluded");
+});
+
+test("Ponytail ticket tool is active only for an enabled session", async () => {
+  const home = tempHome();
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-ponytail-composition-project-"));
+  mkdirSync(join(project, "src"));
+  const configDir = join(home, "pi-c2");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config.json"), JSON.stringify({ tools: { ponytailEnabled: true } }));
+  const registered: string[] = [];
+  let activeTools: string[] = [];
+  const sessionStarts: Array<(event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown> = [];
+  const pi = {
+    registerTool(tool: { name: string }) { registered.push(tool.name); },
+    registerShortcut() {}, registerCommand() {},
+    on(event: string, handler: (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown) {
+      if (event === "session_start") sessionStarts.push(handler);
+    },
+    setActiveTools(names: string[]) { activeTools = names; },
+    getAllTools() { return registered.map((name) => ({ name })); },
+    sendUserMessage() {},
+  } as unknown as ExtensionAPI;
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = home;
+  try {
+    piC2Extension(pi);
+    const ctx = {
+      mode: "print", hasUI: false, cwd: project,
+      sessionManager: { getSessionId: () => "composition-session", getSessionFile: () => undefined },
+    } as unknown as ExtensionContext;
+    await Promise.all(sessionStarts.map((handler) => handler({ type: "session_start", reason: "startup" }, ctx)));
+    assert.ok(activeTools.includes("create_write_edit_ticket"));
+
+    writeFileSync(join(configDir, "config.json"), JSON.stringify({ tools: { ponytailEnabled: false } }));
+    clearSettingsCache();
+    activeTools = [];
+    const disabledCtx = { ...ctx, sessionManager: { getSessionId: () => "disabled-session", getSessionFile: () => undefined } } as unknown as ExtensionContext;
+    await Promise.all(sessionStarts.map((handler) => handler({ type: "session_start", reason: "startup" }, disabledCtx)));
+    assert.equal(activeTools.includes("create_write_edit_ticket"), false);
+  } finally {
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });
 
 test("research tool descriptions direct local-first lookup and automatic fallback saving", () => {
