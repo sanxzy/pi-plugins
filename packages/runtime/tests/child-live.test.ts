@@ -39,6 +39,13 @@ test("inherited MCP empty results keep only explicit answer/message fallbacks", 
   assert.doesNotMatch(rendered, /HOST_PROMPT|HOST_REASON|req-secret|requestId/);
 });
 
+test("inherited MCP invalid content entries do not expose raw host payloads", () => {
+  for (const result of [{ content: [{ hostOnly: "HOST_ARRAY", transportId: "TRANSPORT" }] }, { content: ["HOST_STRING"] }, { content: [{ type: "text", text: "safe" }, { hostOnly: "HOST_MIXED" }] }]) {
+    const rendered = stripVTControlCharacters(inheritedMcpRenderResult(result, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
+    assert.doesNotMatch(rendered, /HOST_ARRAY|TRANSPORT|HOST_STRING|HOST_MIXED/);
+  }
+});
+
 test("inherited MCP unknown result envelopes do not expose raw host payloads", () => {
   for (const result of ["HOST_SECRET", { hostOnly: "HOST_SECRET", transportId: "HOST_TRANSPORT" }]) {
     const rendered = stripVTControlCharacters(inheritedMcpRenderResult(result, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));

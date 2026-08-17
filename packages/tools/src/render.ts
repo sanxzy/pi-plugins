@@ -7,6 +7,17 @@ function sensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
 }
 
+function projectContent(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((block): Array<Record<string, unknown>> => {
+    if (!block || typeof block !== "object") return [];
+    const record = block as Record<string, unknown>;
+    if (record.type === "text" && typeof record.text === "string") return [{ type: "text", text: expandedToolText(record.text) }];
+    if (record.type === "image" && typeof record.data === "string" && typeof record.mimeType === "string") return [{ type: "image", data: "[image]", mimeType: record.mimeType }];
+    return [];
+  });
+}
+
 function sanitizeTraceValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (typeof value === "string") return expandedToolText(value);
   if (typeof value === "bigint") return `${value}n`;
@@ -69,7 +80,8 @@ export function toolResultTrace(
   _context?: ToolRenderContextLike,
 ): string {
   const content = result?.content ?? [];
-  if (Array.isArray(content) && content.length > 0) return traceValue(content);
+  const projectedContent = projectContent(content);
+  if (projectedContent.length > 0) return traceValue(projectedContent);
   if (result?.details && typeof result.details === "object") {
     const visible = Object.fromEntries(Object.entries(result.details).filter(([key]) => ["answer", "message"].includes(key)));
     if (Object.keys(visible).length > 0) return traceValue(visible);

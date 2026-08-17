@@ -106,6 +106,15 @@ test("expanded empty results keep only explicit answer/message fallbacks", () =>
 
 test("expanded malformed regular results suppress primitive and host payloads", () => {
   const webSearch = capture(registerWebSearchTool);
+  for (const result of [{ content: [{ hostOnly: "HOST_ARRAY", transportId: "TRANSPORT" }] }, { content: ["HOST_STRING"] }, { content: [{ type: "text", text: "safe" }, { hostOnly: "HOST_MIXED" }] }]) {
+    const rendered = text(webSearch.renderResult!(result, expandedOptions, theme, { expanded: true }));
+    assert.match(rendered, /safe|Result:/);
+    assert.doesNotMatch(rendered, /HOST_ARRAY|TRANSPORT|HOST_STRING|HOST_MIXED/);
+  }
+});
+
+test("expanded malformed regular result primitives stay suppressed", () => {
+  const webSearch = capture(registerWebSearchTool);
   for (const result of [{ content: "HOST_PRIMITIVE" }, { content: 123 }, { hostOnly: "HOST_SECRET", transportId: "HOST_TRANSPORT" }]) {
     const rendered = text(webSearch.renderResult!(result, expandedOptions, theme, { expanded: true }));
     assert.doesNotMatch(rendered, /HOST_PRIMITIVE|HOST_SECRET|HOST_TRANSPORT/);

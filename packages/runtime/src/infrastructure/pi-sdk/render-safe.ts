@@ -35,6 +35,17 @@ function sanitizeExpanded(value: string): string {
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
 }
 
+function projectContent(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((block): Array<Record<string, unknown>> => {
+    if (!block || typeof block !== "object") return [];
+    const record = block as Record<string, unknown>;
+    if (record.type === "text" && typeof record.text === "string") return [{ type: "text", text: sanitizeExpanded(record.text) }];
+    if (record.type === "image" && typeof record.mimeType === "string") return [{ type: "image", mimeType: record.mimeType }];
+    return [];
+  });
+}
+
 function expandedPayload(result: unknown): string {
   if (!result || typeof result !== "object") return "";
   const record = result as { content?: unknown; details?: unknown };
@@ -87,7 +98,8 @@ export function inheritedMcpRenderResult(result: unknown, options: { expanded?: 
   try {
     if (result !== null && typeof result === "object" && !Array.isArray(result)) {
       const record = result as { content?: unknown; details?: unknown };
-      if (Array.isArray(record.content) && record.content.length > 0) payload = JSON.stringify(sanitizeValue(record.content), null, 2) ?? "";
+      const projectedContent = projectContent(record.content);
+      if (projectedContent.length > 0) payload = JSON.stringify(projectedContent, null, 2) ?? "";
       else if (record.details && typeof record.details === "object" && "structuredContent" in record.details) payload = JSON.stringify(sanitizeValue((record.details as { structuredContent?: unknown }).structuredContent), null, 2) ?? "";
       else {
         const visible = Object.fromEntries(Object.entries(record.details && typeof record.details === "object" ? record.details : {}).filter(([key]) => ["answer", "message"].includes(key)));
