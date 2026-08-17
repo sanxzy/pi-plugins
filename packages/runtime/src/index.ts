@@ -41,6 +41,7 @@ export { createChildSessionManager, resolveChildTools, spawnChildSession } from 
 export { maxAgentDepth } from "./shared/pi-c2-config.ts";
 export {
   loadPonytailState,
+  mutatePonytailState,
   ponytailStateExists,
   pruneExpiredTickets,
   serializePonytailMutation,

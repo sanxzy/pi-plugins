@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, realpathSync, renameSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, renameSync, statSync, chmodSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   PONYTAIL_BACKUP_PREFIX,
@@ -30,6 +30,7 @@ export interface PonytailPersistence {
   readonly rename: (from: string, to: string) => void;
   readonly list: (directory: string) => string[];
   readonly exists: (filePath: string) => boolean;
+  readonly chmod: (filePath: string, mode: number) => void;
 }
 
 const defaultPersistence: PonytailPersistence = {
@@ -38,6 +39,7 @@ const defaultPersistence: PonytailPersistence = {
   rename: (from, to) => renameSync(from, to),
   list: (directory) => readdirSync(directory),
   exists: (filePath) => existsSync(filePath),
+  chmod: (filePath, mode) => chmodSync(filePath, mode),
 };
 
 /** Dedicated session-keyed state file directory. */
@@ -47,9 +49,10 @@ function sessionStateDir(sessionId: string): string {
 
 /**
  * Canonicalize an absolute stored scope without mutating the filesystem. An
- * existing path must equal its real path. A missing path is canonical only when
- * its nearest existing ancestor resolves to the same lexical location; this
- * rejects traversal and symlink escapes while allowing future directories.
+ * existing path must be a directory and equal its real path. A missing path is
+ * canonical only when its nearest existing ancestor is a directory and resolves
+ * to the same lexical location; this rejects traversal, symlink escapes, and
+ * file scopes while allowing future directories.
  */
 export function canonicalPonytailScope(scope: string): string | undefined {
   if (!isAbsolute(scope)) return undefined;
@@ -63,6 +66,7 @@ export function canonicalPonytailScope(scope: string): string | undefined {
   }
   let canonicalAncestor: string;
   try {
+    if (!statSync(ancestor).isDirectory()) return undefined;
     canonicalAncestor = realpathSync(ancestor);
   } catch {
     return undefined;
@@ -122,15 +126,10 @@ export function pruneExpiredTickets(state: PonytailState, nowMs: number): Ponyta
   return tickets.length === state.tickets.length ? state : { ...state, tickets };
 }
 
-/** Atomically persist one session's state with owner-only permissions. */
-export function writePonytailState(sessionId: string, state: PonytailState): void {
-  writePrivateJson(homePonytailStateFile(sessionId), state);
-}
-
 /**
- * Serialize asynchronous same-session state mutations. Synchronous callers in
- * one Node turn are already non-interleaving; future ticket creation uses this
- * queue to prevent concurrent read/prune/write cycles from losing records.
+ * Serialize asynchronous same-session state mutations. Every Ponytail
+ * read-modify-write cycle (load, prune, create, publish) must run through this
+ * queue so concurrent mutations cannot lose records.
  */
 const mutationQueues = new Map<string, Promise<void>>();
 export function serializePonytailMutation<T>(sessionId: string, mutation: () => Promise<T>): Promise<T> {
@@ -142,6 +141,37 @@ export function serializePonytailMutation<T>(sessionId: string, mutation: () => 
     if (mutationQueues.get(sessionId) === settled) mutationQueues.delete(sessionId);
   });
   return current;
+}
+
+/** The exact state-file path for one session. */
+export function ponytailStatePath(sessionId: string): string {
+  return homePonytailStateFile(sessionId);
+}
+
+/** Synchronous full-state publication with owner-only permissions. */
+export function writePonytailState(sessionId: string, state: PonytailState): void {
+  writePrivateJson(homePonytailStateFile(sessionId), state);
+}
+
+/**
+ * Read-modify-write one session's state under the session-keyed queue. The
+ * mutation receives the latest validated (possibly pruned) state and must
+ * return the next state to publish. A false `enabled` is preserved through
+ * future mutations.
+ */
+export async function mutatePonytailState(
+  sessionId: string,
+  nowMs: number,
+  mutation: (state: PonytailState | undefined) => PonytailState | undefined,
+  persistence: PonytailPersistence = defaultPersistence,
+): Promise<PonytailState | undefined> {
+  return serializePonytailMutation(sessionId, async () => {
+    const current = loadPonytailState(sessionId, nowMs, persistence);
+    const next = mutation(current);
+    if (next === undefined) return current;
+    writePonytailState(sessionId, next);
+    return next;
+  });
 }
 
 /**
@@ -192,6 +222,11 @@ export function loadPonytailState(sessionId: string, nowMs: number, persistence:
     persistence.rename(statePath, backupPath);
   } catch {
     return undefined;
+  }
+  try {
+    persistence.chmod(backupPath, 0o600);
+  } catch {
+    // A backup that cannot be secured never authorizes anything.
   }
   const recovered = recovery ?? { version: 1, enabled: true, tickets: [] };
   try {
