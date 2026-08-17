@@ -110,9 +110,9 @@ test("expanded regular-tool failures stay concise and safe", () => {
 
 test("expanded argument and result traces redact token and transport key variants", () => {
   const webSearch = capture(registerWebSearchTool);
-  const args = { access_token: "tok-secret", refreshToken: "refresh-secret", requestId: "req-secret", authorization: "Bearer abc.def" };
+  const args = { access_token: "tok-secret", refreshToken: "refresh-secret", requestId: "req-secret", clientId: "client-id", client_id: "client-id-2", authorization: "Bearer abc.def" };
   const call = text(webSearch.renderCall!(args, theme, { expanded: true, args }));
-  assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|abc\.def/);
+  assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|client-id|abc\.def/);
   const result = text(webSearch.renderResult!({ content: [{ type: "text", text: "safe result access_token=tok-secret requestId=req-secret traceId=trace-secret client_secret=client-secret client_id=client-id api_secret=api-secret https://example.test/?client_secret=url-secret&client_id=url-id" }], details: args }, expandedOptions, theme, { expanded: true, args }));
   assert.match(result, /safe result/);
   assert.doesNotMatch(result, /tok-secret|refresh-secret|req-secret|trace-secret|abc\.def|client-secret|client-id|api-secret|url-secret|url-id/);

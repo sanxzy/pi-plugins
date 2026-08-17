@@ -1,7 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
-const SENSITIVE_KEY = /(?:^|[_-])(?:access|refresh|client|id|api)?[_-]?(?:token|secret|password|credential|key|authorization|auth|bearer|code|state)(?:$|[_-])|(?:^|[_-])(?:chat|file|artifact)[_-]?id(?:$|[_-])|(?:^|[_-])request[_-]?id(?:$|[_-])|(?:^|[_-])trace[_-]?id(?:$|[_-])/i;
+const SENSITIVE_KEY = /(?:^|[_-])(?:access|refresh|client|id|api)?[_-]?(?:token|secret|password|credential|key|authorization|auth|bearer|code|state)(?:$|[_-])|(?:^|[_-])client[_-]?id(?:$|[_-])|(?:^|[_-])(?:chat|file|artifact)[_-]?id(?:$|[_-])|(?:^|[_-])request[_-]?id(?:$|[_-])|(?:^|[_-])trace[_-]?id(?:$|[_-])/i;
 
 function sensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
