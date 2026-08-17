@@ -39,6 +39,13 @@ test("inherited MCP empty results keep only explicit answer/message fallbacks", 
   assert.doesNotMatch(rendered, /HOST_PROMPT|HOST_REASON|req-secret|requestId/);
 });
 
+test("inherited MCP unknown result envelopes do not expose raw host payloads", () => {
+  for (const result of ["HOST_SECRET", { hostOnly: "HOST_SECRET", transportId: "HOST_TRANSPORT" }]) {
+    const rendered = stripVTControlCharacters(inheritedMcpRenderResult(result, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
+    assert.doesNotMatch(rendered, /HOST_SECRET|HOST_TRANSPORT/);
+  }
+});
+
 test("inherited MCP renderers hide payload output while retaining the tool activity label", () => {
   const call = stripVTControlCharacters(inheritedMcpRenderCall("server_lookup", "server_lookup", identityTheme).render(100).join(""));
   const result = stripVTControlCharacters(inheritedMcpRenderResult(

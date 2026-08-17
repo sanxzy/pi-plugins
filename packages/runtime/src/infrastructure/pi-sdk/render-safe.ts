@@ -85,18 +85,15 @@ export function inheritedMcpRenderResult(result: unknown, options: { expanded?: 
   if (isFailed || !options.expanded) return new Text(line, 0, 0);
   let payload = "";
   try {
-    const record = result && typeof result === "object" ? result as { content?: unknown; details?: unknown } : undefined;
-    const content = Array.isArray(record?.content) && record.content.length > 0
-      ? record.content
-      : record?.details && typeof record.details === "object" && "structuredContent" in record.details
-        ? (record.details as { structuredContent?: unknown }).structuredContent
-        : (() => {
-          if (Array.isArray(record?.content) && record.content.length > 0) return record.content;
-          if (!record?.details || typeof record.details !== "object") return record?.content ?? result;
-          const visible = Object.fromEntries(Object.entries(record.details).filter(([key]) => ["answer", "message"].includes(key)));
-          return Object.keys(visible).length > 0 ? visible : record?.content ?? [];
-        })();
-    payload = JSON.stringify(sanitizeValue(content), null, 2) ?? "";
+    if (result !== null && typeof result === "object" && !Array.isArray(result)) {
+      const record = result as { content?: unknown; details?: unknown };
+      if (Array.isArray(record.content) && record.content.length > 0) payload = JSON.stringify(sanitizeValue(record.content), null, 2) ?? "";
+      else if (record.details && typeof record.details === "object" && "structuredContent" in record.details) payload = JSON.stringify(sanitizeValue((record.details as { structuredContent?: unknown }).structuredContent), null, 2) ?? "";
+      else {
+        const visible = Object.fromEntries(Object.entries(record.details && typeof record.details === "object" ? record.details : {}).filter(([key]) => ["answer", "message"].includes(key)));
+        payload = JSON.stringify(sanitizeValue(visible), null, 2) ?? "";
+      }
+    }
   } catch {
     payload = expandedPayload(result);
   }

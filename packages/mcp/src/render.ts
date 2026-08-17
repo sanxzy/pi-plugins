@@ -23,20 +23,18 @@ function sanitizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
 
 function tracePayload(result: unknown): string {
   try {
-    const record = result && typeof result === "object" ? result as { content?: unknown; details?: unknown } : undefined;
-    const content = Array.isArray(record?.content) && record.content.length > 0
-      ? record.content
-      : record?.details && typeof record.details === "object" && "structuredContent" in record.details
-        ? (record.details as { structuredContent?: unknown }).structuredContent
-        : (() => {
-          if (Array.isArray(record?.content) && record.content.length > 0) return record.content;
-          if (!record?.details || typeof record.details !== "object") return record?.content ?? result;
-          const visible = Object.fromEntries(Object.entries(record.details).filter(([key]) => ["answer", "message"].includes(key)));
-          return Object.keys(visible).length > 0 ? visible : record?.content ?? [];
-        })();
-    return JSON.stringify(sanitizeValue(content), null, 2) ?? "";
+    if (result !== null && typeof result === "object" && !Array.isArray(result)) {
+      const record = result as { content?: unknown; details?: unknown };
+      if (Array.isArray(record.content) && record.content.length > 0) return JSON.stringify(sanitizeValue(record.content), null, 2) ?? "";
+      if (record.details && typeof record.details === "object" && "structuredContent" in record.details) {
+        return JSON.stringify(sanitizeValue((record.details as { structuredContent?: unknown }).structuredContent), null, 2) ?? "";
+      }
+      const visible = Object.fromEntries(Object.entries(record.details && typeof record.details === "object" ? record.details : {}).filter(([key]) => ["answer", "message"].includes(key)));
+      return JSON.stringify(sanitizeValue(visible), null, 2) ?? "";
+    }
+    return "";
   } catch {
-    return sanitizePayload(String(result ?? ""));
+    return "";
   }
 }
 
@@ -103,7 +101,9 @@ function failed(result: unknown, context: McpRenderContext): boolean {
 export function renderMcpCall(toolName: string, serverName: string, theme: RenderTheme, context?: McpRenderContext): Text {
   const line = theme.fg("toolTitle", theme.bold(`MCP ${compact(toolName)}`)) + theme.fg("muted", ` • ${compact(serverName)}`);
   if (context?.expanded && context.args !== undefined) {
-    return new Text(`${line}\nArguments:\n${tracePayload(context.args)}`, 0, 0);
+    let args = "";
+    try { args = JSON.stringify(sanitizeValue(context.args), null, 2) ?? ""; } catch { args = ""; }
+    return new Text(`${line}\nArguments:\n${args}`, 0, 0);
   }
   return new Text(line, 0, 0);
 }

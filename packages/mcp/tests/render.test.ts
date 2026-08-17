@@ -43,6 +43,13 @@ test("MCP empty results keep only explicit answer/message fallbacks", () => {
   assert.doesNotMatch(rendered, /HOST_PROMPT|HOST_REASON|req-secret|requestId/);
 });
 
+test("MCP unknown result envelopes do not expose raw host payloads", () => {
+  for (const result of ["HOST_SECRET", { hostOnly: "HOST_SECRET", transportId: "HOST_TRANSPORT" }]) {
+    const rendered = text(renderMcpResult("lookup", result, { expanded: true, isPartial: false }, theme, {}));
+    assert.doesNotMatch(rendered, /HOST_SECRET|HOST_TRANSPORT/);
+  }
+});
+
 test("MCP error rows do not expose payload details", () => {
   const error = { content: [{ type: "text", text: "Error: private transport details" }], details: { isError: true, failure: "transport_error" } };
   const rendered = text(renderMcpResult("lookup", error, { expanded: true, isPartial: false }, theme, {}));
