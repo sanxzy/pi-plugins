@@ -27,7 +27,7 @@ function projectContent(value: unknown): Array<Record<string, unknown>> {
     if (!block || typeof block !== "object") return [];
     const record = block as Record<string, unknown>;
     if (record.type === "text" && typeof record.text === "string") return [{ type: "text", text: sanitizePayload(record.text) }];
-    if (record.type === "image" && typeof record.mimeType === "string") return [{ type: "image", mimeType: record.mimeType }];
+    if (record.type === "image" && typeof record.data === "string" && typeof record.mimeType === "string") return [{ type: "image", mimeType: record.mimeType }];
     return [];
   });
 }

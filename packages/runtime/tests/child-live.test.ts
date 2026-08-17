@@ -46,6 +46,13 @@ test("inherited MCP invalid content entries do not expose raw host payloads", ()
   }
 });
 
+test("inherited MCP malformed image blocks do not expose incomplete payloads", () => {
+  for (const result of [{ content: [{ type: "image", mimeType: "image/png" }] }, { content: [{ type: "image", data: 123, mimeType: "image/png" }] }]) {
+    const rendered = stripVTControlCharacters(inheritedMcpRenderResult(result, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
+    assert.doesNotMatch(rendered, /image\/png/);
+  }
+});
+
 test("inherited MCP unknown result envelopes do not expose raw host payloads", () => {
   for (const result of ["HOST_SECRET", { hostOnly: "HOST_SECRET", transportId: "HOST_TRANSPORT" }]) {
     const rendered = stripVTControlCharacters(inheritedMcpRenderResult(result, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
