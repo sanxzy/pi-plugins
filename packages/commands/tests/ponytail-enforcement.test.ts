@@ -114,6 +114,19 @@ test("disabled sessions preserve built-in write/edit behavior and bash stays out
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("blocks unusable session identities without throwing or exposing raw identity data", async () => {
+  const h = home(); const root = project(); mkdirSync(join(root, "src"));
+  try {
+    const { handler } = registration();
+    for (const sessionId of ["bad/id", "../traversal", ".", "bad\\\\id"]) {
+      const result = await call(handler, "write", { path: "src/file.ts", content: "secret" }, context(root, sessionId));
+      assert.equal(result?.block, true, sessionId);
+      assert.match(result?.reason ?? "", /identity|session/i);
+      assert.doesNotMatch(result?.reason ?? "", /bad|traversal|secret/i);
+    }
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("blocks an existing unrecoverable state file even when the home default is disabled", async () => {
   const h = home(); const root = project(); mkdirSync(join(root, "src"));
   try {
@@ -127,6 +140,20 @@ test("blocks an existing unrecoverable state file even when the home default is 
     assert.equal(result?.block, true);
     assert.match(result?.reason ?? "", /state|Ponytail|ticket/i);
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("blocks absolute and missing targets outside the current project even under a stored scope", async () => {
+  const h = home(); const first = project(); const second = project(); mkdirSync(join(first, "src"));
+  try {
+    withHome(h, () => writePonytailState("cross-project", { version: 1, enabled: true, tickets: [ticket(join(canonicalProjectRoot(first), "src"))] }));
+    process.env.PI_C2_TEST_HOME = h; clearSettingsCache();
+    const { handler } = registration();
+    for (const path of [join(first, "src", "existing.ts"), join(first, "src", "new", "missing.ts")]) {
+      const result = await call(handler, "write", { path, content: "secret" }, context(second, "cross-project"));
+      assert.equal(result?.block, true, path);
+      assert.match(result?.reason ?? "", /project|scope|ticket|outside/i);
+    }
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(first, { recursive: true, force: true }); rmSync(second, { recursive: true, force: true }); }
 });
 
 test("enforcement logs only safe categories and never ticket, path, state, or content values", async () => {
