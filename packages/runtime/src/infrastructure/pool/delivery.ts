@@ -14,19 +14,31 @@ import { pendingDeliveryFile } from "../../shared/paths.ts";
 export interface DeliveryCoordinator {
   readonly activeCount: number;
   readonly pendingCount: number;
-  register(sessionFile: string, deliver: (content: string) => void): void;
+  register(sessionFile: string, deliver: (content: string, meta?: DeliveryResultMeta) => void): void;
   unregister(sessionFile: string): void;
   /** Move pending results from a replaced parent session to its descendant. */
   rebind(previousSessionFile: string, nextSessionFile: string): void;
   /** Re-drive durable pending delivery now (called after the host settles). */
   redrive(sessionFile?: string): void;
-  deliverResult(jobId: string, parentSessionFile: string, content: string): boolean;
+  deliverResult(jobId: string, parentSessionFile: string, content: string, meta?: DeliveryResultMeta): boolean;
+}
+
+/**
+ * Structured metadata accompanying a delivered background result.
+ *
+ * Kept free of session handles and raw paths; the sink uses it to render a
+ * human notification (e.g. the subagent type and job id of a completed child).
+ */
+export interface DeliveryResultMeta {
+  readonly subagentType: string;
+  readonly jobId: string;
 }
 
 interface PendingResult {
   readonly jobId: string;
   parentSessionFile: string;
   readonly content: string;
+  readonly meta?: DeliveryResultMeta;
 }
 
 export interface DeliveryCoordinatorOptions {
@@ -76,7 +88,7 @@ function persistPending(path: string | undefined, pending: readonly PendingResul
 }
 
 export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = {}): DeliveryCoordinator {
-  const sinks = new Map<string, (content: string) => void>();
+  const sinks = new Map<string, (content: string, meta?: DeliveryResultMeta) => void>();
   const pendingPath = options.projectRoot && options.rootSessionId
     ? pendingDeliveryFile(options.projectRoot, options.rootSessionId)
     : undefined;
@@ -115,7 +127,7 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
       }
 
       try {
-        sink(result.content);
+        sink(result.content, result.meta);
         pending.splice(index, 1);
         changed = true;
         options.onDelivered?.(result.jobId);
@@ -174,20 +186,20 @@ export function createDeliveryCoordinator(options: DeliveryCoordinatorOptions = 
       }
       for (const registered of sinks.keys()) deliverPending(registered);
     },
-    deliverResult(jobId, parentSessionFile, content): boolean {
+    deliverResult(jobId, parentSessionFile, content, meta): boolean {
       return processWithLog({ operation: PERSISTENCE_OPERATIONS.DELIVERY_RESULT, parameters: { jobId, parentSessionFile } }, () => {
       const sink = sinks.get(parentSessionFile);
       if (!sink) {
-        pending.push({ jobId, parentSessionFile, content });
+        pending.push({ jobId, parentSessionFile, content, meta });
         persist();
         return false;
       }
 
       try {
-        sink(content);
+        sink(content, meta);
         return true;
       } catch {
-        pending.push({ jobId, parentSessionFile, content });
+        pending.push({ jobId, parentSessionFile, content, meta });
         persist();
         scheduleRetry(parentSessionFile);
         return false;

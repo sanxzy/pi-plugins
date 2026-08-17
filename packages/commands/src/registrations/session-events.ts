@@ -11,6 +11,7 @@ import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
 import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
 import { currentProcessIdentity, clearAgentDiscoveryCache, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, loadPonytailState, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 import { createHostMessageGate, type HostMessageGate } from "./safe-host-delivery.ts";
+import { notifyHost } from "./notify-entry.ts";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-c2:session-reload-markers");
 type SessionReloadMarkers = Map<string, boolean>;
@@ -73,9 +74,7 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLog
     cwd: ctx.cwd,
     hasUI: ctx.hasUI,
     sendUserMessage: (content, options) => gate.sendHidden(content, options?.deliverAs ?? "steer"),
-    notify: (message, type) => {
-      if (ctx.hasUI) ctx.ui.notify(message, type);
-    },
+    notify: (message) => notifyHost(pi, ctx, message),
     logger,
   };
 }
@@ -198,7 +197,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
       pool.deliveryFor(pool.rootSessionIdFor(sessionId)).rebind(event.previousSessionFile, sessionFile);
     }
     const delivery = pool.deliveryFor(pool.rootSessionIdFor(sessionId));
-    delivery.register(sessionFile, (content) => {
+    delivery.register(sessionFile, (content, meta) => {
       // Reject while the host agent is mid-run: the delivery coordinator keeps
       // the result durable pending and retries once the host settles, so a
       // background result is never lost to an active prompt and never surfaces
@@ -208,7 +207,10 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
       if (!gate.trySendHidden(content, "steer")) {
         throw new Error("host agent is busy; defer result delivery");
       }
-      if (ctx.hasUI) ctx.ui.notify("Agent result delivered to the root session.", "info");
+      if (ctx.hasUI) {
+        const detail = meta ? ` (${meta.subagentType}, ${meta.jobId})` : "";
+        notifyHost(pi, ctx, `Agent result delivered to the root session${detail}.`);
+      }
     });
     gate.onSettled(() => delivery.redrive(sessionFile));
 

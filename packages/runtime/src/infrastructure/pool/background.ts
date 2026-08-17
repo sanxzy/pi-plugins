@@ -80,7 +80,7 @@ async function runBackgroundJobInner(
       sessionFile: "",
       output: message,
       status: "failed",
-    }));
+    }), { subagentType: job.subagentType, jobId: job.jobId });
     if (delivered) deps.registry.updateJob(job.jobId, { delivered: true });
     return;
   }
@@ -91,7 +91,7 @@ async function runBackgroundJobInner(
       sessionFile: "",
       output: "could not spawn child",
       status: "failed",
-    }));
+    }), { subagentType: job.subagentType, jobId: job.jobId });
     if (delivered) deps.registry.updateJob(job.jobId, { delivered: true });
     return;
   }
@@ -107,6 +107,6 @@ async function runBackgroundJobInner(
   // Delivery owns the delivered flag: it is set immediately only when the
   // parent sink accepts the result, or later when a durable pending result is
   // drained after the parent session registers again.
-  const delivered = deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, result));
+  const delivered = deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, result), { subagentType: job.subagentType, jobId: job.jobId });
   if (delivered) deps.registry.updateJob(job.jobId, { delivered: true });
 }

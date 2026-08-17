@@ -13,6 +13,18 @@ import {
   clearSessionReload,
 } from "../src/registrations/session-events.ts";
 import { createHostMessageGate } from "../src/registrations/safe-host-delivery.ts";
+import { appendNotifyEntry, notifyHost, NOTIFY_ENTRY_TYPE } from "../src/registrations/notify-entry.ts";
+
+const identity = (text: string): string => text;
+const testTheme = {
+  fg: (_color: string, text: string) => text,
+  bg: (_color: string, text: string) => text,
+  bold: identity,
+  italic: identity,
+  underline: identity,
+  inverse: identity,
+  strikethrough: identity,
+} as unknown as Parameters<typeof import("../src/registrations/notify-entry.ts").notifyEntryRenderer>[2];
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
@@ -44,15 +56,17 @@ function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler> } {
   };
 }
 
-function registrationsWithSteer(): { pi: ExtensionAPI; handlers: Map<string, Handler>; steers: string[]; hidden: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }>; notifications: string[] } {
+function registrationsWithSteer(): { pi: ExtensionAPI; handlers: Map<string, Handler>; steers: string[]; hidden: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }>; notifications: string[]; entries: Array<{ customType: string; data: unknown }> } {
   const handlers = new Map<string, Handler>();
   const steers: string[] = [];
   const hidden: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }> = [];
   const notifications: string[] = [];
+  const entries: Array<{ customType: string; data: unknown }> = [];
   return {
     steers,
     hidden,
     notifications,
+    entries,
     handlers,
     pi: {
       on(event: string, handler: Handler) {
@@ -64,6 +78,9 @@ function registrationsWithSteer(): { pi: ExtensionAPI; handlers: Map<string, Han
       },
       sendMessage(message: { customType: string; content: string; display: boolean }, options?: unknown) {
         hidden.push({ message, options });
+      },
+      appendEntry(customType: string, data: unknown) {
+        entries.push({ customType, data });
       },
       setActiveTools() {},
       getAllTools() {
@@ -350,7 +367,7 @@ test("a disposed host gate releases its lifecycle listeners", () => {
 test("a background result raced into an active run is delivered after the run settles", async () => {
   const cwd = projectRoot();
   try {
-    const { pi, handlers, steers, hidden, notifications } = registrationsWithSteer();
+    const { pi, handlers, steers, hidden, entries } = registrationsWithSteer();
     const ctx = {
       ...context(cwd, "root-a"),
       ui: { notify: (message: string) => notifications.push(message) },
@@ -377,10 +394,61 @@ test("a background result raced into an active run is delivered after the run se
     assert.equal(hidden.at(-1)?.message.customType, "pi-c2:internal-context");
     assert.equal(hidden.at(-1)?.message.display, false);
     assert.equal(hidden.at(-1)?.message.content, "result-a");
-    assert.deepEqual(notifications, ["Agent result delivered to the root session."]);
+    assert.deepEqual(entries.map((entry) => entry.data), [{ message: "Agent result delivered to the root session." }]);
+    assert.deepEqual(entries.map((entry) => entry.customType), ["pi-c2:notify"]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("background result notification includes subagent type and job id when metadata is present", async () => {
+  const cwd = projectRoot();
+  try {
+    const { pi, handlers, entries } = registrationsWithSteer();
+    const ctx = {
+      ...context(cwd, "root-a"),
+      ui: { notify: (message: string) => notifications.push(message) },
+      isIdle: () => true,
+      hasPendingMessages: () => false,
+    } as unknown as ExtensionContext;
+    registerSessionEvents(pi);
+    await handlers.get("session_start")!({ reason: "startup" }, ctx);
+    const sessionFile = join(cwd, "sessions", "root-a.jsonl");
+    const sent = getChildPool(cwd, "root-a").deliveryFor("root-a").deliverResult(
+      "job-42",
+      sessionFile,
+      "Background agent impl-reviewer (job-42) completed: ok",
+      { subagentType: "impl-reviewer", jobId: "job-42" },
+    );
+    assert.equal(sent, true);
+    assert.deepEqual(entries.map((entry) => entry.data), [{ message: "Agent result delivered to the root session (impl-reviewer, job-42)." }]);
+    assert.deepEqual(entries.map((entry) => entry.customType), ["pi-c2:notify"]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("notify entry renders yellow ※ line and falls back to plain notify without UI", async () => {
+  const { notifyEntryRenderer } = await import("../src/registrations/notify-entry.ts");
+  const rendered = notifyEntryRenderer(
+    { type: "custom", id: "e1", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", customType: NOTIFY_ENTRY_TYPE, data: { message: "hello" } },
+    { expanded: false },
+    testTheme,
+  );
+  assert.ok(rendered);
+  assert.equal(rendered.render(80).join("\n").trim(), "※ hello");
+  assert.equal(notifyEntryRenderer({ type: "custom", id: "e2", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", customType: NOTIFY_ENTRY_TYPE, data: { message: "" } }, { expanded: false }, testTheme), undefined);
+
+  // appendNotifyEntry appends the custom entry; notifyHost uses appendEntry with UI.
+  const appended: unknown[] = [];
+  const notifyFallback: string[] = [];
+  const pi = { appendEntry: (customType: string, data: unknown) => appended.push({ customType, data }) } as unknown as ExtensionAPI;
+  appendNotifyEntry(pi, "appended message");
+  assert.deepEqual(appended, [{ customType: NOTIFY_ENTRY_TYPE, data: { message: "appended message" } }]);
+  notifyHost(pi, { hasUI: true } as unknown as ExtensionContext, "ui message");
+  assert.equal(appended.length, 2);
+  notifyHost(pi, { hasUI: false, ui: { notify: (message: string) => notifyFallback.push(message) } } as unknown as ExtensionContext, "plain message");
+  assert.deepEqual(notifyFallback, ["plain message"]);
 });
 
 test("session_shutdown disposes the host gate so a stale context cannot crash the host", async () => {

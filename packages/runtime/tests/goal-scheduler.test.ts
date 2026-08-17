@@ -62,7 +62,7 @@ test("active ticks deliver exact prompt plus footer with steer even while busy",
   pool.tick("/project");
   pool.tick("/project");
   assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`, `p\n${GOAL_DELIVERY_FOOTER}`]);
-  assert.deepEqual(notifications, ["Goal sent to the session.", "Goal sent to the session."]);
+  assert.deepEqual(notifications, ["Goal triggered and sent to the current session — this goal will be sent every 1m.", "Goal triggered and sent to the current session — this goal will be sent every 1m."]);
 });
 
 test("paused ticks warn through UI only and no-UI ticks do nothing", () => {

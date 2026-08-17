@@ -85,6 +85,25 @@ export function normalizeGoalCwd(cwd: string): string {
   }
 }
 
+/** Format an interval in milliseconds as a compact human duration such as 30s, 10m, 1h 30m, or 2d. */
+export function formatGoalInterval(intervalMs: number): string {
+  const units = [
+    { label: "d", ms: 86_400_000 },
+    { label: "h", ms: 3_600_000 },
+    { label: "m", ms: 60_000 },
+    { label: "s", ms: 1_000 },
+  ] as const;
+  const parts: string[] = [];
+  let remainder = Math.max(0, intervalMs);
+  for (const unit of units) {
+    if (remainder >= unit.ms) {
+      parts.push(`${Math.floor(remainder / unit.ms)}${unit.label}`);
+      remainder %= unit.ms;
+    }
+  }
+  return parts.length > 0 ? parts.join(" ") : `${intervalMs}ms`;
+}
+
 interface SchedulerRecord {
   readonly timer: GoalTimerHandle;
   readonly intervalMs: number;
@@ -137,7 +156,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         try {
           if (goal.status === "active") {
             target.sendUserMessage(`${goal.prompt}\n${GOAL_DELIVERY_FOOTER}`, { deliverAs: "steer" });
-            target.notify("Goal sent to the session.", "info");
+            target.notify(`Goal triggered and sent to the current session — this goal will be sent every ${formatGoalInterval(goal.intervalMs)}.`, "info");
           } else if (target.hasUI) {
             target.notify(`Goal paused: ${goal.pauseReason ?? ""}`, "warning");
           }
