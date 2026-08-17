@@ -5,7 +5,15 @@ type RenderTheme = {
   bold(text: string): string;
 };
 
-export type McpRenderContext = { isError?: boolean };
+function tracePayload(result: unknown): string {
+  try {
+    return sanitizePayload(JSON.stringify(result, null, 2));
+  } catch {
+    return sanitizePayload(String(result ?? ""));
+  }
+}
+
+export type McpRenderContext = { isError?: boolean; expanded?: boolean; args?: unknown };
 
 function compact(value: unknown, maxLength = 96): string {
   const text = String(value ?? "")
@@ -47,7 +55,8 @@ function sanitizePayload(value: string): string {
   return value
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
     .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*\d+\b)/gi, "[redacted]")
+    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .replace(/\u001b/g, "");
 }
@@ -63,12 +72,12 @@ function failed(result: unknown, context: McpRenderContext): boolean {
   return payloadText(result).trimStart().startsWith("Error:");
 }
 
-export function renderMcpCall(toolName: string, serverName: string, theme: RenderTheme): Text {
-  return new Text(
-    theme.fg("toolTitle", theme.bold(`MCP ${compact(toolName)}`)) + theme.fg("muted", ` • ${compact(serverName)}`),
-    0,
-    0,
-  );
+export function renderMcpCall(toolName: string, serverName: string, theme: RenderTheme, context?: McpRenderContext): Text {
+  const line = theme.fg("toolTitle", theme.bold(`MCP ${compact(toolName)}`)) + theme.fg("muted", ` • ${compact(serverName)}`);
+  if (context?.expanded && context.args !== undefined) {
+    return new Text(`${line}\nArguments:\n${tracePayload(context.args)}`, 0, 0);
+  }
+  return new Text(line, 0, 0);
 }
 
 export function renderMcpResult(
@@ -82,7 +91,7 @@ export function renderMcpResult(
   const isFailed = failed(result, context);
   const label = `MCP ${compact(toolName)} • ${isFailed ? "failed" : "completed"}`;
   const line = theme.fg(isFailed ? "warning" : "success", `${isFailed ? "✗" : "✓"} ${label}`);
-  const payload = !isFailed && options.expanded ? payloadText(result) : "";
+  const payload = options.expanded && !isFailed ? tracePayload(result) : "";
   return new Text(payload ? `${line}\n${payload}` : line, 0, 0);
 }
 

@@ -275,7 +275,7 @@ export class McpToolExposer {
       description: mapping.description ?? `MCP tool ${mapping.nativeName}`,
       parameters: mapping.parameters as never,
       execute: invoke,
-      renderCall: (_args, theme) => renderMcpCall(mapping.nativeName, mapping.serverName, theme),
+      renderCall: (args, theme, context) => renderMcpCall(mapping.nativeName, mapping.serverName, theme, { ...context, args }),
       renderResult: (result, options, theme, context) => renderMcpResult(mapping.nativeName, result, options, theme, context),
     });
   }

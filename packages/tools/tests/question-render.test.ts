@@ -15,7 +15,7 @@ import type { QuestionDetails } from "../src/types.ts";
  */
 
 interface Renderers {
-  renderCall?: (args: QuestionParams, theme: Theme) => { render(width: number): string[] };
+  renderCall?: (args: QuestionParams, theme: Theme, context?: unknown) => { render(width: number): string[] };
   renderResult: (
     result: { content: Array<{ type: string; text?: string }>; details?: QuestionDetails },
     options: unknown,
@@ -61,9 +61,16 @@ const params: QuestionParams = {
   ],
 };
 
-test("question uses the host default call renderer", () => {
+test("question renders concise activity and exact arguments when expanded", () => {
   const { renderCall } = captureRenderers();
-  assert.equal(renderCall, undefined);
+  assert.ok(renderCall);
+  const collapsed = stripVTControlCharacters(renderCall!(params, theme).render(80).join(""));
+  assert.match(collapsed, /question/);
+  assert.match(collapsed, /Proceed\?/);
+  assert.doesNotMatch(collapsed, /\"options\"/);
+  const expanded = stripVTControlCharacters(renderCall!(params, theme, { expanded: true, args: params }).render(120).join(""));
+  assert.match(expanded, /\"options\"/);
+  assert.match(expanded, /Continue/);
 });
 
 test("renderResult shows a selected answer only when expanded", () => {

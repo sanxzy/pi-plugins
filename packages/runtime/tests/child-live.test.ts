@@ -32,6 +32,9 @@ test("inherited MCP renderers hide payload output while retaining the tool activ
     { isError: false },
   ).render(100).join(""));
   assert.match(call, /server_lookup/);
+  const expandedCall = stripVTControlCharacters(inheritedMcpRenderCall("server_lookup", "server_lookup", identityTheme, { expanded: true, args: { query: "inspect this" } }).render(100).join(""));
+  assert.match(expandedCall, /\"query\"/);
+  assert.match(expandedCall, /inspect this/);
   assert.doesNotMatch(result, /SECRET_MCP_OUTPUT/);
   const expanded = stripVTControlCharacters(inheritedMcpRenderResult(
     { content: [{ type: "text", text: "SAFE_MCP_OUTPUT" }] },

@@ -74,15 +74,15 @@ export function registerWebFetchTool(pi: ExtensionAPI): void {
         return errorResult(toErrorMessage(error), {});
       }
     },
-    renderCall(args, theme) {
-      return renderToolDetail(theme, "web_fetch", args.url);
+    renderCall(args, theme, context) {
+      return renderToolDetail(theme, "web_fetch", args.url, 96, context, args);
     },
     renderResult(result, options, theme, context) {
       const failed = toolResultFailed(result, context);
       const output = toolResultText(result);
       const lineCount = output ? output.split("\n").length : 0;
       const contentType = output.includes("#") ? "markdown" : "text";
-      return renderToolOutcome(theme, `Web fetch • ${contentType} • ${lineCount} lines`, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, output);
+      return renderToolOutcome(theme, `Web fetch • ${contentType} • ${lineCount} lines`, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, output, result, context.args);
     },
   });
 }

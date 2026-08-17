@@ -9,7 +9,7 @@ import { DISMISSED, QuestionDialog, type QuestionDialogResult, type QuestionDial
 import { questionParams, type QuestionParams } from "../tools.ts";
 import type { QuestionDetails } from "../types.ts";
 import { errorResult, textResult } from "../results.ts";
-import { renderToolOutcome, renderToolResult, toolResultFailed } from "../render.ts";
+import { renderToolCall, renderToolOutcome, toolResultFailed } from "../render.ts";
 
 /**
  * Register the `question` tool.
@@ -107,12 +107,15 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
       });
     },
 
+    renderCall(args, theme, context) {
+      return renderToolCall(theme, "question", args.question, context, args);
+    },
     renderResult(result, options, theme, context) {
       const failed = toolResultFailed(result, context);
       const answer = result.details?.answer;
       const activity = failed ? "Question failed" : answer === null ? "question cancelled" : "question answered";
       const detail = !failed && typeof answer === "string" ? `Question • answered: ${answer}` : "";
-      return renderToolOutcome(theme, activity, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, detail);
+      return renderToolOutcome(theme, activity, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, detail, result, context.args);
     },
   });
 }

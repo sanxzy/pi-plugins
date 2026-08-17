@@ -6,7 +6,7 @@ import { cancelParams, type CancelParams } from "../tools.ts";
 import type { CancelDetails } from "../types.ts";
 import { callerFor } from "../caller.ts";
 import { errorResult, textResult } from "../results.ts";
-import { renderToolResult, toolResultFailed } from "../render.ts";
+import { renderToolDetail, renderToolOutcome, toolResultFailed } from "../render.ts";
 
 export function registerCancelTool(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -86,12 +86,16 @@ export function registerCancelTool(pi: ExtensionAPI): void {
       });
       });
     },
+    renderCall(args, theme, context) {
+      return renderToolDetail(theme, "agent_cancel", args.job_id, 96, context, args);
+    },
     renderResult(result, options, theme, context) {
       const details = result.details && typeof result.details === "object" ? result.details as unknown as Record<string, unknown> : {};
       const success = details.success === true;
       const type = typeof details.subagentType === "string" ? details.subagentType : "agent";
       const jobId = typeof details.jobId === "string" ? details.jobId : "unknown";
-      return renderToolResult(theme, `Agent ${type} • ${jobId} ${success ? "cancelled" : "not cancellable"}`, toolResultFailed(result, context) || !success, options.isPartial);
+      const failed = toolResultFailed(result, context) || !success;
+      return renderToolOutcome(theme, `Agent ${type} • ${jobId} ${success ? "cancelled" : "not cancellable"}`, options, failed, "", result, context.args);
     },
   });
 }

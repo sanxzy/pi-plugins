@@ -13,7 +13,8 @@ function sanitizeExpanded(value: string): string {
   return value
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
     .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*\d+\b)/gi, "[redacted]")
+    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]")
     .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
     .replace(/[\u0000-\u001f\u007f]/g, "");
 }
@@ -51,8 +52,14 @@ function failed(result: unknown, context: { isError?: boolean }): boolean {
   );
 }
 
-export function inheritedMcpRenderCall(name: string, label: string, theme: { fg(color: string, text: string): string; bold(text: string): string }): Text {
-  return new Text(theme.fg("toolTitle", theme.bold(compact(label))) + theme.fg("muted", ` ${compact(name)}`), 0, 0);
+export function inheritedMcpRenderCall(name: string, label: string, theme: { fg(color: string, text: string): string; bold(text: string): string }, context?: { expanded?: boolean; args?: unknown }): Text {
+  const line = theme.fg("toolTitle", theme.bold(compact(label))) + theme.fg("muted", ` ${compact(name)}`);
+  if (context?.expanded && context.args !== undefined) {
+    let args = "";
+    try { args = sanitizeExpanded(JSON.stringify(context.args, null, 2)); } catch { args = sanitizeExpanded(String(context.args)); }
+    return new Text(`${line}\nArguments:\n${args}`, 0, 0);
+  }
+  return new Text(line, 0, 0);
 }
 
 export function inheritedMcpRenderResult(result: unknown, options: { expanded?: boolean; isPartial: boolean }, theme: { fg(color: string, text: string): string }, context: { isError?: boolean }): Text {
@@ -60,6 +67,11 @@ export function inheritedMcpRenderResult(result: unknown, options: { expanded?: 
   const isFailed = failed(result, context);
   const line = theme.fg(isFailed ? "warning" : "success", isFailed ? "✗ MCP tool failed" : "✓ MCP tool complete");
   if (isFailed || !options.expanded) return new Text(line, 0, 0);
-  const payload = expandedPayload(result);
-  return new Text(payload ? `${line}\n${compact(payload, 50_000)}` : line, 0, 0);
+  let payload = "";
+  try {
+    payload = sanitizeExpanded(JSON.stringify(result, null, 2));
+  } catch {
+    payload = expandedPayload(result);
+  }
+  return new Text(payload ? `${line}\n${payload}` : line, 0, 0);
 }

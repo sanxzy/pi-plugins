@@ -59,8 +59,8 @@ export function registerAgentTool(pi: ExtensionAPI): void {
         executeAgentCall(params, ctx, _signal),
       );
     },
-    renderCall(args, theme) {
-      return renderToolDetail(theme, "agent", `${args.subagent_type} • ${args.description}`);
+    renderCall(args, theme, context) {
+      return renderToolDetail(theme, "agent", `${args.subagent_type} • ${args.description}`, 96, context, args);
     },
     renderResult(result, options, theme, context) {
       const details = result.details;
@@ -74,7 +74,7 @@ export function registerAgentTool(pi: ExtensionAPI): void {
       const prompt = !failed && context.expanded && context.args && typeof context.args === "object" && "prompt" in context.args
         ? `Instructions: ${String((context.args as { prompt?: unknown }).prompt ?? "")}`
         : detailsRecord && context.expanded && typeof detailsRecord.prompt === "string" ? `Instructions: ${detailsRecord.prompt}` : "";
-      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, prompt);
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, prompt, result, context.args);
     },
   });
 }

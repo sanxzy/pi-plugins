@@ -195,15 +195,15 @@ export function registerKnowledgeSearchTool(pi: ExtensionAPI): void {
           }),
       );
     },
-    renderCall(args, theme) {
+    renderCall(args, theme, context) {
       const query = typeof args.query === "string" ? args.query : "discovering local knowledge";
-      return renderToolDetail(theme, "knowledge_search", query);
+      return renderToolDetail(theme, "knowledge_search", query, 96, context, args);
     },
     renderResult(result, options, theme, context) {
       const failed = toolResultFailed(result, context);
       const details = result.details as { results?: unknown[] } | undefined;
       const count = details?.results?.length ?? (toolResultText(result) ? 1 : 0);
-      return renderToolOutcome(theme, `Knowledge search • ${count} results`, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, toolResultText(result));
+      return renderToolOutcome(theme, `Knowledge search • ${count} results`, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, toolResultText(result), result, context.args);
     },
   });
 }

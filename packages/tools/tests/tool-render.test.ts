@@ -75,12 +75,23 @@ test("tool renderers expose safe, tool-specific activity without model payloads"
   };
 
   for (const tool of tools) {
-    const call = tool.renderCall ? text(tool.renderCall(argsByTool[tool.name] ?? {}, theme, renderContext)) : "";
+    const args = argsByTool[tool.name] ?? {};
+    const call = tool.renderCall ? text(tool.renderCall(args, theme, renderContext)) : "";
     const result = text(tool.renderResult!({ content: [{ type: "text", text: "secret internal output" }], details: { prompt: "secret" } }, collapsedOptions, theme, renderContext));
-    if (tool.renderCall) assert.ok(call.length > 0, `${tool.name} renders activity`);
+    if (tool.renderCall) {
+      assert.ok(call.length > 0, `${tool.name} renders activity`);
+      assert.doesNotMatch(call, /secret|internal output/);
+      const expandedCall = text(tool.renderCall(args, theme, { ...renderContext, expanded: true, args }));
+      assert.match(expandedCall, /Arguments:/, `${tool.name} exposes expanded arguments`);
+    }
     assert.ok(result.length > 0, `${tool.name} renders an outcome`);
-    if (tool.renderCall) assert.doesNotMatch(call, /secret|internal output/);
     assert.doesNotMatch(result, /secret|internal output/);
+    const expandedResult = text(tool.renderResult!({ content: [{ type: "text", text: "traceable internal output" }], details: { prompt: "traceable" } }, expandedOptions, theme, { ...renderContext, expanded: true, args }));
+    if (tool.name === "agent_cancel" || tool.name === "agent_status") {
+      assert.match(expandedResult, /\"prompt\"|traceable internal output|not cancellable|unknown/);
+    } else {
+      assert.match(expandedResult, /traceable internal output|\"prompt\"/, `${tool.name} exposes expanded result tracing`);
+    }
   }
 
 
@@ -127,7 +138,7 @@ test("renderers follow the agreed collapsed and expanded tool contracts", () => 
   assert.match(webExpanded, /\"provider\"/);
 
   const telegram = capture((pi) => registerTelegramChatTool(pi, { registry: { register() {} } as never }));
-  const telegramResult = { content: [], details: { sent: true, action: "send_text", message: "private report", chatId: "123456" } };
+  const telegramResult = { content: [], details: { sent: true, action: "send_text", message: "private report", chatId: "123456", messageId: 456 } };
   assert.doesNotMatch(text(telegram.renderResult!(telegramResult, collapsedOptions, theme, renderContext)), /private report|123456/);
   const telegramExpanded = text(telegram.renderResult!(telegramResult, expandedOptions, theme, renderContext));
   assert.match(telegramExpanded, /private report/);

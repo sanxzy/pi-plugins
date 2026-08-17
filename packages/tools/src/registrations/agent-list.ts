@@ -4,7 +4,7 @@ import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { agentNoArgsParams } from "../tools.ts";
 import type { AgentListDetails } from "../types.ts";
 import { textResult } from "../results.ts";
-import { renderToolOutcome, toolResultFailed } from "../render.ts";
+import { renderToolCall, renderToolOutcome, toolResultFailed } from "../render.ts";
 
 /**
  * Keep the displayed description to its first paragraph so each section stays
@@ -51,12 +51,15 @@ export function registerAgentListTool(pi: ExtensionAPI): void {
       return textResult(`Available agents:\n${sections.join("\n")}`, { agents });
       });
     },
+    renderCall(_args, theme, context) {
+      return renderToolCall(theme, "agent_list", undefined, context, {});
+    },
     renderResult(result, options, theme, context) {
       const details = result.details as AgentListDetails | undefined;
       const agents = details?.agents ?? [];
       const label = `Agent list • ${agents.length} agents`;
       const expanded = agents.map((agent) => `• ${agent.name} • ${agent.description}`).join("\n");
-      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, toolResultFailed(result, context), expanded);
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, toolResultFailed(result, context), expanded, result, context.args);
     },
   });
 }

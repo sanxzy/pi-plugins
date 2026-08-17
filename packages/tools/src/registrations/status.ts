@@ -7,7 +7,7 @@ import type { StatusDetails } from "../types.ts";
 import { callerFor } from "../caller.ts";
 import { toJobSummary } from "../job-summary.ts";
 import { errorResult, textResult } from "../results.ts";
-import { renderToolResult, toolResultFailed } from "../render.ts";
+import { renderToolDetail, renderToolOutcome, toolResultFailed } from "../render.ts";
 
 export function formatRunningAgentText(subagentType: string, jobId: string): string {
   return `Agent ${subagentType} (${jobId}) is running. Take a rest while the agent works. Do not poll agent tools or use sleep-based waiting. Simply end your response and let the agents notify you when they finish.`;
@@ -58,13 +58,16 @@ export function registerStatusTool(pi: ExtensionAPI): void {
       });
       });
     },
+    renderCall(args, theme, context) {
+      return renderToolDetail(theme, "agent_status", args.job_id, 96, context, args);
+    },
     renderResult(result, options, theme, context) {
       const details = result.details && typeof result.details === "object" ? result.details as { status?: unknown; job?: { subagentType?: unknown; jobId?: unknown; description?: unknown } } : {};
       const job = details.job;
       const type = typeof job?.subagentType === "string" ? job.subagentType : "agent";
       const jobId = typeof job?.jobId === "string" ? job.jobId : "unknown";
       const status = typeof details.status === "string" ? details.status : "unknown";
-      return renderToolResult(theme, `Agent ${type} • ${jobId} ${status}`, toolResultFailed(result, context), options.isPartial);
+      return renderToolOutcome(theme, `Agent ${type} • ${jobId} ${status}`, options, toolResultFailed(result, context), "", result, context.args);
     },
   });
 }

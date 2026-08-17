@@ -225,7 +225,7 @@ export class McpPromptsResourcesExposer {
           : "(no resources)";
         return { content: [{ type: "text", text }], details: { server, count: resources.length } };
       }),
-      renderCall: (args, theme) => renderMcpCall("resources_list", compactMcpLabel((args as { server?: unknown }).server), theme),
+      renderCall: (args, theme, context) => renderMcpCall("resources_list", compactMcpLabel((args as { server?: unknown }).server), theme, { ...context, args }),
       renderResult: (result, options, theme, context) => renderMcpResult("resources_list", result, options, theme, context),
     });
     this.pi.registerTool({
@@ -260,7 +260,7 @@ export class McpPromptsResourcesExposer {
         }
         return { content, details: result };
       }),
-      renderCall: (args, theme) => renderMcpCall("resources_read", `${compactMcpLabel((args as { server?: unknown }).server)}/${compactMcpLabel((args as { uri?: unknown }).uri)}`, theme),
+      renderCall: (args, theme, context) => renderMcpCall("resources_read", `${compactMcpLabel((args as { server?: unknown }).server)}/${compactMcpLabel((args as { uri?: unknown }).uri)}`, theme, { ...context, args }),
       renderResult: (result, options, theme, context) => renderMcpResult("resources_read", result, options, theme, context),
     });
   }

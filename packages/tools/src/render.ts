@@ -6,21 +6,66 @@ export function compactToolText(value: unknown, maxLength = 80): string {
   const text = typeof value === "string" ? value : String(value ?? "");
   const withoutCredentials = text
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
-    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]");
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
+    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]");
   const singleLine = withoutCredentials.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (singleLine.length <= maxLength) return singleLine;
   return `${singleLine.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+/** Serialize a value for expanded tracing without letting unusual values break rendering. */
+function traceValue(value: unknown): string {
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    return expandedToolText(serialized === undefined ? String(value ?? "") : serialized);
+  } catch {
+    return expandedToolText(String(value ?? ""));
+  }
+}
+
 /** Render one user-facing activity line for a pi-c2 tool call. */
-export function renderToolCall(theme: Theme, label: string, activity?: string): Text {
+export function renderToolCall(
+  theme: Theme,
+  label: string,
+  activity?: string,
+  context?: ToolRenderContextLike,
+  traceArgs?: unknown,
+): Text {
   const suffix = activity ? theme.fg("muted", ` ${compactToolText(activity)}`) : "";
-  return new Text(theme.fg("toolTitle", theme.bold(label)) + suffix, 0, 0);
+  const line = theme.fg("toolTitle", theme.bold(label)) + suffix;
+  if (context?.expanded && traceArgs !== undefined) {
+    return new Text(`${line}\nArguments:\n${traceValue(traceArgs)}`, 0, 0);
+  }
+  return new Text(line, 0, 0);
 }
 
 /** Render an identifier as a safe, compact activity detail. */
-export function renderToolDetail(theme: Theme, label: string, value: unknown, maxLength = 96): Text {
-  return renderToolCall(theme, label, compactToolText(value, maxLength));
+export function renderToolDetail(
+  theme: Theme,
+  label: string,
+  value: unknown,
+  maxLength = 96,
+  context?: ToolRenderContextLike,
+  traceArgs?: unknown,
+): Text {
+  return renderToolCall(theme, label, compactToolText(value, maxLength), context, traceArgs);
+}
+
+/** Serialize the result exactly as the model-facing tool boundary exposes it. */
+export function toolResultTrace(
+  result: { content?: unknown; details?: unknown } | undefined,
+  context?: ToolRenderContextLike,
+): string {
+  try {
+    return traceValue({
+      content: result?.content ?? [],
+      ...(result?.details === undefined ? {} : { details: result.details }),
+      ...(context?.isError ? { isError: true } : {}),
+    });
+  } catch {
+    return expandedToolText(String(result ?? ""));
+  }
 }
 
 /** Render a compact outcome without exposing the tool's model-facing result. */
@@ -70,7 +115,8 @@ export function expandedToolText(value: unknown): string {
   return text
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
     .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*\d+\b)/gi, "[redacted]")
+    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]")
     .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
     .replace(/\u001b/g, "");
@@ -107,12 +153,18 @@ export function renderToolOutcome(
   options: ToolRenderResultOptionsLike,
   failed = false,
   expandedDetail = "",
+  traceResult?: { content?: unknown; details?: unknown },
+  traceArgs?: unknown,
 ): Text {
   if (options.isPartial) return new Text(theme.fg("dim", "…"), 0, 0);
   const marker = failed ? "✗" : "✓";
   const line = theme.fg(failed ? "warning" : "success", `${marker} ${compactToolText(label, 160)}`);
-  if (!failed && options.expanded && expandedDetail) {
-    return new Text(`${line}\n${expandedToolText(expandedDetail)}`, 0, 0);
+  if (options.expanded) {
+    const sections: string[] = [];
+    if (traceArgs !== undefined) sections.push(`Arguments:\n${traceValue(traceArgs)}`);
+    if (traceResult) sections.push(`Result:\n${toolResultTrace(traceResult, { isError: failed })}`);
+    else if (expandedDetail) sections.push(expandedToolText(expandedDetail));
+    if (sections.length > 0) return new Text(`${line}\n${sections.join("\n")}`, 0, 0);
   }
   return new Text(line, 0, 0);
 }

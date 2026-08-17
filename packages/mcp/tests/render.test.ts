@@ -21,6 +21,9 @@ test("MCP renderers keep collapsed rows concise and expand safe payloads", () =>
   const call = text(renderMcpCall("lookup", "demo", theme));
   assert.match(call, /MCP lookup/);
   assert.match(call, /demo/);
+  const expandedCall = text(renderMcpCall("lookup", "demo", theme, { expanded: true, args: { query: "find it" } }));
+  assert.match(expandedCall, /\"query\"/);
+  assert.match(expandedCall, /find it/);
 
   const collapsed = text(renderMcpResult("lookup", result, { expanded: false, isPartial: false }, theme, {}));
   assert.match(collapsed, /completed/);

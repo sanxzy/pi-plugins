@@ -67,15 +67,15 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
     ): Promise<AgentToolResult<WebSearchDetails>> {
       return executeWebSearch(params, signal, undefined, { projectRoot: ctx.cwd });
     },
-    renderCall(args, theme) {
-      return renderToolDetail(theme, "web_search", args.query);
+    renderCall(args, theme, context) {
+      return renderToolDetail(theme, "web_search", args.query, 96, context, args);
     },
     renderResult(result, options, theme, context) {
       const failed = toolResultFailed(result, context);
       const details = result.details as (WebSearchDetails & { results?: Array<{ title?: string; url?: string }> }) | undefined;
       const count = details?.results?.length ?? (toolResultText(result) ? 1 : 0);
       const label = `Web search • ${count} results`;
-      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, toolResultText(result));
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, toolResultText(result), result, context.args);
     },
   });
 }
