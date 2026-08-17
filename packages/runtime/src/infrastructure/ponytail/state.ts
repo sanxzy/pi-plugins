@@ -182,6 +182,13 @@ export function canonicalizeWriteEditTarget(target: string): string | undefined 
   if (target.split(/[\\/]/).includes("..")) return undefined;
   const resolved = resolve(target);
   if (resolved !== target) return undefined;
+  if (existsSync(resolved)) {
+    try {
+      return realpathSync(resolved);
+    } catch {
+      return undefined;
+    }
+  }
   let ancestor = resolved;
   while (!existsSync(ancestor)) {
     const parent = dirname(ancestor);
@@ -212,7 +219,7 @@ export function isWriteEditAuthorized(
 ): { ok: boolean; reason?: string } {
   const state = loadPonytailState(sessionId, nowMs, persistence);
   if (!state) return { ok: false, reason: "Ponytail is not enabled for this session." };
-  if (!state.enabled) return { ok: false, reason: "Ponytail is disabled for this session." };
+  if (!state.enabled) return { ok: true };
   const canonical = canonicalizeWriteEditTarget(target);
   if (!canonical) return { ok: false, reason: "The target path is unsafe or outside the project." };
   for (const ticket of state.tickets) {

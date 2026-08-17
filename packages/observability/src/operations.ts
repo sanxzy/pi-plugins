@@ -111,6 +111,10 @@ export const TELEGRAM_OPERATIONS = {
   SEND: "telegram.send",
 } as const;
 
+export const PONYTAIL_OPERATIONS = {
+  ENFORCE: "ponytail.enforce",
+} as const;
+
 export const COMMAND_OPERATIONS = {
   GOAL_COMMAND: "command.goal",
   SETUP_CHANNEL: "command.setupChannel",
@@ -176,6 +180,7 @@ export const ALL_OPERATIONS = {
   ...PERSISTENCE_OPERATIONS,
   ...CHANNEL_OPERATIONS,
   ...TELEGRAM_OPERATIONS,
+  ...PONYTAIL_OPERATIONS,
   ...COMMAND_OPERATIONS,
   ...MCP_OPERATIONS,
   ...TOOL_OPERATIONS,

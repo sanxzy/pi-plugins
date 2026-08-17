@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { PONYTAIL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { canonicalizeWriteEditTarget, isWriteEditAuthorized, loadPonytailState, resolveSettingsForProject } from "@xzy-ai/runtime";
 
 /** Tool names enforced by the Ponytail write/edit authorization boundary. */
@@ -23,14 +24,19 @@ export function registerPonytailEnforcement(pi: ExtensionAPI): void {
     }
     const state = loadPonytailState(sessionId, Date.now());
     if (!state && !resolveSettingsForProject(ctx.cwd).tools.ponytailEnabled) return undefined;
+    if (state && state.enabled === false) return undefined;
     const target = canonicalizeWriteEditTargetFromCwd(ctx.cwd, rawTarget);
     if (!target) {
-      return { block: true, reason: "Ponytail cannot authorize this write/edit target path. Request a correctly scoped ticket first." };
+      return logDecision(event.toolName, "blocked", { block: true, reason: "Ponytail cannot authorize this write/edit target path. Request a correctly scoped ticket first." });
     }
     const decision = isWriteEditAuthorized(sessionId, target);
-    if (!decision.ok) return { block: true, reason: decision.reason ?? "Ponytail cannot authorize this write/edit target." };
-    return undefined;
+    if (!decision.ok) return logDecision(event.toolName, "blocked", { block: true, reason: decision.reason ?? "Ponytail cannot authorize this write/edit target." });
+    return logDecision(event.toolName, "allowed", undefined);
   });
+}
+
+function logDecision<T>(tool: string, outcome: "allowed" | "blocked", result: T): T {
+  return processWithLog({ operation: PONYTAIL_OPERATIONS.ENFORCE, parameters: { tool, outcome } }, () => result);
 }
 
 function canonicalizeWriteEditTargetFromCwd(cwd: string, rawTarget: string): string | undefined {
