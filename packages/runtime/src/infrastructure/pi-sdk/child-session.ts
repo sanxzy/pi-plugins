@@ -70,6 +70,8 @@ const AGENT_FAMILY_TOOLS = [
 ] as const;
 const WEB_FAMILY_TOOLS = ["web_search", "web_fetch", "knowledge_search"] as const;
 const PONYTAIL_TOOL = "create_write_edit_ticket";
+/** Dedicated ticket-free Markdown/Text tools, appended only when Ponytail is enabled. */
+const MARKDOWN_TOOLS = ["write_markdown", "edit_markdown"] as const;
 const EXTENSION_TOOLS = [...AGENT_FAMILY_TOOLS, ...WEB_FAMILY_TOOLS] as const;
 
 /** MCP resource/prompt tools every child may expose so subagents can manage MCP. */
@@ -109,6 +111,7 @@ export function resolveChildTools(
 ): readonly string[] {
   const requested = agent.tools && agent.tools.length > 0 ? [...agent.tools] : [...ALL_BUILTIN_TOOLS];
   const extensionNames = EXTENSION_TOOLS as readonly string[];
+  const markdownNames = ponytailEnabled ? (MARKDOWN_TOOLS as readonly string[]) : [];
   const builtinNames = new Set<string>(ALL_BUILTIN_TOOLS);
   const mcpNames = new Set(mcpToolNames);
   const filtered = requested.filter((name) =>
@@ -126,6 +129,7 @@ export function resolveChildTools(
     ...(mcpEnabled ? MCP_RESOURCE_TOOLS : []),
     ...(mcpEnabled ? mcpToolNames : []),
     ...(ponytailEnabled ? [PONYTAIL_TOOL] : []),
+    ...markdownNames,
   ])];
 }
 
