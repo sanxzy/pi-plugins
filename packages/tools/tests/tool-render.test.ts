@@ -97,6 +97,13 @@ test("tool renderers expose safe, tool-specific activity without model payloads"
 
 });
 
+test("expanded empty results keep only explicit answer/message fallbacks", () => {
+  const webSearch = capture(registerWebSearchTool);
+  const rendered = text(webSearch.renderResult!({ content: [], details: { answer: "allowed", message: "also allowed", prompt: "HOST_PROMPT", reason: "HOST_REASON", requestId: "req-secret" } }, expandedOptions, theme, { expanded: true }));
+  assert.match(rendered, /allowed|also allowed/);
+  assert.doesNotMatch(rendered, /HOST_PROMPT|HOST_REASON|req-secret|requestId/);
+});
+
 test("expanded regular-tool failures stay concise and safe", () => {
   const telegram = capture((pi) => registerTelegramChatTool(pi, { registry: { register() {} } as never }));
   const failed = text(telegram.renderResult!({

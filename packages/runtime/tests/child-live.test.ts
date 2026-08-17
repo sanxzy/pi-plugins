@@ -33,6 +33,12 @@ test("inherited MCP renderers redact expanded token and transport traces", () =>
   assert.doesNotMatch(result, /tok-secret|refresh-secret|req-secret|trace-secret|abc\.def|client-secret|client-id|api-secret|url-secret|url-id/);
 });
 
+test("inherited MCP empty results keep only explicit answer/message fallbacks", () => {
+  const rendered = stripVTControlCharacters(inheritedMcpRenderResult({ content: [], details: { answer: "allowed", message: "also allowed", prompt: "HOST_PROMPT", reason: "HOST_REASON", requestId: "req-secret" } }, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
+  assert.match(rendered, /allowed|also allowed/);
+  assert.doesNotMatch(rendered, /HOST_PROMPT|HOST_REASON|req-secret|requestId/);
+});
+
 test("inherited MCP renderers hide payload output while retaining the tool activity label", () => {
   const call = stripVTControlCharacters(inheritedMcpRenderCall("server_lookup", "server_lookup", identityTheme).render(100).join(""));
   const result = stripVTControlCharacters(inheritedMcpRenderResult(

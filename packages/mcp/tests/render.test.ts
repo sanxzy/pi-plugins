@@ -37,6 +37,12 @@ test("MCP renderers keep collapsed rows concise and expand safe payloads", () =>
   assert.doesNotMatch(expanded, /password|token=secret/);
 });
 
+test("MCP empty results keep only explicit answer/message fallbacks", () => {
+  const rendered = text(renderMcpResult("lookup", { content: [], details: { answer: "allowed", message: "also allowed", prompt: "HOST_PROMPT", reason: "HOST_REASON", requestId: "req-secret" } }, { expanded: true, isPartial: false }, theme, {}));
+  assert.match(rendered, /allowed|also allowed/);
+  assert.doesNotMatch(rendered, /HOST_PROMPT|HOST_REASON|req-secret|requestId/);
+});
+
 test("MCP error rows do not expose payload details", () => {
   const error = { content: [{ type: "text", text: "Error: private transport details" }], details: { isError: true, failure: "transport_error" } };
   const rendered = text(renderMcpResult("lookup", error, { expanded: true, isPartial: false }, theme, {}));

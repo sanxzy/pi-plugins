@@ -71,7 +71,7 @@ export function toolResultTrace(
   const content = result?.content ?? [];
   if (Array.isArray(content) && content.length > 0) return traceValue(content);
   if (result?.details && typeof result.details === "object") {
-    const visible = Object.fromEntries(Object.entries(result.details).filter(([key]) => ["answer", "message", "prompt", "reason"].includes(key)));
+    const visible = Object.fromEntries(Object.entries(result.details).filter(([key]) => ["answer", "message"].includes(key)));
     if (Object.keys(visible).length > 0) return traceValue(visible);
   }
   if (result?.details && typeof result.details === "object" && "structuredContent" in result.details) {
