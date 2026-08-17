@@ -77,7 +77,7 @@ export function toolResultTrace(
   if (result?.details && typeof result.details === "object" && "structuredContent" in result.details) {
     return traceValue((result.details as { structuredContent?: unknown }).structuredContent);
   }
-  return traceValue(content);
+  return traceValue([]);
 }
 
 /** Render a compact outcome without exposing the tool's model-facing result. */

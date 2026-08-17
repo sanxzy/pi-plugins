@@ -104,6 +104,14 @@ test("expanded empty results keep only explicit answer/message fallbacks", () =>
   assert.doesNotMatch(rendered, /HOST_PROMPT|HOST_REASON|req-secret|requestId/);
 });
 
+test("expanded malformed regular results suppress primitive and host payloads", () => {
+  const webSearch = capture(registerWebSearchTool);
+  for (const result of [{ content: "HOST_PRIMITIVE" }, { content: 123 }, { hostOnly: "HOST_SECRET", transportId: "HOST_TRANSPORT" }]) {
+    const rendered = text(webSearch.renderResult!(result, expandedOptions, theme, { expanded: true }));
+    assert.doesNotMatch(rendered, /HOST_PRIMITIVE|HOST_SECRET|HOST_TRANSPORT/);
+  }
+});
+
 test("expanded regular-tool failures stay concise and safe", () => {
   const telegram = capture((pi) => registerTelegramChatTool(pi, { registry: { register() {} } as never }));
   const failed = text(telegram.renderResult!({
