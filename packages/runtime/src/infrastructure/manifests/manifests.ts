@@ -17,6 +17,8 @@ import {
   writePrivateJson,
   writePrivateText,
 } from "../../shared/paths.ts";
+import { writePonytailState } from "../ponytail/state.ts";
+import { resolveSettingsForProject } from "../../shared/settings.ts";
 import { PERSISTENCE_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 
 /** Canonical agent id for storage: strip a `job-` prefix from a job id. */
@@ -160,6 +162,23 @@ export interface StartRootSessionResult {
   readonly sessionPath: string;
 }
 
+/**
+ * Initialize Ponytail state only for new root sessions whose home policy is
+ * enabled. Existing sessions keep their explicit state authoritative; disabled
+ * roots receive no state until they opt in. Corrupt state is recovered lazily
+ * on the next read and never blocks lifecycle start.
+ */
+function initializePonytailState(sessionId: string, projectRoot: string, isExisting: boolean): void {
+  if (isExisting) return;
+  const homeEnabled = resolveSettingsForProject(projectRoot).tools.ponytailEnabled;
+  if (!homeEnabled) return;
+  try {
+    writePonytailState(sessionId, { version: 1, enabled: true, tickets: [] });
+  } catch {
+    // Non-fatal: lifecycle must not fail because private state cannot be written.
+  }
+}
+
 /** Create (or reopen) the root-session manifest and ensure the project manifest exists. */
 export function startRootSession(input: StartRootSessionInput): StartRootSessionResult {
   return processWithLog({ operation: PERSISTENCE_OPERATIONS.MANIFEST_START, parameters: { sessionId: input.sessionId, projectRoot: input.projectRoot } }, () => {
@@ -185,6 +204,7 @@ export function startRootSession(input: StartRootSessionInput): StartRootSession
     lastSeenAt: now,
   };
   writePrivateJson(sessionPath, manifest);
+  initializePonytailState(input.sessionId, projectRoot, existing !== undefined);
   return { manifest, projectManifest, sessionPath };
   });
 }

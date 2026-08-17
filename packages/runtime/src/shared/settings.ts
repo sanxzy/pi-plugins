@@ -72,11 +72,16 @@ export interface CommandSettings {
   goalMaxPromptLength: number;
 }
 
+export interface PonytailSettings {
+  ponytailEnabled: boolean;
+  writeEditTicketTtlMs: number;
+}
+
 export interface ResolvedSettings {
   agents: AgentSettings;
   runtime: RuntimeSettings;
   channels: ChannelSettings;
-  tools: { web: WebSettings };
+  tools: { web: WebSettings } & PonytailSettings;
   mcp: McpSettings;
   commands: CommandSettings;
 }
@@ -144,6 +149,8 @@ export function defaultSettings(): ResolvedSettings {
       mediaTimeoutMs: 30_000,
     },
     tools: {
+      ponytailEnabled: false,
+      writeEditTicketTtlMs: 600_000,
       web: {
         searchTimeoutMs: 30_000,
         fetchTimeoutSeconds: FETCH_SECONDS_MIN,
@@ -188,7 +195,7 @@ export function bootstrapSettingsConfig(filePath?: string): boolean {
       agents: { ...defaults.agents },
       runtime: { ...defaults.runtime },
       channels: { ...defaults.channels },
-      tools: { web: { ...defaults.tools.web, exaApiKey: "" } },
+      tools: { ...defaults.tools, web: { ...defaults.tools.web, exaApiKey: "" } },
       mcp: { ...defaults.mcp },
       commands: { ...defaults.commands, telegram: { ...defaults.commands.telegram } },
     };
@@ -227,7 +234,7 @@ function readConfigFile(filePath: string): Record<string, unknown> {
 }
 
 /** Apply a source's recognized fields; invalid or unknown fields are skipped. */
-function applySource(source: Record<string, unknown>, target: ResolvedSettings): void {
+function applySource(source: Record<string, unknown>, target: ResolvedSettings, includeHomeOnlyTools = true): void {
   const agents = source.agents;
   if (isObject(agents)) {
     if (isPosInt(agents.maxAgentDepth, MAX_DEPTH_UPPER)) target.agents.maxAgentDepth = agents.maxAgentDepth;
@@ -257,7 +264,12 @@ function applySource(source: Record<string, unknown>, target: ResolvedSettings):
     if (isPosInt(channels.mediaDocumentMaxBytes, 512 * MIB)) target.channels.mediaDocumentMaxBytes = channels.mediaDocumentMaxBytes;
     if (isMs(channels.mediaTimeoutMs, 1_000, HOUR_MS)) target.channels.mediaTimeoutMs = channels.mediaTimeoutMs;
   }
-  const web = source.tools && isObject(source.tools) ? source.tools.web : undefined;
+  const sourceTools = source.tools;
+  if (includeHomeOnlyTools && isObject(sourceTools)) {
+    if (typeof sourceTools.ponytailEnabled === "boolean") target.tools.ponytailEnabled = sourceTools.ponytailEnabled;
+    if (isMs(sourceTools.writeEditTicketTtlMs, 60_000, HOUR_MS)) target.tools.writeEditTicketTtlMs = sourceTools.writeEditTicketTtlMs;
+  }
+  const web = isObject(sourceTools) ? sourceTools.web : undefined;
   if (isObject(web)) {
     if (isMs(web.searchTimeoutMs, 1_000, HOUR_MS)) target.tools.web.searchTimeoutMs = web.searchTimeoutMs;
     if (isPosInt(web.fetchTimeoutSeconds, FETCH_SECONDS_MAX) && web.fetchTimeoutSeconds >= FETCH_SECONDS_MIN) {
@@ -324,7 +336,7 @@ function copySettings(settings: ResolvedSettings): ResolvedSettings {
     agents: { ...settings.agents },
     runtime: { ...settings.runtime },
     channels: { ...settings.channels },
-    tools: { web: { ...settings.tools.web } },
+    tools: { ...settings.tools, web: { ...settings.tools.web } },
     mcp: { ...settings.mcp },
     commands: { ...settings.commands, telegram: { ...settings.commands.telegram } },
   };
@@ -348,8 +360,8 @@ export function resolveSettingsForProject(project?: string): ResolvedSettings {
     value = cached.value;
   } else {
     value = defaultSettings();
-    applySource(readConfigFile(settingsConfigPath()), value);
-    if (projectFile) applySource(readConfigFile(projectFile), value);
+    applySource(readConfigFile(settingsConfigPath()), value, true);
+    if (projectFile) applySource(readConfigFile(projectFile), value, false);
     settingsCache.set(entryKey, { value: copySettings(value), home: homeFingerprint, project: projectFingerprint });
     if (settingsCache.size > CONFIG_CACHE_LIMIT) {
       const oldest = settingsCache.keys().next();

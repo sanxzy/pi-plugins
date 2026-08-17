@@ -14,6 +14,9 @@ export const PROJECT_MANIFEST_FILE_NAME = "project.json";
 export const SESSION_MANIFEST_FILE_NAME = "session.json";
 export const AGENT_MANIFEST_FILE_NAME = "agent.json";
 export const GOALS_FILE_NAME = "goals.jsonl";
+export const PONYTAIL_FILE_NAME = "ponytail.json";
+export const PONYTAIL_BACKUP_PREFIX = "ponytail.";
+export const PONYTAIL_BACKUP_SUFFIX = ".json.bak";
 export const EVENTS_FILE_NAME = "events.jsonl";
 export const ERRORS_FILE_NAME = "errors.jsonl";
 export const TRANSCRIPT_FILE_NAME = "transcript.jsonl";
@@ -175,6 +178,15 @@ export function homeSessionDir(projectId: string, rootSessionId: string): string
 
 export function homeSessionDirFromRoot(projectRoot: string, rootSessionId: string): string {
   return homeSessionDir(encodeProjectId(projectRoot), rootSessionId);
+}
+
+/** Dedicated session-keyed state outside project directories. */
+export function homePonytailSessionDir(sessionId: string): string {
+  return join(homeRoot(), "sessions", validateId(sessionId, "session id"));
+}
+
+export function homePonytailStateFile(sessionId: string): string {
+  return join(homePonytailSessionDir(sessionId), PONYTAIL_FILE_NAME);
 }
 
 export function homeSessionManifestFile(projectId: string, rootSessionId: string): string {

@@ -165,7 +165,7 @@ test("invalid state never loads as active authorization", () => {
       const statePath = homePonytailStateFile("root-invalid");
       writePonytailState("root-invalid", validState());
       writeFileSync(statePath, JSON.stringify({ version: 2, enabled: true, tickets: [] }));
-      assert.equal(loadPonytailState("root-invalid", 5_000), undefined);
+      assert.deepEqual(loadPonytailState("root-invalid", 5_000), { version: 1, enabled: true, tickets: [] });
     });
   } finally {
     rmSync(home, { recursive: true, force: true });

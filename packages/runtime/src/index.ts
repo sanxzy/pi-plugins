@@ -39,7 +39,15 @@ export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type Goal
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
 export { createChildSessionManager, resolveChildTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 export { maxAgentDepth } from "./shared/pi-c2-config.ts";
-export { clearSettingsCache, resolveSettings, resolveSettingsForProject, settingsConfigPath, bootstrapSettingsConfig, type AgentSettings, type ChannelSettings, type CommandSettings, type McpSettings, type ResolvedSettings, type RuntimeSettings, type WebSettings } from "./shared/settings.ts";
+export {
+  loadPonytailState,
+  ponytailStateExists,
+  pruneExpiredTickets,
+  writePonytailState,
+  type PonytailState,
+  type PonytailTicket,
+} from "./infrastructure/ponytail/state.ts";
+export { clearSettingsCache, resolveSettings, resolveSettingsForProject, settingsConfigPath, bootstrapSettingsConfig, type AgentSettings, type ChannelSettings, type CommandSettings, type McpSettings, type PonytailSettings, type ResolvedSettings, type RuntimeSettings, type WebSettings } from "./shared/settings.ts";
 export { getChildExtensionFactories, registerChildExtensionFactory } from "./infrastructure/pi-sdk/child-extensions.ts";
 export {
   attachAgentSessionLiveFeed,
@@ -79,6 +87,8 @@ export {
   homeGoalFile,
   homeProjectDir,
   homeProjectDirFromRoot,
+  homePonytailSessionDir,
+  homePonytailStateFile,
   homeProjectManifestFile,
   homeRoot,
   homeRootBase,
@@ -93,6 +103,9 @@ export {
   EVENTS_FILE_NAME,
   ERRORS_FILE_NAME,
   GOALS_FILE_NAME,
+  PONYTAIL_FILE_NAME,
+  PONYTAIL_BACKUP_PREFIX,
+  PONYTAIL_BACKUP_SUFFIX,
   PENDING_DELIVERY_FILE_NAME,
   PROJECT_MANIFEST_FILE_NAME,
   SESSION_MANIFEST_FILE_NAME,
