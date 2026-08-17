@@ -19,6 +19,7 @@ import {
   registerSystemPrompt,
   registerLifecycleGates,
   registerPonytailEnforcement,
+  registerPonytailSetup,
   registerTelegramSetup,
   registerReferencesSetup,
   registerTelegramClear,
@@ -93,6 +94,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerTelegramChatTool(pi);
   registerSessionEvents(pi);
   registerPonytailEnforcement(pi);
+  registerPonytailSetup(pi);
   registerSystemPrompt(pi);
   registerLifecycleGates(pi);
   registerGoalCommand(pi);

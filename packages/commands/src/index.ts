@@ -1,5 +1,6 @@
 export { registerSessionEvents } from "./registrations/session-events.ts";
 export { registerPonytailEnforcement } from "./registrations/ponytail-enforcement.ts";
+export { registerPonytailSetup } from "./registrations/ponytail-setup.ts";
 export { registerSystemPrompt } from "./registrations/system-prompt.ts";
 export {
   clearSessionReload,

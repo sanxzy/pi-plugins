@@ -116,6 +116,7 @@ export const PONYTAIL_OPERATIONS = {
 } as const;
 
 export const COMMAND_OPERATIONS = {
+  SETUP_PONYTAIL: "command.setupPonytail",
   GOAL_COMMAND: "command.goal",
   SETUP_CHANNEL: "command.setupChannel",
   CLEAR_CHANNEL: "command.clearChannel",
