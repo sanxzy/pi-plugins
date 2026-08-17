@@ -176,7 +176,6 @@ export function renderToolOutcome(
   const line = theme.fg(failed ? "warning" : "success", `${marker} ${compactToolText(label, 160)}`);
   if (options.expanded && !failed) {
     const sections: string[] = [];
-    if (traceArgs !== undefined) sections.push(`Arguments:\n${traceValue(traceArgs)}`);
     if (traceResult) sections.push(`Result:\n${toolResultTrace(traceResult)}`);
     else if (expandedDetail) sections.push(expandedToolText(expandedDetail));
     if (sections.length > 0) return new Text(`${line}\n${sections.join("\n")}`, 0, 0);

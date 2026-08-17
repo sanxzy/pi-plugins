@@ -115,6 +115,7 @@ test("expanded argument and result traces redact token and transport key variant
   assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|client-id|abc\.def/);
   const result = text(webSearch.renderResult!({ content: [{ type: "text", text: "safe result access_token=tok-secret requestId=req-secret traceId=trace-secret client_secret=client-secret client_id=client-id api_secret=api-secret https://example.test/?client_secret=url-secret&client_id=url-id" }], details: args }, expandedOptions, theme, { expanded: true, args }));
   assert.match(result, /safe result/);
+  assert.doesNotMatch(result, /Arguments:/);
   assert.doesNotMatch(result, /tok-secret|refresh-secret|req-secret|trace-secret|abc\.def|client-secret|client-id|api-secret|url-secret|url-id/);
 });
 
@@ -131,8 +132,8 @@ test("renderers follow the agreed expanded tool contracts", () => {
   assert.match(agentExpandedCall, /\"prompt\"/);
   assert.match(agentExpandedCall, /inspect every renderer/);
   const agentExpanded = text(agent.renderResult!(agentResult, expandedOptions, theme, { ...renderContext, expanded: true, args: agentArgs }));
+  assert.doesNotMatch(agentExpanded, /Arguments:/);
   assert.match(agentExpanded, /completed/);
-  assert.match(agentExpanded, /inspect every renderer/);
   assert.match(agentExpanded, /Agent completed/);
   assert.doesNotMatch(agentExpanded.slice(agentExpanded.indexOf("Result:")), /\"jobId\"|\"subagentType\"|\"prompt\"/);
 
