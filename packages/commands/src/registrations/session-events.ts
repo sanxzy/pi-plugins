@@ -9,7 +9,7 @@ import type {
 import { allMcpNames, sessionMcpActive, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
 import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
-import { currentProcessIdentity, clearAgentDiscoveryCache, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
+import { currentProcessIdentity, clearAgentDiscoveryCache, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, loadPonytailState, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 import { createHostMessageGate, type HostMessageGate } from "./safe-host-delivery.ts";
 
 const SESSION_RELOAD_MARKERS_KEY = Symbol.for("@xzy-ai/pi-c2:session-reload-markers");
@@ -166,11 +166,13 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const currentSessionNames = new Set(sessionMcpNames(ctx.cwd, sessionId));
     const mcpActive = sessionMcpActive(ctx.cwd, sessionId);
     const mcpResourceTools = new Set(["mcp_resources_list", "mcp_resources_read"]);
+    const ponytailActive = loadPonytailState(sessionId, Date.now())?.enabled === true;
     pi.setActiveTools(
       pi
         .getAllTools()
         .map((tool) => tool.name)
-        .filter((name) => name !== "ls" && (mcpActive || !mcpResourceTools.has(name)) && (!managedNames.has(name) || currentSessionNames.has(name))),
+        .filter((name) => name !== "ls" && (ponytailActive || name !== "create_write_edit_ticket"))
+        .filter((name) => (mcpActive || !mcpResourceTools.has(name)) && (!managedNames.has(name) || currentSessionNames.has(name))),
     );
 
     // Bind the goal pool to the fresh host. Goals are strictly per-root

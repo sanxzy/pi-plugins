@@ -2,12 +2,11 @@ import { randomBytes } from "node:crypto";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import {
-  loadPonytailState,
   mutatePonytailState,
   resolveSettingsForProject,
   resolveTicketScopes,
   type PonytailPersistence,
-  type PonytailState,
+  type PonytailTicket,
 } from "@xzy-ai/runtime";
 import { errorResult, textResult } from "../results.ts";
 
@@ -64,21 +63,23 @@ export async function executeCreateWriteEditTicket(
   const now = options.now?.() ?? Date.now();
   try {
     const settings = resolveSettingsForProject(ctx.cwd);
-    const current = loadPonytailState(sessionId, now, options.persistence);
-    if (!current || !current.enabled) {
-      return errorResult("Ponytail is not enabled for this session.", { mode: "error" });
-    }
     const scopes = resolveTicketScopes({ projectRoot: ctx.cwd, directories: params.directories }).map((scope) => scope.canonical);
-    const ticket = randomBytes(32).toString("base64url");
-    const createdAt = now;
-    const expiresAt = now + settings.tools.writeEditTicketTtlMs;
-    const next: PonytailState = {
-      version: 1,
-      enabled: current.enabled,
-      tickets: [...current.tickets, { value: ticket, scopes, createdAt, expiresAt }],
-    };
-    await mutatePonytailState(sessionId, now, () => next, options.persistence);
-    return textResult(formatIssuedTicket(ticket, params), { mode: "issued", ticket });
+    let issuedTicket: string | undefined;
+    await mutatePonytailState(sessionId, now, (current) => {
+      if (!current || !current.enabled) {
+        throw new Error("Ponytail is not enabled for this session.");
+      }
+      issuedTicket = randomBytes(32).toString("base64url");
+      const ticket: PonytailTicket = {
+        value: issuedTicket,
+        scopes,
+        createdAt: now,
+        expiresAt: now + settings.tools.writeEditTicketTtlMs,
+      };
+      return { version: 1, enabled: current.enabled, tickets: [...current.tickets, ticket] };
+    }, options.persistence);
+    if (!issuedTicket) throw new Error("Unable to create the write/edit ticket.");
+    return textResult(formatIssuedTicket(issuedTicket, params), { mode: "issued", ticket: issuedTicket });
   } catch {
     return errorResult("Unable to persist the write/edit ticket. No new ticket was activated.", { mode: "error" });
   }
