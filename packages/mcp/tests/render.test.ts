@@ -45,6 +45,15 @@ test("MCP error rows do not expose payload details", () => {
   assert.doesNotMatch(rendered, /private transport details/);
 });
 
+test("MCP expanded traces redact token and transport key variants", () => {
+  const args = { access_token: "tok-secret", refreshToken: "refresh-secret", requestId: "req-secret", authorization: "Bearer abc.def" };
+  const call = text(renderMcpCall("lookup", "demo", theme, { expanded: true, args }));
+  assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|abc\.def/);
+  const rendered = text(renderMcpResult("lookup", { content: [{ type: "text", text: "safe" }], details: args }, { expanded: true, isPartial: false }, theme, {}));
+  assert.match(rendered, /safe/);
+  assert.doesNotMatch(rendered, /tok-secret|refresh-secret|req-secret|abc\.def/);
+});
+
 test("MCP labels sanitize credentials and terminal controls", () => {
   assert.equal(compactMcpLabel("\u001b[31mhttps://user:pass@example.com?token=secret\u001b[0m"), "https://[redacted]@example.com?token=[redacted]");
 });

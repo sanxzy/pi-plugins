@@ -1,22 +1,36 @@
 import { Text } from "@earendil-works/pi-tui";
 
+const SENSITIVE_KEY = /(?:^|[_-])(?:access|refresh|id|api)?[_-]?(?:token|secret|password|credential|key|authorization|auth|bearer|code|state)(?:$|[_-])|(?:^|[_-])(?:chat|file|artifact)[_-]?id(?:$|[_-])|(?:^|[_-])request[_-]?id(?:$|[_-])|(?:^|[_-])trace[_-]?id(?:$|[_-])/i;
+
+function sensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
+}
+
+function sanitizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === "string") return sanitizeExpanded(value);
+  if (typeof value === "bigint") return `${value}n`;
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, seen));
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sensitiveKey(key) ? "[redacted]" : sanitizeValue(item, seen)]));
+}
+
 function compact(value: unknown, maxLength = 80): string {
   const text = typeof value === "string" ? value : String(value ?? "");
-  const withoutCredentials = text
-    .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
-    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]");
-  const singleLine = withoutCredentials.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  const singleLine = sanitizeExpanded(text).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   return singleLine.length <= maxLength ? singleLine : `${singleLine.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
 function sanitizeExpanded(value: string): string {
   return value
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
-    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential|access_token|refresh_token)=)[^&#\s]+/gi, "$1[redacted]")
+    .replace(/(\b(?:bearer|basic)\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[redacted]")
+    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|request[_-]?id|trace[_-]?id)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
     .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]")
     .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
-    .replace(/[\u0000-\u001f\u007f]/g, "");
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
 }
 
 function expandedPayload(result: unknown): string {
@@ -35,7 +49,7 @@ function expandedPayload(result: unknown): string {
   const structured = record.details && typeof record.details === "object" && "structuredContent" in record.details
     ? (record.details as { structuredContent?: unknown }).structuredContent
     : undefined;
-  try { return structured === undefined ? "" : sanitizeExpanded(JSON.stringify(structured, null, 2)); } catch { return ""; }
+  try { return structured === undefined ? "" : JSON.stringify(sanitizeValue(structured), null, 2) ?? ""; } catch { return ""; }
 }
 
 function failed(result: unknown, context: { isError?: boolean }): boolean {
@@ -56,7 +70,7 @@ export function inheritedMcpRenderCall(name: string, label: string, theme: { fg(
   const line = theme.fg("toolTitle", theme.bold(compact(label))) + theme.fg("muted", ` ${compact(name)}`);
   if (context?.expanded && context.args !== undefined) {
     let args = "";
-    try { args = sanitizeExpanded(JSON.stringify(context.args, null, 2)); } catch { args = sanitizeExpanded(String(context.args)); }
+    try { args = JSON.stringify(sanitizeValue(context.args), null, 2) ?? ""; } catch { args = sanitizeExpanded(String(context.args)); }
     return new Text(`${line}\nArguments:\n${args}`, 0, 0);
   }
   return new Text(line, 0, 0);
@@ -69,7 +83,7 @@ export function inheritedMcpRenderResult(result: unknown, options: { expanded?: 
   if (isFailed || !options.expanded) return new Text(line, 0, 0);
   let payload = "";
   try {
-    payload = sanitizeExpanded(JSON.stringify(result, null, 2));
+    payload = JSON.stringify(sanitizeValue(result), null, 2) ?? "";
   } catch {
     payload = expandedPayload(result);
   }

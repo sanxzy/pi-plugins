@@ -97,7 +97,28 @@ test("tool renderers expose safe, tool-specific activity without model payloads"
 
 });
 
-test("renderers follow the agreed collapsed and expanded tool contracts", () => {
+test("expanded regular-tool failures stay concise and safe", () => {
+  const telegram = capture((pi) => registerTelegramChatTool(pi, { registry: { register() {} } as never }));
+  const failed = text(telegram.renderResult!({
+    content: [{ type: "text", text: "Error: transport response secret" }],
+    details: { isError: true, access_token: "tok-secret", requestId: "req-secret" },
+  }, expandedOptions, theme, { isError: true, expanded: true }));
+  assert.match(failed, /failed|✗/);
+  assert.doesNotMatch(failed, /transport response secret|tok-secret|req-secret/);
+  assert.doesNotMatch(failed, /Arguments:|Result:/);
+});
+
+test("expanded argument and result traces redact token and transport key variants", () => {
+  const webSearch = capture(registerWebSearchTool);
+  const args = { access_token: "tok-secret", refreshToken: "refresh-secret", requestId: "req-secret", authorization: "Bearer abc.def" };
+  const call = text(webSearch.renderCall!(args, theme, { expanded: true, args }));
+  assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|abc\.def/);
+  const result = text(webSearch.renderResult!({ content: [{ type: "text", text: "safe result" }], details: args }, expandedOptions, theme, { expanded: true, args }));
+  assert.match(result, /safe result/);
+  assert.doesNotMatch(result, /tok-secret|refresh-secret|req-secret|abc\.def/);
+});
+
+test("renderers follow the agreed expanded tool contracts", () => {
   const goals: Tool[] = [];
   registerGoalTools({ registerTool: (tool: unknown) => { goals.push(tool as Tool); } } as unknown as ExtensionAPI);
   const agent = capture(registerAgentTool);

@@ -5,9 +5,25 @@ type RenderTheme = {
   bold(text: string): string;
 };
 
+const SENSITIVE_KEY = /(?:^|[_-])(?:access|refresh|id|api)?[_-]?(?:token|secret|password|credential|key|authorization|auth|bearer|code|state)(?:$|[_-])|(?:^|[_-])(?:chat|file|artifact)[_-]?id(?:$|[_-])|(?:^|[_-])request[_-]?id(?:$|[_-])|(?:^|[_-])trace[_-]?id(?:$|[_-])/i;
+
+function sensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
+}
+
+function sanitizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === "string") return sanitizePayload(value);
+  if (typeof value === "bigint") return `${value}n`;
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, seen));
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sensitiveKey(key) ? "[redacted]" : sanitizeValue(item, seen)]));
+}
+
 function tracePayload(result: unknown): string {
   try {
-    return sanitizePayload(JSON.stringify(result, null, 2));
+    return JSON.stringify(sanitizeValue(result), null, 2) ?? "";
   } catch {
     return sanitizePayload(String(result ?? ""));
   }
@@ -16,10 +32,7 @@ function tracePayload(result: unknown): string {
 export type McpRenderContext = { isError?: boolean; expanded?: boolean; args?: unknown };
 
 function compact(value: unknown, maxLength = 96): string {
-  const text = String(value ?? "")
-    .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
-    .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
-    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
+  const text = sanitizePayload(String(value ?? ""))
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -43,7 +56,7 @@ function payloadText(result: unknown): string {
   const details = record.details;
   if (details && typeof details === "object" && "structuredContent" in details) {
     try {
-      return sanitizePayload(JSON.stringify((details as { structuredContent?: unknown }).structuredContent, null, 2));
+      return JSON.stringify(sanitizeValue((details as { structuredContent?: unknown }).structuredContent), null, 2) ?? "";
     } catch {
       return "";
     }
@@ -54,9 +67,11 @@ function payloadText(result: unknown): string {
 function sanitizePayload(value: string): string {
   return value
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
-    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential|access_token|refresh_token)=)[^&#\s]+/gi, "$1[redacted]")
+    .replace(/(\b(?:bearer|basic)\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[redacted]")
+    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|request[_-]?id|trace[_-]?id)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
     .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]")
+    .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .replace(/\u001b/g, "");
 }

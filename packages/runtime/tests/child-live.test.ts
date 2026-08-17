@@ -23,6 +23,15 @@ const identityTheme = {
   bold: (text: string) => text,
 };
 
+test("inherited MCP renderers redact expanded token and transport traces", () => {
+  const args = { access_token: "tok-secret", refreshToken: "refresh-secret", requestId: "req-secret", authorization: "Bearer abc.def" };
+  const call = stripVTControlCharacters(inheritedMcpRenderCall("lookup", "lookup", identityTheme, { expanded: true, args }).render(120).join("\n"));
+  assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|abc\.def/);
+  const result = stripVTControlCharacters(inheritedMcpRenderResult({ content: [{ type: "text", text: "safe" }], details: args }, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
+  assert.match(result, /safe/);
+  assert.doesNotMatch(result, /tok-secret|refresh-secret|req-secret|abc\.def/);
+});
+
 test("inherited MCP renderers hide payload output while retaining the tool activity label", () => {
   const call = stripVTControlCharacters(inheritedMcpRenderCall("server_lookup", "server_lookup", identityTheme).render(100).join(""));
   const result = stripVTControlCharacters(inheritedMcpRenderResult(

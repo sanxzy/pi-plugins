@@ -1,15 +1,27 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
+const SENSITIVE_KEY = /(?:^|[_-])(?:access|refresh|id|api)?[_-]?(?:token|secret|password|credential|key|authorization|auth|bearer|code|state)(?:$|[_-])|(?:^|[_-])(?:chat|file|artifact)[_-]?id(?:$|[_-])|(?:^|[_-])request[_-]?id(?:$|[_-])|(?:^|[_-])trace[_-]?id(?:$|[_-])/i;
+
+function sensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
+}
+
+function sanitizeTraceValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === "string") return expandedToolText(value);
+  if (typeof value === "bigint") return `${value}n`;
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeTraceValue(item, seen));
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(record).map(([key, item]) => [key, sensitiveKey(key) ? "[redacted]" : sanitizeTraceValue(item, seen)]));
+}
+
 /** Keep tool activity readable without copying model-facing payloads into the TUI. */
 export function compactToolText(value: unknown, maxLength = 80): string {
   const text = typeof value === "string" ? value : String(value ?? "");
-  const withoutCredentials = text
-    .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
-    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
-    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]");
-  const singleLine = withoutCredentials.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  const singleLine = expandedToolText(text).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (singleLine.length <= maxLength) return singleLine;
   return `${singleLine.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
@@ -17,8 +29,7 @@ export function compactToolText(value: unknown, maxLength = 80): string {
 /** Serialize a value for expanded tracing without letting unusual values break rendering. */
 function traceValue(value: unknown): string {
   try {
-    const serialized = JSON.stringify(value, null, 2);
-    return expandedToolText(serialized === undefined ? String(value ?? "") : serialized);
+    return JSON.stringify(sanitizeTraceValue(value), null, 2) ?? String(value ?? "");
   } catch {
     return expandedToolText(String(value ?? ""));
   }
@@ -52,20 +63,16 @@ export function renderToolDetail(
   return renderToolCall(theme, label, compactToolText(value, maxLength), context, traceArgs);
 }
 
-/** Serialize the result exactly as the model-facing tool boundary exposes it. */
+/** Serialize the result exactly as the model-facing tool boundary exposes it, after redaction. */
 export function toolResultTrace(
   result: { content?: unknown; details?: unknown } | undefined,
   context?: ToolRenderContextLike,
 ): string {
-  try {
-    return traceValue({
-      content: result?.content ?? [],
-      ...(result?.details === undefined ? {} : { details: result.details }),
-      ...(context?.isError ? { isError: true } : {}),
-    });
-  } catch {
-    return expandedToolText(String(result ?? ""));
-  }
+  return traceValue({
+    content: result?.content ?? [],
+    ...(result?.details === undefined ? {} : { details: result.details }),
+    ...(context?.isError ? { isError: true } : {}),
+  });
 }
 
 /** Render a compact outcome without exposing the tool's model-facing result. */
@@ -114,8 +121,9 @@ export function expandedToolText(value: unknown): string {
   const text = typeof value === "string" ? value : String(value ?? "");
   return text
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
-    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential|access_token|refresh_token)=)[^&#\s]+/gi, "$1[redacted]")
+    .replace(/(\b(?:bearer|basic)\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[redacted]")
+    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|request[_-]?id|trace[_-]?id)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
     .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]")
     .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
@@ -140,7 +148,7 @@ export function toolResultText(result: { content?: unknown; details?: unknown } 
     : undefined;
   if (structured === undefined) return "";
   try {
-    return expandedToolText(JSON.stringify(structured, null, 2));
+    return traceValue(structured);
   } catch {
     return "";
   }
@@ -159,10 +167,10 @@ export function renderToolOutcome(
   if (options.isPartial) return new Text(theme.fg("dim", "…"), 0, 0);
   const marker = failed ? "✗" : "✓";
   const line = theme.fg(failed ? "warning" : "success", `${marker} ${compactToolText(label, 160)}`);
-  if (options.expanded) {
+  if (options.expanded && !failed) {
     const sections: string[] = [];
     if (traceArgs !== undefined) sections.push(`Arguments:\n${traceValue(traceArgs)}`);
-    if (traceResult) sections.push(`Result:\n${toolResultTrace(traceResult, { isError: failed })}`);
+    if (traceResult) sections.push(`Result:\n${toolResultTrace(traceResult)}`);
     else if (expandedDetail) sections.push(expandedToolText(expandedDetail));
     if (sections.length > 0) return new Text(`${line}\n${sections.join("\n")}`, 0, 0);
   }
