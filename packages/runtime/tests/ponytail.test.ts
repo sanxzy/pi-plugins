@@ -164,6 +164,32 @@ test("malformed state is backed up and newest valid backup restores complete une
   }
 });
 
+test("backup permission failure restores the corrupt primary and stays inactive", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      const sessionId = "root-chmod-fail";
+      const statePath = homePonytailStateFile(sessionId);
+      writePonytailState(sessionId, { version: 1, enabled: true, tickets: [] });
+      writeFileSync(statePath, "{broken", "utf8");
+      const backupPath = join(homePonytailSessionDir(sessionId), "ponytail.001.json.bak");
+      const persistence: PonytailPersistence = {
+        readJson: (path) => JSON.parse(readFileSync(path, "utf8")),
+        writeJson: (path, value) => writeFileSync(path, JSON.stringify(value)),
+        rename: (from, to) => renameSync(from, to),
+        list: (directory) => readdirSync(directory),
+        exists: (path) => existsSync(path),
+        chmod: () => { throw new Error("permission denied"); },
+      };
+      assert.equal(loadPonytailState(sessionId, 5_000, persistence), undefined);
+      assert.equal(readFileSync(statePath, "utf8"), "{broken");
+      assert.equal(existsSync(backupPath), false);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("invalid state never loads as active authorization", () => {
   const home = tempHome();
   try {

@@ -226,7 +226,14 @@ export function loadPonytailState(sessionId: string, nowMs: number, persistence:
   try {
     persistence.chmod(backupPath, 0o600);
   } catch {
-    // A backup that cannot be secured never authorizes anything.
+    // An unsecured backup is not safe evidence; restore the corrupt primary
+    // and fail closed so no recovered state is activated.
+    try {
+      persistence.rename(backupPath, statePath);
+    } catch {
+      // Keep the preserved backup; either way, no replacement is activated.
+    }
+    return undefined;
   }
   const recovered = recovery ?? { version: 1, enabled: true, tickets: [] };
   try {
