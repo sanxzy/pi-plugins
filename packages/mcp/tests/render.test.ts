@@ -17,13 +17,28 @@ const result = {
   details: { server: "demo", tool: "lookup", structuredContent: { answer: "safe body" } },
 };
 
+test("MCP expanded traces use human-readable input and result sections", () => {
+  const args = { type: "wikis", query: "pi-c2 tool rendering migration", maxResults: 5 };
+  const call = text(renderMcpCall("knowledge_search", "local", theme, { expanded: true, args }));
+  assert.match(call, /Input: type=wikis, query=pi-c2 tool rendering migration, maxResults=5/);
+  assert.doesNotMatch(call, /Arguments:|\"type\"|\{/);
+
+  const expanded = text(renderMcpResult("knowledge_search", {
+    content: [
+      { type: "text", text: "- pi-c2-wiki-entry.md (15.245047)" },
+      { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+    ],
+  }, { expanded: true, isPartial: false }, theme, { args }));
+  assert.match(expanded, /Results:\s*\n\s*- pi-c2-wiki-entry.md \(15\.245047\)/);
+  assert.doesNotMatch(expanded, /Result:|\"type\"|\"text\"|aGVsbG8=|image\/png|\{/);
+});
+
 test("MCP renderers keep collapsed rows concise and expand safe payloads", () => {
   const call = text(renderMcpCall("lookup", "demo", theme));
   assert.match(call, /MCP lookup/);
   assert.match(call, /demo/);
   const expandedCall = text(renderMcpCall("lookup", "demo", theme, { expanded: true, args: { query: "find it" } }));
-  assert.match(expandedCall, /\"query\"/);
-  assert.match(expandedCall, /find it/);
+  assert.match(expandedCall, /Input: query=find it/);
 
   const collapsed = text(renderMcpResult("lookup", result, { expanded: false, isPartial: false }, theme, {}));
   assert.match(collapsed, /completed/);
@@ -52,8 +67,8 @@ test("MCP invalid content entries do not expose raw host payloads", () => {
 
 test("MCP image MIME metadata is sanitized", () => {
   const rendered = text(renderMcpResult("lookup", { content: [{ type: "image", data: "base64", mimeType: "image/png?client_id=IMAGE_SECRET requestId=REQ_SECRET" }] }, { expanded: true, isPartial: false }, theme, {}));
-  assert.match(rendered, /image\/png/);
-  assert.doesNotMatch(rendered, /IMAGE_SECRET|REQ_SECRET/);
+  assert.match(rendered, /Results:/);
+  assert.doesNotMatch(rendered, /IMAGE_SECRET|REQ_SECRET|image\/png/);
 });
 
 test("MCP malformed image blocks do not expose incomplete payloads", () => {

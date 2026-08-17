@@ -14,51 +14,27 @@ import {
   wikiRoot,
 } from "../wiki.ts";
 
-const commonQuery = Type.Optional(Type.String({ description: "Search query, or \"*\" for deterministic discovery; omit when opening a page directly." }));
-const discoveryQuery = Type.Optional(Type.String({ description: "Grouped discovery/search query; omitted or \"*\" discovers both configured references and wiki topics." }));
-const maxResults = Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum results or topics to return" }));
-const knowledgeSearchParams = Type.Union([
-  Type.Object({
-    type: Type.Literal("wikis", { description: "Search, discover, or retrieve pages from the local wiki corpus" }),
-    query: commonQuery,
-    page: Type.Optional(Type.String({ description: "Open a saved page directly by its file path (topic is derived from the file name), e.g. 'react-notes.md' or 'react-notes.part-002.md'; do not combine with a search query" })),
-    maxResults,
-  }, { additionalProperties: false }),
-  Type.Object({
-    type: Type.Literal("references", { description: "Discover configured reference aliases or select a readable root" }),
-    query: commonQuery,
-    alias: Type.Optional(Type.String({ description: "Configured reference alias to select a readable root; omit it with query=\"*\" to discover non-hidden aliases" })),
-  }, { additionalProperties: false }),
-  Type.Object({
-    type: Type.Optional(Type.Null()),
-    query: discoveryQuery,
-  }, { additionalProperties: false }),
-]);
+// Keep this as one plain object with optional scalar properties. Some model
+// providers reject top-level unions/anyOf and nullable optional properties even
+// when they are valid JSON Schema. The executor below remains authoritative for
+// combinations such as page+query and alias on a wiki request.
+const knowledgeSearchParams = Type.Object({
+  type: Type.Optional(Type.String({ description: "Search scope: \"wikis\" or \"references\". Omit for grouped discovery." })),
+  query: Type.Optional(Type.String({ description: "Search query, or \"*\" for deterministic discovery; omit when opening a page directly." })),
+  page: Type.Optional(Type.String({ description: "Open a saved wiki page directly by its file path; use only with type=\"wikis\" and without query." })),
+  alias: Type.Optional(Type.String({ description: "Configured reference alias to select a readable root; use only with type=\"references\"." })),
+  maxResults: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Maximum wiki results or topics to return." })),
+}, { additionalProperties: false });
 
 export type KnowledgeSearchType = "wikis" | "references";
 
-type KnowledgeSearchParams =
-  | {
-      type: "wikis";
-      query?: string;
-      page?: string;
-      maxResults?: number;
-      alias?: never;
-    }
-  | {
-      type: "references";
-      query?: string;
-      alias?: string;
-      page?: never;
-      maxResults?: never;
-    }
-  | {
-      type?: null;
-      query?: string;
-      alias?: never;
-      page?: never;
-      maxResults?: never;
-    };
+type KnowledgeSearchParams = {
+  type?: string | null;
+  query?: string;
+  page?: string;
+  alias?: string;
+  maxResults?: number;
+};
 
 export interface KnowledgeSearchResultItem {
   file: string;
@@ -201,9 +177,10 @@ export function registerKnowledgeSearchTool(pi: ExtensionAPI): void {
     },
     renderResult(result, options, theme, context) {
       const failed = toolResultFailed(result, context);
-      const details = result.details as { results?: unknown[] } | undefined;
-      const count = details?.results?.length ?? (toolResultText(result) ? 1 : 0);
-      return renderToolOutcome(theme, `Knowledge search • ${count} results`, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, toolResultText(result), result, context.args);
+      const details = result.details as { results?: unknown[]; page?: { file?: unknown } } | undefined;
+      const pageFile = typeof details?.page?.file === "string" ? details.page.file : undefined;
+      const label = pageFile ? `Read: ${pageFile}` : `Knowledge search • ${details?.results?.length ?? (toolResultText(result) ? 1 : 0)} results`;
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded), ...(pageFile ? { successMarker: false, expandedLabel: false } : {}) }, failed, toolResultText(result), result, context.args);
     },
   });
 }

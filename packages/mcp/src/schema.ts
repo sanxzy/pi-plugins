@@ -43,7 +43,16 @@ function convertType(schema: unknown): TSchema {
           typeof value === "string" || typeof value === "number" || typeof value === "boolean",
         );
         if (primitive && schema.enum.length > 0) {
-          return annotate(Type.Union(schema.enum.map((value) => Type.Literal(value as string | number | boolean))));
+          // Encode scalar enums as a plain primitive plus `enum` instead of
+          // anyOf/literal unions; several tool providers only accept this
+          // simpler JSON Schema shape. Preserve the enum's primitive type.
+          const enumType = typeof schema.enum[0];
+          if (schema.enum.every((value) => typeof value === enumType)) {
+            if (enumType === "string") return annotate(Type.String({ enum: schema.enum as string[] }));
+            if (enumType === "number") return annotate(Type.Number({ enum: schema.enum as number[] }));
+            if (enumType === "boolean") return annotate(Type.Boolean({ enum: schema.enum as boolean[] }));
+          }
+          return annotate(Type.Any());
         }
         return annotate(Type.String());
       }

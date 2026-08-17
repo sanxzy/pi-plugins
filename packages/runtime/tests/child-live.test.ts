@@ -23,6 +23,22 @@ const identityTheme = {
   bold: (text: string) => text,
 };
 
+test("inherited MCP expanded traces use human-readable input and result sections", () => {
+  const args = { type: "wikis", query: "pi-c2 tool rendering migration", maxResults: 5 };
+  const call = stripVTControlCharacters(inheritedMcpRenderCall("knowledge_search", "knowledge_search", identityTheme, { expanded: true, args }).render(120).join("\n"));
+  assert.match(call, /Input: type=wikis, query=pi-c2 tool rendering migration, maxResults=5/);
+  assert.doesNotMatch(call, /Arguments:|\"type\"|\{/);
+
+  const expanded = stripVTControlCharacters(inheritedMcpRenderResult({
+    content: [
+      { type: "text", text: "- pi-c2-wiki-entry.md (15.245047)" },
+      { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+    ],
+  }, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
+  assert.match(expanded, /Results:\s*\n\s*- pi-c2-wiki-entry.md \(15\.245047\)/);
+  assert.doesNotMatch(expanded, /Result:|\"type\"|\"text\"|aGVsbG8=|image\/png|\{/);
+});
+
 test("inherited MCP renderers redact expanded token and transport traces", () => {
   const args = { access_token: "tok-secret", refreshToken: "refresh-secret", requestId: "req-secret", traceId: "trace-secret", clientId: "client-id", client_id: "client-id-2", authorization: "Bearer abc.def" };
   const call = stripVTControlCharacters(inheritedMcpRenderCall("lookup", "lookup", identityTheme, { expanded: true, args }).render(120).join("\n"));
@@ -48,8 +64,8 @@ test("inherited MCP invalid content entries do not expose raw host payloads", ()
 
 test("inherited MCP image MIME metadata is sanitized", () => {
   const rendered = stripVTControlCharacters(inheritedMcpRenderResult({ content: [{ type: "image", data: "base64", mimeType: "image/png?client_id=IMAGE_SECRET requestId=REQ_SECRET" }] }, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
-  assert.match(rendered, /image\/png/);
-  assert.doesNotMatch(rendered, /IMAGE_SECRET|REQ_SECRET/);
+  assert.match(rendered, /Results:/);
+  assert.doesNotMatch(rendered, /IMAGE_SECRET|REQ_SECRET|image\/png/);
 });
 
 test("inherited MCP malformed image blocks do not expose incomplete payloads", () => {
@@ -76,7 +92,7 @@ test("inherited MCP renderers hide payload output while retaining the tool activ
   ).render(100).join(""));
   assert.match(call, /server_lookup/);
   const expandedCall = stripVTControlCharacters(inheritedMcpRenderCall("server_lookup", "server_lookup", identityTheme, { expanded: true, args: { query: "inspect this" } }).render(100).join(""));
-  assert.match(expandedCall, /\"query\"/);
+  assert.match(expandedCall, /Input: query=inspect this/);
   assert.match(expandedCall, /inspect this/);
   assert.doesNotMatch(result, /SECRET_MCP_OUTPUT/);
   const expanded = stripVTControlCharacters(inheritedMcpRenderResult(

@@ -6,16 +6,6 @@ function sensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
 }
 
-function sanitizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
-  if (typeof value === "string") return sanitizeExpanded(value);
-  if (typeof value === "bigint") return `${value}n`;
-  if (value === null || typeof value !== "object") return value;
-  if (seen.has(value)) return "[Circular]";
-  seen.add(value);
-  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, seen));
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sensitiveKey(key) ? "[redacted]" : sanitizeValue(item, seen)]));
-}
-
 function compact(value: unknown, maxLength = 80): string {
   const text = typeof value === "string" ? value : String(value ?? "");
   const singleLine = sanitizeExpanded(text).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
@@ -35,34 +25,54 @@ function sanitizeExpanded(value: string): string {
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
 }
 
-function projectContent(value: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((block): Array<Record<string, unknown>> => {
-    if (!block || typeof block !== "object") return [];
-    const record = block as Record<string, unknown>;
-    if (record.type === "text" && typeof record.text === "string") return [{ type: "text", text: sanitizeExpanded(record.text) }];
-    if (record.type === "image" && typeof record.data === "string" && typeof record.mimeType === "string") return [{ type: "image", mimeType: sanitizeExpanded(record.mimeType) }];
-    return [];
-  });
+function humanValue(value: unknown, seen = new WeakSet<object>()): string {
+  if (typeof value === "string") return sanitizeExpanded(value).replace(/[\r\n]+/g, " ").trim();
+  if (value === null || value === undefined) return "none";
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => humanValue(item, seen)).join(", ");
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length === 0 ? "none" : entries.map(([key, item]) => `${key}=${sensitiveKey(key) ? "[redacted]" : humanValue(item, seen)}`).join(", ");
+}
+
+function humanText(value: string): string {
+  const sanitized = sanitizeExpanded(value);
+  const trimmed = sanitized.trim();
+  if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && (trimmed.endsWith("}") || trimmed.endsWith("]"))) {
+    try { return humanValue(JSON.parse(trimmed)); } catch { /* preserve ordinary text */ }
+  }
+  return sanitized;
 }
 
 function expandedPayload(result: unknown): string {
-  if (!result || typeof result !== "object") return "";
+  if (!result || typeof result !== "object" || Array.isArray(result)) return "";
   const record = result as { content?: unknown; details?: unknown };
   const content = Array.isArray(record.content)
-    ? record.content.map((block) => {
-      if (!block || typeof block !== "object") return "";
-      const item = block as { text?: unknown; type?: unknown; mimeType?: unknown };
-      if (typeof item.text === "string") return item.text;
-      if (item.type === "image" && typeof item.mimeType === "string") return `[image: ${item.mimeType}]`;
-      return "";
-    }).filter(Boolean).join("\n")
+    ? record.content
+      .filter((block): block is Record<string, unknown> => Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type === "text"))
+      .filter((block) => typeof block.text === "string")
+      .map((block) => humanText(block.text as string))
+      .join("\n")
     : "";
-  if (content) return sanitizeExpanded(content);
-  const structured = record.details && typeof record.details === "object" && "structuredContent" in record.details
-    ? (record.details as { structuredContent?: unknown }).structuredContent
-    : undefined;
-  try { return structured === undefined ? "" : JSON.stringify(sanitizeValue(structured), null, 2) ?? ""; } catch { return ""; }
+  if (content) return content;
+  if (record.details && typeof record.details === "object") {
+    const details = record.details as Record<string, unknown>;
+    const visible = Object.fromEntries(Object.entries(details).filter(([key]) => ["answer", "message"].includes(key)));
+    if (Object.keys(visible).length > 0) return humanValue(visible);
+    if ("structuredContent" in details) return humanValue(details.structuredContent);
+  }
+  return "";
+}
+
+function hasRenderableImage(result: unknown): boolean {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return false;
+  const content = (result as { content?: unknown }).content;
+  return Array.isArray(content) && content.some((block) => Boolean(
+    block && typeof block === "object" && (block as Record<string, unknown>).type === "image" &&
+    typeof (block as Record<string, unknown>).data === "string" &&
+    typeof (block as Record<string, unknown>).mimeType === "string",
+  ));
 }
 
 function failed(result: unknown, context: { isError?: boolean }): boolean {
@@ -82,9 +92,7 @@ function failed(result: unknown, context: { isError?: boolean }): boolean {
 export function inheritedMcpRenderCall(name: string, label: string, theme: { fg(color: string, text: string): string; bold(text: string): string }, context?: { expanded?: boolean; args?: unknown }): Text {
   const line = theme.fg("toolTitle", theme.bold(compact(label))) + theme.fg("muted", ` ${compact(name)}`);
   if (context?.expanded && context.args !== undefined) {
-    let args = "";
-    try { args = JSON.stringify(sanitizeValue(context.args), null, 2) ?? ""; } catch { args = sanitizeExpanded(String(context.args)); }
-    return new Text(`${line}\nArguments:\n${args}`, 0, 0);
+    return new Text(`${line}\nInput: ${humanValue(context.args)}`, 0, 0);
   }
   return new Text(line, 0, 0);
 }
@@ -94,20 +102,7 @@ export function inheritedMcpRenderResult(result: unknown, options: { expanded?: 
   const isFailed = failed(result, context);
   const line = theme.fg(isFailed ? "warning" : "success", isFailed ? "✗ MCP tool failed" : "✓ MCP tool complete");
   if (isFailed || !options.expanded) return new Text(line, 0, 0);
-  let payload = "";
-  try {
-    if (result !== null && typeof result === "object" && !Array.isArray(result)) {
-      const record = result as { content?: unknown; details?: unknown };
-      const projectedContent = projectContent(record.content);
-      if (projectedContent.length > 0) payload = JSON.stringify(projectedContent, null, 2) ?? "";
-      else if (record.details && typeof record.details === "object" && "structuredContent" in record.details) payload = JSON.stringify(sanitizeValue((record.details as { structuredContent?: unknown }).structuredContent), null, 2) ?? "";
-      else {
-        const visible = Object.fromEntries(Object.entries(record.details && typeof record.details === "object" ? record.details : {}).filter(([key]) => ["answer", "message"].includes(key)));
-        payload = JSON.stringify(sanitizeValue(visible), null, 2) ?? "";
-      }
-    }
-  } catch {
-    payload = expandedPayload(result);
-  }
-  return new Text(payload ? `${line}\n${payload}` : line, 0, 0);
+  const payload = expandedPayload(result);
+  const hasImage = !isFailed && options.expanded && hasRenderableImage(result);
+  return new Text(payload || hasImage ? `${line}\nResults:${payload ? `\n${payload}` : ""}` : line, 0, 0);
 }

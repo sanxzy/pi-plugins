@@ -39,6 +39,53 @@ function safeTelegramError(error: unknown): string {
     .replace(SENSITIVE_QUERY_PATTERN, "$1[Redacted]");
 }
 
+/** Validate action-specific fields after the provider-facing object schema. */
+function telegramParameterError(value: unknown): string | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return "Parameters must be an object";
+  const params = value as Record<string, unknown>;
+  const action = params.action;
+  const stringField = (name: string, required = false): string | undefined => {
+    if (params[name] === undefined && !required) return undefined;
+    return typeof params[name] === "string" && (params[name] as string).length > 0 ? undefined : `${name} must be a non-empty string`;
+  };
+  const messageId = (required = false, positive = false): string | undefined => {
+    if (params.message_id === undefined && !required) return undefined;
+    return typeof params.message_id === "number" && Number.isInteger(params.message_id) && (!positive || params.message_id >= 1)
+      ? undefined
+      : `message_id must be an integer${positive ? " greater than zero" : ""}`;
+  };
+
+  if (action === "send_text") {
+    return stringField("text", true) ?? stringField("format") ?? messageId();
+  }
+  if (action === "react") {
+    if (messageId(true, true)) return messageId(true, true);
+    if (typeof params.emoji !== "string" || !validateStandardReaction(params.emoji)) return "emoji must be a supported Telegram reaction";
+    return undefined;
+  }
+  if (action === "send_choices") {
+    const questionError = stringField("question", true);
+    if (questionError) return questionError;
+    if (!Array.isArray(params.choices) || params.choices.length < 2 || params.choices.length > 10) return "choices must contain between 2 and 10 items";
+    if (params.choices.some((choice) => {
+      if (choice === null || typeof choice !== "object" || Array.isArray(choice)) return true;
+      const item = choice as Record<string, unknown>;
+      return typeof item.label !== "string" || item.label.length === 0 || typeof item.value !== "string" || item.value.length === 0;
+    })) return "each choice must have a non-empty label and value";
+    return messageId(false, true);
+  }
+  if (action === "send_media") {
+    if (params.media_type !== "photo" && params.media_type !== "document") return "media_type must be photo or document";
+    if (params.source === null || typeof params.source !== "object" || Array.isArray(params.source)) return "source must be a media object";
+    const source = params.source as Record<string, unknown>;
+    if (source.kind === "file_id" && typeof source.file_id === "string" && source.file_id.length > 0) return undefined;
+    if (source.kind === "artifact_id" && typeof source.artifact_id === "string" && source.artifact_id.length > 0) return undefined;
+    if (source.kind === "https" && typeof source.url === "string" && source.url.length > 0) return undefined;
+    return "source must contain a valid file_id, artifact_id, or https URL";
+  }
+  return "action must be send_text, react, send_choices, or send_media";
+}
+
 export interface TelegramChatDeps {
   /** Injectable send seam so tests verify delivery and partial results offline. */
   send?: (projectRoot: string, chatId: string, message: string, options?: {
@@ -156,7 +203,17 @@ export function registerTelegramChatTool(pi: ExtensionAPI, deps: TelegramChatDep
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<TelegramChatDetails>> {
       return processWithLog({ operation: TOOL_OPERATIONS.TELEGRAM_EXECUTE, parameters: { action: (params as { action?: unknown }).action } }, async () => {
+      const parameterError = telegramParameterError(params);
       const action = (params as { action?: unknown }).action;
+      if (parameterError) {
+        return errorResult(`Invalid Telegram parameters: ${parameterError}`, {
+          action: action === "react" || action === "send_choices" || action === "send_media" ? action : "send_text",
+          sent: false,
+          chatId: typeof (params as { chat_id?: unknown }).chat_id === "string" ? (params as { chat_id: string }).chat_id : "",
+          error: parameterError,
+          category: "telegram_rejected",
+        });
+      }
       if (action !== "send_text" && action !== "react" && action !== "send_choices" && action !== "send_media") {
         return errorResult("Unsupported Telegram action", {
           action: "send_text",

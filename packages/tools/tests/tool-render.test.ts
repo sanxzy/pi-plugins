@@ -82,19 +82,69 @@ test("tool renderers expose safe, tool-specific activity without model payloads"
       assert.ok(call.length > 0, `${tool.name} renders activity`);
       assert.doesNotMatch(call, /secret|internal output/);
       const expandedCall = text(tool.renderCall(args, theme, { ...renderContext, expanded: true, args }));
-      assert.match(expandedCall, /Arguments:/, `${tool.name} exposes expanded arguments`);
+      assert.match(expandedCall, /Input:/, `${tool.name} exposes expanded input`);
     }
     assert.ok(result.length > 0, `${tool.name} renders an outcome`);
     assert.doesNotMatch(result, /secret|internal output/);
     const expandedResult = text(tool.renderResult!({ content: [{ type: "text", text: "traceable internal output" }], details: { prompt: "traceable" } }, expandedOptions, theme, { ...renderContext, expanded: true, args }));
     if (tool.name === "agent_cancel" || tool.name === "agent_status") {
-      assert.match(expandedResult, /\"prompt\"|traceable internal output|not cancellable|unknown/);
+      assert.match(expandedResult, /traceable internal output|not cancellable|unknown/);
     } else {
-      assert.match(expandedResult, /traceable internal output|\"prompt\"/, `${tool.name} exposes expanded result tracing`);
+      assert.match(expandedResult, /traceable internal output|traceable/, `${tool.name} exposes expanded result tracing`);
     }
   }
 
 
+});
+
+test("knowledge page reads render as reads rather than zero-result searches", () => {
+  const knowledgeSearch = capture(registerKnowledgeSearchTool);
+  const args = { type: "wikis", page: "bounded-smoke-test-example.md" };
+  const pageText = `{
+  "status": "ok",
+  "content": [
+    "## Web Search: bounded smoke test example",
+    "",
+    "\`\`\`python",
+    "def smoke_check():",
+    "    return True",
+    "",
+    "print(smoke_check())",
+    "\`\`\`"
+  ]
+}`;
+  assert.equal(pageText.startsWith("{"), true);
+  assert.match(pageText, /\n    "```python",\n    "def smoke_check\(\):"/);
+  const result = {
+    content: [{ type: "text", text: pageText }],
+    details: { mode: "wikis", topic: "bounded-smoke-test-example", results: [], page: { file: "bounded-smoke-test-example.md", topic: "bounded-smoke-test-example", page: 1, totalPages: 1 } },
+  };
+  const collapsed = text(knowledgeSearch.renderResult!(result, collapsedOptions, theme, { args }));
+  assert.equal(collapsed.trim(), "Read: bounded-smoke-test-example.md");
+  const expanded = text(knowledgeSearch.renderResult!(result, expandedOptions, theme, { expanded: true, args }));
+  const unpaddedExpanded = expanded.split("\n").map((line) => line.trimEnd()).join("\n");
+  assert.equal(unpaddedExpanded, `Results:\n${pageText}`);
+  assert.doesNotMatch(unpaddedExpanded, /status=ok|content=/);
+  assert.doesNotMatch(expanded, /Knowledge search|0 results/);
+});
+
+test("expanded traces use human-readable input and result sections", () => {
+  const knowledgeSearch = capture(registerKnowledgeSearchTool);
+  const args = { type: "wikis", query: "pi-c2 tool rendering migration", maxResults: 5 };
+  const call = text(knowledgeSearch.renderCall!(args, theme, { expanded: true, args }));
+  assert.match(call, /Input: type=wikis, query=pi-c2 tool rendering migration, maxResults=5/);
+  assert.doesNotMatch(call, /Arguments:|\"type\"|\{/);
+
+  const result = text(knowledgeSearch.renderResult!({
+    content: [
+      { type: "text", text: "- pi-c2-wiki-entry.md (15.245047)\n- pi-c2-coding-agent-extension-typescript-subagents.md (13.672721)" },
+      { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+    ],
+    details: { results: [{ file: "pi-c2-wiki-entry.md", score: 15.245047 }] },
+  }, expandedOptions, theme, { expanded: true, args }));
+  assert.match(result, /Results:\s*\n\s*- pi-c2-wiki-entry.md \(15\.245047\)/);
+  assert.match(result, /✓ Knowledge search • \d+ results/, "search mode retains the result-count collapsed label");
+  assert.doesNotMatch(result, /Result:|\"type\"|\"text\"|aGVsbG8=|image\/png|\{/);
 });
 
 test("expanded empty results keep only explicit answer/message fallbacks", () => {
@@ -108,7 +158,7 @@ test("expanded malformed regular results suppress primitive and host payloads", 
   const webSearch = capture(registerWebSearchTool);
   for (const result of [{ content: [{ hostOnly: "HOST_ARRAY", transportId: "TRANSPORT" }] }, { content: ["HOST_STRING"] }, { content: [{ type: "text", text: "safe" }, { hostOnly: "HOST_MIXED" }] }]) {
     const rendered = text(webSearch.renderResult!(result, expandedOptions, theme, { expanded: true }));
-    assert.match(rendered, /safe|Result:/);
+    assert.match(rendered, /safe|Results:|Web search/);
     assert.doesNotMatch(rendered, /HOST_ARRAY|TRANSPORT|HOST_STRING|HOST_MIXED/);
   }
 });
@@ -153,13 +203,12 @@ test("renderers follow the agreed expanded tool contracts", () => {
   };
   const agentArgs = { description: "audit renderers", prompt: "inspect every renderer", subagent_type: "explore", background: true };
   const agentExpandedCall = text(agent.renderCall!(agentArgs, theme, { ...renderContext, expanded: true, args: agentArgs }));
-  assert.match(agentExpandedCall, /\"prompt\"/);
-  assert.match(agentExpandedCall, /inspect every renderer/);
+  assert.match(agentExpandedCall, /Input: .*prompt=inspect every renderer/);
   const agentExpanded = text(agent.renderResult!(agentResult, expandedOptions, theme, { ...renderContext, expanded: true, args: agentArgs }));
   assert.doesNotMatch(agentExpanded, /Arguments:/);
   assert.match(agentExpanded, /completed/);
   assert.match(agentExpanded, /Agent completed/);
-  assert.doesNotMatch(agentExpanded.slice(agentExpanded.indexOf("Result:")), /\"jobId\"|\"subagentType\"|\"prompt\"/);
+  assert.doesNotMatch(agentExpanded.slice(agentExpanded.indexOf("Results:")), /jobId|subagentType/);
 
   const jobs = capture(registerJobsTool);
   const jobsResult = { content: [{ type: "text", text: "Subagent jobs:\n- job-123: running (audit renderers)" }], details: { jobs: [{ jobId: "job-123", status: "running", subagentType: "explore", description: "audit renderers" }] } };
@@ -175,7 +224,7 @@ test("renderers follow the agreed expanded tool contracts", () => {
 
   const webSearch = capture(registerWebSearchTool);
   const webArgs = { query: "pi renderers", numResults: 3, type: "deep" };
-  assert.match(text(webSearch.renderCall!(webArgs, theme, { ...renderContext, expanded: true, args: webArgs })), /\"numResults\"/);
+  assert.match(text(webSearch.renderCall!(webArgs, theme, { ...renderContext, expanded: true, args: webArgs })), /Input: .*numResults=3/);
   const webResult = { content: [{ type: "text", text: "Result one\nResult body" }], details: { query: "pi renderers", provider: "exa", results: [{ title: "Result one", url: "https://example.com" }] } };
   assert.match(text(webSearch.renderResult!(webResult, collapsedOptions, theme, renderContext)), /results/);
   const webExpanded = text(webSearch.renderResult!(webResult, expandedOptions, theme, { ...renderContext, expanded: true, args: webArgs }));

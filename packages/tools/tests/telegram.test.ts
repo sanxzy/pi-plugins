@@ -21,12 +21,25 @@ function context(cwd = "/tmp/project"): ExtensionContext {
 
 const sendText = { action: "send_text", chat_id: "777", text: "hello" };
 
-test("schema rejects legacy, actionless, and incomplete send_text payloads", () => {
+test("telegram schema is a provider-compatible object shape", () => {
+  assert.equal((telegramChatParams as { type?: string }).type, "object");
   assert.equal(Value.Check(telegramChatParams, { message: "hello" }), false);
   assert.equal(Value.Check(telegramChatParams, { chat_id: "777", text: "hello" }), false);
-  assert.equal(Value.Check(telegramChatParams, { action: "send_text", chat_id: "777" }), false);
+  // Action-specific required fields are checked by the execution boundary so
+  // the provider-facing schema can remain a plain object without anyOf.
+  assert.equal(Value.Check(telegramChatParams, { action: "send_text", chat_id: "777" }), true);
   assert.equal(Value.Check(telegramChatParams, sendText), true);
   assert.equal(Value.Check(telegramChatParams, { ...sendText, channel: "telegram" }), false);
+  const serialized = JSON.stringify(telegramChatParams);
+  assert.doesNotMatch(serialized, /"type"\s*:\s*"null"/);
+  assert.doesNotMatch(serialized, /"(?:anyOf|oneOf|allOf)"\s*:/);
+});
+
+test("telegram execution rejects incomplete action payloads before delivery", async () => {
+  const tool = capture({ validateTarget: async () => { throw new Error("must not reach target validation"); } });
+  const result = await tool.execute("call", { action: "send_text", chat_id: "777" }, undefined, undefined, context());
+  assert.equal(result.details.category, "telegram_rejected");
+  assert.match(result.content[0].text, /Invalid Telegram parameters/);
 });
 
 test("schema rejects mixed-action and unknown fields on send_text", () => {

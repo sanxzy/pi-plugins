@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import ../../test-setup.mjs --import tsx tests/job-session.test.ts tests/child-session-live.test.ts tests/goal.test.ts tests/references.test.ts"
+    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/job-session.test.ts tests/child-session-live.test.ts tests/goal.test.ts tests/references.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.1"

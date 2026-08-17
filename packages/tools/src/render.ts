@@ -7,26 +7,39 @@ function sensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
 }
 
-function projectContent(value: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((block): Array<Record<string, unknown>> => {
-    if (!block || typeof block !== "object") return [];
-    const record = block as Record<string, unknown>;
-    if (record.type === "text" && typeof record.text === "string") return [{ type: "text", text: expandedToolText(record.text) }];
-    if (record.type === "image" && typeof record.data === "string" && typeof record.mimeType === "string") return [{ type: "image", data: "[image]", mimeType: record.mimeType }];
-    return [];
-  });
-}
-
-function sanitizeTraceValue(value: unknown, seen = new WeakSet<object>()): unknown {
-  if (typeof value === "string") return expandedToolText(value);
+function humanValue(value: unknown, seen = new WeakSet<object>()): string {
+  if (typeof value === "string") return expandedToolText(value).replace(/[\r\n]+/g, " ").trim();
   if (typeof value === "bigint") return `${value}n`;
-  if (value === null || typeof value !== "object") return value;
+  if (value === null || value === undefined) return "none";
+  if (typeof value !== "object") return String(value);
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
-  if (Array.isArray(value)) return value.map((item) => sanitizeTraceValue(item, seen));
-  const record = value as Record<string, unknown>;
-  return Object.fromEntries(Object.entries(record).map(([key, item]) => [key, sensitiveKey(key) ? "[redacted]" : sanitizeTraceValue(item, seen)]));
+  if (Array.isArray(value)) return value.map((item) => humanValue(item, seen)).join(", ");
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return "none";
+  return entries.map(([key, item]) => `${key}=${sensitiveKey(key) ? "[redacted]" : humanValue(item, seen)}`).join(", ");
+}
+
+function humanInput(value: unknown): string {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    return entries.length === 0 ? "none" : entries.map(([key, item]) => `${key}=${sensitiveKey(key) ? "[redacted]" : humanValue(item)}`).join(", ");
+  }
+  return humanValue(value);
+}
+
+function humanText(value: string, preserveText = false): string {
+  const sanitized = expandedToolText(value);
+  if (preserveText) return sanitized;
+  const trimmed = sanitized.trim();
+  if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && (trimmed.endsWith("}") || trimmed.endsWith("]"))) {
+    try {
+      return humanValue(JSON.parse(trimmed));
+    } catch {
+      // Preserve ordinary text that merely begins with a brace or bracket.
+    }
+  }
+  return sanitized;
 }
 
 /** Keep tool activity readable without copying model-facing payloads into the TUI. */
@@ -35,15 +48,6 @@ export function compactToolText(value: unknown, maxLength = 80): string {
   const singleLine = expandedToolText(text).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (singleLine.length <= maxLength) return singleLine;
   return `${singleLine.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
-}
-
-/** Serialize a value for expanded tracing without letting unusual values break rendering. */
-function traceValue(value: unknown): string {
-  try {
-    return JSON.stringify(sanitizeTraceValue(value), null, 2) ?? String(value ?? "");
-  } catch {
-    return expandedToolText(String(value ?? ""));
-  }
 }
 
 /** Render one user-facing activity line for a pi-c2 tool call. */
@@ -57,7 +61,7 @@ export function renderToolCall(
   const suffix = activity ? theme.fg("muted", ` ${compactToolText(activity)}`) : "";
   const line = theme.fg("toolTitle", theme.bold(label)) + suffix;
   if (context?.expanded && traceArgs !== undefined) {
-    return new Text(`${line}\nArguments:\n${traceValue(traceArgs)}`, 0, 0);
+    return new Text(`${line}\nInput: ${humanInput(traceArgs)}`, 0, 0);
   }
   return new Text(line, 0, 0);
 }
@@ -74,22 +78,37 @@ export function renderToolDetail(
   return renderToolCall(theme, label, compactToolText(value, maxLength), context, traceArgs);
 }
 
-/** Serialize only the result content that is delivered to the model. */
+/** Format only the result content that is delivered to the model. */
 export function toolResultTrace(
   result: { content?: unknown; details?: unknown } | undefined,
   _context?: ToolRenderContextLike,
 ): string {
-  const content = result?.content ?? [];
-  const projectedContent = projectContent(content);
-  if (projectedContent.length > 0) return traceValue(projectedContent);
+  const content = Array.isArray(result?.content) ? result.content : [];
+  const details = result?.details && typeof result.details === "object" ? result.details as Record<string, unknown> : undefined;
+  const preserveText = details?.mode === "wikis" && typeof details.page === "object" && details.page !== null;
+  const text = content
+    .filter((block): block is Record<string, unknown> => Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type === "text"))
+    .filter((block) => typeof block.text === "string")
+    .map((block) => humanText(block.text as string, preserveText))
+    .join("\n");
+  if (text) return text;
   if (result?.details && typeof result.details === "object") {
     const visible = Object.fromEntries(Object.entries(result.details).filter(([key]) => ["answer", "message"].includes(key)));
-    if (Object.keys(visible).length > 0) return traceValue(visible);
+    if (Object.keys(visible).length > 0) return humanValue(visible);
+    if ("structuredContent" in result.details) {
+      const structured = (result.details as { structuredContent?: unknown }).structuredContent;
+      return structured === undefined ? "" : humanValue(structured);
+    }
   }
-  if (result?.details && typeof result.details === "object" && "structuredContent" in result.details) {
-    return traceValue((result.details as { structuredContent?: unknown }).structuredContent);
-  }
-  return traceValue([]);
+  return "";
+}
+
+function toolResultHasImage(result: { content?: unknown } | undefined): boolean {
+  return Array.isArray(result?.content) && result.content.some((block) =>
+    Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type === "image" &&
+      typeof (block as Record<string, unknown>).data === "string" &&
+      typeof (block as Record<string, unknown>).mimeType === "string"),
+  );
 }
 
 /** Render a compact outcome without exposing the tool's model-facing result. */
@@ -131,6 +150,8 @@ export function toolResultFailed(
 export interface ToolRenderResultOptionsLike {
   readonly expanded?: boolean;
   readonly isPartial?: boolean;
+  readonly successMarker?: boolean;
+  readonly expandedLabel?: boolean;
 }
 
 /** Preserve expanded model-facing text while removing terminal controls and credentials. */
@@ -167,7 +188,7 @@ export function toolResultText(result: { content?: unknown; details?: unknown } 
     : undefined;
   if (structured === undefined) return "";
   try {
-    return traceValue(structured);
+    return humanValue(structured);
   } catch {
     return "";
   }
@@ -184,13 +205,16 @@ export function renderToolOutcome(
   traceArgs?: unknown,
 ): Text {
   if (options.isPartial) return new Text(theme.fg("dim", "…"), 0, 0);
-  const marker = failed ? "✗" : "✓";
-  const line = theme.fg(failed ? "warning" : "success", `${marker} ${compactToolText(label, 160)}`);
+  const marker = failed ? "✗" : options.successMarker === false ? "" : "✓";
+  const prefix = marker ? `${marker} ` : "";
+  const line = theme.fg(failed ? "warning" : "success", `${prefix}${compactToolText(label, 160)}`);
   if (options.expanded && !failed) {
     const sections: string[] = [];
-    if (traceResult) sections.push(`Result:\n${toolResultTrace(traceResult)}`);
-    else if (expandedDetail) sections.push(expandedToolText(expandedDetail));
-    if (sections.length > 0) return new Text(`${line}\n${sections.join("\n")}`, 0, 0);
+    const resultText = traceResult ? toolResultTrace(traceResult) : expandedToolText(expandedDetail);
+    if (resultText || (traceResult && toolResultHasImage(traceResult))) {
+      sections.push(`Results:${resultText ? `\n${resultText}` : ""}`);
+    }
+    if (sections.length > 0) return new Text(`${options.expandedLabel === false ? "" : `${line}\n`}${sections.join("\n")}`, 0, 0);
   }
   return new Text(line, 0, 0);
 }

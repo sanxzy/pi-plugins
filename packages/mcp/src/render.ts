@@ -11,43 +11,62 @@ function sensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
 }
 
-function sanitizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
-  if (typeof value === "string") return sanitizePayload(value);
-  if (typeof value === "bigint") return `${value}n`;
-  if (value === null || typeof value !== "object") return value;
+function humanValue(value: unknown, seen = new WeakSet<object>()): string {
+  if (typeof value === "string") return sanitizePayload(value).replace(/[\r\n]+/g, " ").trim();
+  if (value === null || value === undefined) return "none";
+  if (typeof value !== "object") return String(value);
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
-  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, seen));
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sensitiveKey(key) ? "[redacted]" : sanitizeValue(item, seen)]));
+  if (Array.isArray(value)) return value.map((item) => humanValue(item, seen)).join(", ");
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length === 0 ? "none" : entries.map(([key, item]) => `${key}=${sensitiveKey(key) ? "[redacted]" : humanValue(item, seen)}`).join(", ");
 }
 
-function projectContent(value: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((block): Array<Record<string, unknown>> => {
-    if (!block || typeof block !== "object") return [];
-    const record = block as Record<string, unknown>;
-    if (record.type === "text" && typeof record.text === "string") return [{ type: "text", text: sanitizePayload(record.text) }];
-    if (record.type === "image" && typeof record.data === "string" && typeof record.mimeType === "string") return [{ type: "image", mimeType: sanitizePayload(record.mimeType) }];
-    return [];
-  });
+function humanInput(value: unknown): string {
+  return humanValue(value);
+}
+
+function humanText(value: string): string {
+  const sanitized = sanitizePayload(value);
+  const trimmed = sanitized.trim();
+  if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && (trimmed.endsWith("}") || trimmed.endsWith("]"))) {
+    try {
+      return humanValue(JSON.parse(trimmed));
+    } catch {
+      // Preserve ordinary text that merely begins with a brace or bracket.
+    }
+  }
+  return sanitized;
 }
 
 function tracePayload(result: unknown): string {
-  try {
-    if (result !== null && typeof result === "object" && !Array.isArray(result)) {
-      const record = result as { content?: unknown; details?: unknown };
-      const projectedContent = projectContent(record.content);
-      if (projectedContent.length > 0) return JSON.stringify(projectedContent, null, 2) ?? "";
-      if (record.details && typeof record.details === "object" && "structuredContent" in record.details) {
-        return JSON.stringify(sanitizeValue((record.details as { structuredContent?: unknown }).structuredContent), null, 2) ?? "";
-      }
-      const visible = Object.fromEntries(Object.entries(record.details && typeof record.details === "object" ? record.details : {}).filter(([key]) => ["answer", "message"].includes(key)));
-      return JSON.stringify(sanitizeValue(visible), null, 2) ?? "";
-    }
-    return "";
-  } catch {
-    return "";
+  if (result === null || typeof result !== "object" || Array.isArray(result)) return "";
+  const record = result as { content?: unknown; details?: unknown };
+  const text = Array.isArray(record.content)
+    ? record.content
+      .filter((block): block is Record<string, unknown> => Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type === "text"))
+      .filter((block) => typeof block.text === "string")
+      .map((block) => humanText(block.text as string))
+      .join("\n")
+    : "";
+  if (text) return text;
+  if (record.details && typeof record.details === "object") {
+    const details = record.details as Record<string, unknown>;
+    const visible = Object.fromEntries(Object.entries(details).filter(([key]) => ["answer", "message"].includes(key)));
+    if (Object.keys(visible).length > 0) return humanValue(visible);
+    if ("structuredContent" in details) return humanValue(details.structuredContent);
   }
+  return "";
+}
+
+function hasRenderableImage(result: unknown): boolean {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return false;
+  const content = (result as { content?: unknown }).content;
+  return Array.isArray(content) && content.some((block) => Boolean(
+    block && typeof block === "object" && (block as Record<string, unknown>).type === "image" &&
+    typeof (block as Record<string, unknown>).data === "string" &&
+    typeof (block as Record<string, unknown>).mimeType === "string",
+  ));
 }
 
 export type McpRenderContext = { isError?: boolean; expanded?: boolean; args?: unknown };
@@ -77,7 +96,7 @@ function payloadText(result: unknown): string {
   const details = record.details;
   if (details && typeof details === "object" && "structuredContent" in details) {
     try {
-      return JSON.stringify(sanitizeValue((details as { structuredContent?: unknown }).structuredContent), null, 2) ?? "";
+      return humanValue((details as { structuredContent?: unknown }).structuredContent);
     } catch {
       return "";
     }
@@ -113,9 +132,7 @@ function failed(result: unknown, context: McpRenderContext): boolean {
 export function renderMcpCall(toolName: string, serverName: string, theme: RenderTheme, context?: McpRenderContext): Text {
   const line = theme.fg("toolTitle", theme.bold(`MCP ${compact(toolName)}`)) + theme.fg("muted", ` • ${compact(serverName)}`);
   if (context?.expanded && context.args !== undefined) {
-    let args = "";
-    try { args = JSON.stringify(sanitizeValue(context.args), null, 2) ?? ""; } catch { args = ""; }
-    return new Text(`${line}\nArguments:\n${args}`, 0, 0);
+    return new Text(`${line}\nInput: ${humanInput(context.args)}`, 0, 0);
   }
   return new Text(line, 0, 0);
 }
@@ -132,7 +149,8 @@ export function renderMcpResult(
   const label = `MCP ${compact(toolName)} • ${isFailed ? "failed" : "completed"}`;
   const line = theme.fg(isFailed ? "warning" : "success", `${isFailed ? "✗" : "✓"} ${label}`);
   const payload = options.expanded && !isFailed ? tracePayload(result) : "";
-  return new Text(payload ? `${line}\n${payload}` : line, 0, 0);
+  const hasImage = options.expanded && !isFailed && hasRenderableImage(result);
+  return new Text(payload || hasImage ? `${line}\nResults:${payload ? `\n${payload}` : ""}` : line, 0, 0);
 }
 
 export function mcpPayloadText(result: unknown): string {

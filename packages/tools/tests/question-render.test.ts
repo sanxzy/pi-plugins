@@ -69,8 +69,7 @@ test("question renders concise activity and exact arguments when expanded", () =
   assert.match(collapsed, /Proceed\?/);
   assert.doesNotMatch(collapsed, /\"options\"/);
   const expanded = stripVTControlCharacters(renderCall!(params, theme, { expanded: true, args: params }).render(120).join(""));
-  assert.match(expanded, /\"options\"/);
-  assert.match(expanded, /Continue/);
+  assert.match(expanded, /Input: question=Proceed\?, options=label=Yes, description=Continue, label=No/);
 });
 
 test("renderResult shows a selected answer only when expanded", () => {

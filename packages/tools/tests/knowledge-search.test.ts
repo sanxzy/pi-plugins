@@ -143,23 +143,22 @@ test("knowledge_search telemetry excludes callback results and history-derived d
   }
 });
 
-test("knowledge_search is registered with an explicit type discriminator and a local-first description", () => {
+test("knowledge_search uses a provider-compatible object schema", () => {
   const tool = captureTool();
   assert.equal(tool.name, "knowledge_search");
-  const variants = tool.parameters.anyOf ?? [];
-  assert.equal(variants.length, 3);
-  const literals = variants.map((variant) => {
-    const typeField = (variant as { properties?: { type?: { const?: string } } }).properties?.type;
-    return typeField?.const;
-  });
-  assert.deepEqual(literals, ["wikis", "references", undefined]);
-  const wiki = variants[0] as { properties?: Record<string, { const?: string; type?: string; anyOf?: unknown[] }> };
-  assert.equal(wiki.properties?.query?.type, "string");
-  assert.equal(wiki.properties?.page?.type, "string");
-  assert.equal(wiki.properties?.topic, undefined);
-  const grouped = variants[2] as { properties?: Record<string, { const?: string; type?: string; anyOf?: unknown[] }> };
-  assert.equal(grouped.properties?.query?.type, "string");
-  assert.equal(grouped.properties?.type?.type, "null");
+  assert.equal(tool.parameters.type, "object");
+  assert.ok(tool.parameters.properties);
+  assert.equal(tool.parameters.anyOf, undefined);
+  assert.equal(tool.parameters.properties?.type?.type, "string");
+  assert.equal(tool.parameters.properties?.query?.type, "string");
+  assert.equal(tool.parameters.properties?.page?.type, "string");
+  assert.equal(tool.parameters.properties?.alias?.type, "string");
+  assert.equal(tool.parameters.properties?.maxResults?.type, "integer");
+  // Avoid nullable branches and composition keywords that several providers
+  // reject or normalize incorrectly when converting function schemas.
+  const serialized = JSON.stringify(tool.parameters);
+  assert.doesNotMatch(serialized, /"type"\s*:\s*"null"/);
+  assert.doesNotMatch(serialized, /"(?:anyOf|oneOf|allOf)"\s*:/);
   assert.match(tool.description, /wikis/i);
   assert.match(tool.description, /references/i);
   assert.match(tool.description, /Use this tool first/i);
@@ -1036,4 +1035,12 @@ test("wiki discovery caps pages per topic", async () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("knowledge_search schema contains only provider-compatible object keywords", () => {
+  const tool = captureTool();
+  const serialized = JSON.stringify(tool.parameters);
+  assert.equal(tool.parameters.type, "object");
+  assert.doesNotMatch(serialized, /"type"\s*:\s*"null"/);
+  assert.doesNotMatch(serialized, /"(?:anyOf|oneOf|allOf)"\s*:/);
 });

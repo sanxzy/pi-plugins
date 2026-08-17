@@ -15,8 +15,8 @@ const MAX_NUM_RESULTS = 20;
 const webSearchParams = Type.Object({
   query: Type.String({ description: "Web search query" }),
   numResults: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_NUM_RESULTS, description: "Number of results to return (maximum 20)" })),
-  livecrawl: Type.Optional(Type.Union([Type.Literal("fallback"), Type.Literal("preferred")], { description: "Live crawl mode" })),
-  type: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("fast"), Type.Literal("deep")], { description: "Search type" })),
+  livecrawl: Type.Optional(Type.String({ enum: ["fallback", "preferred"], description: "Live crawl mode" })),
+  type: Type.Optional(Type.String({ enum: ["auto", "fast", "deep"], description: "Search type" })),
   contextMaxCharacters: Type.Optional(Type.Integer({ minimum: 1, maximum: 50_000, description: "Maximum context characters" })),
 });
 

@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --import ../../test-setup.mjs --import tsx tests/observability.test.ts"
+    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/observability.test.ts"
   },
   "dependencies": {
     "pino": "^10.3.1"

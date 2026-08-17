@@ -17,12 +17,11 @@ const BROWSER_USER_AGENT =
 
 const webFetchParams = Type.Object({
   url: Type.String({ description: "The URL to fetch content from" }),
-  format: Type.Optional(
-    Type.Union([Type.Literal("markdown"), Type.Literal("text")], {
-      description: "The format to return the content in (markdown or text). Defaults to markdown.",
-      default: "markdown",
-    }),
-  ),
+  format: Type.Optional(Type.String({
+    enum: ["markdown", "text"],
+    description: "The format to return the content in (markdown or text). Defaults to markdown.",
+    default: "markdown",
+  })),
   timeout: Type.Optional(Type.Number({ description: "Optional timeout in seconds (minimum 30, maximum 3600; centralized default is 30)" })),
 });
 
