@@ -141,6 +141,8 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "mcp_resources_list",
     "mcp_resources_read",
     "question",
+    "write_markdown",
+    "edit_markdown",
     "create_write_edit_ticket",
     "agent",
     "agent_cancel",
@@ -202,6 +204,9 @@ test("parent startup activates the registered tools including web_search and web
   assert.equal(activeTools.includes("mcp_resources_list"), false, "empty MCP surface hides resource listing");
   assert.equal(activeTools.includes("mcp_resources_read"), false, "empty MCP surface hides resource reads");
   assert.equal(activeTools.includes("ls"), false, "ls stays excluded");
+  assert.equal(activeTools.includes("write_markdown"), false, "absent Ponytail state hides write_markdown");
+  assert.equal(activeTools.includes("edit_markdown"), false, "absent Ponytail state hides edit_markdown");
+  assert.equal(activeTools.includes("create_write_edit_ticket"), false, "absent Ponytail state hides the ticket tool");
 });
 
 test("Ponytail ticket tool is active only for an enabled session", async () => {
@@ -234,6 +239,8 @@ test("Ponytail ticket tool is active only for an enabled session", async () => {
     } as unknown as ExtensionContext;
     await Promise.all(sessionStarts.map((handler) => handler({ type: "session_start", reason: "startup" }, ctx)));
     assert.ok(activeTools.includes("create_write_edit_ticket"));
+    assert.ok(activeTools.includes("write_markdown"), "enabled session exposes write_markdown");
+    assert.ok(activeTools.includes("edit_markdown"), "enabled session exposes edit_markdown");
 
     writeFileSync(join(configDir, "config.json"), JSON.stringify({ tools: { ponytailEnabled: false } }));
     clearSettingsCache();
@@ -241,6 +248,8 @@ test("Ponytail ticket tool is active only for an enabled session", async () => {
     const disabledCtx = { ...ctx, sessionManager: { getSessionId: () => "disabled-session", getSessionFile: () => undefined } } as unknown as ExtensionContext;
     await Promise.all(sessionStarts.map((handler) => handler({ type: "session_start", reason: "startup" }, disabledCtx)));
     assert.equal(activeTools.includes("create_write_edit_ticket"), false);
+    assert.equal(activeTools.includes("write_markdown"), false);
+    assert.equal(activeTools.includes("edit_markdown"), false);
   } finally {
     if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
     else process.env.PI_C2_TEST_HOME = previous;

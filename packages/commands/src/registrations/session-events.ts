@@ -167,11 +167,12 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const mcpActive = sessionMcpActive(ctx.cwd, sessionId);
     const mcpResourceTools = new Set(["mcp_resources_list", "mcp_resources_read"]);
     const ponytailActive = loadPonytailState(sessionId, Date.now())?.enabled === true;
+    const markdownTools = new Set(["write_markdown", "edit_markdown"]);
     pi.setActiveTools(
       pi
         .getAllTools()
         .map((tool) => tool.name)
-        .filter((name) => name !== "ls" && (ponytailActive || name !== "create_write_edit_ticket"))
+        .filter((name) => name !== "ls" && (ponytailActive || (!markdownTools.has(name) && name !== "create_write_edit_ticket")))
         .filter((name) => (mcpActive || !mcpResourceTools.has(name)) && (!managedNames.has(name) || currentSessionNames.has(name))),
     );
 
