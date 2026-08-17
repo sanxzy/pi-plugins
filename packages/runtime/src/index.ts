@@ -40,7 +40,9 @@ export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/g
 export { createChildSessionManager, resolveChildTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 export { maxAgentDepth } from "./shared/pi-c2-config.ts";
 export {
+  canonicalizeWriteEditTarget,
   initializeChildPonytailState,
+  isWriteEditAuthorized,
   loadPonytailState,
   mutatePonytailState,
   ponytailStateExists,
@@ -50,6 +52,7 @@ export {
   type PonytailPersistence,
   type PonytailState,
   type PonytailTicket,
+  type WriteEditDecision,
 } from "./infrastructure/ponytail/state.ts";
 export { resolveTicketScopes, type ResolveTicketScopeError, type ResolveTicketScopesInput, type ResolvedTicketScope } from "./infrastructure/ponytail/scopes.ts";
 export { isWithinScope, isDescendantScope } from "./infrastructure/ponytail/containment.ts";
