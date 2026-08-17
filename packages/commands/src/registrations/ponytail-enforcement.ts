@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { PONYTAIL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
-import { canonicalizeWriteEditTarget, isWriteEditAuthorized, loadPonytailState, resolveSettingsForProject } from "@xzy-ai/runtime";
+import { canonicalizeWriteEditTarget, isWriteEditAuthorized, loadPonytailState, ponytailStateExists, resolveSettingsForProject } from "@xzy-ai/runtime";
 
 /** Tool names enforced by the Ponytail write/edit authorization boundary. */
 const ENFORCED_TOOLS = new Set(["write", "edit"]);
@@ -23,7 +23,14 @@ export function registerPonytailEnforcement(pi: ExtensionAPI): void {
       return { block: true, reason: "Ponytail requires a target path for write/edit authorization." };
     }
     const state = loadPonytailState(sessionId, Date.now());
-    if (!state && !resolveSettingsForProject(ctx.cwd).tools.ponytailEnabled) return undefined;
+    if (!state) {
+      // An existing but unusable state file must fail closed even when the home
+      // default is disabled; only a genuinely absent file preserves compatibility.
+      if (ponytailStateExists(sessionId)) {
+        return logDecision(event.toolName, "blocked", { block: true, reason: "Ponytail state is malformed or unrecoverable for this session. Write/edit is blocked until the state is repaired or reset." });
+      }
+      if (!resolveSettingsForProject(ctx.cwd).tools.ponytailEnabled) return undefined;
+    }
     if (state && state.enabled === false) return undefined;
     const target = canonicalizeWriteEditTargetFromCwd(ctx.cwd, rawTarget);
     if (!target) {
