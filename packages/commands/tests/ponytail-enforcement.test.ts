@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   canonicalProjectRoot,
@@ -55,11 +56,12 @@ test("allows an exact or descendant target under any unexpired ticket before wri
   const h = home(); const root = project(); mkdirSync(join(root, "src"));
   try {
     const scope = join(canonicalProjectRoot(root), "src");
+    writeFileSync(join(root, "src", "existing.ts"), "existing-secret-content");
     withHome(h, () => writePonytailState("enforcement-session", { version: 1, enabled: true, tickets: [ticket(scope)] }));
     process.env.PI_C2_TEST_HOME = h; clearSettingsCache();
     const { handler } = registration(); const ctx = context(root);
     assert.deepEqual(await call(handler, "write", { path: "src/new/deep/file.ts", content: "x" }, ctx), undefined);
-    assert.deepEqual(await call(handler, "edit", { path: "src/existing.ts", edits: [] }, ctx), undefined);
+    assert.deepEqual(await call(handler, "edit", { path: "src/existing.ts", edits: [{ oldText: "x", newText: "y" }] }, ctx), undefined);
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -101,10 +103,36 @@ test("blocks missing identity, missing/malformed/expired authorization, and expo
 test("disabled sessions preserve built-in write/edit behavior and bash stays outside the boundary", async () => {
   const h = home(); const root = project(); mkdirSync(join(root, "src"));
   try {
+    withHome(h, () => writePonytailState("disabled", { version: 1, enabled: false, tickets: [] }));
+    process.env.PI_C2_TEST_HOME = h; clearSettingsCache();
     const { handler } = registration(); const ctx = context(root, "disabled");
     assert.deepEqual(await call(handler, "write", { path: "src/file.ts", content: "x" }, ctx), undefined);
     assert.deepEqual(await call(handler, "edit", { path: "src/file.ts", edits: [] }, ctx), undefined);
     assert.deepEqual(await call(handler, "bash", { command: "printf secret" }, ctx), undefined);
-    assert.equal(existsSync(homePonytailStateFile("disabled")), false);
+    assert.equal(existsSync(homePonytailStateFile("disabled")), true);
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("enforcement logs only safe categories and never ticket, path, state, or content values", async () => {
+  const h = home(); const root = project(); mkdirSync(join(root, "src"));
+  const logDir = mkdtempSync(join(tmpdir(), "pi-c2-ponytail-log-"));
+  const eventsPath = join(logDir, "events.jsonl");
+  try {
+    const ticketValue = "opaque-ticket-log-secret";
+    const target = join(root, "src", "blocked-secret.ts");
+    withHome(h, () => writePonytailState("enforcement-session", {
+      version: 1, enabled: true,
+      tickets: [{ value: ticketValue, scopes: [join(canonicalProjectRoot(root), "other")], createdAt: Date.now() - 1_000, expiresAt: Date.now() + 60_000 }],
+    }));
+    process.env.PI_C2_TEST_HOME = h; clearSettingsCache();
+    const { handler } = registration();
+    const logger = createSessionLogger({ projectId: "project", rootSessionId: "enforcement-session", eventsPath, errorsPath: join(logDir, "errors.jsonl") });
+    await runWithLogContext(logger, async () => {
+      await call(handler, "write", { path: target, content: "write-content-secret" }, context(root));
+    });
+    const raw = readFileSync(eventsPath, "utf8");
+    assert.match(raw, /ponytail\.enforce/);
+    assert.match(raw, /blocked/);
+    for (const secret of [ticketValue, target, "write-content-secret"]) assert.equal(raw.includes(secret), false, `leaked ${secret}`);
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); rmSync(logDir, { recursive: true, force: true }); }
 });
