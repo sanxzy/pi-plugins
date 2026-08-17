@@ -28,6 +28,8 @@ function sanitizeExpanded(value: string): string {
     .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential|access_token|refresh_token)=)[^&#\s]+/gi, "$1[redacted]")
     .replace(/(\b(?:bearer|basic)\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[redacted]")
     .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|request[_-]?id|trace[_-]?id)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/(\b(?:access[_-]?token|refresh[_-]?token|(?:api|auth|bearer)[_-]?(?:token|key)|token|secret|password|credential|authorization|request[_-]?id|trace[_-]?id|(?:chat|file|artifact)[_-]?id)\b\s*[=:]\s*)(?!\[redacted\])([^\s,;&}\]]+?)(?=[\s,;&}\]]|$)/gi, "$1[redacted]")
+    .replace(/(\b(?:authorization|auth|bearer)\b\s*[=:]\s*)([^\r\n,;&}\]]+)/gi, "$1[redacted]")
     .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]")
     .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
