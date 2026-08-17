@@ -44,13 +44,15 @@ function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler> } {
   };
 }
 
-function registrationsWithSteer(): { pi: ExtensionAPI; handlers: Map<string, Handler>; steers: string[]; hidden: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }> } {
+function registrationsWithSteer(): { pi: ExtensionAPI; handlers: Map<string, Handler>; steers: string[]; hidden: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }>; notifications: string[] } {
   const handlers = new Map<string, Handler>();
   const steers: string[] = [];
   const hidden: Array<{ message: { customType: string; content: string; display: boolean }; options: unknown }> = [];
+  const notifications: string[] = [];
   return {
     steers,
     hidden,
+    notifications,
     handlers,
     pi: {
       on(event: string, handler: Handler) {
@@ -348,9 +350,10 @@ test("a disposed host gate releases its lifecycle listeners", () => {
 test("a background result raced into an active run is delivered after the run settles", async () => {
   const cwd = projectRoot();
   try {
-    const { pi, handlers, steers, hidden } = registrationsWithSteer();
+    const { pi, handlers, steers, hidden, notifications } = registrationsWithSteer();
     const ctx = {
       ...context(cwd, "root-a"),
+      ui: { notify: (message: string) => notifications.push(message) },
       isIdle: () => true,
       hasPendingMessages: () => false,
     } as unknown as ExtensionContext;
@@ -374,6 +377,7 @@ test("a background result raced into an active run is delivered after the run se
     assert.equal(hidden.at(-1)?.message.customType, "pi-c2:internal-context");
     assert.equal(hidden.at(-1)?.message.display, false);
     assert.equal(hidden.at(-1)?.message.content, "result-a");
+    assert.deepEqual(notifications, ["Agent result delivered to the root session."]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

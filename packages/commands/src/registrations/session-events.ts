@@ -207,6 +207,7 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
       if (!gate.trySendHidden(content, "steer")) {
         throw new Error("host agent is busy; defer result delivery");
       }
+      if (ctx.hasUI) ctx.ui.notify("Agent result delivered to the root session.", "info");
     });
     gate.onSettled(() => delivery.redrive(sessionFile));
 

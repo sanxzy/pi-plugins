@@ -137,6 +137,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         try {
           if (goal.status === "active") {
             target.sendUserMessage(`${goal.prompt}\n${GOAL_DELIVERY_FOOTER}`, { deliverAs: "steer" });
+            target.notify("Goal sent to the session.", "info");
           } else if (target.hasUI) {
             target.notify(`Goal paused: ${goal.pauseReason ?? ""}`, "warning");
           }

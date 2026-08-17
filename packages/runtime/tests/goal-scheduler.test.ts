@@ -55,12 +55,14 @@ test("first active delivery occurs only after one complete interval", () => {
 test("active ticks deliver exact prompt plus footer with steer even while busy", () => {
   const pool = createGoalPool(projectRoot());
   const sent: string[] = [];
+  const notifications: string[] = [];
   pool.setScheduler(() => ({ clear() {} }));
-  pool.bind(binding({ sendUserMessage: (content) => sent.push(content) }));
+  pool.bind(binding({ sendUserMessage: (content) => sent.push(content), notify: (message) => notifications.push(message) }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
   pool.tick("/project");
   pool.tick("/project");
   assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`, `p\n${GOAL_DELIVERY_FOOTER}`]);
+  assert.deepEqual(notifications, ["Goal sent to the session.", "Goal sent to the session."]);
 });
 
 test("paused ticks warn through UI only and no-UI ticks do nothing", () => {
