@@ -12,6 +12,7 @@ import {
   resolveSettingsForProject,
   serializePonytailMutation,
   startRootSession,
+  initializeChildPonytailState,
   writePonytailState,
   type PonytailPersistence,
   type PonytailState,
@@ -81,6 +82,29 @@ test("home config exposes disabled Ponytail and bounded ticket TTL, ignoring pro
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   }
+});
+
+test("child Ponytail state inherits only enabled status and never root tickets", () => {
+  const home = tempHome();
+  const project = tempProject();
+  mkdirSync(join(project, "src"));
+  try {
+    withHome(home, () => {
+      writePonytailState("root-child-state", {
+        version: 1,
+        enabled: true,
+        tickets: [{ value: "root-secret", scopes: [join(project, "src")], createdAt: 1, expiresAt: 10_000 }],
+      });
+      assert.equal(initializeChildPonytailState("root-child-state", "child-state", 2_000), true);
+      assert.deepEqual(loadPonytailState("child-state", 2_000), { version: 1, enabled: true, tickets: [] });
+
+      writePonytailState("root-disabled-child", { version: 1, enabled: false, tickets: [] });
+      assert.equal(initializeChildPonytailState("root-disabled-child", "child-disabled", 2_000), false);
+      assert.deepEqual(loadPonytailState("child-disabled", 2_000), { version: 1, enabled: false, tickets: [] });
+      assert.equal(initializeChildPonytailState("missing-root", "child-missing", 2_000), false);
+      assert.equal(existsSync(homePonytailStateFile("child-missing")), false);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });
 
 test("new root lifecycle materializes enabled Ponytail state and leaves disabled roots without state", () => {

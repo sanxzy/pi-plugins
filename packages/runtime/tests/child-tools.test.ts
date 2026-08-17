@@ -11,6 +11,7 @@ const ALL_AGENT_TOOLS = ["agent", "agent_list", "agent_jobs", "agent_status", "a
 const ALL_WEB_TOOLS = ["web_search", "web_fetch", "knowledge_search"];
 const ALL_MCP_RESOURCE_TOOLS = ["mcp_resources_list", "mcp_resources_read"];
 const ALL_CHILD_TOOLS = [...ALL_BUILTIN_TOOLS, ...ALL_AGENT_TOOLS, ...ALL_WEB_TOOLS, ...ALL_MCP_RESOURCE_TOOLS];
+const PONYTAIL_TOOL = "create_write_edit_ticket";
 
 function discoveredAgent(tools?: string[]): DiscoveredAgent {
   return {
@@ -28,6 +29,12 @@ test("child extension factories are retained for isolated child loaders", () => 
   registerChildExtensionFactory(factory);
   assert.ok(getChildExtensionFactories().includes(factory));
   assert.equal(getChildExtensionFactories().filter((candidate) => candidate === factory).length, 1);
+});
+
+test("enabled children receive the Ponytail ticket tool while disabled children do not", () => {
+  assert.ok(resolveChildTools(discoveredAgent(), [], 0, undefined, true, true).includes(PONYTAIL_TOOL));
+  assert.equal(resolveChildTools(discoveredAgent(), [], 0, undefined, true, false).includes(PONYTAIL_TOOL), false);
+  assert.equal(resolveChildTools(discoveredAgent([PONYTAIL_TOOL]), [], 0, undefined, true, false).includes(PONYTAIL_TOOL), false);
 });
 
 test("an explicit non-empty tools list keeps the allowlist and appends agent, web, and MCP resource tools", () => {
