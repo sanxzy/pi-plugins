@@ -49,9 +49,9 @@ test("MCP expanded traces redact token and transport key variants", () => {
   const args = { access_token: "tok-secret", refreshToken: "refresh-secret", requestId: "req-secret", authorization: "Bearer abc.def" };
   const call = text(renderMcpCall("lookup", "demo", theme, { expanded: true, args }));
   assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|abc\.def/);
-  const rendered = text(renderMcpResult("lookup", { content: [{ type: "text", text: "safe access_token=tok-secret requestId=req-secret traceId=trace-secret" }], details: args }, { expanded: true, isPartial: false }, theme, {}));
+  const rendered = text(renderMcpResult("lookup", { content: [{ type: "text", text: "safe access_token=tok-secret requestId=req-secret traceId=trace-secret client_secret=client-secret client_id=client-id api_secret=api-secret https://example.test/?client_secret=url-secret&client_id=url-id" }], details: args }, { expanded: true, isPartial: false }, theme, {}));
   assert.match(rendered, /safe/);
-  assert.doesNotMatch(rendered, /tok-secret|refresh-secret|req-secret|trace-secret|abc\.def/);
+  assert.doesNotMatch(rendered, /tok-secret|refresh-secret|req-secret|trace-secret|abc\.def|client-secret|client-id|api-secret|url-secret|url-id/);
 });
 
 test("MCP labels sanitize credentials and terminal controls", () => {

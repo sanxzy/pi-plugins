@@ -1,7 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
-const SENSITIVE_KEY = /(?:^|[_-])(?:access|refresh|id|api)?[_-]?(?:token|secret|password|credential|key|authorization|auth|bearer|code|state)(?:$|[_-])|(?:^|[_-])(?:chat|file|artifact)[_-]?id(?:$|[_-])|(?:^|[_-])request[_-]?id(?:$|[_-])|(?:^|[_-])trace[_-]?id(?:$|[_-])/i;
+const SENSITIVE_KEY = /(?:^|[_-])(?:access|refresh|client|id|api)?[_-]?(?:token|secret|password|credential|key|authorization|auth|bearer|code|state)(?:$|[_-])|(?:^|[_-])(?:chat|file|artifact)[_-]?id(?:$|[_-])|(?:^|[_-])request[_-]?id(?:$|[_-])|(?:^|[_-])trace[_-]?id(?:$|[_-])/i;
 
 function sensitiveKey(key: string): boolean {
   return SENSITIVE_KEY.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
@@ -121,10 +121,10 @@ export function expandedToolText(value: unknown): string {
   const text = typeof value === "string" ? value : String(value ?? "");
   return text
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
-    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential|access_token|refresh_token)=)[^&#\s]+/gi, "$1[redacted]")
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential|access[_-]?token|refresh[_-]?token|client[_-]?(?:secret|id)|api[_-]?secret)=)[^&#\s]+/gi, "$1[redacted]")
     .replace(/(\b(?:bearer|basic)\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[redacted]")
-    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|request[_-]?id|trace[_-]?id)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
-    .replace(/(\b(?:access[_-]?token|refresh[_-]?token|(?:api|auth|bearer)[_-]?(?:token|key)|token|secret|password|credential|authorization|request[_-]?id|trace[_-]?id|(?:chat|file|artifact)[_-]?id)\b\s*[=:]\s*)(?!\[redacted\])([^\s,;&}\]]+?)(?=[\s,;&}\]]|$)/gi, "$1[redacted]")
+    .replace(/(["'](?:chat[_-]?id|file[_-]?id|artifact[_-]?id|token|key|secret|code|state|password|authorization|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?(?:secret|id)|api[_-]?secret|request[_-]?id|trace[_-]?id)["']\s*:\s*)("[^"]*"|[^,}\s]+)/gi, '$1"[redacted]"')
+    .replace(/(\b(?:access[_-]?token|refresh[_-]?token|(?:api|auth|bearer)[_-]?(?:token|key)|client[_-]?(?:secret|id)|api[_-]?secret|token|secret|password|credential|authorization|request[_-]?id|trace[_-]?id|(?:chat|file|artifact)[_-]?id)\b\s*[=:]\s*)(?!\[redacted\])([^\s,;&}\]]+?)(?=[\s,;&}\]]|$)/gi, "$1[redacted]")
     .replace(/(\b(?:authorization|auth|bearer)\b\s*[=:]\s*)([^\r\n,;&}\]]+)/gi, "$1[redacted]")
     .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*["']?\d+["']?)/gi, "[redacted]")
     .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")

@@ -27,9 +27,9 @@ test("inherited MCP renderers redact expanded token and transport traces", () =>
   const args = { access_token: "tok-secret", refreshToken: "refresh-secret", requestId: "req-secret", traceId: "trace-secret", authorization: "Bearer abc.def" };
   const call = stripVTControlCharacters(inheritedMcpRenderCall("lookup", "lookup", identityTheme, { expanded: true, args }).render(120).join("\n"));
   assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|abc\.def/);
-  const result = stripVTControlCharacters(inheritedMcpRenderResult({ content: [{ type: "text", text: "safe access_token=tok-secret requestId=req-secret traceId=trace-secret" }], details: args }, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
+  const result = stripVTControlCharacters(inheritedMcpRenderResult({ content: [{ type: "text", text: "safe access_token=tok-secret requestId=req-secret traceId=trace-secret client_secret=client-secret client_id=client-id api_secret=api-secret https://example.test/?client_secret=url-secret&client_id=url-id" }], details: args }, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
   assert.match(result, /safe/);
-  assert.doesNotMatch(result, /tok-secret|refresh-secret|req-secret|trace-secret|abc\.def/);
+  assert.doesNotMatch(result, /tok-secret|refresh-secret|req-secret|trace-secret|abc\.def|client-secret|client-id|api-secret|url-secret|url-id/);
 });
 
 test("inherited MCP renderers hide payload output while retaining the tool activity label", () => {
