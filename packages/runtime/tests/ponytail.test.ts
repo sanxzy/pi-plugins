@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -103,6 +103,38 @@ test("child Ponytail state inherits only enabled status and never root tickets",
       assert.deepEqual(loadPonytailState("child-disabled", 2_000), { version: 1, enabled: false, tickets: [] });
       assert.equal(initializeChildPonytailState("missing-root", "child-missing", 2_000), false);
       assert.equal(existsSync(homePonytailStateFile("child-missing")), false);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
+});
+
+test("child resume preserves its own tickets and observes root enablement only at the boundary", () => {
+  const home = tempHome(); const project = tempProject(); mkdirSync(join(project, "child"));
+  try {
+    withHome(home, () => {
+      const childScope = realpathSync(join(project, "child"));
+      writePonytailState("root-boundary", { version: 1, enabled: true, tickets: [] });
+      assert.equal(initializeChildPonytailState("root-boundary", "child-boundary", 1_000), true);
+      writePonytailState("child-boundary", {
+        version: 1,
+        enabled: true,
+        tickets: [{ value: "child-ticket", scopes: [childScope], createdAt: 1, expiresAt: 10_000 }],
+      });
+
+      // A root toggle does not mutate an already-running child's persisted state.
+      writePonytailState("root-boundary", { version: 1, enabled: false, tickets: [] });
+      assert.deepEqual(loadPonytailState("child-boundary", 2_000), {
+        version: 1,
+        enabled: true,
+        tickets: [{ value: "child-ticket", scopes: [childScope], createdAt: 1, expiresAt: 10_000 }],
+      });
+
+      // The next child start/resume boundary adopts the root bit but keeps the child ticket.
+      assert.equal(initializeChildPonytailState("root-boundary", "child-boundary", 3_000), false);
+      assert.deepEqual(loadPonytailState("child-boundary", 3_000), {
+        version: 1,
+        enabled: false,
+        tickets: [{ value: "child-ticket", scopes: [childScope], createdAt: 1, expiresAt: 10_000 }],
+      });
     });
   } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });

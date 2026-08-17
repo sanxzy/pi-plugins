@@ -110,6 +110,8 @@ test("pi-c2 extension registers Telegram setup and goal workflow alongside exist
     "references setup command registered exactly once",
   );
   assert.equal(commands.filter((name) => name === "goal").length, 1, "goal command registered exactly once");
+  assert.equal(commands.filter((name) => name === "setup-ponytail").length, 1, "Ponytail setup command registered exactly once");
+  assert.equal(events.filter((event) => event === "tool_call").length, 1, "Ponytail enforcement registered exactly once");
   assert.ok(events.includes("session_start"), "session_start lifecycle handler registered");
   assert.ok(events.includes("session_shutdown"), "session_shutdown lifecycle handler registered");
   assert.ok(events.filter((event) => event === "session_start").length >= 2, "MCP lifecycle registers session_start");

@@ -101,6 +101,26 @@ test("blocks missing identity, missing/malformed/expired authorization, and expo
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("root, child, and sibling Ponytail tickets authorize only their own sessions", async () => {
+  const h = home(); const root = project();
+  mkdirSync(join(root, "root-scope")); mkdirSync(join(root, "child-a-scope")); mkdirSync(join(root, "child-b-scope"));
+  try {
+    withHome(h, () => {
+      writePonytailState("root-session", { version: 1, enabled: true, tickets: [ticket(join(canonicalProjectRoot(root), "root-scope"))] });
+      writePonytailState("child-session", { version: 1, enabled: true, tickets: [ticket(join(canonicalProjectRoot(root), "child-a-scope"))] });
+      writePonytailState("sibling-session", { version: 1, enabled: true, tickets: [ticket(join(canonicalProjectRoot(root), "child-b-scope"))] });
+    });
+    process.env.PI_C2_TEST_HOME = h; clearSettingsCache();
+    const { handler } = registration();
+    assert.deepEqual(await call(handler, "write", { path: "root-scope/root.ts", content: "x" }, context(root, "root-session")), undefined);
+    assert.equal((await call(handler, "write", { path: "root-scope/child.ts", content: "x" }, context(root, "child-session")))?.block, true);
+    assert.deepEqual(await call(handler, "write", { path: "child-a-scope/child.ts", content: "x" }, context(root, "child-session")), undefined);
+    assert.equal((await call(handler, "write", { path: "child-a-scope/other.ts", content: "x" }, context(root, "sibling-session")))?.block, true);
+    assert.deepEqual(await call(handler, "edit", { path: "child-b-scope/sibling.ts", edits: [] }, context(root, "sibling-session")), undefined);
+    assert.equal((await call(handler, "write", { path: "child-a-scope/root.ts", content: "x" }, context(root, "root-session")))?.block, true);
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("disabled sessions preserve built-in write/edit behavior and bash stays outside the boundary", async () => {
   const h = home(); const root = project(); mkdirSync(join(root, "src"));
   try {
