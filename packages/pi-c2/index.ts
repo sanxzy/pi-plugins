@@ -3,6 +3,7 @@ import {
   registerAgentTool,
   registerCancelTool,
   registerQuestionTool,
+  registerWriteMarkdownTool,
   registerWriteEditTicketTool,
   registerStatusTool,
   registerJobsTool,
@@ -80,6 +81,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerTelegramLifecycle(pi, { getCommands: getMenuCommands });
   registerMcpLifecycle(pi);
   registerQuestionTool(pi);
+  registerWriteMarkdownTool(pi);
   registerWriteEditTicketTool(pi);
   registerAgentTool(pi);
   registerCancelTool(pi);

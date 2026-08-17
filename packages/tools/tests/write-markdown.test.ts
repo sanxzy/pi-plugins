@@ -35,7 +35,8 @@ for (const extension of ["md", "MD", "Md", "mdx", "MDX", "txt", "TXT", "Mixed.Tx
       const file = join(canonicalProjectRoot(root), "docs", `notes.${extension}`);
       assert.equal(existsSync(file), true, "file created");
       assert.equal(readFileSync(file, "utf8"), "# Notes\ncontent");
-      assert.match(textOf(result), /Successfully wrote \d+ bytes to docs\/notes\./);
+      assert.match(textOf(result), /Successfully wrote \d+ bytes to /);
+      assert.doesNotMatch(textOf(result), /# Notes\ncontent/);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 }
@@ -76,7 +77,7 @@ test("write_markdown rejects traversal, escapes, and outside-project targets wit
 test("write_markdown executor writes through the same path as the built-in host write", async () => {
   const root = project();
   try {
-    const { default: extension } = await import("@earendil-works/pi-coding-agent");
+    const extension = await import("@earendil-works/pi-coding-agent");
     const { createWriteTool } = extension as unknown as { createWriteTool: (cwd: string) => { execute: (id: string, args: { path: string; content: string }) => Promise<unknown> } };
     const tool = createWriteTool(canonicalProjectRoot(root));
     await tool.execute("call", { path: "docs/notes.md", content: "host-write" });

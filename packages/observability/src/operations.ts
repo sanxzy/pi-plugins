@@ -167,6 +167,8 @@ export const TOOL_OPERATIONS = {
   WIKI_EXECUTE: "tool.wikiExecute",
   KNOWLEDGE_SEARCH_EXECUTE: "tool.knowledgeSearchExecute",
   AGENT_LIST_EXECUTE: "tool.agentListExecute",
+  WRITE_MARKDOWN_EXECUTE: "tool.writeMarkdownExecute",
+  WRITE_MARKDOWN_REJECT: "tool.writeMarkdownReject",
 } as const;
 
 /**

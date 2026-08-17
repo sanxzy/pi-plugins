@@ -7,6 +7,14 @@ export {
   type CreateWriteEditTicketOptions,
   type CreateWriteEditTicketParams,
 } from "./registrations/ponytail-ticket.ts";
+export {
+  admitWriteMarkdownTarget,
+  executeWriteMarkdown,
+  registerWriteMarkdownTool,
+  writeMarkdownParams,
+  type WriteMarkdownDetails,
+  type WriteMarkdownParams,
+} from "./registrations/write-markdown.ts";
 export { registerAgentTool } from "./registrations/agent.ts";
 export { registerCancelTool } from "./registrations/cancel.ts";
 export { registerStatusTool } from "./registrations/status.ts";
