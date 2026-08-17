@@ -95,6 +95,8 @@ test("pi-c2 extension registers Telegram setup and goal workflow alongside exist
   assert.ok(names.includes("web_search"), "web_search tool registered");
   assert.ok(names.includes("web_fetch"), "web_fetch tool registered");
   assert.ok(names.includes("knowledge_search"), "knowledge_search tool registered");
+  assert.equal(names.filter((name) => name === "write_markdown").length, 1, "write_markdown registered exactly once");
+  assert.equal(names.filter((name) => name === "edit_markdown").length, 1, "edit_markdown registered exactly once");
   assert.deepEqual(
     names.filter((name) => name.startsWith("goal_")),
     ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"],
