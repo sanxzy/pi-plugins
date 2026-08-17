@@ -149,8 +149,8 @@ export function ponytailStatePath(sessionId: string): string {
 }
 
 /** Synchronous full-state publication with owner-only permissions. */
-export function writePonytailState(sessionId: string, state: PonytailState): void {
-  writePrivateJson(homePonytailStateFile(sessionId), state);
+export function writePonytailState(sessionId: string, state: PonytailState, persistence: PonytailPersistence = defaultPersistence): void {
+  persistence.writeJson(homePonytailStateFile(sessionId), state);
 }
 
 /**
@@ -169,7 +169,7 @@ export async function mutatePonytailState(
     const current = loadPonytailState(sessionId, nowMs, persistence);
     const next = mutation(current);
     if (next === undefined) return current;
-    writePonytailState(sessionId, next);
+    writePonytailState(sessionId, next, persistence);
     return next;
   });
 }
