@@ -40,6 +40,7 @@ export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/g
 export { createChildSessionManager, resolveChildTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 export { maxAgentDepth } from "./shared/pi-c2-config.ts";
 export {
+  initializeChildPonytailState,
   loadPonytailState,
   mutatePonytailState,
   ponytailStateExists,

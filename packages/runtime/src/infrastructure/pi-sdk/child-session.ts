@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import * as PiSdk from "@earendil-works/pi-coding-agent";
 import { maxAgentDepth } from "../../shared/pi-c2-config.ts";
+import { initializeChildPonytailState } from "../ponytail/state.ts";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -68,6 +69,7 @@ const AGENT_FAMILY_TOOLS = [
   "agent_cancel",
 ] as const;
 const WEB_FAMILY_TOOLS = ["web_search", "web_fetch", "knowledge_search"] as const;
+const PONYTAIL_TOOL = "create_write_edit_ticket";
 const EXTENSION_TOOLS = [...AGENT_FAMILY_TOOLS, ...WEB_FAMILY_TOOLS] as const;
 
 /** MCP resource/prompt tools every child may expose so subagents can manage MCP. */
@@ -103,6 +105,7 @@ export function resolveChildTools(
   depth = 0,
   cwd?: string,
   mcpEnabled = true,
+  ponytailEnabled = false,
 ): readonly string[] {
   const requested = agent.tools && agent.tools.length > 0 ? [...agent.tools] : [...ALL_BUILTIN_TOOLS];
   const extensionNames = EXTENSION_TOOLS as readonly string[];
@@ -122,6 +125,7 @@ export function resolveChildTools(
     ...extensionTools,
     ...(mcpEnabled ? MCP_RESOURCE_TOOLS : []),
     ...(mcpEnabled ? mcpToolNames : []),
+    ...(ponytailEnabled ? [PONYTAIL_TOOL] : []),
   ])];
 }
 
@@ -229,6 +233,9 @@ async function createIsolatedChild(options: {
     sessionFile: options.sessionFile,
   });
   const childContext = { cwd: options.cwd, sessionManager };
+  const childPonytailEnabled = options.rootSessionId
+    ? initializeChildPonytailState(options.rootSessionId, options.jobId)
+    : false;
   // Publish the inherited MCP catalog under this child session id so its own
   // foreground descendants can inherit it recursively.
   publishSessionMcpNames(childContext, options.mcpEnabled === false ? [] : options.mcpToolNames ?? []);
@@ -254,7 +261,7 @@ async function createIsolatedChild(options: {
   // Tool mapping: an explicit non-empty `tools` list becomes the child
   // allowlist; an absent/empty list enables the full built-in set (excluding
   // `ls`) plus the depth-aware extension/MCP policy.
-  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames, options.depth, options.cwd, options.mcpEnabled ?? true);
+  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames, options.depth, options.cwd, options.mcpEnabled ?? true, childPonytailEnabled);
   sessionOptions.mcpToolNames = options.mcpEnabled === false ? [] : options.mcpToolNames ?? [];
   // Dynamic MCP definitions are supplied by the parent composition root. The
   // child loader cannot discover the parent's MCP manager, so register the

@@ -143,6 +143,27 @@ export function serializePonytailMutation<T>(sessionId: string, mutation: () => 
   return current;
 }
 
+/**
+ * Initialize a child session's independent Ponytail state at its start/resume
+ * boundary. Only the root's effective enabled bit is inherited; root tickets
+ * are never copied. Existing child tickets remain independent.
+ */
+export function initializeChildPonytailState(rootSessionId: string, childSessionId: string, nowMs = Date.now()): boolean {
+  const root = loadPonytailState(rootSessionId, nowMs);
+  if (!root) return false;
+  try {
+    const child = loadPonytailState(childSessionId, nowMs);
+    writePonytailState(childSessionId, {
+      version: 1,
+      enabled: root.enabled,
+      tickets: child?.tickets ?? [],
+    });
+    return root.enabled;
+  } catch {
+    return false;
+  }
+}
+
 /** The exact state-file path for one session. */
 export function ponytailStatePath(sessionId: string): string {
   return homePonytailStateFile(sessionId);
