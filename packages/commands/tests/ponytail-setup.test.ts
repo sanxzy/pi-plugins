@@ -20,7 +20,7 @@ function registrations(): { handler: CommandHandler; commands: Map<string, unkno
   if (!command?.handler) throw new Error("setup-ponytail was not registered");
   return { handler: command.handler, commands };
 }
-function context(cwd: string, sessionId: string, select: (title: string, options: string[]) => Promise<string | undefined>, reload: () => Promise<void>, sessionFile?: string): ExtensionCommandContext {
+function context(cwd: string, sessionId: string, select: (title: string, options: string[]) => Promise<string | undefined>, reload?: () => Promise<void>, sessionFile?: string): ExtensionCommandContext {
   return {
     cwd, mode: "tui", hasUI: true,
     ui: { select, notify() {} },
@@ -62,6 +62,40 @@ test("registers root-only setup and presents current status with explicit enable
       assert.deepEqual(choices, [["Enable Ponytail", "Disable Ponytail"]]);
       assert.equal(state("setup-root").enabled, true);
       assert.equal(notifications.some((message) => /enabled|reload/i.test(message)), true);
+    });
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test("reports persistence and successful reload as separate outcomes", async () => {
+  const h = home(); const cwd = project(); const notifications: string[] = [];
+  try {
+    await withHome(h, async () => {
+      const { handler } = registrations();
+      registerRoot(cwd, "reload-succeeds");
+      const ctx = context(cwd, "reload-succeeds", async () => "Enable Ponytail", async () => {});
+      (ctx.ui as unknown as { notify: (message: string) => void }).notify = (message) => notifications.push(message);
+      await handler("", ctx);
+      assert.equal(state("reload-succeeds").enabled, true);
+      assert.equal(notifications.some((message) => /persisted successfully/i.test(message)), true);
+      assert.equal(notifications.some((message) => /reload succeeded/i.test(message)), true);
+    });
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test("reports unavailable reload while retaining the persisted choice for the next lifecycle boundary", async () => {
+  const h = home(); const cwd = project(); const notifications: string[] = [];
+  try {
+    await withHome(h, async () => {
+      const { handler } = registrations();
+      registerRoot(cwd, "reload-unavailable");
+      const ctx = context(cwd, "reload-unavailable", async () => "Enable Ponytail");
+      (ctx.ui as unknown as { notify: (message: string) => void }).notify = (message) => notifications.push(message);
+      await handler("", ctx);
+      assert.equal(state("reload-unavailable").enabled, true);
+      assert.equal(notifications.some((message) => /persisted successfully/i.test(message)), true);
+      assert.equal(notifications.some((message) => /reload unavailable/i.test(message)), true);
+      assert.equal(notifications.some((message) => /runtime was not changed/i.test(message)), true);
+      assert.equal(notifications.some((message) => /next successful reload or session start/i.test(message)), true);
     });
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(cwd, { recursive: true, force: true }); }
 });
