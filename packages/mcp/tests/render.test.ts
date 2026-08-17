@@ -50,6 +50,12 @@ test("MCP invalid content entries do not expose raw host payloads", () => {
   }
 });
 
+test("MCP image MIME metadata is sanitized", () => {
+  const rendered = text(renderMcpResult("lookup", { content: [{ type: "image", data: "base64", mimeType: "image/png?client_id=IMAGE_SECRET requestId=REQ_SECRET" }] }, { expanded: true, isPartial: false }, theme, {}));
+  assert.match(rendered, /image\/png/);
+  assert.doesNotMatch(rendered, /IMAGE_SECRET|REQ_SECRET/);
+});
+
 test("MCP malformed image blocks do not expose incomplete payloads", () => {
   for (const result of [{ content: [{ type: "image", mimeType: "image/png" }] }, { content: [{ type: "image", data: 123, mimeType: "image/png" }] }]) {
     const rendered = text(renderMcpResult("lookup", result, { expanded: true, isPartial: false }, theme, {}));

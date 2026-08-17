@@ -46,6 +46,12 @@ test("inherited MCP invalid content entries do not expose raw host payloads", ()
   }
 });
 
+test("inherited MCP image MIME metadata is sanitized", () => {
+  const rendered = stripVTControlCharacters(inheritedMcpRenderResult({ content: [{ type: "image", data: "base64", mimeType: "image/png?client_id=IMAGE_SECRET requestId=REQ_SECRET" }] }, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
+  assert.match(rendered, /image\/png/);
+  assert.doesNotMatch(rendered, /IMAGE_SECRET|REQ_SECRET/);
+});
+
 test("inherited MCP malformed image blocks do not expose incomplete payloads", () => {
   for (const result of [{ content: [{ type: "image", mimeType: "image/png" }] }, { content: [{ type: "image", data: 123, mimeType: "image/png" }] }]) {
     const rendered = stripVTControlCharacters(inheritedMcpRenderResult(result, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
