@@ -94,9 +94,15 @@ test("renderers follow the agreed collapsed and expanded tool contracts", () => 
     content: [{ type: "text", text: "Agent completed" }],
     details: { jobId: "job-123", status: "completed", subagentType: "explore", description: "audit renderers", prompt: "inspect every renderer" },
   };
-  const agentExpanded = text(agent.renderResult!(agentResult, expandedOptions, theme, { ...renderContext, expanded: true, args: { description: "audit renderers", prompt: "inspect every renderer" } }));
+  const agentArgs = { description: "audit renderers", prompt: "inspect every renderer", subagent_type: "explore", background: true };
+  const agentExpandedCall = text(agent.renderCall!(agentArgs, theme, { ...renderContext, expanded: true, args: agentArgs }));
+  assert.match(agentExpandedCall, /\"prompt\"/);
+  assert.match(agentExpandedCall, /inspect every renderer/);
+  const agentExpanded = text(agent.renderResult!(agentResult, expandedOptions, theme, { ...renderContext, expanded: true, args: agentArgs }));
   assert.match(agentExpanded, /completed/);
   assert.match(agentExpanded, /inspect every renderer/);
+  assert.match(agentExpanded, /Agent completed/);
+  assert.match(agentExpanded, /\"status\"/);
 
   const jobs = capture(registerJobsTool);
   const jobsResult = { content: [], details: { jobs: [{ jobId: "job-123", status: "running", subagentType: "explore", description: "audit renderers" }] } };
@@ -110,12 +116,20 @@ test("renderers follow the agreed collapsed and expanded tool contracts", () => 
   assert.match(text(goalCreate.renderResult!(goalResult, expandedOptions, theme, renderContext)), /finish the migration/);
 
   const webSearch = capture(registerWebSearchTool);
+  const webArgs = { query: "pi renderers", numResults: 3, type: "deep" };
+  assert.match(text(webSearch.renderCall!(webArgs, theme, { ...renderContext, expanded: true, args: webArgs })), /\"numResults\"/);
   const webResult = { content: [{ type: "text", text: "Result one\nResult body" }], details: { query: "pi renderers", provider: "exa", results: [{ title: "Result one", url: "https://example.com" }] } };
   assert.match(text(webSearch.renderResult!(webResult, collapsedOptions, theme, renderContext)), /results/);
-  assert.match(text(webSearch.renderResult!(webResult, expandedOptions, theme, { ...renderContext, expanded: true })), /Result body/);
+  const webExpanded = text(webSearch.renderResult!(webResult, expandedOptions, theme, { ...renderContext, expanded: true, args: webArgs }));
+  assert.match(webExpanded, /Result body/);
+  assert.match(webExpanded, /Result one/);
+  assert.match(webExpanded, /https:\/\/example.com/);
+  assert.match(webExpanded, /\"provider\"/);
 
   const telegram = capture((pi) => registerTelegramChatTool(pi, { registry: { register() {} } as never }));
   const telegramResult = { content: [], details: { sent: true, action: "send_text", message: "private report", chatId: "123456" } };
   assert.doesNotMatch(text(telegram.renderResult!(telegramResult, collapsedOptions, theme, renderContext)), /private report|123456/);
-  assert.match(text(telegram.renderResult!(telegramResult, expandedOptions, theme, renderContext)), /private report/);
+  const telegramExpanded = text(telegram.renderResult!(telegramResult, expandedOptions, theme, renderContext));
+  assert.match(telegramExpanded, /private report/);
+  assert.match(telegramExpanded, /\"messageId\"/);
 });
