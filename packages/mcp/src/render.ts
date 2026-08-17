@@ -23,7 +23,17 @@ function sanitizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
 
 function tracePayload(result: unknown): string {
   try {
-    return JSON.stringify(sanitizeValue(result), null, 2) ?? "";
+    const record = result && typeof result === "object" ? result as { content?: unknown; details?: unknown } : undefined;
+    const content = Array.isArray(record?.content) && record.content.length > 0
+      ? record.content
+      : record?.details && typeof record.details === "object" && "structuredContent" in record.details
+        ? (record.details as { structuredContent?: unknown }).structuredContent
+        : record?.content ?? (() => {
+          if (!record?.details || typeof record.details !== "object") return result;
+          const visible = Object.fromEntries(Object.entries(record.details).filter(([key]) => ["answer", "message", "prompt", "reason"].includes(key)));
+          return Object.keys(visible).length > 0 ? visible : [];
+        })();
+    return JSON.stringify(sanitizeValue(content), null, 2) ?? "";
   } catch {
     return sanitizePayload(String(result ?? ""));
   }

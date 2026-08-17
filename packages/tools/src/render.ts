@@ -63,16 +63,21 @@ export function renderToolDetail(
   return renderToolCall(theme, label, compactToolText(value, maxLength), context, traceArgs);
 }
 
-/** Serialize the result exactly as the model-facing tool boundary exposes it, after redaction. */
+/** Serialize only the result content that is delivered to the model. */
 export function toolResultTrace(
   result: { content?: unknown; details?: unknown } | undefined,
-  context?: ToolRenderContextLike,
+  _context?: ToolRenderContextLike,
 ): string {
-  return traceValue({
-    content: result?.content ?? [],
-    ...(result?.details === undefined ? {} : { details: result.details }),
-    ...(context?.isError ? { isError: true } : {}),
-  });
+  const content = result?.content ?? [];
+  if (Array.isArray(content) && content.length > 0) return traceValue(content);
+  if (result?.details && typeof result.details === "object") {
+    const visible = Object.fromEntries(Object.entries(result.details).filter(([key]) => ["answer", "message", "prompt", "reason"].includes(key)));
+    if (Object.keys(visible).length > 0) return traceValue(visible);
+  }
+  if (result?.details && typeof result.details === "object" && "structuredContent" in result.details) {
+    return traceValue((result.details as { structuredContent?: unknown }).structuredContent);
+  }
+  return traceValue(content);
 }
 
 /** Render a compact outcome without exposing the tool's model-facing result. */

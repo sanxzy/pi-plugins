@@ -32,9 +32,8 @@ test("MCP renderers keep collapsed rows concise and expand safe payloads", () =>
   const expanded = text(renderMcpResult("lookup", result, { expanded: true, isPartial: false }, theme, {}));
   assert.match(expanded, /safe body/);
   assert.match(expanded, /\[redacted\]/);
-  assert.match(expanded, /\"server\"/);
-  assert.match(expanded, /\"tool\"/);
-  assert.match(expanded, /\"structuredContent\"/);
+  assert.match(expanded, /safe body/);
+  assert.doesNotMatch(expanded, /\"structuredContent\"|\"server\"|\"tool\"/);
   assert.doesNotMatch(expanded, /password|token=secret/);
 });
 

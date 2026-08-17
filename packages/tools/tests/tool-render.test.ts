@@ -134,18 +134,19 @@ test("renderers follow the agreed expanded tool contracts", () => {
   assert.match(agentExpanded, /completed/);
   assert.match(agentExpanded, /inspect every renderer/);
   assert.match(agentExpanded, /Agent completed/);
-  assert.match(agentExpanded, /\"status\"/);
+  assert.doesNotMatch(agentExpanded.slice(agentExpanded.indexOf("Result:")), /\"jobId\"|\"subagentType\"|\"prompt\"/);
 
   const jobs = capture(registerJobsTool);
-  const jobsResult = { content: [], details: { jobs: [{ jobId: "job-123", status: "running", subagentType: "explore", description: "audit renderers" }] } };
+  const jobsResult = { content: [{ type: "text", text: "Subagent jobs:\n- job-123: running (audit renderers)" }], details: { jobs: [{ jobId: "job-123", status: "running", subagentType: "explore", description: "audit renderers" }] } };
   assert.match(text(jobs.renderResult!(jobsResult, collapsedOptions, theme, renderContext)), /1 jobs/);
-  assert.match(text(jobs.renderResult!(jobsResult, expandedOptions, theme, renderContext)), /job-123/);
   assert.match(text(jobs.renderResult!(jobsResult, expandedOptions, theme, renderContext)), /audit renderers/);
+  assert.doesNotMatch(text(jobs.renderResult!(jobsResult, expandedOptions, theme, renderContext)), /\"jobs\"|\"subagentType\"/);
 
   const goalCreate = goals.find((tool) => tool.name === "goal_create")!;
-  const goalResult = { content: [], details: { goal: { prompt: "finish the migration", intervalMs: 60_000, status: "active" } } };
+  const goalResult = { content: [{ type: "text", text: "Goal created successfully! Please proceed carefully and complete the work correctly.\nGoal status: active\nPrompt: finish the migration\nInterval: 60000ms" }], details: { goal: { prompt: "finish the migration", intervalMs: 60_000, status: "active" } } };
   assert.match(text(goalCreate.renderResult!(goalResult, collapsedOptions, theme, renderContext)), /Goal created/);
   assert.match(text(goalCreate.renderResult!(goalResult, expandedOptions, theme, renderContext)), /finish the migration/);
+  assert.doesNotMatch(text(goalCreate.renderResult!(goalResult, expandedOptions, theme, renderContext)), /\"goal\"|goalId|updatedAt/);
 
   const webSearch = capture(registerWebSearchTool);
   const webArgs = { query: "pi renderers", numResults: 3, type: "deep" };
@@ -155,13 +156,12 @@ test("renderers follow the agreed expanded tool contracts", () => {
   const webExpanded = text(webSearch.renderResult!(webResult, expandedOptions, theme, { ...renderContext, expanded: true, args: webArgs }));
   assert.match(webExpanded, /Result body/);
   assert.match(webExpanded, /Result one/);
-  assert.match(webExpanded, /https:\/\/example.com/);
-  assert.match(webExpanded, /\"provider\"/);
+  assert.doesNotMatch(webExpanded, /\"provider\"|\"wiki\"|wikiSaveError/);
 
   const telegram = capture((pi) => registerTelegramChatTool(pi, { registry: { register() {} } as never }));
   const telegramResult = { content: [], details: { sent: true, action: "send_text", message: "private report", chatId: "123456", messageId: 456 } };
   assert.doesNotMatch(text(telegram.renderResult!(telegramResult, collapsedOptions, theme, renderContext)), /private report|123456/);
   const telegramExpanded = text(telegram.renderResult!(telegramResult, expandedOptions, theme, renderContext));
   assert.match(telegramExpanded, /private report/);
-  assert.match(telegramExpanded, /\"messageId\"/);
+  assert.doesNotMatch(telegramExpanded, /messageId|chatId/);
 });

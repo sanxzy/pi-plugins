@@ -29,6 +29,7 @@ test("inherited MCP renderers redact expanded token and transport traces", () =>
   assert.doesNotMatch(call, /tok-secret|refresh-secret|req-secret|abc\.def/);
   const result = stripVTControlCharacters(inheritedMcpRenderResult({ content: [{ type: "text", text: "safe access_token=tok-secret requestId=req-secret traceId=trace-secret client_secret=client-secret client_id=client-id api_secret=api-secret https://example.test/?client_secret=url-secret&client_id=url-id" }], details: args }, { expanded: true, isPartial: false }, identityTheme, {}).render(120).join("\n"));
   assert.match(result, /safe/);
+  assert.doesNotMatch(result, /\"details\"/);
   assert.doesNotMatch(result, /tok-secret|refresh-secret|req-secret|trace-secret|abc\.def|client-secret|client-id|api-secret|url-secret|url-id/);
 });
 
