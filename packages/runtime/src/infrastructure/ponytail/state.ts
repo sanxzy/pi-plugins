@@ -1,9 +1,8 @@
-import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, realpathSync, renameSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   PONYTAIL_BACKUP_PREFIX,
   PONYTAIL_BACKUP_SUFFIX,
-  PONYTAIL_FILE_NAME,
   homePonytailStateFile,
   readPrivateJson,
   writePrivateJson,
@@ -17,44 +16,83 @@ export interface PonytailTicket {
   readonly expiresAt: number;
 }
 
-/**
- * Versioned session Ponytail state. The exact shape is part of the contract:
- * `version: 1`, an explicit boolean `enabled`, and a ticket array.
- */
+/** Versioned session Ponytail state. */
 export interface PonytailState {
   readonly version: 1;
   readonly enabled: boolean;
   readonly tickets: PonytailTicket[];
 }
 
-/** The dedicated session-keyed Ponytail state file under the pi-c2 home. */
+/** Optional file-operation seam used by deterministic recovery tests. */
+export interface PonytailPersistence {
+  readonly readJson: (filePath: string) => unknown;
+  readonly writeJson: (filePath: string, value: unknown) => void;
+  readonly rename: (from: string, to: string) => void;
+  readonly list: (directory: string) => string[];
+  readonly exists: (filePath: string) => boolean;
+}
+
+const defaultPersistence: PonytailPersistence = {
+  readJson: (filePath) => readPrivateJson<unknown>(filePath),
+  writeJson: (filePath, value) => writePrivateJson(filePath, value),
+  rename: (from, to) => renameSync(from, to),
+  list: (directory) => readdirSync(directory),
+  exists: (filePath) => existsSync(filePath),
+};
+
+/** Dedicated session-keyed state file directory. */
 function sessionStateDir(sessionId: string): string {
   return dirname(homePonytailStateFile(sessionId));
+}
+
+/**
+ * Canonicalize an absolute stored scope without mutating the filesystem. An
+ * existing path must equal its real path. A missing path is canonical only when
+ * its nearest existing ancestor resolves to the same lexical location; this
+ * rejects traversal and symlink escapes while allowing future directories.
+ */
+export function canonicalPonytailScope(scope: string): string | undefined {
+  if (!isAbsolute(scope)) return undefined;
+  const resolved = resolve(scope);
+  if (resolved !== scope) return undefined;
+  let ancestor = resolved;
+  while (!existsSync(ancestor)) {
+    const parent = dirname(ancestor);
+    if (parent === ancestor) return undefined;
+    ancestor = parent;
+  }
+  let canonicalAncestor: string;
+  try {
+    canonicalAncestor = realpathSync(ancestor);
+  } catch {
+    return undefined;
+  }
+  const suffix = relative(ancestor, resolved);
+  const canonical = resolve(canonicalAncestor, suffix);
+  return canonical === resolved ? resolved : undefined;
 }
 
 function parseTicketRecord(raw: unknown): PonytailTicket | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const record = raw as Record<string, unknown>;
   if (typeof record.value !== "string" || record.value.length === 0) return undefined;
-  if (!Array.isArray(record.scopes) || !record.scopes.every((scope): scope is string => typeof scope === "string" && isAbsolutePath(scope))) {
-    return undefined;
+  if (!Array.isArray(record.scopes) || record.scopes.length === 0) return undefined;
+  const scopes: string[] = [];
+  for (const scope of record.scopes) {
+    if (typeof scope !== "string") return undefined;
+    const canonical = canonicalPonytailScope(scope);
+    if (canonical === undefined || scopes.includes(canonical)) return undefined;
+    scopes.push(canonical);
   }
-  if (typeof record.createdAt !== "number" || !Number.isSafeInteger(record.createdAt)) return undefined;
-  if (typeof record.expiresAt !== "number" || !Number.isSafeInteger(record.expiresAt)) return undefined;
-  return {
-    value: record.value,
-    scopes: [...record.scopes],
-    createdAt: record.createdAt,
-    expiresAt: record.expiresAt,
-  };
+  if (typeof record.createdAt !== "number" || !Number.isSafeInteger(record.createdAt) || record.createdAt < 0) return undefined;
+  if (typeof record.expiresAt !== "number" || !Number.isSafeInteger(record.expiresAt) || record.expiresAt <= record.createdAt) return undefined;
+  return { value: record.value, scopes, createdAt: record.createdAt, expiresAt: record.expiresAt };
 }
 
 function parseState(raw: unknown): PonytailState | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
   const state = raw as Record<string, unknown>;
-  if (state.version !== 1) return undefined;
-  if (typeof state.enabled !== "boolean") return undefined;
-  if (!Array.isArray(state.tickets)) return undefined;
+  if (state.version !== 1 || typeof state.enabled !== "boolean" || !Array.isArray(state.tickets)) return undefined;
   const tickets: PonytailTicket[] = [];
   for (const ticket of state.tickets) {
     const parsed = parseTicketRecord(ticket);
@@ -64,107 +102,125 @@ function parseState(raw: unknown): PonytailState | undefined {
   return { version: 1, enabled: state.enabled, tickets };
 }
 
-function isAbsolutePath(value: string): boolean {
-  return value.startsWith("/");
-}
-
-/** List numbered backups in ascending order, ignoring malformed names. */
-function listBackups(sessionId: string): string[] {
+function listBackups(sessionId: string, persistence: PonytailPersistence): string[] {
   const directory = sessionStateDir(sessionId);
   let entries: string[];
   try {
-    entries = readdirSync(directory);
+    entries = persistence.list(directory);
   } catch {
     return [];
   }
-  const backups: string[] = [];
-  for (const entry of entries) {
-    const match = /^ponytail\.(\d{3})\.json\.bak$/.exec(entry);
-    if (!match) continue;
-    backups.push(join(directory, entry));
-  }
-  backups.sort();
-  return backups;
+  return entries
+    .filter((entry) => /^ponytail\.\d{3}\.json\.bak$/.test(entry))
+    .sort()
+    .map((entry) => join(directory, entry));
 }
 
-/**
- * Validate the current wall-clock expiry of every ticket. Tickets whose
- * `expiresAt` has passed never authorize an operation.
- */
+/** Remove expired records; timestamps are persisted wall-clock milliseconds. */
 export function pruneExpiredTickets(state: PonytailState, nowMs: number): PonytailState {
   const tickets = state.tickets.filter((ticket) => ticket.expiresAt > nowMs);
   return tickets.length === state.tickets.length ? state : { ...state, tickets };
 }
 
-/**
- * Atomically persist one session's Ponytail state with owner-only
- * permissions. Publication replaces the prior file; a failed write leaves
- * the previous usable state untouched.
- */
+/** Atomically persist one session's state with owner-only permissions. */
 export function writePonytailState(sessionId: string, state: PonytailState): void {
   writePrivateJson(homePonytailStateFile(sessionId), state);
 }
 
 /**
- * Load and validate one session's Ponytail state. Malformed, unsupported,
- * or unreadable state never authorizes: the corrupt primary is preserved as
- * the lowest unused numbered backup, the newest valid backup's complete
- * unexpired state is recovered, and recovery fails closed when preservation
- * fails. Missing state returns undefined.
+ * Serialize asynchronous same-session state mutations. Synchronous callers in
+ * one Node turn are already non-interleaving; future ticket creation uses this
+ * queue to prevent concurrent read/prune/write cycles from losing records.
  */
-export function loadPonytailState(sessionId: string, nowMs: number): PonytailState | undefined {
+const mutationQueues = new Map<string, Promise<void>>();
+export function serializePonytailMutation<T>(sessionId: string, mutation: () => Promise<T>): Promise<T> {
+  const previous = mutationQueues.get(sessionId) ?? Promise.resolve();
+  const current = previous.then(mutation, mutation);
+  const settled = current.then(() => undefined, () => undefined);
+  mutationQueues.set(sessionId, settled);
+  void settled.finally(() => {
+    if (mutationQueues.get(sessionId) === settled) mutationQueues.delete(sessionId);
+  });
+  return current;
+}
+
+/**
+ * Load and validate state. Corrupt primaries are preserved under the lowest
+ * unused backup. If recovery publication fails, the backup is restored to the
+ * primary and authorization remains inactive.
+ */
+export function loadPonytailState(sessionId: string, nowMs: number, persistence: PonytailPersistence = defaultPersistence): PonytailState | undefined {
   const statePath = homePonytailStateFile(sessionId);
-  if (!existsSync(statePath)) return undefined;
+  if (!persistence.exists(statePath)) return undefined;
   let parsed: PonytailState | undefined;
   try {
-    parsed = parseState(readPrivateJson<unknown>(statePath));
+    parsed = parseState(persistence.readJson(statePath));
   } catch {
     parsed = undefined;
   }
   if (parsed) {
-    return pruneExpiredTickets(parsed, nowMs);
+    const pruned = pruneExpiredTickets(parsed, nowMs);
+    if (pruned !== parsed) {
+      try {
+        persistence.writeJson(statePath, pruned);
+      } catch {
+        // Expired records are already excluded from the returned authorization.
+      }
+    }
+    return pruned;
   }
+
   const directory = sessionStateDir(sessionId);
-  const backups = listBackups(sessionId);
+  const recoveryCandidates = listBackups(sessionId, persistence);
   let recovery: PonytailState | undefined;
-  for (let index = backups.length - 1; index >= 0; index -= 1) {
+  for (let index = recoveryCandidates.length - 1; index >= 0; index -= 1) {
     try {
-      const candidate = parseState(readPrivateJson<unknown>(backups[index]!));
+      const candidate = parseState(persistence.readJson(recoveryCandidates[index]!));
       if (candidate) {
         recovery = pruneExpiredTickets(candidate, nowMs);
         break;
       }
     } catch {
-      // Corrupt backups are skipped in descending order.
+      // Continue to the next newest backup.
     }
   }
-  const backupName = nextBackupName(directory);
+
+  const backupName = nextBackupName(directory, persistence);
+  if (backupName === undefined) return undefined;
+  const backupPath = join(directory, backupName);
   try {
-    renameSync(statePath, join(directory, backupName));
+    persistence.rename(statePath, backupPath);
   } catch {
     return undefined;
   }
   const recovered = recovery ?? { version: 1, enabled: true, tickets: [] };
-  writePonytailState(sessionId, recovered);
-  return recovered;
+  try {
+    persistence.writeJson(statePath, recovered);
+    return recovered;
+  } catch {
+    try {
+      persistence.rename(backupPath, statePath);
+    } catch {
+      // Keep the preserved backup; either way, no replacement is activated.
+    }
+    return undefined;
+  }
 }
 
-/** The lowest unused three-digit backup name, starting at `001`. */
-function nextBackupName(directory: string): string {
+function nextBackupName(directory: string, persistence: PonytailPersistence): string | undefined {
   const existing = new Set<string>();
   try {
-    for (const entry of readdirSync(directory)) existing.add(entry);
+    for (const entry of persistence.list(directory)) existing.add(entry);
   } catch {
-    // A missing directory has no conflicting backups.
+    return undefined;
   }
   for (let number = 1; number < 1_000; number += 1) {
     const name = `${PONYTAIL_BACKUP_PREFIX}${String(number).padStart(3, "0")}${PONYTAIL_BACKUP_SUFFIX}`;
     if (!existing.has(name)) return name;
   }
-  throw new Error("No Ponytail backup slot available");
+  return undefined;
 }
 
-/** True when a private owner-only Ponytail state file exists for the session. */
 export function ponytailStateExists(sessionId: string): boolean {
   const statePath = homePonytailStateFile(sessionId);
   try {

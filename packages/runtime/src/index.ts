@@ -43,7 +43,9 @@ export {
   loadPonytailState,
   ponytailStateExists,
   pruneExpiredTickets,
+  serializePonytailMutation,
   writePonytailState,
+  type PonytailPersistence,
   type PonytailState,
   type PonytailTicket,
 } from "./infrastructure/ponytail/state.ts";

@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
   clearSettingsCache,
   homePonytailStateFile,
+  homePonytailSessionDir,
   loadPonytailState,
   resolveSettingsForProject,
+  serializePonytailMutation,
   startRootSession,
   writePonytailState,
+  type PonytailPersistence,
   type PonytailState,
 } from "@xzy-ai/runtime";
 
@@ -166,6 +169,137 @@ test("invalid state never loads as active authorization", () => {
       writePonytailState("root-invalid", validState());
       writeFileSync(statePath, JSON.stringify({ version: 2, enabled: true, tickets: [] }));
       assert.deepEqual(loadPonytailState("root-invalid", 5_000), { version: 1, enabled: true, tickets: [] });
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+function malformedStateTicket(overrides: Record<string, unknown>): string {
+  return JSON.stringify({
+    version: 1,
+    enabled: true,
+    tickets: [{ value: "t", scopes: ["/project/src"], createdAt: 1_000, expiresAt: 10_000, ...overrides }],
+  });
+}
+
+for (const [label, mutate] of [
+  ["traversal scope", () => ({ scopes: ["/project/../outside"] })],
+  ["redundant-segment scope", () => ({ scopes: ["/project/src/../src"] })],
+  ["empty scope list", () => ({ scopes: [] })],
+  ["non-absolute scope", () => ({ scopes: ["project/src"] })],
+  ["expired-before-created", () => ({ createdAt: 10_000, expiresAt: 1_000 })],
+  ["negative timestamp", () => ({ createdAt: -5, expiresAt: 10_000 })],
+  ["equal timestamps", () => ({ createdAt: 10_000, expiresAt: 10_000 })],
+] as Array<[string, () => Record<string, unknown>]>) {
+  test(`malformed ticket state is rejected and replaced: ${label}`, () => {
+    const home = tempHome();
+    try {
+      withHome(home, () => {
+        const statePath = homePonytailStateFile(`root-${label.replace(/[^a-z0-9]+/gi, "-")}`);
+        writePonytailState(`root-${label.replace(/[^a-z0-9]+/gi, "-")}`, { version: 1, enabled: true, tickets: [] });
+        writeFileSync(statePath, malformedStateTicket(mutate()));
+        assert.deepEqual(loadPonytailState(`root-${label.replace(/[^a-z0-9]+/gi, "-")}`, 5_000), { version: 1, enabled: true, tickets: [] });
+        assert.equal(readdirSync(join(home, "pi-c2", "sessions", `root-${label.replace(/[^a-z0-9]+/gi, "-")}`)).filter((name) => name.endsWith(".json.bak")).length, 1);
+      });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+}
+
+test("same-session mutations are serialized without losing ordering", async () => {
+  const order: string[] = [];
+  const first = serializePonytailMutation("root-queue", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    order.push("first");
+    return 1;
+  });
+  const second = serializePonytailMutation("root-queue", async () => {
+    order.push("second");
+    return 2;
+  });
+  assert.deepEqual(await Promise.all([first, second]), [1, 2]);
+  assert.deepEqual(order, ["first", "second"]);
+});
+
+test("expired tickets are pruned and persisted during a valid-state load", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      const statePath = homePonytailStateFile("root-prune");
+      writePonytailState("root-prune", { version: 1, enabled: true, tickets: [] });
+      writeFileSync(statePath, JSON.stringify({
+        version: 1,
+        enabled: true,
+        tickets: [
+          { value: "alive", scopes: ["/project/src"], createdAt: 1_000, expiresAt: 10_000 },
+          { value: "stale", scopes: ["/project/old"], createdAt: 1, expiresAt: 4_000 },
+        ],
+      }));
+      const loaded = loadPonytailState("root-prune", 5_000);
+      assert.deepEqual(loaded?.tickets.map((t) => t.value), ["alive"]);
+      assert.deepEqual(JSON.parse(readFileSync(statePath, "utf8")).tickets.map((t: { value: string }) => t.value), ["alive"]);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("ponytail state directories and files are owner-only with no temporary siblings", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      writePonytailState("root-modes", validState());
+      const statePath = homePonytailStateFile("root-modes");
+      assert.equal(statSync(statePath).mode & 0o777, 0o600);
+      const sessionDir = homePonytailSessionDir("root-modes");
+      assert.equal(statSync(sessionDir).mode & 0o777, 0o700);
+      assert.deepEqual(readdirSync(sessionDir), ["ponytail.json"]);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("backup-slot exhaustion leaves the corrupt primary untouched and loads no state", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      const statePath = homePonytailStateFile("root-full");
+      writePonytailState("root-full", { version: 1, enabled: true, tickets: [] });
+      writeFileSync(statePath, "{broken");
+      const sessionDir = homePonytailSessionDir("root-full");
+      mkdirSync(sessionDir, { recursive: true });
+      for (let number = 1; number <= 999; number += 1) {
+        writeFileSync(join(sessionDir, `ponytail.${String(number).padStart(3, "0")}.json.bak`), "{}");
+      }
+      assert.equal(loadPonytailState("root-full", 5_000), undefined);
+      assert.equal(readFileSync(statePath, "utf8"), "{broken");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("recovery publication failure restores the backup and loads no state", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      const statePath = homePonytailStateFile("root-write-fail");
+      writePonytailState("root-write-fail", { version: 1, enabled: true, tickets: [] });
+      writeFileSync(statePath, "{broken");
+      const directory = homePonytailSessionDir("root-write-fail");
+      const persistence: PonytailPersistence = {
+        readJson: (path) => (path === statePath ? undefined : JSON.parse(readFileSync(path, "utf8"))),
+        writeJson: () => { throw new Error("disk full"); },
+        rename: (from, to) => renameSync(from, to),
+        list: (dir) => readdirSync(dir),
+        exists: (path) => existsSync(path),
+      };
+      assert.equal(loadPonytailState("root-write-fail", 5_000, persistence), undefined);
+      assert.equal(existsSync(statePath), true);
+      assert.equal(readFileSync(statePath, "utf8"), "{broken");
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
