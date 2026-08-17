@@ -40,6 +40,14 @@ test("inherited MCP renderers hide payload output while retaining the tool activ
     { isError: false },
   ).render(100).join(""));
   assert.match(expanded, /SAFE_MCP_OUTPUT/);
+
+  const sensitive = stripVTControlCharacters(inheritedMcpRenderResult(
+    { content: [{ type: "text", text: "chatId=123456 bot123:SECRET https://user:pass@example.com/?token=secret" }] },
+    { expanded: true, isPartial: false },
+    identityTheme,
+    { isError: false },
+  ).render(200).join(""));
+  assert.doesNotMatch(sensitive, /123456|bot123:SECRET|user:pass|token=secret/);
 });
 
 test("maps SDK message and tool events to the core live feed", () => {

@@ -9,6 +9,15 @@ function compact(value: unknown, maxLength = 80): string {
   return singleLine.length <= maxLength ? singleLine : `${singleLine.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
+function sanitizeExpanded(value: string): string {
+  return value
+    .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
+    .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
+    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*\d+\b)/gi, "[redacted]")
+    .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f]/g, "");
+}
+
 function expandedPayload(result: unknown): string {
   if (!result || typeof result !== "object") return "";
   const record = result as { content?: unknown; details?: unknown };
@@ -21,11 +30,11 @@ function expandedPayload(result: unknown): string {
       return "";
     }).filter(Boolean).join("\n")
     : "";
-  if (content) return content;
+  if (content) return sanitizeExpanded(content);
   const structured = record.details && typeof record.details === "object" && "structuredContent" in record.details
     ? (record.details as { structuredContent?: unknown }).structuredContent
     : undefined;
-  try { return structured === undefined ? "" : JSON.stringify(structured, null, 2); } catch { return ""; }
+  try { return structured === undefined ? "" : sanitizeExpanded(JSON.stringify(structured, null, 2)); } catch { return ""; }
 }
 
 function failed(result: unknown, context: { isError?: boolean }): boolean {

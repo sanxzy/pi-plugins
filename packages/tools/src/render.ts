@@ -70,7 +70,7 @@ export function expandedToolText(value: unknown): string {
   return text
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
     .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(\b(?:bot\d+:[A-Za-z0-9_-]+|chat[_-]?id\s*[:=]\s*)\d+\b)/gi, "[redacted]")
+    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*\d+\b)/gi, "[redacted]")
     .replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "")
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
     .replace(/\u001b/g, "");

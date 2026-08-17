@@ -47,7 +47,7 @@ function sanitizePayload(value: string): string {
   return value
     .replace(/(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi, "$1[redacted]@")
     .replace(/([?&](?:token|key|secret|code|state|password|authorization|credential)=)[^&#\s]+/gi, "$1[redacted]")
-    .replace(/(\b(?:bot\d+:[A-Za-z0-9_-]+|chat[_-]?id\s*[:=]\s*)\d+\b)/gi, "[redacted]")
+    .replace(/(?:\bbot\d+:[A-Za-z0-9_-]+\b|\bchat[_-]?id\s*[:=]\s*\d+\b)/gi, "[redacted]")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .replace(/\u001b/g, "");
 }
