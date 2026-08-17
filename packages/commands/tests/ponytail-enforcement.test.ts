@@ -9,6 +9,7 @@ import {
   canonicalProjectRoot,
   clearSettingsCache,
   homePonytailStateFile,
+  ponytailStateExists,
   writePonytailState,
 } from "@xzy-ai/runtime";
 import { registerPonytailEnforcement } from "../src/registrations/ponytail-enforcement.ts";
@@ -110,6 +111,21 @@ test("disabled sessions preserve built-in write/edit behavior and bash stays out
     assert.deepEqual(await call(handler, "edit", { path: "src/file.ts", edits: [] }, ctx), undefined);
     assert.deepEqual(await call(handler, "bash", { command: "printf secret" }, ctx), undefined);
     assert.equal(existsSync(homePonytailStateFile("disabled")), true);
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("blocks an existing unrecoverable state file even when the home default is disabled", async () => {
+  const h = home(); const root = project(); mkdirSync(join(root, "src"));
+  try {
+    process.env.PI_C2_TEST_HOME = h; clearSettingsCache();
+    const statePath = homePonytailStateFile("corrupt-disabled");
+    mkdirSync(join(h, "pi-c2", "sessions", "corrupt-disabled"), { recursive: true });
+    writeFileSync(statePath, "{ malformed state");
+    assert.equal(ponytailStateExists("corrupt-disabled"), true);
+    const { handler } = registration();
+    const result = await call(handler, "write", { path: "src/file.ts", content: "secret" }, context(root, "corrupt-disabled"));
+    assert.equal(result?.block, true);
+    assert.match(result?.reason ?? "", /state|Ponytail|ticket/i);
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
