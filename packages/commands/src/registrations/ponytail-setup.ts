@@ -43,13 +43,20 @@ export function registerPonytailSetup(pi: ExtensionAPI): void {
           ctx.ui.notify("Unable to persist Ponytail state; the active session was not changed.", "error");
           return;
         }
+        ctx.ui.notify(`Ponytail ${enabled ? "enable" : "disable"} choice persisted successfully.`, "info");
         markSessionReload(ctx.cwd);
+        const reloadFn = typeof ctx.reload === "function" ? ctx.reload : undefined;
+        if (reloadFn === undefined) {
+          clearSessionReload(ctx.cwd);
+          ctx.ui.notify(`Session reload unavailable; the current runtime was not changed. The Ponytail ${enabled ? "enable" : "disable"} choice takes effect at the next successful reload or session start.`, "warning");
+          return;
+        }
         try {
-          await ctx.reload();
-          ctx.ui.notify(`Ponytail ${enabled ? "enabled" : "disabled"}; the session was reloaded.`, "info");
+          await reloadFn();
+          ctx.ui.notify("Session reload succeeded; the current runtime now reflects the persisted Ponytail choice.", "info");
         } catch {
           clearSessionReload(ctx.cwd);
-          ctx.ui.notify(`Ponytail ${enabled ? "enabled" : "disabled"} was persisted, but reload failed; the current runtime was not changed.`, "warning");
+          ctx.ui.notify(`Session reload failed; the current runtime was not changed. The persisted Ponytail choice takes effect at the next successful reload or session start.`, "warning");
         }
       });
     },
