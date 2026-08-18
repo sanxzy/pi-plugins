@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { canonicalProjectRoot } from "@xzy-ai/runtime";
 import { test } from "node:test";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
   clearSettingsCache,
   homePonytailStateFile,
@@ -218,5 +219,58 @@ test("missing session identity fails closed and the registration exposes the too
     let tool: unknown;
     registerWriteEditTicketTool({ registerTool: (candidate: unknown) => { tool = candidate; } } as unknown as ExtensionAPI);
     assert.equal((tool as { name: string }).name, "create_write_edit_ticket");
+    assert.equal(typeof (tool as { renderCall?: unknown }).renderCall, "function", "renderCall present");
+    assert.equal(typeof (tool as { renderResult?: unknown }).renderResult, "function", "renderResult present");
+  } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("create_write_edit_ticket renderers follow the pi-c2 activity style", async () => {
+  const h = home(); const root = project(); mkdirSync(join(root, "src"));
+  try { withHome(h, () => setup(root)); activateHome(h);
+    let tool: {
+      name: string;
+      renderCall: (args: unknown, theme: unknown, context: unknown) => { render(width: number): string[] };
+      renderResult: (result: unknown, options: unknown, theme: unknown, context: unknown) => { render(width: number): string[] };
+    } | undefined;
+    registerWriteEditTicketTool({ registerTool: (candidate: unknown) => { tool = candidate as typeof tool; } } as unknown as ExtensionAPI);
+    assert.ok(tool);
+
+    const identity = (text: string): string => text;
+    const theme = { fg: (_color: string, text: string) => text, bold: identity } as unknown as Theme;
+    const renderContext = { isError: false };
+    const collapsed = { expanded: false, isPartial: false };
+    const expanded = { expanded: true, isPartial: false };
+
+    // renderCall with an issued request shows the scoped directories.
+    const call = tool.renderCall(input(["src", "tests"]), theme, renderContext);
+    const callText = stripVTControlCharacters(call.render(120).join("\n"));
+    assert.match(callText, /create_write_edit_ticket/);
+    assert.match(callText, /src, tests/);
+
+    // renderCall with a yagni request shows the skip marker.
+    const yagniCall = tool.renderCall({ ...input(), doesNeedToExist: false }, theme, renderContext);
+    assert.match(stripVTControlCharacters(yagniCall.render(120).join("\n")), /yagni/);
+
+    // renderResult for an issued ticket shows the short ticket value.
+    const issued = tool.renderResult({ content: [{ type: "text", text: "Write/edit ticket: abcde\nAdvisor:\n- ok" }], details: { mode: "issued", ticket: "abcde" } }, collapsed, theme, renderContext);
+    const issuedText = stripVTControlCharacters(issued.render(120).join("\n"));
+    assert.match(issuedText, /Write\/edit ticket • abcde/);
+    assert.doesNotMatch(issuedText, /Advisor:/);
+
+    // Expanded issued result traces the ticket and guidance.
+    const issuedExpanded = tool.renderResult({ content: [{ type: "text", text: "Write/edit ticket: abcde\nAdvisor:\n- ok" }], details: { mode: "issued", ticket: "abcde" } }, expanded, theme, { ...renderContext, expanded: true, args: input() });
+    const issuedExpandedText = stripVTControlCharacters(issuedExpanded.render(120).join("\n"));
+    assert.match(issuedExpandedText, /Results:/);
+    assert.match(issuedExpandedText, /Write\/edit ticket: abcde/);
+
+    // renderResult for a yagni skip shows the skip outcome without a ticket.
+    const yagni = tool.renderResult({ content: [{ type: "text", text: "Skip it and state why in one line. YAGNI — do not add code that does not need to exist." }], details: { mode: "yagni" } }, collapsed, theme, renderContext);
+    const yagniText = stripVTControlCharacters(yagni.render(120).join("\n"));
+    assert.match(yagniText, /skipped \(YAGNI\)/);
+    assert.doesNotMatch(yagniText, /Write\/edit ticket: [A-Za-z0-9_-]{5}/);
+
+    // renderResult for a failure shows the failed outcome.
+    const failed = tool.renderResult({ content: [{ type: "text", text: "Error: unable to persist" }], details: { mode: "error" } }, collapsed, theme, renderContext);
+    assert.match(stripVTControlCharacters(failed.render(120).join("\n")), /failed/);
   } finally { rmSync(h, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });

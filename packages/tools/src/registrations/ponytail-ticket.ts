@@ -9,16 +9,17 @@ import {
   type PonytailTicket,
 } from "@xzy-ai/runtime";
 import { errorResult, textResult } from "../results.ts";
+import { renderToolCall, renderToolOutcome, toolResultFailed } from "../render.ts";
 
 export const createWriteEditTicketParams = Type.Object({
   directories: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, description: "One or more project-relative directory paths." }),
-  doesNeedToExist: Type.Boolean(),
-  alreadyAvailableInCodebase: Type.Boolean(),
-  standardLibraryOrNativePlatformCanHandleIt: Type.Boolean(),
-  installedDependencyCanHandleIt: Type.Boolean(),
-  canBeOneLine: Type.Boolean(),
-  requiresNewDependency: Type.Boolean(),
-  hasClearVerificationPath: Type.Boolean(),
+  doesNeedToExist: Type.Boolean({ description: "Prefer not creating it unless it is genuinely necessary. If no, skip it (YAGNI)." }),
+  alreadyAvailableInCodebase: Type.Boolean({ description: "Prefer reusing or extending the existing implementation instead of rewriting or duplicating it." }),
+  standardLibraryOrNativePlatformCanHandleIt: Type.Boolean({ description: "Prefer the standard library or the platform's native capability when either already provides a sufficient solution." }),
+  installedDependencyCanHandleIt: Type.Boolean({ description: "Prefer an already-installed dependency when it adequately solves the problem instead of adding another implementation or dependency." }),
+  canBeOneLine: Type.Boolean({ description: "Prefer the simplest one-line solution when it is sufficient and remains clear." }),
+  requiresNewDependency: Type.Boolean({ description: "Prefer the minimum implementation that correctly satisfies the requirement; add a new dependency only when nothing else suffices, and wrap it behind an adapter." }),
+  hasClearVerificationPath: Type.Boolean({ description: "Prefer a clear verification path: run the relevant checks and confirm the change preserves existing behavior before finishing." }),
 }, { additionalProperties: false });
 
 export type CreateWriteEditTicketParams = Static<typeof createWriteEditTicketParams>;
@@ -44,6 +45,19 @@ export function registerWriteEditTicketTool(pi: ExtensionAPI): void {
     parameters: createWriteEditTicketParams,
     async execute(_toolCallId: string, params: CreateWriteEditTicketParams, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<AgentToolResult<CreateWriteEditTicketDetails>> {
       return executeCreateWriteEditTicket(params, ctx);
+    },
+    renderCall(args, theme, context) {
+      const activity = args.doesNeedToExist ? args.directories.join(", ") : "yagni";
+      return renderToolCall(theme, "create_write_edit_ticket", activity, context, args);
+    },
+    renderResult(result, options, theme, context) {
+      const details = result.details as CreateWriteEditTicketDetails | undefined;
+      const failed = toolResultFailed(result, context);
+      const mode = details?.mode ?? "error";
+      const ticket = details?.ticket;
+      const label = mode === "issued" ? `Write/edit ticket • ${ticket ?? ""}` : mode === "yagni" ? "Write/edit ticket • skipped (YAGNI)" : "Write/edit ticket • failed";
+      const detail = mode === "issued" && ticket ? `Ticket: ${ticket}` : mode === "yagni" ? YAGNI : "";
+      return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, detail, result, context.args);
     },
   });
 }
