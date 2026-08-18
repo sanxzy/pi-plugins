@@ -115,7 +115,6 @@ test("does not add a spacer between main and its only child", () => {
   });
 
   assert.deepEqual(renderRows(footer).slice(3), [
-    "",
     "⏺ main 0s",
     "└─ ◯ Run parallel recursive descendant 2m 56s",
   ]);
@@ -142,7 +141,6 @@ test("renders every descendant on one uniformly spaced tree row", () => {
   });
 
   assert.deepEqual(renderRows(footer).slice(3), [
-    "",
     "⏺ main 0s",
     "├─ ✓ post 2m 56s",
     "└─ ◯ parallel 2m 56s",

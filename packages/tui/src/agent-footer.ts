@@ -120,10 +120,9 @@ export class AgentFooter implements Component {
     const lastByDepth = computeLastByDepth(rows);
     const lines = [pathLine, statsLine, footerHeading(rows, this.theme)];
     if (this.hint) lines.push(this.theme.fg("warning", this.hint));
-    // The heading gets its own visual separation from the tree. Do not add a
-    // second spacer after `main`: doing so only when multiple level-1 children
-    // exist makes the root-to-child distance depend on branching factor.
-    if (!this.management) lines.push("");
+    // The heading sits directly above the tree: the root row follows the
+    // heading without a blank spacer, so the header and the agent tree stay
+    // visually close (same behavior as management mode).
 
     const visible = this.management
       ? rows.slice(this.scrollTop, this.scrollTop + MAX_VISIBLE_MANAGEMENT_ROWS)
