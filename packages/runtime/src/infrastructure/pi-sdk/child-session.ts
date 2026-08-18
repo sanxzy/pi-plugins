@@ -6,12 +6,12 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
-  resolveCliModel,
   SessionManager,
   SettingsManager,
   type AgentSession,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import { resolveExactChildModel } from "./child-model.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
 import { publishSessionMcpActive, publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
@@ -282,11 +282,20 @@ async function createIsolatedChild(options: {
   publishSessionMcpDefinitions(childContext, options.mcpToolDefs ?? []);
   if (options.mcpBridge) publishSessionMcpBridge(childContext, options.mcpBridge);
 
-  // Model mapping: an explicit frontmatter model is resolved against the child
-  // runtime and falls back to the inherited parent model when resolution fails
-  // or no runtime/models are available; an absent model inherits the parent.
-  const model =
-    discovered && discovered.model ? resolveChildModel(discovered.model, modelRuntime) ?? options.model : options.model;
+  // Model mapping: a frontmatter `model` value is an exact contract. When the
+  // key is present, the child uses the resolved value as-is — an unresolvable
+  // reference fails the child with a clear message instead of silently falling
+  // back to the parent model. Only an absent key inherits the parent model.
+  let model = options.model;
+  if (discovered?.model) {
+    const declared = resolveExactChildModel(discovered.model, modelRuntime);
+    if (!declared) {
+      throw new Error(
+        `Agent "${discovered.name}" declares model "${discovered.model}", which does not match any available model exactly. Fix the frontmatter model value or remove the key to inherit the parent model.`,
+      );
+    }
+    model = declared;
+  }
 
   const sessionOptions: Record<string, unknown> = {
     cwd: options.cwd,
@@ -338,19 +347,6 @@ async function createIsolatedChild(options: {
       session.dispose();
     },
   };
-}
-
-/**
- * Resolve a frontmatter model reference against the child model runtime.
- *
- * Returns the resolved model, or `undefined` when there is no runtime, no
- * configured models, or the reference does not match. The caller falls back to
- * the inherited parent model in every failure case.
- */
-function resolveChildModel(model: string, modelRuntime: ModelRuntime | undefined): unknown {
-  if (!modelRuntime) return undefined;
-  const result = resolveCliModel({ cliModel: model, modelRuntime });
-  return result.model;
 }
 
 /**
