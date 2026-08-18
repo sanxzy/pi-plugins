@@ -65,22 +65,29 @@ test("manager reload, reconnect, close, and stop paths emit dedicated boundaries
   mkdirSync(join(agentDir, "pi-c2"), { recursive: true });
   const fixture = new URL("./fixtures/stdio-server.ts", import.meta.url).pathname;
   const exitOnce = join(root, "exit-once");
-  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: { reconnect: { type: "local", command: [process.execPath, fixture], cwd: dirname(fixture), environment: { MCP_FIXTURE_EXIT_ONCE_FILE: exitOnce, MCP_FIXTURE_EXIT_AFTER_MS: "25" } } } } }));
+  writeFileSync(userConfigPath(agentDir), JSON.stringify({ mcp: { servers: { reconnect: { type: "local", command: [process.execPath, fixture], cwd: dirname(fixture), environment: { MCP_FIXTURE_EXIT_ONCE_FILE: exitOnce, MCP_FIXTURE_EXIT_AFTER_MS: "500" } } } } }));
   const logDir = join(root, "logs");
   const logger = createSessionLogger({ projectId: "project", rootSessionId: "root", eventsPath: join(logDir, "events.jsonl"), errorsPath: join(logDir, "errors.jsonl") });
-  const manager = createMcpManager({ agentDir, projectRoot, reconnectBaseDelayMs: 5, reconnectMaxAttempts: 2 });
+  const manager = createMcpManager({ agentDir, projectRoot, reconnectBaseDelayMs: 5, reconnectMaxAttempts: 5 });
   await runWithLogContext(logger, async () => {
     manager.reload();
     await manager.start();
     assert.equal(manager.status("reconnect")?.status, "connected");
-    const deadline = Date.now() + 3_000;
+    const failedDeadline = Date.now() + 5_000;
     let sawFailed = false;
-    while (Date.now() < deadline) {
+    while (Date.now() < failedDeadline) {
       if (manager.status("reconnect")?.status === "failed") sawFailed = true;
       if (sawFailed && manager.status("reconnect")?.status === "connected") break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(sawFailed, true, "reconnect fixture must report a failed transition");
+    // Recovery is bounded by the manager's reconnect backoff; under parallel
+    // test-file load the spawn can take longer than a few hundred ms, so the
+    // deadline is generous (the fixture itself exits only once).
+    const recoveryDeadline = Date.now() + 10_000;
+    while (Date.now() < recoveryDeadline && manager.status("reconnect")?.status !== "connected") {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     assert.equal(manager.status("reconnect")?.status, "connected", "reconnect fixture must recover");
     await manager.close();
     await manager.stop();

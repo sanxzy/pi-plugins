@@ -32,8 +32,8 @@ function controller(overrides: Partial<ManageAgentModelController> = {}): Manage
     listThinkingLevels: async () => [{ level: "off", label: "off" }, { level: "high", label: "high" }],
     setModel: async () => ({ ok: true, message: "Agent model set." }),
     removeModel: async () => ({ ok: true, message: "Agent model removed." }),
-    getGlobalModel: async () => ({ model: undefined, configPath: "/tmp/config.json" }),
-    setGlobalModel: async (reference) => ({ ok: true, message: `Global agent model set to ${reference}.` }),
+    getGlobalModel: async () => ({ model: undefined, thinking: undefined, configPath: "/tmp/config.json" }),
+    setGlobalModel: async (reference, thinking) => ({ ok: true, message: `Global agent model set to ${reference}${thinking ? `, thinking ${thinking}` : ""}.` }),
     removeGlobalModel: async () => ({ ok: true, message: "Global agent model removed." }),
     cancel: async () => {
       await undefined;
@@ -177,20 +177,23 @@ test("empty agent list reports an error result", async () => {
   assert.ok(lines(wizard).some((line) => line.includes("No agents are defined")));
 });
 
-test("the action menu shows the current global model", async () => {
-  const ctl = controller({ getGlobalModel: async () => ({ model: "commandcode/meta/muse-spark-1.2-contributor", configPath: "/home/user/.pi/agent/pi-c2/config.json" }) });
+test("the action menu shows the current global model and thinking", async () => {
+  const ctl = controller({ getGlobalModel: async () => ({ model: "commandcode/meta/muse-spark-1.2-contributor", thinking: "high", configPath: "/home/user/.pi/agent/pi-c2/config.json" }) });
   const wizard = new ManageAgentModelWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
   await flush();
   assert.ok(lines(wizard).some((line) => line.includes("Global agent model:")));
   assert.ok(lines(wizard).some((line) => line.includes("commandcode/meta/muse-spark-1.2-contributor")));
+  assert.ok(lines(wizard).some((line) => line.includes("thinking high")));
 });
 
-test("global set flow goes action → global → model → result and calls setGlobalModel", async () => {
+test("global set flow goes action → global → model → thinking → result and calls setGlobalModel with thinking", async () => {
   let setReference: string | undefined;
+  let setThinking: string | undefined;
   const ctl = controller({
-    setGlobalModel: async (reference) => {
+    setGlobalModel: async (reference, thinking) => {
       setReference = reference;
-      return { ok: true, message: `Global agent model set to ${reference}.` };
+      setThinking = thinking;
+      return { ok: true, message: `Global agent model set to ${reference}${thinking ? `, thinking ${thinking}` : ""}.` };
     },
   });
   const result = resultPromise();
@@ -207,7 +210,40 @@ test("global set flow goes action → global → model → result and calls setG
   wizard.handleInput("\r");
   assert.ok(lines(wizard).some((line) => line.includes("select model")));
 
-  // Model step: select the first model.
+  // Model step: select the first model (reasoning-capable → thinking step).
+  wizard.handleInput("\r");
+  await flush();
+  assert.ok(lines(wizard).some((line) => line.includes("thinking level")));
+
+  // Thinking step: select the first level ("off").
+  wizard.handleInput("\r");
+  await flush();
+  assert.equal(setReference, "anthropic/claude-sonnet-4-5");
+  assert.equal(setThinking, "off");
+  const rendered = lines(wizard).join(" ").replace(/\s+/g, " ");
+  assert.ok(rendered.includes("Global agent model set to anthropic/claude-sonnet-4-5, thinking off."), `rendered: ${rendered}`);
+  wizard.handleInput("\r");
+  assert.deepEqual(await result.promise, { status: "saved", message: "Global agent model set to anthropic/claude-sonnet-4-5, thinking off." });
+});
+
+test("global set flow skips the thinking step for non-reasoning models", async () => {
+  let setReference: string | undefined;
+  const ctl = controller({
+    listThinkingLevels: async () => [{ level: "off", label: "off" }],
+    setGlobalModel: async (reference) => {
+      setReference = reference;
+      return { ok: true, message: `Global agent model set to ${reference}.` };
+    },
+  });
+  const result = resultPromise();
+  const wizard = new ManageAgentModelWizard({ tui: tui(), theme, controller: ctl, done: result.resolve });
+  await flush();
+
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("select model")));
   wizard.handleInput("\r");
   await flush();
   assert.equal(setReference, "anthropic/claude-sonnet-4-5");

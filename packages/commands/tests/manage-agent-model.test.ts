@@ -197,14 +197,15 @@ function writeHomeConfig(home: string, value: unknown): void {
   writeFileSync(join(dir, "config.json"), JSON.stringify(value));
 }
 
-test("getGlobalModel reports the configured agents.model and its config path", () => {
+test("getGlobalModel reports the configured agents.model, thinking, and its config path", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
   try {
-    writeHomeConfig(home, { agents: { model: "commandcode/meta/muse-spark-1.2-contributor", maxConcurrency: 4 } });
+    writeHomeConfig(home, { agents: { model: "commandcode/meta/muse-spark-1.2-contributor", thinking: "high", maxConcurrency: 4 } });
     withHome(home, async () => {
       const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
       const global = await controller.getGlobalModel();
       assert.equal(global.model, "commandcode/meta/muse-spark-1.2-contributor");
+      assert.equal(global.thinking, "high");
       assert.equal(global.configPath, settingsConfigPath());
     });
   } finally {
@@ -212,19 +213,37 @@ test("getGlobalModel reports the configured agents.model and its config path", (
   }
 });
 
-test("setGlobalModel writes agents.model preserving other config keys", () => {
+test("setGlobalModel writes agents.model and agents.thinking preserving other config keys", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
   try {
     writeHomeConfig(home, { agents: { maxConcurrency: 4 }, channels: { maxTextLength: 9000 } });
     withHome(home, async () => {
       const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
-      const result = await controller.setGlobalModel("openai/gpt-5");
-      assert.deepEqual(result, { ok: true, message: "Global agent model set to openai/gpt-5." });
+      const result = await controller.setGlobalModel("openai/gpt-5", "high");
+      assert.deepEqual(result, { ok: true, message: "Global agent model set to openai/gpt-5, thinking high." });
       const raw = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as Record<string, unknown>;
       assert.equal((raw.agents as Record<string, unknown>).model, "openai/gpt-5");
+      assert.equal((raw.agents as Record<string, unknown>).thinking, "high");
       assert.equal((raw.agents as Record<string, unknown>).maxConcurrency, 4, "sibling agents keys preserved");
       assert.equal((raw.channels as Record<string, unknown>).maxTextLength, 9000, "other groups preserved");
       assert.equal(resolveSettingsForProject("/tmp").agents.model, "openai/gpt-5", "settings cache observes the write");
+      assert.equal(resolveSettingsForProject("/tmp").agents.thinking, "high");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("setGlobalModel without thinking clears a stale agents.thinking", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
+  try {
+    writeHomeConfig(home, { agents: { model: "openai/gpt-5", thinking: "high" } });
+    withHome(home, async () => {
+      const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
+      const result = await controller.setGlobalModel("openai/gpt-5");
+      assert.equal(result.ok, true);
+      const raw = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as Record<string, unknown>;
+      assert.equal("thinking" in (raw.agents as Record<string, unknown>), false, "thinking cleared when not supplied");
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -236,10 +255,11 @@ test("setGlobalModel creates the config file when missing", () => {
   try {
     withHome(home, async () => {
       const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
-      const result = await controller.setGlobalModel("commandcode/deepseek/deepseek-v4-flash");
+      const result = await controller.setGlobalModel("commandcode/deepseek/deepseek-v4-flash", "high");
       assert.equal(result.ok, true);
       const raw = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as Record<string, unknown>;
       assert.equal((raw.agents as Record<string, unknown>).model, "commandcode/deepseek/deepseek-v4-flash");
+      assert.equal((raw.agents as Record<string, unknown>).thinking, "high");
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -249,29 +269,31 @@ test("setGlobalModel creates the config file when missing", () => {
 test("setGlobalModel to the same value is a no-change success", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
   try {
-    writeHomeConfig(home, { agents: { model: "openai/gpt-5" } });
+    writeHomeConfig(home, { agents: { model: "openai/gpt-5", thinking: "high" } });
     withHome(home, async () => {
       const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
-      const result = await controller.setGlobalModel("openai/gpt-5");
-      assert.deepEqual(result, { ok: true, message: "Global agent model already set to openai/gpt-5; no change was needed." });
+      const result = await controller.setGlobalModel("openai/gpt-5", "high");
+      assert.deepEqual(result, { ok: true, message: "Global agent model already set to openai/gpt-5, thinking high; no change was needed." });
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("removeGlobalModel deletes the agents.model key preserving the rest", () => {
+test("removeGlobalModel deletes the agents.model and agents.thinking keys preserving the rest", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
   try {
-    writeHomeConfig(home, { agents: { model: "openai/gpt-5", maxConcurrency: 4 } });
+    writeHomeConfig(home, { agents: { model: "openai/gpt-5", thinking: "high", maxConcurrency: 4 } });
     withHome(home, async () => {
       const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
       const result = await controller.removeGlobalModel();
       assert.deepEqual(result, { ok: true, message: "Global agent model removed." });
       const raw = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as Record<string, unknown>;
       assert.equal("model" in (raw.agents as Record<string, unknown>), false);
+      assert.equal("thinking" in (raw.agents as Record<string, unknown>), false);
       assert.equal((raw.agents as Record<string, unknown>).maxConcurrency, 4);
       assert.equal(resolveSettingsForProject("/tmp").agents.model, undefined);
+      assert.equal(resolveSettingsForProject("/tmp").agents.thinking, undefined);
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -284,7 +306,7 @@ test("removeGlobalModel with nothing configured reports no-change", () => {
     withHome(home, async () => {
       const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
       const result = await controller.removeGlobalModel();
-      assert.deepEqual(result, { ok: true, message: "No global agent model is configured; no change was needed." });
+      assert.deepEqual(result, { ok: true, message: "No global agent model or thinking is configured; no change was needed." });
     });
   } finally {
     rmSync(home, { recursive: true, force: true });

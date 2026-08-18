@@ -43,11 +43,11 @@ export interface ManageAgentModelController {
   setModel(agentName: string, reference: string, thinking?: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
   /** Remove the `model`/`thinking` keys from the agent file's frontmatter. */
   removeModel(agentName: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
-  /** The current global agent model (home-root `pi-c2/config.json` `agents.model`) and its config file path. */
-  getGlobalModel(): Promise<{ model?: string; configPath: string }>;
-  /** Set the global agent model in the home-root `pi-c2/config.json`, exactly as given. */
-  setGlobalModel(reference: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
-  /** Remove the global agent model key from the home-root `pi-c2/config.json`. */
+  /** The current global agent model + thinking (home-root `pi-c2/config.json` `agents.model`/`agents.thinking`) and its config file path. */
+  getGlobalModel(): Promise<{ model?: string; thinking?: string; configPath: string }>;
+  /** Set the global agent model (+ optional thinking) in the home-root `pi-c2/config.json`, exactly as given. */
+  setGlobalModel(reference: string, thinking?: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
+  /** Remove the global agent model + thinking keys from the home-root `pi-c2/config.json`. */
   removeGlobalModel(signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
   cancel(): Promise<void>;
 }
@@ -108,6 +108,7 @@ export class ManageAgentModelWizard implements Component {
   private selectedAgent: ManageAgentModelAgentItem | undefined;
   private selectedModel: SelectableModel | undefined;
   private globalModel?: string;
+  private globalThinking?: string;
   private globalConfigPath?: string;
   private cachedLines: string[] | undefined;
   private settled = false;
@@ -141,11 +142,13 @@ export class ManageAgentModelWizard implements Component {
       this.agents = agents;
       this.models = models.map((model) => ({ ...model, label: model.reference }));
       this.globalModel = global.model;
+      this.globalThinking = global.thinking;
       this.globalConfigPath = global.configPath;
     } catch {
       this.agents = [];
       this.models = [];
       this.globalModel = undefined;
+      this.globalThinking = undefined;
       this.globalConfigPath = undefined;
     }
     this.refresh();
@@ -189,7 +192,7 @@ export class ManageAgentModelWizard implements Component {
           add(selected ? this.theme.fg("accent", "> ") : "  ", this.theme.fg(selected ? "accent" : "text", `${i + 1}. ${options[i]}`));
         }
         if (this.globalModel) {
-          add(" ", this.theme.fg("dim", `Global agent model: ${this.globalModel}`));
+          add(" ", this.theme.fg("dim", `Global agent model: ${this.globalModel}${this.globalThinking ? ` · thinking ${this.globalThinking}` : ""}`));
         }
         add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc cancel"));
         break;
@@ -238,7 +241,8 @@ export class ManageAgentModelWizard implements Component {
         break;
       }
       case "thinking": {
-        add(" ", this.theme.fg("accent", `Manage agent model · ${this.selectedAgent?.name ?? ""} · ${this.selectedModel?.label ?? ""} · thinking level`));
+        const contextLabel = this.actionIndex === 2 ? "global agent model" : (this.selectedAgent?.name ?? "");
+        add(" ", this.theme.fg("accent", `Manage agent model · ${contextLabel} · ${this.selectedModel?.label ?? ""} · thinking level`));
         if (this.thinkings.length === 0) {
           add(" ", this.theme.fg("muted", "This model does not support thinking levels."));
           add(" ", this.theme.fg("dim", "Enter continue"));
@@ -256,7 +260,7 @@ export class ManageAgentModelWizard implements Component {
       case "global": {
         add(" ", this.theme.fg("accent", "Manage agent model · global agent model"));
         if (this.globalModel) {
-          add(" ", this.theme.fg("text", `Current: ${this.globalModel}`));
+          add(" ", this.theme.fg("text", `Current: ${this.globalModel}${this.globalThinking ? ` · thinking ${this.globalThinking}` : ""}`));
         } else {
           add(" ", this.theme.fg("muted", "No global agent model is configured. Agents without a frontmatter model inherit the parent model."));
         }
@@ -300,7 +304,7 @@ export class ManageAgentModelWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.down)) {
-        this.actionIndex = Math.min(2, this.actionIndex + 1);
+        this.actionIndex = Math.min(4, this.actionIndex + 1);
         this.refresh();
         return;
       }
@@ -413,7 +417,7 @@ export class ManageAgentModelWizard implements Component {
         } else if (model && this.actionIndex === 2) {
           this.selectedModel = model;
           this.modelIndex = 0;
-          void this.runSetGlobal(model.reference);
+          void this.startGlobalThinkingStep(model.reference);
         }
         return;
       }
@@ -438,7 +442,9 @@ export class ManageAgentModelWizard implements Component {
       }
       if (matchesKey(data, Key.enter)) {
         const thinking = this.thinkings[this.thinkingIndex];
-        if (this.selectedAgent && this.selectedModel) {
+        if (this.actionIndex === 2 && this.selectedModel) {
+          void this.runSetGlobal(this.selectedModel.reference, thinking?.level);
+        } else if (this.selectedAgent && this.selectedModel) {
           void this.runSet(this.selectedAgent.name, this.selectedModel.reference, thinking?.level);
         }
         return;
@@ -503,6 +509,30 @@ export class ManageAgentModelWizard implements Component {
     })();
   }
 
+  /** Global set: check thinking support, then route to the shared thinking step (or apply directly when only `off`). */
+  private startGlobalThinkingStep(reference: string): void {
+    void (async () => {
+      this.step = { kind: "busy", message: "Checking thinking support…" };
+      this.refresh();
+      let levels: readonly ManageAgentModelThinkingItem[];
+      try {
+        levels = await this.controller.listThinkingLevels(reference);
+      } catch {
+        levels = [];
+      }
+      if (this.settled) return;
+      // Non-reasoning models expose only `off`; apply directly without a picker.
+      if (levels.length <= 1 && levels[0]?.level === "off") {
+        void this.runSetGlobal(reference);
+        return;
+      }
+      this.thinkings = levels;
+      this.thinkingIndex = 0;
+      this.step = { kind: "thinking" };
+      this.refresh();
+    })();
+  }
+
   private async runSet(name: string, reference: string, thinking?: string): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -527,15 +557,16 @@ export class ManageAgentModelWizard implements Component {
     this.refresh();
   }
 
-  private async runSetGlobal(reference: string): Promise<void> {
+  private async runSetGlobal(reference: string, thinking?: string): Promise<void> {
     if (this.busy) return;
     this.busy = true;
-    this.step = { kind: "busy", message: `Setting global agent model to ${reference}…` };
+    this.step = { kind: "busy", message: `Setting global agent model to ${reference}${thinking ? `, thinking ${thinking}` : ""}…` };
     this.refresh();
-    const result = await this.controller.setGlobalModel(reference, this.signal);
+    const result = await this.controller.setGlobalModel(reference, thinking, this.signal);
     if (this.settled) return;
     this.busy = false;
     this.globalModel = result.ok ? reference : this.globalModel;
+    this.globalThinking = result.ok ? thinking : this.globalThinking;
     this.step = { kind: "result", ok: result.ok, message: result.message };
     this.refresh();
   }
@@ -548,7 +579,10 @@ export class ManageAgentModelWizard implements Component {
     const result = await this.controller.removeGlobalModel(this.signal);
     if (this.settled) return;
     this.busy = false;
-    if (result.ok) this.globalModel = undefined;
+    if (result.ok) {
+      this.globalModel = undefined;
+      this.globalThinking = undefined;
+    }
     this.step = { kind: "result", ok: result.ok, message: result.message };
     this.refresh();
   }

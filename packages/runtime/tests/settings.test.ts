@@ -454,6 +454,38 @@ test("agents.model accepts a project override with home as the base", () => {
   }
 });
 
+test("agents.thinking is resolved exactly as configured and never normalized", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, { agents: { thinking: "high" } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.thinking, "high");
+    });
+    writeHomeConfig(home, { agents: { thinking: "not-a-level" } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.thinking, "not-a-level", "no validation of the config value");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("agents.thinking is absent by default and empty values are skipped", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, { agents: { thinking: "   " } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.thinking, undefined, "whitespace-only is treated as unset");
+    });
+    writeHomeConfig(home, { agents: { thinking: "" } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.thinking, undefined, "empty string is treated as unset");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("configured maxConcurrency is used when a project pool is constructed", async () => {
   const home = tempHome();
   const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-concurrency-project-"));

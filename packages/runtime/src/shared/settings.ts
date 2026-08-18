@@ -31,6 +31,12 @@ export interface AgentSettings {
    * time; an unresolvable value fails the child with a clear error.
    */
   model?: string;
+  /**
+   * Global agent thinking level, applied to every child agent without a
+   * frontmatter `thinking`. Accepted exactly as configured — no validation or
+   * normalization; an invalid level fails the child with a clear error.
+   */
+  thinking?: string;
 }
 
 export interface RuntimeSettings {
@@ -254,6 +260,10 @@ function applySource(source: Record<string, unknown>, target: ResolvedSettings, 
     // supported way to clear it; no validation or auto-correction is applied.
     if (typeof agents.model === "string" && agents.model.trim().length > 0) {
       target.agents.model = agents.model;
+    }
+    // The global agent thinking level follows the same exact-contract rule.
+    if (typeof agents.thinking === "string" && agents.thinking.trim().length > 0) {
+      target.agents.thinking = agents.thinking;
     }
   }
   const runtime = source.runtime;

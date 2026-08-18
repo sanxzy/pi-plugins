@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveChildModelMapping, resolveExactChildModel } from "../src/infrastructure/pi-sdk/child-model.ts";
+import { resolveChildModelMapping, resolveChildThinkingMapping, resolveExactChildModel } from "../src/infrastructure/pi-sdk/child-model.ts";
 
 interface FakeModel {
   id: string;
@@ -135,4 +135,44 @@ test("mapping: a resolvable global model is used exactly as-is with no normaliza
   const result = mapping({ globalModel: "commandcode/deepseek-v4-flash" });
   assert.equal(result.model?.provider, "commandcode");
   assert.equal(result.model?.id, "deepseek-v4-flash");
+});
+
+function thinkingMapping(options: Partial<Parameters<typeof resolveChildThinkingMapping>[0]> = {}): ReturnType<typeof resolveChildThinkingMapping> {
+  return resolveChildThinkingMapping({
+    frontmatterThinking: undefined,
+    globalThinking: undefined,
+    globalConfigPath: CONFIG_PATH,
+    ...options,
+  });
+}
+
+test("thinking mapping: frontmatter thinking wins over the global level", () => {
+  const result = thinkingMapping({ frontmatterThinking: "max", globalThinking: "high" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.thinking, "max");
+});
+
+test("thinking mapping: global level applies when the frontmatter key is absent", () => {
+  const result = thinkingMapping({ globalThinking: "high" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.thinking, "high");
+});
+
+test("thinking mapping: no configured value leaves the SDK default", () => {
+  const result = thinkingMapping();
+  assert.equal(result.error, undefined);
+  assert.equal(result.thinking, undefined, "caller keeps the SDK default");
+});
+
+test("thinking mapping: an invalid global level errors with the config path", () => {
+  const result = thinkingMapping({ globalThinking: "super-duper" });
+  assert.equal(result.thinking, undefined);
+  assert.match(result.error ?? "", /Global agent thinking "super-duper"/);
+  assert.match(result.error ?? "", new RegExp(CONFIG_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(result.error ?? "", /agents\.thinking/);
+});
+
+test("thinking mapping: a whitespace-padded valid level is trimmed before use", () => {
+  const result = thinkingMapping({ globalThinking: "  high  " });
+  assert.equal(result.thinking, "high");
 });

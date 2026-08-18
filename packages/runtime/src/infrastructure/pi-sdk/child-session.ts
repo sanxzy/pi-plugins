@@ -11,7 +11,7 @@ import {
   type AgentSession,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import { resolveChildModelMapping } from "./child-model.ts";
+import { resolveChildModelMapping, resolveChildThinkingMapping } from "./child-model.ts";
 import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
@@ -314,11 +314,21 @@ async function createIsolatedChild(options: {
     sessionManager,
     resourceLoader,
   };
-  // Thinking mapping: an explicit frontmatter `thinking` level applies to the
-  // child session; the SDK clamps unsupported levels to the model's range. An
-  // absent level inherits the SDK default.
-  if (discovered?.thinking) {
-    sessionOptions.thinkingLevel = discovered.thinking;
+  // Thinking mapping, in resolution priority: frontmatter `thinking` (exact)
+  // > `agents.thinking` in the home-root `pi-c2/config.json` (exact) > SDK
+  // default. A configured level is applied as-is; an invalid global level
+  // fails the child with a clear error instead of silently ignoring it. The
+  // SDK clamps unsupported levels to the model's range.
+  const thinking = resolveChildThinkingMapping({
+    frontmatterThinking: discovered?.thinking,
+    globalThinking: resolveSettingsForProject(options.cwd).agents.thinking,
+    globalConfigPath: settingsConfigPath(),
+  });
+  if (thinking.error) {
+    throw new Error(thinking.error);
+  }
+  if (thinking.thinking) {
+    sessionOptions.thinkingLevel = thinking.thinking;
   }
   // Tool mapping: an explicit non-empty `tools` list becomes the child
   // allowlist; an absent/empty list enables the full built-in set (excluding

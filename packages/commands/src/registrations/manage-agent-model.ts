@@ -173,26 +173,30 @@ export function createManageAgentModelController(options: ManageAgentModelContro
     },
     async getGlobalModel() {
       const configPath = settingsConfigPath();
-      const model = resolveSettingsForProject(cwd).agents.model;
-      return { model, configPath };
+      const settings = resolveSettingsForProject(cwd);
+      return { model: settings.agents.model, thinking: settings.agents.thinking, configPath };
     },
-    async setGlobalModel(reference, _signal) {
+    async setGlobalModel(reference, thinking, _signal) {
       const configPath = settingsConfigPath();
       try {
         const config = readSettingsConfig(configPath);
         const agents = typeof config.agents === "object" && config.agents !== null && !Array.isArray(config.agents)
           ? { ...(config.agents as Record<string, unknown>) }
           : {};
-        if (agents.model === reference) {
-          return { ok: true, message: `Global agent model already set to ${reference}; no change was needed.` };
+        const sameModel = agents.model === reference;
+        const sameThinking = agents.thinking === thinking;
+        if (sameModel && sameThinking) {
+          return { ok: true, message: `Global agent model already set to ${reference}${thinking ? `, thinking ${thinking}` : ""}; no change was needed.` };
         }
         agents.model = reference;
+        if (thinking) agents.thinking = thinking;
+        else delete agents.thinking;
         writeSettingsConfig(configPath, { ...config, agents });
       } catch (error) {
         return { ok: false, message: `Could not write ${configPath}: ${error instanceof Error ? error.message : String(error)}` };
       }
       clearSettingsCache();
-      return { ok: true, message: `Global agent model set to ${reference}.` };
+      return { ok: true, message: `Global agent model set to ${reference}${thinking ? `, thinking ${thinking}` : ""}.` };
     },
     async removeGlobalModel(_signal) {
       const configPath = settingsConfigPath();
@@ -201,10 +205,11 @@ export function createManageAgentModelController(options: ManageAgentModelContro
         const agents = typeof config.agents === "object" && config.agents !== null && !Array.isArray(config.agents)
           ? { ...(config.agents as Record<string, unknown>) }
           : {};
-        if (!("model" in agents)) {
-          return { ok: true, message: "No global agent model is configured; no change was needed." };
+        if (!("model" in agents) && !("thinking" in agents)) {
+          return { ok: true, message: "No global agent model or thinking is configured; no change was needed." };
         }
         delete agents.model;
+        delete agents.thinking;
         writeSettingsConfig(configPath, { ...config, agents });
       } catch (error) {
         return { ok: false, message: `Could not write ${configPath}: ${error instanceof Error ? error.message : String(error)}` };

@@ -10,6 +10,8 @@
  * frontmatter manually.
  */
 
+import { THINKING_LEVELS } from "@xzy-ai/core";
+
 export interface ExactModelLike {
   id: string;
   provider: string;
@@ -58,6 +60,36 @@ export function resolveChildModelMapping(options: {
     return { model: declared };
   }
   return { model: undefined };
+}
+
+/**
+ * Apply the child thinking resolution priority for one child agent:
+ *
+ *   frontmatter thinking > global config `agents.thinking` > SDK default
+ *
+ * A configured value (frontmatter or global) is applied exactly as-is. An
+ * invalid global level produces a clear `error` (frontmatter levels are
+ * already normalized by discovery). Only when no value is configured at
+ * either level does the caller keep the SDK default.
+ */
+export function resolveChildThinkingMapping(options: {
+  frontmatterThinking?: string;
+  globalThinking?: string;
+  globalConfigPath: string;
+}): { thinking?: string; error?: string } {
+  if (options.frontmatterThinking) {
+    return { thinking: options.frontmatterThinking };
+  }
+  if (options.globalThinking) {
+    const level = options.globalThinking.trim();
+    if (!(THINKING_LEVELS as readonly string[]).includes(level)) {
+      return {
+        error: `Global agent thinking "${options.globalThinking}" (from ${options.globalConfigPath} agents.thinking) is not a valid thinking level. Fix the value in the config file or remove the agents.thinking key to inherit the SDK default.`,
+      };
+    }
+    return { thinking: level };
+  }
+  return {};
 }
 
 /**
