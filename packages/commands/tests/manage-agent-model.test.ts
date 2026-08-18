@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionCommandContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { clearSettingsCache, resolveSettingsForProject, settingsConfigPath } from "@xzy-ai/runtime";
 import { registerManageAgentModel } from "../src/registrations/manage-agent-model-command.ts";
 import { createManageAgentModelController } from "../src/registrations/manage-agent-model.ts";
 
@@ -174,6 +175,119 @@ test("setModel on an unknown agent reports an error", async () => {
     assert.equal((await controller.setModel("nope", "openai/gpt-5")).ok, false);
   } finally {
     cleanup();
+  }
+});
+
+function withHome(home: string, run: () => void): void {
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = home;
+  clearSettingsCache();
+  try {
+    run();
+  } finally {
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
+    clearSettingsCache();
+  }
+}
+
+function writeHomeConfig(home: string, value: unknown): void {
+  const dir = join(home, "pi-c2");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "config.json"), JSON.stringify(value));
+}
+
+test("getGlobalModel reports the configured agents.model and its config path", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
+  try {
+    writeHomeConfig(home, { agents: { model: "commandcode/meta/muse-spark-1.2-contributor", maxConcurrency: 4 } });
+    withHome(home, async () => {
+      const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
+      const global = await controller.getGlobalModel();
+      assert.equal(global.model, "commandcode/meta/muse-spark-1.2-contributor");
+      assert.equal(global.configPath, settingsConfigPath());
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("setGlobalModel writes agents.model preserving other config keys", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
+  try {
+    writeHomeConfig(home, { agents: { maxConcurrency: 4 }, channels: { maxTextLength: 9000 } });
+    withHome(home, async () => {
+      const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
+      const result = await controller.setGlobalModel("openai/gpt-5");
+      assert.deepEqual(result, { ok: true, message: "Global agent model set to openai/gpt-5." });
+      const raw = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as Record<string, unknown>;
+      assert.equal((raw.agents as Record<string, unknown>).model, "openai/gpt-5");
+      assert.equal((raw.agents as Record<string, unknown>).maxConcurrency, 4, "sibling agents keys preserved");
+      assert.equal((raw.channels as Record<string, unknown>).maxTextLength, 9000, "other groups preserved");
+      assert.equal(resolveSettingsForProject("/tmp").agents.model, "openai/gpt-5", "settings cache observes the write");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("setGlobalModel creates the config file when missing", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
+  try {
+    withHome(home, async () => {
+      const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
+      const result = await controller.setGlobalModel("commandcode/deepseek/deepseek-v4-flash");
+      assert.equal(result.ok, true);
+      const raw = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as Record<string, unknown>;
+      assert.equal((raw.agents as Record<string, unknown>).model, "commandcode/deepseek/deepseek-v4-flash");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("setGlobalModel to the same value is a no-change success", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
+  try {
+    writeHomeConfig(home, { agents: { model: "openai/gpt-5" } });
+    withHome(home, async () => {
+      const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
+      const result = await controller.setGlobalModel("openai/gpt-5");
+      assert.deepEqual(result, { ok: true, message: "Global agent model already set to openai/gpt-5; no change was needed." });
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("removeGlobalModel deletes the agents.model key preserving the rest", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
+  try {
+    writeHomeConfig(home, { agents: { model: "openai/gpt-5", maxConcurrency: 4 } });
+    withHome(home, async () => {
+      const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
+      const result = await controller.removeGlobalModel();
+      assert.deepEqual(result, { ok: true, message: "Global agent model removed." });
+      const raw = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as Record<string, unknown>;
+      assert.equal("model" in (raw.agents as Record<string, unknown>), false);
+      assert.equal((raw.agents as Record<string, unknown>).maxConcurrency, 4);
+      assert.equal(resolveSettingsForProject("/tmp").agents.model, undefined);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("removeGlobalModel with nothing configured reports no-change", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-agent-model-global-"));
+  try {
+    withHome(home, async () => {
+      const controller = createManageAgentModelController({ cwd: "/tmp", modelRegistry: modelRegistry([]) });
+      const result = await controller.removeGlobalModel();
+      assert.deepEqual(result, { ok: true, message: "No global agent model is configured; no change was needed." });
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

@@ -11,7 +11,8 @@ import {
   type AgentSession,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import { resolveExactChildModel } from "./child-model.ts";
+import { resolveChildModelMapping } from "./child-model.ts";
+import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
 import { publishSessionMcpActive, publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
@@ -282,19 +283,26 @@ async function createIsolatedChild(options: {
   publishSessionMcpDefinitions(childContext, options.mcpToolDefs ?? []);
   if (options.mcpBridge) publishSessionMcpBridge(childContext, options.mcpBridge);
 
-  // Model mapping: a frontmatter `model` value is an exact contract. When the
-  // key is present, the child uses the resolved value as-is — an unresolvable
-  // reference fails the child with a clear message instead of silently falling
-  // back to the parent model. Only an absent key inherits the parent model.
+  // Model mapping, in resolution priority: frontmatter `model` (exact
+  // contract) > `agents.model` in the home-root `pi-c2/config.json` (exact
+  // contract) > parent model. When a configured value is present it is
+  // accepted exactly as-is and must resolve against the child catalog — an
+  // unresolvable reference fails the child with a clear message instead of
+  // silently falling back to the parent model. Only an absent value at both
+  // levels inherits the parent model.
   let model = options.model;
-  if (discovered?.model) {
-    const declared = resolveExactChildModel(discovered.model, modelRuntime);
-    if (!declared) {
-      throw new Error(
-        `Agent "${discovered.name}" declares model "${discovered.model}", which does not match any available model exactly. Fix the frontmatter model value or remove the key to inherit the parent model.`,
-      );
-    }
-    model = declared;
+  const mapping = resolveChildModelMapping({
+    frontmatterModel: discovered?.model,
+    globalModel: resolveSettingsForProject(options.cwd).agents.model,
+    agentName: discovered?.name ?? "",
+    modelRuntime,
+    globalConfigPath: settingsConfigPath(),
+  });
+  if (mapping.error) {
+    throw new Error(mapping.error);
+  }
+  if (mapping.model) {
+    model = mapping.model;
   }
 
   const sessionOptions: Record<string, unknown> = {

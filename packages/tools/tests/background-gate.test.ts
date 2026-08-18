@@ -541,3 +541,101 @@ test("one root agent call performs at most one authoritative registry load", asy
     else process.env.PI_C2_TEST_HOME = previousHome;
   }
 });
+
+test("a failed root background spawn surfaces the model error through ui.notify", async () => {
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-notify-fail-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-notify-fail-"));
+  mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "agents", "test-agent.md"),
+    "---\nname: test-agent\ndescription: Test agent\nmodel: commandcode/dummy-nonexistent-model\n---\ntest body",
+    "utf8",
+  );
+  const previousFactory = spawnChildSession.__createChild;
+  spawnChildSession.__createChild = async () => {
+    throw new Error('Agent "test-agent" declares model "commandcode/dummy-nonexistent-model", which does not match any available model exactly. Fix the frontmatter model value or remove the key to inherit the parent model.');
+  };
+  const notifications: string[] = [];
+  const notifyCtx = context(cwd) as ExtensionContext & { ui: { notify: (message: string) => void } };
+  notifyCtx.ui = { ...notifyCtx.ui, notify: (message: string) => notifications.push(message) };
+  let registered: RegisteredAgent | undefined;
+  registerAgentTool({
+    registerTool(tool: RegisteredAgent) {
+      registered = tool;
+    },
+  } as unknown as ExtensionAPI);
+  try {
+    assert.ok(registered);
+    const result = await registered.execute(
+      "call",
+      { description: "broken model", prompt: "work", subagent_type: "test-agent" },
+      undefined,
+      undefined,
+      notifyCtx,
+    );
+    assert.ok(result.details.jobId);
+    await flush();
+    await flush();
+    assert.equal(notifications.length, 1, "the model error is surfaced through ui.notify");
+    assert.match(notifications[0]!, /declares model/);
+  } finally {
+    spawnChildSession.__createChild = previousFactory;
+    rmSync(cwd, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+  }
+});
+
+test("a child caller failure is not notified (inline result only)", async () => {
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = mkdtempSync(join(tmpdir(), "pi-c2-notify-child-home-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-notify-child-"));
+  mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "agents", "test-agent.md"),
+    "---\nname: test-agent\ndescription: Test agent\n---\ntest body",
+    "utf8",
+  );
+  const previousFactory = spawnChildSession.__createChild;
+  spawnChildSession.__createChild = async () => {
+    throw new Error("child creation failed");
+  };
+  const notifications: string[] = [];
+  const childCtx = context(cwd) as ExtensionContext & { sessionIdForTest: string; ui: { notify: (message: string) => void } };
+  childCtx.sessionIdForTest = "child-session";
+  childCtx.ui = { ...childCtx.ui, notify: (message: string) => notifications.push(message) };
+  let registered: RegisteredAgent | undefined;
+  registerAgentTool({
+    registerTool(tool: RegisteredAgent) {
+      registered = tool;
+    },
+  } as unknown as ExtensionAPI);
+  try {
+    const pool = getChildPool(cwd, "child-session");
+    pool.registry.createJob(createJob({
+      jobId: "child-session",
+      parentSessionId: "root-session",
+      sessionId: "child-session",
+      status: "running",
+      description: "child",
+      subagentType: "test-agent",
+    }));
+    assert.ok(registered);
+    const result = await registered.execute(
+      "call",
+      { description: "child spawn", prompt: "work", subagent_type: "test-agent" },
+      undefined,
+      undefined,
+      childCtx,
+    );
+    assert.ok(result.details.jobId);
+    assert.match(result.content[0]?.text ?? "", /failed/);
+    assert.equal(notifications.length, 0, "child-caller failures are not notified");
+  } finally {
+    spawnChildSession.__createChild = previousFactory;
+    rmSync(cwd, { recursive: true, force: true });
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+  }
+});

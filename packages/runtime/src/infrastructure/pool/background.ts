@@ -48,6 +48,13 @@ interface BackgroundJobDeps {
 interface RunBackgroundJobOptions {
   parentSessionFile: string;
   runChild: () => Promise<ChildRunResult | undefined>;
+  /**
+   * Called when the child run fails (thrown error or failed result) with the
+   * surfaced message. The agent tool uses this to notify the user through
+   * `ctx.ui.notify` so configuration errors (e.g. an unresolvable global or
+   * frontmatter model) are visible immediately for manual correction.
+   */
+  onChildFailed?: (message: string) => void;
 }
 
 /**
@@ -76,6 +83,7 @@ async function runBackgroundJobInner(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.registry.updateJob(job.jobId, { status: "failed" });
+    options.onChildFailed?.(message);
     const delivered = deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
       sessionFile: "",
       output: message,
@@ -87,6 +95,7 @@ async function runBackgroundJobInner(
 
   if (!result) {
     deps.registry.updateJob(job.jobId, { status: "failed" });
+    options.onChildFailed?.("could not spawn child");
     const delivered = deps.delivery.deliverResult(job.jobId, options.parentSessionFile, formatBackgroundResult(job.subagentType, job.jobId, {
       sessionFile: "",
       output: "could not spawn child",
@@ -104,6 +113,7 @@ async function runBackgroundJobInner(
   deps.registry.updateJob(job.jobId, { status: terminalStatus });
   deps.manifest?.update({ status: terminalStatus, endedAt, sessionFile: result.sessionFile });
   deps.registry.updateJob(job.jobId, { sessionFile: result.sessionFile });
+  if (result.status === "failed") options.onChildFailed?.(result.output);
   // Delivery owns the delivered flag: it is set immediately only when the
   // parent sink accepts the result, or later when a durable pending result is
   // drained after the parent session registers again.

@@ -393,6 +393,67 @@ test("resolution error paths do not surface the parsed secret", () => {
   }
 });
 
+test("agents.model is resolved exactly as configured and never normalized", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, { agents: { model: "commandcode/meta/muse-spark-1.2-contributor" } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.model, "commandcode/meta/muse-spark-1.2-contributor");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("agents.model is absent by default and empty values are skipped", () => {
+  const home = tempHome();
+  try {
+    writeHomeConfig(home, { agents: { model: "   " } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.model, undefined, "whitespace-only is treated as unset");
+    });
+    writeHomeConfig(home, { agents: { model: "" } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.model, undefined, "empty string is treated as unset");
+    });
+    rmSync(join(home, "pi-c2", "config.json"), { force: true });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.model, undefined, "absent key stays absent");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("agents.model is never validated or auto-corrected even when unresolvable-looking", () => {
+  const home = tempHome();
+  try {
+    // A value that no catalog could ever match must still be accepted as-is:
+    // resolution happens later at child spawn, and errors surface to the user.
+    writeHomeConfig(home, { agents: { model: "commandcode/definitely/not/a/real/model" } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().agents.model, "commandcode/definitely/not/a/real/model");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("agents.model accepts a project override with home as the base", () => {
+  const home = tempHome();
+  const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-model-project-"));
+  try {
+    writeHomeConfig(home, { agents: { model: "anthropic/claude-sonnet-4-5" } });
+    writeProjectConfig(project, { agents: { model: "openai/gpt-5" } });
+    withHome(home, () => {
+      assert.equal(resolveSettingsForProject(project).agents.model, "openai/gpt-5", "project override wins");
+    });
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("configured maxConcurrency is used when a project pool is constructed", async () => {
   const home = tempHome();
   const project = mkdtempSync(join(tmpdir(), "pi-c2-settings-concurrency-project-"));

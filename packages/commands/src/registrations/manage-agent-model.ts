@@ -15,7 +15,13 @@ import type {
   ManageAgentModelModelItem,
   ManageAgentModelThinkingItem,
 } from "@xzy-ai/tui";
-import { clearAgentDiscoveryCache, createCachedAgentDiscovery } from "@xzy-ai/runtime";
+import {
+  clearAgentDiscoveryCache,
+  clearSettingsCache,
+  createCachedAgentDiscovery,
+  resolveSettingsForProject,
+  settingsConfigPath,
+} from "@xzy-ai/runtime";
 
 /**
  * UI-agnostic boundary implemented by the commands package and driven by the
@@ -38,13 +44,29 @@ export function formatModelReference(model: RegistryModel): string {
   return `${model.provider}/${model.id}`;
 }
 
+/** Read the current settings config as a plain object; malformed or missing input degrades to `{}`. */
+function readSettingsConfig(filePath: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Write the settings config with the same formatting the bootstrap uses. */
+function writeSettingsConfig(filePath: string, value: Record<string, unknown>): void {
+  writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
 /**
  * Create the controller for `/manage-agent-model`.
  *
  * The agent list comes from the shared cached discovery (same seam as the
  * `agent` tool); the model list comes from the session model registry. Writes
- * rewrite only the `model` key of the target agent file's frontmatter and clear
- * the discovery cache so subsequent `agent` calls resolve the new model.
+ * rewrite only the `model` key of the target agent file's frontmatter (or the
+ * `agents.model` key of the home-root `pi-c2/config.json`) and clear the
+ * discovery/settings caches so subsequent `agent` calls resolve the new model.
  */
 export function createManageAgentModelController(options: ManageAgentModelControllerOptions): ManageAgentModelController {
   const { cwd, modelRegistry } = options;
@@ -148,6 +170,47 @@ export function createManageAgentModelController(options: ManageAgentModelContro
       const thinkingEdit = removeFrontmatterKey(modelEdit.content, "thinking");
       if (!thinkingEdit.ok) return { ok: false, message: thinkingEdit.message };
       return applyEdit(name, [modelEdit, thinkingEdit], "model removed");
+    },
+    async getGlobalModel() {
+      const configPath = settingsConfigPath();
+      const model = resolveSettingsForProject(cwd).agents.model;
+      return { model, configPath };
+    },
+    async setGlobalModel(reference, _signal) {
+      const configPath = settingsConfigPath();
+      try {
+        const config = readSettingsConfig(configPath);
+        const agents = typeof config.agents === "object" && config.agents !== null && !Array.isArray(config.agents)
+          ? { ...(config.agents as Record<string, unknown>) }
+          : {};
+        if (agents.model === reference) {
+          return { ok: true, message: `Global agent model already set to ${reference}; no change was needed.` };
+        }
+        agents.model = reference;
+        writeSettingsConfig(configPath, { ...config, agents });
+      } catch (error) {
+        return { ok: false, message: `Could not write ${configPath}: ${error instanceof Error ? error.message : String(error)}` };
+      }
+      clearSettingsCache();
+      return { ok: true, message: `Global agent model set to ${reference}.` };
+    },
+    async removeGlobalModel(_signal) {
+      const configPath = settingsConfigPath();
+      try {
+        const config = readSettingsConfig(configPath);
+        const agents = typeof config.agents === "object" && config.agents !== null && !Array.isArray(config.agents)
+          ? { ...(config.agents as Record<string, unknown>) }
+          : {};
+        if (!("model" in agents)) {
+          return { ok: true, message: "No global agent model is configured; no change was needed." };
+        }
+        delete agents.model;
+        writeSettingsConfig(configPath, { ...config, agents });
+      } catch (error) {
+        return { ok: false, message: `Could not write ${configPath}: ${error instanceof Error ? error.message : String(error)}` };
+      }
+      clearSettingsCache();
+      return { ok: true, message: "Global agent model removed." };
     },
     async cancel() {
       await undefined;

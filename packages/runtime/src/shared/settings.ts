@@ -24,6 +24,13 @@ export interface AgentSettings {
   maxParallelAgents: number;
   retainedTerminalJobs: number;
   retainedTerminalAgents: number;
+  /**
+   * Global agent model reference, applied to every child agent without a
+   * frontmatter `model`. Accepted exactly as configured — no validation or
+   * normalization — and resolved against the child model catalog at spawn
+   * time; an unresolvable value fails the child with a clear error.
+   */
+  model?: string;
 }
 
 export interface RuntimeSettings {
@@ -242,6 +249,12 @@ function applySource(source: Record<string, unknown>, target: ResolvedSettings, 
     if (isPosInt(agents.maxParallelAgents, MAX_PARALLEL_UPPER)) target.agents.maxParallelAgents = agents.maxParallelAgents;
     if (isUint(agents.retainedTerminalJobs, RETENTION_UPPER)) target.agents.retainedTerminalJobs = agents.retainedTerminalJobs;
     if (isUint(agents.retainedTerminalAgents, RETENTION_UPPER)) target.agents.retainedTerminalAgents = agents.retainedTerminalAgents;
+    // The global agent model is accepted exactly as configured. An empty
+    // string or non-string value is skipped so removal (key deletion) is the
+    // supported way to clear it; no validation or auto-correction is applied.
+    if (typeof agents.model === "string" && agents.model.trim().length > 0) {
+      target.agents.model = agents.model;
+    }
   }
   const runtime = source.runtime;
   if (isObject(runtime)) {

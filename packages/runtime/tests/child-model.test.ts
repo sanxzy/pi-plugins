@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveExactChildModel } from "../src/infrastructure/pi-sdk/child-model.ts";
+import { resolveChildModelMapping, resolveExactChildModel } from "../src/infrastructure/pi-sdk/child-model.ts";
 
 interface FakeModel {
   id: string;
@@ -79,4 +79,60 @@ test("an empty or whitespace-only reference never resolves", () => {
 
 test("a missing runtime never resolves", () => {
   assert.equal(resolveExactChildModel("commandcode/deepseek-v4-flash", undefined), undefined);
+});
+
+const CONFIG_PATH = "/home/user/.pi/agent/pi-c2/config.json";
+
+function mapping(options: Partial<Parameters<typeof resolveChildModelMapping>[0]> = {}): ReturnType<typeof resolveChildModelMapping> {
+  return resolveChildModelMapping({
+    frontmatterModel: undefined,
+    globalModel: undefined,
+    agentName: "explore",
+    modelRuntime: runtimeWith(CATALOG),
+    globalConfigPath: CONFIG_PATH,
+    ...options,
+  });
+}
+
+test("mapping: frontmatter model wins over the global model", () => {
+  const result = mapping({
+    frontmatterModel: "commandcode/deepseek-v4-pro",
+    globalModel: "commandcode/deepseek-v4-flash",
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.model?.id, "deepseek-v4-pro");
+});
+
+test("mapping: global model applies when the frontmatter key is absent", () => {
+  const result = mapping({ globalModel: "commandcode/deepseek-v4-flash" });
+  assert.equal(result.error, undefined);
+  assert.equal(result.model?.provider, "commandcode");
+  assert.equal(result.model?.id, "deepseek-v4-flash");
+});
+
+test("mapping: no configured value at either level leaves the parent model", () => {
+  const result = mapping();
+  assert.equal(result.error, undefined);
+  assert.equal(result.model, undefined, "caller keeps the parent model");
+});
+
+test("mapping: unresolvable frontmatter model errors without falling back", () => {
+  const result = mapping({ frontmatterModel: "commandcode/dummy-nonexistent-model" });
+  assert.equal(result.model, undefined);
+  assert.match(result.error ?? "", /Agent "explore" declares model "commandcode\/dummy-nonexistent-model"/);
+  assert.match(result.error ?? "", /does not match any available model exactly/);
+});
+
+test("mapping: unresolvable global model errors with the config path", () => {
+  const result = mapping({ globalModel: "commandcode/not-a-model" });
+  assert.equal(result.model, undefined);
+  assert.match(result.error ?? "", /Global agent model "commandcode\/not-a-model"/);
+  assert.match(result.error ?? "", new RegExp(CONFIG_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(result.error ?? "", /agents\.model/);
+});
+
+test("mapping: a resolvable global model is used exactly as-is with no normalization", () => {
+  const result = mapping({ globalModel: "commandcode/deepseek-v4-flash" });
+  assert.equal(result.model?.provider, "commandcode");
+  assert.equal(result.model?.id, "deepseek-v4-flash");
 });

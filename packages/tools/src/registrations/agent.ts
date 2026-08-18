@@ -312,12 +312,21 @@ async function startAgentInner(
   // Root host: background delivery. The child lifecycle runs under the shared
   // concurrency gate, so a call beyond the cap stays `queued` until it acquires
   // a slot. `signal: undefined` keeps the child alive when the turn is cancelled.
+  // A failed spawn (e.g. an unresolvable frontmatter or global config model)
+  // surfaces through the UI notification channel so the user can correct the
+  // configuration manually; the failure text is also delivered to the parent
+  // transcript through the normal background result path.
   const parentSessionFile = ctx.sessionManager.getSessionFile() ?? "";
   const launch = runBackgroundJob(
     { registry: pool.registry, delivery: pool.deliveryFor(pool.rootSessionIdFor(parentSessionId)) },
     job,
     {
       parentSessionFile,
+      onChildFailed: (message) => {
+        if (ctx.mode === "tui") {
+          ctx.ui.notify(message, "error");
+        }
+      },
       runChild: () =>
         spawnWithControl(pool, params, ctx, job, agent, {
           ...spawnOptions,

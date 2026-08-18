@@ -20,6 +20,47 @@ export interface ExactModelCatalog {
 }
 
 /**
+ * Apply the child model resolution priority for one child agent:
+ *
+ *   frontmatter model > global config `agents.model` > parent model
+ *
+ * A configured value (frontmatter or global) is an exact contract: it must
+ * resolve against the child catalog by exact reference. An unresolvable value
+ * produces a clear `error` (never a silent fallback to the parent model) so
+ * the user can correct the configuration manually. Only when no value is
+ * configured at either level does the caller keep the parent model.
+ */
+export function resolveChildModelMapping(options: {
+  frontmatterModel?: string;
+  globalModel?: string;
+  agentName: string;
+  modelRuntime: ExactModelCatalog | undefined;
+  globalConfigPath: string;
+}): { model: ExactModelLike | undefined; error?: string } {
+  if (options.frontmatterModel) {
+    const declared = resolveExactChildModel(options.frontmatterModel, options.modelRuntime);
+    if (!declared) {
+      return {
+        model: undefined,
+        error: `Agent "${options.agentName}" declares model "${options.frontmatterModel}", which does not match any available model exactly. Fix the frontmatter model value or remove the key to inherit the parent model.`,
+      };
+    }
+    return { model: declared };
+  }
+  if (options.globalModel) {
+    const declared = resolveExactChildModel(options.globalModel, options.modelRuntime);
+    if (!declared) {
+      return {
+        model: undefined,
+        error: `Global agent model "${options.globalModel}" (from ${options.globalConfigPath} agents.model) does not match any available model exactly. Fix the value in the config file or remove the agents.model key to inherit the parent model.`,
+      };
+    }
+    return { model: declared };
+  }
+  return { model: undefined };
+}
+
+/**
  * Resolve a frontmatter model reference by exact match only.
  *
  * A `provider/modelId` reference matches the single model with that provider

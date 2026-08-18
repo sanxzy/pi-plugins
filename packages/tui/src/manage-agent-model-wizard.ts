@@ -43,6 +43,12 @@ export interface ManageAgentModelController {
   setModel(agentName: string, reference: string, thinking?: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
   /** Remove the `model`/`thinking` keys from the agent file's frontmatter. */
   removeModel(agentName: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
+  /** The current global agent model (home-root `pi-c2/config.json` `agents.model`) and its config file path. */
+  getGlobalModel(): Promise<{ model?: string; configPath: string }>;
+  /** Set the global agent model in the home-root `pi-c2/config.json`, exactly as given. */
+  setGlobalModel(reference: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
+  /** Remove the global agent model key from the home-root `pi-c2/config.json`. */
+  removeGlobalModel(signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
   cancel(): Promise<void>;
 }
 
@@ -52,6 +58,7 @@ type WizardStep =
   | { kind: "agent" }
   | { kind: "model" }
   | { kind: "thinking" }
+  | { kind: "global" }
   | { kind: "busy"; message: string }
   | { kind: "result"; ok: boolean; message: string };
 
@@ -90,6 +97,7 @@ export class ManageAgentModelWizard implements Component {
 
   private step: WizardStep = { kind: "action" };
   private actionIndex = 0;
+  private globalActionIndex = 0;
   private agentIndex = 0;
   private modelIndex = 0;
   private thinkingIndex = 0;
@@ -99,6 +107,8 @@ export class ManageAgentModelWizard implements Component {
   private thinkings: readonly ManageAgentModelThinkingItem[] = [];
   private selectedAgent: ManageAgentModelAgentItem | undefined;
   private selectedModel: SelectableModel | undefined;
+  private globalModel?: string;
+  private globalConfigPath?: string;
   private cachedLines: string[] | undefined;
   private settled = false;
   private busy = false;
@@ -123,12 +133,20 @@ export class ManageAgentModelWizard implements Component {
 
   private async load(): Promise<void> {
     try {
-      const [agents, models] = await Promise.all([this.controller.listAgents(), this.controller.listModels()]);
+      const [agents, models, global] = await Promise.all([
+        this.controller.listAgents(),
+        this.controller.listModels(),
+        this.controller.getGlobalModel(),
+      ]);
       this.agents = agents;
       this.models = models.map((model) => ({ ...model, label: model.reference }));
+      this.globalModel = global.model;
+      this.globalConfigPath = global.configPath;
     } catch {
       this.agents = [];
       this.models = [];
+      this.globalModel = undefined;
+      this.globalConfigPath = undefined;
     }
     this.refresh();
   }
@@ -159,10 +177,19 @@ export class ManageAgentModelWizard implements Component {
     switch (this.step.kind) {
       case "action": {
         add(" ", this.theme.fg("accent", "Manage agent model"));
-        const options = ["Set / replace agent model", "Remove agent model", "Done"];
+        const options = [
+          "Set / replace agent model",
+          "Remove agent model",
+          "Set / replace global agent model",
+          "Remove global agent model",
+          "Done",
+        ];
         for (let i = 0; i < options.length; i++) {
           const selected = i === this.actionIndex;
           add(selected ? this.theme.fg("accent", "> ") : "  ", this.theme.fg(selected ? "accent" : "text", `${i + 1}. ${options[i]}`));
+        }
+        if (this.globalModel) {
+          add(" ", this.theme.fg("dim", `Global agent model: ${this.globalModel}`));
         }
         add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc cancel"));
         break;
@@ -189,7 +216,8 @@ export class ManageAgentModelWizard implements Component {
         break;
       }
       case "model": {
-        add(" ", this.theme.fg("accent", `Manage agent model · ${this.selectedAgent?.name ?? ""} · select model`));
+        const contextLabel = this.actionIndex === 2 ? "global agent model" : (this.selectedAgent?.name ?? "");
+        add(" ", this.theme.fg("accent", `Manage agent model · ${contextLabel} · select model`));
         add(" ", this.theme.fg("muted", "Type to filter • ↑↓ navigate • Enter select • Esc back"));
         add(" ", this.theme.fg("text", `Filter: ${this.search.getValue()}`));
         const filtered = this.filteredModels();
@@ -223,6 +251,26 @@ export class ManageAgentModelWizard implements Component {
           }
           add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc back"));
         }
+        break;
+      }
+      case "global": {
+        add(" ", this.theme.fg("accent", "Manage agent model · global agent model"));
+        if (this.globalModel) {
+          add(" ", this.theme.fg("text", `Current: ${this.globalModel}`));
+        } else {
+          add(" ", this.theme.fg("muted", "No global agent model is configured. Agents without a frontmatter model inherit the parent model."));
+        }
+        add(" ", this.theme.fg("dim", `Config: ${this.globalConfigPath ?? "unknown"}`));
+        const options = [
+          "Set / replace global agent model",
+          "Remove global agent model",
+          "Back",
+        ];
+        for (let i = 0; i < options.length; i++) {
+          const selected = i === this.globalActionIndex;
+          add(selected ? this.theme.fg("accent", "> ") : "  ", this.theme.fg(selected ? "accent" : "text", `${i + 1}. ${options[i]}`));
+        }
+        add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc back"));
         break;
       }
       case "busy":
@@ -263,9 +311,46 @@ export class ManageAgentModelWizard implements Component {
       if (matchesKey(data, Key.enter)) {
         if (this.actionIndex === 0 || this.actionIndex === 1) {
           this.startAgentStep();
+        } else if (this.actionIndex === 2 || this.actionIndex === 3) {
+          this.globalActionIndex = 0;
+          this.step = { kind: "global" };
+          this.refresh();
         } else {
           this.finish({ status: "saved", message: "Done." });
         }
+      }
+      return;
+    }
+    if (this.step.kind === "global") {
+      if (matchesKey(data, Key.up)) {
+        this.globalActionIndex = Math.max(0, this.globalActionIndex - 1);
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.down)) {
+        this.globalActionIndex = Math.min(2, this.globalActionIndex + 1);
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.enter)) {
+        if (this.globalActionIndex === 0) {
+          this.search.setValue("");
+          this.query = "";
+          this.modelIndex = 0;
+          this.step = { kind: "model" };
+          this.refresh();
+        } else if (this.globalActionIndex === 1) {
+          void this.runRemoveGlobal();
+        } else {
+          this.step = { kind: "action" };
+          this.refresh();
+        }
+        return;
+      }
+      if (matchesKey(data, Key.escape)) {
+        this.step = { kind: "action" };
+        this.refresh();
+        return;
       }
       return;
     }
@@ -325,11 +410,15 @@ export class ManageAgentModelWizard implements Component {
           this.selectedModel = model;
           this.modelIndex = 0;
           void this.startThinkingStep(this.selectedAgent.name, model.reference);
+        } else if (model && this.actionIndex === 2) {
+          this.selectedModel = model;
+          this.modelIndex = 0;
+          void this.runSetGlobal(model.reference);
         }
         return;
       }
       if (matchesKey(data, Key.escape)) {
-        this.step = { kind: "agent" };
+        this.step = this.actionIndex === 2 ? { kind: "global" } : { kind: "agent" };
         this.refresh();
         return;
       }
@@ -434,6 +523,32 @@ export class ManageAgentModelWizard implements Component {
     const result = await this.controller.removeModel(name, this.signal);
     if (this.settled) return;
     this.busy = false;
+    this.step = { kind: "result", ok: result.ok, message: result.message };
+    this.refresh();
+  }
+
+  private async runSetGlobal(reference: string): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.step = { kind: "busy", message: `Setting global agent model to ${reference}…` };
+    this.refresh();
+    const result = await this.controller.setGlobalModel(reference, this.signal);
+    if (this.settled) return;
+    this.busy = false;
+    this.globalModel = result.ok ? reference : this.globalModel;
+    this.step = { kind: "result", ok: result.ok, message: result.message };
+    this.refresh();
+  }
+
+  private async runRemoveGlobal(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.step = { kind: "busy", message: "Removing global agent model…" };
+    this.refresh();
+    const result = await this.controller.removeGlobalModel(this.signal);
+    if (this.settled) return;
+    this.busy = false;
+    if (result.ok) this.globalModel = undefined;
     this.step = { kind: "result", ok: result.ok, message: result.message };
     this.refresh();
   }
