@@ -15,7 +15,7 @@ export interface NotifyEntryData {
 export const notifyEntryRenderer: EntryRenderer<NotifyEntryData> = (entry, _options, theme) => {
   const data = entry.data as NotifyEntryData | undefined;
   if (!data || typeof data.message !== "string" || data.message.length === 0) return undefined;
-  return new Text(theme.fg("warning", `※ ${data.message}`), 0, 0);
+  return new Text(theme.fg("warning", `※ ${data.message}`), 1, 0);
 };
 
 /**
