@@ -1,7 +1,7 @@
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createEditTool } from "@earendil-works/pi-coding-agent";
-import { canonicalProjectRoot, canonicalizeWriteEditTarget } from "@xzy-ai/runtime";
+import { canonicalProjectRoot } from "@xzy-ai/runtime";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { errorResult, textResult } from "../results.ts";
 import { admitWriteMarkdownTarget } from "./write-markdown.ts";

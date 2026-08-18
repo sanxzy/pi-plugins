@@ -37,15 +37,16 @@ export function admitWriteMarkdownTarget(rawTarget: string, cwd: string): { ok: 
   const absolute = isAbsolute(rawTarget) ? rawTarget : resolve(cwd, rawTarget);
   const canonical = canonicalizeWriteEditTarget(absolute);
   if (!canonical) return { ok: false, reason: "The target path is unsafe or outside the project." };
+  const projectRoot = canonicalProjectRoot(cwd);
+  if (!isWithinProject(canonical, projectRoot)) return { ok: false, reason: "The target path is outside the active project." };
   const finalComponent = canonical.split(/[\\/]/).pop() ?? "";
   if (!ALLOWED_EXTENSIONS.has(extname(finalComponent).toLowerCase())) {
     return { ok: false, reason: "Only .md, .mdx, and .txt targets are allowed for this tool." };
   }
-  const projectRoot = canonicalProjectRoot(cwd);
-  if (!isWithinProject(canonical, projectRoot)) return { ok: false, reason: "The target path is outside the active project." };
   return { ok: true, path: canonical };
 }
 
+/** True when `candidate` is `root` or nested inside it. */
 function isWithinProject(candidate: string, root: string): boolean {
   if (candidate === root) return true;
   const prefix = root.endsWith("/") ? root : `${root}/`;
