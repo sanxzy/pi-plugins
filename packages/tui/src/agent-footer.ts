@@ -291,16 +291,16 @@ function renderTreeRow(
   width: number,
   theme: AgentFooterTheme,
 ): string {
-  // Running agents with live counters render as a compact flat line; rows
-  // without live data (root, queued, settled) keep the tree layout.
-  if (row.live) {
-    return truncateToWidth(renderLiveRow(row), width, theme.fg("dim", "..."));
-  }
+  // The compact live line keeps the tree connectors so running agents stay
+  // visually part of the descendant tree; only the body text changes shape.
   const prefix = row.root
     ? ""
     : row.depth === 0
       ? "  "
       : treePrefix(row.depth, lastByDepth, rows, index);
+  if (row.live) {
+    return truncateToWidth(`${prefix}${renderLiveRow(row)}`, width, theme.fg("dim", "..."));
+  }
   const status = statusGlyph(row.status, theme);
   const leaf = row.leaf ? ` · ${sanitizeLeaf(row.leaf)}` : "";
   return truncateToWidth(`${prefix}${status} ${row.description} ${formatDuration(row.durationMs)}${leaf}`, width, theme.fg("dim", "..."));

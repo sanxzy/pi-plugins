@@ -225,6 +225,7 @@ test("running agents with live stats render as a compact stats line", () => {
 
   const lines = renderRows(footer);
   assert.ok(lines.some((line) => line.includes("explore:8f2a › Trace provider compatibility · 24 tool uses · 18.4k tokens · 2m 31s")), `compact line rendered: ${lines.join("\n")}`);
+  assert.ok(lines.some((line) => /[├└]─ explore:8f2a/.test(line)), "live rows stay connected to the agent tree");
   for (const line of lines) assert.ok(line.length <= 100, `line fits: ${line}`);
 });
 
