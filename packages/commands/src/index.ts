@@ -1,5 +1,5 @@
 export { registerSessionEvents } from "./registrations/session-events.ts";
-export { registerNotifyEntry, appendNotifyEntry, notifyHost, NOTIFY_ENTRY_TYPE, type NotifyEntryData } from "./registrations/notify-entry.ts";
+export { notifyHost } from "./registrations/notify-entry.ts";
 export { registerPonytailEnforcement } from "./registrations/ponytail-enforcement.ts";
 export { registerPonytailSetup } from "./registrations/ponytail-setup.ts";
 export { registerSystemPrompt } from "./registrations/system-prompt.ts";

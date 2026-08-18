@@ -10,10 +10,10 @@ import { createGoalRecord, pauseGoalRecord, resumeGoalRecord } from "./record.ts
  */
 
 export type GoalEvent =
-  | { event: "goal_created"; cwd: string; goalId: string; timestamp: number; prompt: string; intervalMs: number }
-  | { event: "goal_paused"; cwd: string; goalId: string; timestamp: number; reason: string }
-  | { event: "goal_resumed"; cwd: string; goalId: string; timestamp: number }
-  | { event: "goal_cleared"; cwd: string; goalId: string; timestamp: number };
+  | { event: "goal_created"; cwd: string; rootSessionId: string; goalId: string; timestamp: number; prompt: string; intervalMs: number }
+  | { event: "goal_paused"; cwd: string; rootSessionId: string; goalId: string; timestamp: number; reason: string }
+  | { event: "goal_resumed"; cwd: string; rootSessionId: string; goalId: string; timestamp: number }
+  | { event: "goal_cleared"; cwd: string; rootSessionId: string; goalId: string; timestamp: number };
 
 /** Serialize a goal event to a single JSONL line. */
 export function serializeGoalEvent(event: GoalEvent): string {
@@ -31,7 +31,7 @@ function isPositiveSafeInteger(value: unknown): value is number {
 function isValidGoalEvent(parsed: unknown): parsed is GoalEvent {
   if (typeof parsed !== "object" || parsed === null) return false;
   const event = parsed as Record<string, unknown>;
-  if (!isNonEmptyString(event.cwd) || !isNonEmptyString(event.goalId) || !isPositiveSafeInteger(event.timestamp)) {
+  if (!isNonEmptyString(event.cwd) || !isNonEmptyString(event.rootSessionId) || !isNonEmptyString(event.goalId) || !isPositiveSafeInteger(event.timestamp)) {
     return false;
   }
   switch (event.event) {
@@ -60,20 +60,21 @@ export function parseGoalEvent(line: string): GoalEvent | null {
 }
 
 /**
- * Fold a sequence of goal events into the current per-cwd goal state.
+ * Fold a sequence of goal events into the current per-session goal state.
  *
- * Folding is keyed by normalized cwd: each cwd holds at most one current goal,
- * and clearing a goal removes its record. Events for a cwd are applied in order,
- * so the last write wins and a fresh reader reconstructs the same state.
+ * Folding is keyed by rootSessionId: each root session holds at most one
+ * current goal, and clearing a goal removes its record. Events are applied in
+ * order, so the last write wins and a fresh reader reconstructs the same state.
  */
 export function foldGoalEvents(events: Iterable<GoalEvent>): Map<string, Goal> {
   const result = new Map<string, Goal>();
   for (const event of events) {
-    const current = result.get(event.cwd);
+    const current = result.get(event.rootSessionId);
     switch (event.event) {
       case "goal_created": {
-        result.set(event.cwd, createGoalRecord({
+        result.set(event.rootSessionId, createGoalRecord({
           goalId: event.goalId,
+          rootSessionId: event.rootSessionId,
           cwd: event.cwd,
           prompt: event.prompt,
           intervalMs: event.intervalMs,
@@ -83,18 +84,18 @@ export function foldGoalEvents(events: Iterable<GoalEvent>): Map<string, Goal> {
       }
       case "goal_paused": {
         if (current && current.goalId === event.goalId) {
-          result.set(event.cwd, pauseGoalRecord(current, event.reason, event.timestamp));
+          result.set(event.rootSessionId, pauseGoalRecord(current, event.reason, event.timestamp));
         }
         break;
       }
       case "goal_resumed": {
         if (current && current.goalId === event.goalId) {
-          result.set(event.cwd, resumeGoalRecord(current, event.timestamp));
+          result.set(event.rootSessionId, resumeGoalRecord(current, event.timestamp));
         }
         break;
       }
       case "goal_cleared": {
-        if (current?.goalId === event.goalId) result.delete(event.cwd);
+        if (current?.goalId === event.goalId) result.delete(event.rootSessionId);
         break;
       }
     }

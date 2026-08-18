@@ -49,12 +49,12 @@ test("goal created in one root session is invisible and unschedulable from a sec
   const a = poolFor(root, "root-a");
   const b = poolFor(root, "root-b");
   assert.equal(a.create({ cwd: root, prompt: "exact A", interval: "1m" }).ok, true);
-  assert.equal(b.get(root), undefined);
+  assert.equal(b.get(), undefined);
   assert.equal(b.create({ cwd: root, prompt: "exact B", interval: "1m" }).ok, true);
   // A single binding can only map one cwd to one delivery, so assert on
   // per-session isolation of the store rather than scheduler cross-talk.
-  assert.deepEqual([...a.all().keys()], [b.get(root)?.cwd ?? root]);
-  assert.equal(b.get(root)?.prompt, "exact B");
+  assert.deepEqual([...a.all().keys()], ["root-a"]);
+  assert.equal(b.get()?.prompt, "exact B");
 });
 
 test("a new root session start never offers continuation of another session's goal", async () => {
@@ -78,8 +78,8 @@ test("a new root session start never offers continuation of another session's go
 
   assert.equal(confirmed, 0, "a replacement root must not ask to continue another session's goal");
   const b = poolFor(root, "root-b");
-  assert.equal(b.get(root), undefined, "the fresh root's goal store must be empty");
-  assert.equal(a.get(root)?.prompt, "P", "the original root's goal must remain untouched");
+  assert.equal(b.get(), undefined, "the fresh root's goal store must be empty");
+  assert.equal(a.get()?.prompt, "P", "the original root's goal must remain untouched");
 });
 
 test("child agent call sites receive unavailable goal-tool behavior", async () => {
@@ -104,12 +104,12 @@ test("clearing one root session goal leaves other root sessions isolated", () =>
   const b = poolFor(root, "root-b");
   a.create({ cwd: root, prompt: "A", interval: "1m" });
   b.create({ cwd: root, prompt: "B", interval: "1m" });
-  assert.equal(a.clear(root), true);
-  assert.equal(a.get(root), undefined);
-  assert.equal(b.get(root)?.prompt, "B");
+  assert.equal(a.clear(), true);
+  assert.equal(a.get(), undefined);
+  assert.equal(b.get()?.prompt, "B");
 });
 
-test("root-session cleanup removes only that session's goal store", async () => {
+test("root-session cleanup pauses only that session's goal and leaves others untouched", async () => {
   home();
   const root = projectRoot();
   const a = poolFor(root, "root-a");
@@ -131,9 +131,14 @@ test("root-session cleanup removes only that session's goal store", async () => 
   if (pull) {
     await pull({ reason: "quit" }, context(root, "root-a"));
   }
-  assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-a")), false);
+  // Shutdown pauses only the exiting session's goal; its store survives.
+  const pausedA = getGoalPool(root, "root-a").get();
+  assert.equal(pausedA?.status, "paused");
+  assert.match(pausedA?.pauseReason ?? "", /quit/);
+  assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-a")), true);
+  // The untouched sibling root session keeps its active goal and store.
   assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-b")), true);
-  assert.equal(getGoalPool(root, "root-b").get(root)?.prompt, "B");
+  assert.equal(getGoalPool(root, "root-b").get()?.prompt, "B");
 });
 
 test("two root sessions keep isolated goal stores with their own scheduler delivery", () => {
@@ -150,8 +155,8 @@ test("two root sessions keep isolated goal stores with their own scheduler deliv
   a.create({ cwd: root, prompt: "A", interval: "1m" });
   b.create({ cwd: root, prompt: "B", interval: "1m" });
   // Each pool delivers only its own goal's exact prompt to its own host.
-  assert.equal(a.get(root)?.prompt, "A");
-  assert.equal(b.get(root)?.prompt, "B");
+  assert.equal(a.get()?.prompt, "A");
+  assert.equal(b.get()?.prompt, "B");
   assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-a")), true);
   assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-b")), true);
   a.tick(root);

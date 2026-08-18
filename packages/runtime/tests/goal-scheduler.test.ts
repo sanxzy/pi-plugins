@@ -75,7 +75,7 @@ test("paused ticks warn through UI only and no-UI ticks do nothing", () => {
     notify: (message, type) => warnings.push(`${type}:${message}`),
   }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
-  assert.equal(pool.pause("/project", "waiting").ok, true);
+  assert.equal(pool.pause("waiting").ok, true);
   pool.tick("/project");
   assert.deepEqual(sent, []);
   assert.deepEqual(warnings, ["warning:Goal paused: waiting"]);
@@ -88,27 +88,29 @@ test("paused ticks warn through UI only and no-UI ticks do nothing", () => {
 
 test("scheduler rereads persisted state and isolates cwd delivery failures", () => {
   const root = projectRoot();
-  const pool = createGoalPool(root);
+  const poolA = createGoalPool(root, "root-a");
+  const poolB = createGoalPool(root, "root-b");
   const delivered: string[] = [];
   const failed: string[] = [];
-  pool.setScheduler(() => ({ clear() {} }));
-  pool.bind(binding({
+  poolA.setScheduler(() => ({ clear() {} }));
+  poolB.setScheduler(() => ({ clear() {} }));
+  poolA.bind(binding({
     cwd: join(root, "a"),
     sendUserMessage: (content) => {
       failed.push(content);
       throw new Error("failed A");
     },
   }));
-  pool.bind(binding({ cwd: join(root, "b"), sendUserMessage: (content) => delivered.push(content) }));
-  assert.equal(pool.create({ cwd: join(root, "a"), prompt: "A", interval: "1m" }).ok, true);
-  assert.equal(pool.create({ cwd: join(root, "b"), prompt: "B", interval: "1m" }).ok, true);
-  pool.tick(join(root, "a"));
-  pool.tick(join(root, "b"));
+  poolB.bind(binding({ cwd: join(root, "b"), sendUserMessage: (content) => delivered.push(content) }));
+  assert.equal(poolA.create({ cwd: join(root, "a"), prompt: "A", interval: "1m" }).ok, true);
+  assert.equal(poolB.create({ cwd: join(root, "b"), prompt: "B", interval: "1m" }).ok, true);
+  poolA.tick(join(root, "a"));
+  poolB.tick(join(root, "b"));
   assert.equal(failed.length, 1);
   assert.deepEqual(delivered, [`B\n${GOAL_DELIVERY_FOOTER}`]);
 
-  pool.pause(join(root, "b"), "paused");
-  pool.tick(join(root, "b"));
+  poolB.pause("paused");
+  poolB.tick(join(root, "b"));
   assert.deepEqual([...delivered, ...failed], [`B\n${GOAL_DELIVERY_FOOTER}`, "A\n" + GOAL_DELIVERY_FOOTER]);
 });
 
@@ -122,7 +124,7 @@ test("an unbound cwd or a cleared goal stops delivery", () => {
   // No binding for /project: the current-host fallback is the only binding, which
   // is /other — delivery still routes to the current host.
   assert.equal(sent.length, 1);
-  pool.clear("/project");
+  pool.clear();
   pool.tick("/project");
   assert.equal(sent.length, 1);
 });
@@ -185,9 +187,37 @@ test("clearing confirmed active goals removes them and prevents stale callbacks"
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
   assert.equal(pool.beginSessionConfirmation(), true);
   assert.equal(pool.clearActiveGoals(), 1);
-  assert.equal(pool.get("/project"), undefined);
+  assert.equal(pool.get(), undefined);
   callbacks[0]!();
   assert.deepEqual(sent, []);
+});
+
+test("pauseAllActive pauses persisted goals without removing them and stops delivery", () => {
+  const root = projectRoot();
+  const pool = createGoalPool(root);
+  const sent: string[] = [];
+  const callbacks: Array<() => void> = [];
+  let clearCount = 0;
+  pool.setScheduler((callback) => {
+    callbacks.push(callback);
+    return { clear: () => { clearCount += 1; } };
+  });
+  pool.bind(binding({ sendUserMessage: (content) => sent.push(content) }));
+  assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  assert.equal(callbacks.length, 1);
+
+  assert.equal(pool.pauseAllActive("session exited (quit)"), 1);
+  // Delivery is suspended and the scheduler is stopped.
+  callbacks[0]!();
+  assert.deepEqual(sent, []);
+  assert.equal(clearCount, 1);
+
+  // The persisted record survives as paused and is restored on a fresh reader.
+  const fresh = getGoalPool(root);
+  const restored = fresh.get();
+  assert.equal(restored?.prompt, "p");
+  assert.equal(restored?.status, "paused");
+  assert.equal(restored?.pauseReason, "session exited (quit)");
 });
 test("goal mutations emit correlated processWithLog records under a log context", () => {
   const pool = createGoalPool(projectRoot());

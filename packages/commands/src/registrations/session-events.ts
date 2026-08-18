@@ -270,10 +270,12 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
         reason: event.reason,
       });
     }
-    // Every root host teardown stops delivery and removes only this root
-    // session's persisted goal store. Other root sessions and project-level
-    // channel state remain untouched.
+    // Every root host teardown pauses this root session's active goals so
+    // they survive exit and are restored (still paused) when the same session
+    // resumes. Other root sessions and project-level channel state remain
+    // untouched. Goals are removed only when explicitly cleared via
+    // goal_clear, never by session exit.
     const goalPool = getGoalPool(ctx.cwd, rootSessionId);
-    goalPool.clearStore();
+    goalPool.pauseAllActive(`session exited (${event.reason})`);
   }
 }

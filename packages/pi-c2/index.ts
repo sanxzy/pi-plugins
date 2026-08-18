@@ -28,7 +28,6 @@ import {
   registerTelegramLifecycle,
   registerTelegramInbound,
   registerGoalCommand,
-  registerNotifyEntry,
   createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
@@ -98,7 +97,6 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerAgentFooter(pi);
   registerTelegramChatTool(pi);
   registerSessionEvents(pi);
-  registerNotifyEntry(pi);
   registerPonytailEnforcement(pi);
   registerPonytailSetup(pi);
   registerSystemPrompt(pi);

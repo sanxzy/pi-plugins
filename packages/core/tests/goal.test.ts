@@ -46,6 +46,7 @@ test("goal validation accepts a centralized prompt-length bound", () => {
 test("goal records transition immutably and retain exact pause reason", () => {
   const created = createGoalRecord({
     goalId: "goal-1",
+    rootSessionId: "root-1",
     cwd: "/project",
     prompt: "  preserve this  ",
     intervalMs: 60_000,
@@ -61,18 +62,18 @@ test("goal records transition immutably and retain exact pause reason", () => {
   assert.equal(resumed.pauseReason, undefined);
 });
 
-test("goal events fold current state for multiple cwd values and clear records", () => {
+test("goal events fold current state for multiple root sessions and clear records", () => {
   const events: GoalEvent[] = [
-    { event: "goal_created", cwd: "/a", goalId: "a", timestamp: 1, prompt: "A", intervalMs: 10 },
-    { event: "goal_created", cwd: "/b", goalId: "b", timestamp: 2, prompt: "B", intervalMs: 20 },
-    { event: "goal_paused", cwd: "/a", goalId: "a", timestamp: 3, reason: "blocked" },
-    { event: "goal_resumed", cwd: "/a", goalId: "a", timestamp: 4 },
-    { event: "goal_cleared", cwd: "/b", goalId: "b", timestamp: 5 },
+    { event: "goal_created", cwd: "/a", rootSessionId: "a", goalId: "a", timestamp: 1, prompt: "A", intervalMs: 10 },
+    { event: "goal_created", cwd: "/b", rootSessionId: "b", goalId: "b", timestamp: 2, prompt: "B", intervalMs: 20 },
+    { event: "goal_paused", cwd: "/a", rootSessionId: "a", goalId: "a", timestamp: 3, reason: "blocked" },
+    { event: "goal_resumed", cwd: "/a", rootSessionId: "a", goalId: "a", timestamp: 4 },
+    { event: "goal_cleared", cwd: "/b", rootSessionId: "b", goalId: "b", timestamp: 5 },
   ];
   const folded = foldGoalEvents(events);
-  assert.equal(folded.get("/a")?.status, "active");
-  assert.equal(folded.get("/a")?.prompt, "A");
-  assert.equal(folded.has("/b"), false);
+  assert.equal(folded.get("a")?.status, "active");
+  assert.equal(folded.get("a")?.prompt, "A");
+  assert.equal(folded.has("b"), false);
 });
 
 test("goal event parsing skips malformed payloads and mismatched lifecycle ids", () => {
@@ -81,6 +82,7 @@ test("goal event parsing skips malformed payloads and mismatched lifecycle ids",
   assert.equal(parseGoalEvent(JSON.stringify({
     event: "goal_created",
     cwd: "/a",
+    rootSessionId: "a",
     goalId: "a",
     timestamp: 1,
     prompt: "A",
@@ -88,16 +90,17 @@ test("goal event parsing skips malformed payloads and mismatched lifecycle ids",
   }))?.event, "goal_created");
 
   const folded = foldGoalEvents([
-    { event: "goal_created", cwd: "/a", goalId: "a", timestamp: 1, prompt: "A", intervalMs: 10 },
-    { event: "goal_paused", cwd: "/a", goalId: "other", timestamp: 2, reason: "wrong goal" },
-    { event: "goal_cleared", cwd: "/a", goalId: "other", timestamp: 3 },
+    { event: "goal_created", cwd: "/a", rootSessionId: "a", goalId: "a", timestamp: 1, prompt: "A", intervalMs: 10 },
+    { event: "goal_paused", cwd: "/a", rootSessionId: "a", goalId: "other", timestamp: 2, reason: "wrong goal" },
+    { event: "goal_cleared", cwd: "/a", rootSessionId: "a", goalId: "other", timestamp: 3 },
   ]);
-  assert.equal(folded.get("/a")?.status, "active");
+  assert.equal(folded.get("a")?.status, "active");
 });
 
 test("pause and resume preserve exact timestamps and retain fields", () => {
   const created = createGoalRecord({
     goalId: "goal-1",
+    rootSessionId: "root-1",
     cwd: "/project",
     prompt: "  exact  ",
     intervalMs: 60_000,

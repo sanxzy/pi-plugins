@@ -2,6 +2,7 @@ export type GoalStatus = "active" | "paused";
 
 export interface Goal {
   readonly goalId: string;
+  readonly rootSessionId: string;
   readonly cwd: string;
   readonly prompt: string;
   readonly intervalMs: number;
@@ -13,6 +14,7 @@ export interface Goal {
 
 export interface GoalCreationInput {
   readonly goalId: string;
+  readonly rootSessionId: string;
   readonly cwd: string;
   readonly prompt: string;
   readonly intervalMs: number;
@@ -22,6 +24,7 @@ export interface GoalCreationInput {
 export function createGoalRecord(input: GoalCreationInput): Goal {
   return {
     goalId: input.goalId,
+    rootSessionId: input.rootSessionId,
     cwd: input.cwd,
     prompt: input.prompt,
     intervalMs: input.intervalMs,

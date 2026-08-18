@@ -17,6 +17,7 @@ import { renderToolCall, renderToolOutcome, toolResultFailed } from "../render.t
 interface GoalToolDetails {
   readonly goal?: Goal;
   readonly reason?: string;
+  readonly sessionId?: string;
 }
 
 type GoalToolResult = AgentToolResult<GoalToolDetails>;
@@ -35,9 +36,10 @@ function unavailableToChild(): GoalToolResult {
   });
 }
 
-function goalOrError(ctx: ExtensionContext): { pool: ReturnType<typeof getGoalPool>; cwd: string } | GoalToolResult {
+function goalOrError(ctx: ExtensionContext): { pool: ReturnType<typeof getGoalPool>; cwd: string; sessionId: string } | GoalToolResult {
   if (!isMainHost(ctx)) return unavailableToChild();
-  return { pool: getGoalPool(ctx.cwd, ctx.sessionManager.getSessionId()), cwd: ctx.cwd };
+  const sessionId = ctx.sessionManager.getSessionId();
+  return { pool: getGoalPool(ctx.cwd, sessionId), cwd: ctx.cwd, sessionId };
 }
 
 function formatGoal(goal: Goal): string {
@@ -47,6 +49,7 @@ function formatGoal(goal: Goal): string {
     `Prompt: ${goal.prompt}`,
     `Interval: ${goal.intervalMs}ms`,
     `Goal id: ${goal.goalId}`,
+    `Root session: ${goal.rootSessionId}`,
     `Cwd: ${goal.cwd}`,
     `Updated: ${goal.updatedAt}`,
     pause,
@@ -68,8 +71,8 @@ export function registerGoalTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "goal_create",
     label: "Create goal",
-    description: "Create one persistent cwd-scoped goal. Preserve the prompt exactly; clear an existing goal before creating a replacement.",
-    promptSnippet: "Create a persistent goal for the current working directory.",
+    description: "Create one persistent session-scoped goal. Preserve the prompt exactly; clear an existing goal before creating a replacement. Goals belong to the root session, not the working directory.",
+    promptSnippet: "Create a persistent goal for the current session.",
     parameters: goalCreateParams,
     async execute(_toolCallId: string, params: GoalCreateParams, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
       return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "create" } }, async () => {
@@ -77,7 +80,7 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       if ("content" in target) return target;
       const result = target.pool.create({ cwd: target.cwd, prompt: params.prompt, interval: params.interval });
       if (!result.ok) return errorResult(result.error, { reason: result.error });
-      return success(`Goal created successfully! Please proceed carefully and complete the work correctly.\n${formatGoal(result.goal)}`, { goal: result.goal });
+      return success(`Goal created successfully! Please proceed carefully and complete the work correctly.\n${formatGoal(result.goal)}`, { goal: result.goal, sessionId: target.sessionId });
       });
     },
     renderCall(args, theme, context) {
@@ -101,9 +104,9 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "pause" } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
-      const result = target.pool.pause(target.cwd, params.reason);
+      const result = target.pool.pause(params.reason);
       if (!result.ok) return errorResult(result.error, { reason: result.error });
-      return success(`Goal paused: ${params.reason}`, { goal: result.goal });
+      return success(`Goal paused: ${params.reason}`, { goal: result.goal, sessionId: target.sessionId });
       });
     },
     renderCall(args, theme, context) {
@@ -125,9 +128,9 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "resume" } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
-      const result = target.pool.resume(target.cwd);
+      const result = target.pool.resume();
       if (!result.ok) return errorResult(result.error, { reason: result.error });
-      return success(`Goal resumed: ${result.goal.status}`, { goal: result.goal });
+      return success(`Goal resumed: ${result.goal.status}`, { goal: result.goal, sessionId: target.sessionId });
       });
     },
     renderCall(_args, theme, context) {
@@ -143,15 +146,15 @@ export function registerGoalTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "goal_status",
     label: "Goal status",
-    description: "Show the complete current goal record for this working directory.",
+    description: "Show the complete current goal record for this root session.",
     parameters: goalNoArgsParams,
     async execute(_toolCallId: string, _params: unknown, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<GoalToolResult> {
       return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "status" } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
-      const goal = target.pool.get(target.cwd);
-      if (!goal) return errorResult("no goal exists for this cwd", { reason: "no goal exists for this cwd" });
-      return success(formatGoal(goal), { goal });
+      const goal = target.pool.get();
+      if (!goal) return errorResult("no goal exists for this session", { reason: "no goal exists for this session" });
+      return success(formatGoal(goal), { goal, sessionId: target.sessionId });
       });
     },
     renderCall(_args, theme, context) {
@@ -175,11 +178,11 @@ export function registerGoalTools(pi: ExtensionAPI): void {
       return processWithLog({ operation: TOOL_OPERATIONS.GOALS_EXECUTE, parameters: { action: "clear", isComplete: params.isComplete } }, async () => {
       const target = goalOrError(ctx);
       if ("content" in target) return target;
-      const goal = target.pool.get(target.cwd);
-      if (!goal) return errorResult("no goal exists to clear for this cwd", { reason: "no goal exists to clear for this cwd" });
-      if (!params.isComplete) return success(notCompleteAdvice(goal), { goal });
-      if (!target.pool.clear(target.cwd)) return errorResult("no goal exists to clear for this cwd", { reason: "no goal exists to clear for this cwd" });
-      return success("Congratulations, the goal was completed and cleared.", { goal });
+      const goal = target.pool.get();
+      if (!goal) return errorResult("no goal exists to clear for this session", { reason: "no goal exists to clear for this session" });
+      if (!params.isComplete) return success(notCompleteAdvice(goal), { goal, sessionId: target.sessionId });
+      if (!target.pool.clear()) return errorResult("no goal exists to clear for this session", { reason: "no goal exists to clear for this session" });
+      return success("Congratulations, the goal was completed and cleared.", { goal, sessionId: target.sessionId });
       });
     },
     renderCall(args, theme, context) {

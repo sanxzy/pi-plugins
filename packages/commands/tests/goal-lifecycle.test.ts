@@ -84,22 +84,24 @@ test("/new does not clear the current root session goal or ask to continue it", 
       context(cwd, "root", async () => false),
     );
     assert.deepEqual(result, { cancel: false });
-    assert.equal(getGoalPool(cwd, "root").get(cwd)?.status, "active");
+    assert.equal(getGoalPool(cwd, "root").get()?.status, "active");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("session shutdown preserves the persisted goal while stopping delivery", async () => {
+test("session shutdown pauses the persisted goal while stopping delivery", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-c2-goal-lifecycle-"));
   try {
     addActiveGoal(cwd);
     const d = registrations();
     registerSessionEvents(d.pi);
     await d.handlers.get("session_shutdown")!({ reason: "new" }, context(cwd, "root", async () => true));
-    // Shutdown stops timers/bindings but never clears the persisted goal; the
-    // fresh session decides Continue or Clear.
-    assert.equal(getGoalPool(cwd).get(cwd)?.status, "active");
+    // Shutdown stops timers/bindings and pauses the active goal but never
+    // clears it; the persisted record survives for the resumed session.
+    const goal = getGoalPool(cwd).get();
+    assert.equal(goal?.status, "paused");
+    assert.match(goal?.pauseReason ?? "", /new/);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -123,7 +125,7 @@ test("startup does not offer continuation for a goal from another root session",
     );
     assert.equal(confirmed.length, 0);
     // The current root session has no inherited goal.
-    assert.equal(getGoalPool(cwd, "root").get(cwd), undefined);
+    assert.equal(getGoalPool(cwd, "root").get(), undefined);
     assert.equal(sent, 0);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -140,8 +142,8 @@ test("startup leaves the prior root session goal untouched", async () => {
       { reason: "startup" },
       context(cwd, "root", async () => false),
     );
-    assert.equal(getGoalPool(cwd, "root").get(cwd), undefined);
-    assert.equal(getGoalPool(cwd, "old-root").get(cwd)?.prompt, "p");
+    assert.equal(getGoalPool(cwd, "root").get(), undefined);
+    assert.equal(getGoalPool(cwd, "old-root").get()?.prompt, "p");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -162,7 +164,7 @@ test("startup with no session file does not offer another session's goal", async
       }, true, undefined),
     );
     assert.deepEqual(confirmations, []);
-    assert.equal(getGoalPool(cwd, "root").get(cwd), undefined);
+    assert.equal(getGoalPool(cwd, "root").get(), undefined);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -186,8 +188,8 @@ test("startup with no session file does not offer another session's goal", async
     await d.handlers.get("session_start")!({ reason: "resume" }, context(cwd, "fresh", async () => {
       throw new Error("fresh session must not prompt");
     }));
-    assert.equal(getGoalPool(cwd, "fresh").get(cwd), undefined);
-    assert.equal(getGoalPool(cwd, "old").get(cwd)?.prompt, "p");
+    assert.equal(getGoalPool(cwd, "fresh").get(), undefined);
+    assert.equal(getGoalPool(cwd, "old").get()?.prompt, "p");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -213,7 +215,7 @@ test("no-UI /new does not offer or clear another session's goal", async () => {
       context(cwd, "root", async () => true, false),
     );
     assert.deepEqual(result, { cancel: false });
-    assert.equal(getGoalPool(cwd, "root").get(cwd)?.status, "active");
+    assert.equal(getGoalPool(cwd, "root").get()?.status, "active");
     void callbacks;
     void sent;
   } finally {
@@ -246,8 +248,11 @@ test("quit shutdown clears goal timers and bindings idempotently", async () => {
     registerSessionEvents(d.pi);
     await d.handlers.get("session_shutdown")!({ reason: "quit" }, context(cwd, "root", async () => true));
     await d.handlers.get("session_shutdown")!({ reason: "quit" }, context(cwd, "root", async () => true));
-    // Goal timers/bindings are cleared on quit; the persisted record is untouched.
-    assert.equal(getGoalPool(cwd).get(cwd)?.status, "active");
+    // Goal timers/bindings are cleared on quit; the persisted record is
+    // paused but untouched and idempotent across repeated shutdowns.
+    const goal = getGoalPool(cwd).get();
+    assert.equal(goal?.status, "paused");
+    assert.match(goal?.pauseReason ?? "", /quit/);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

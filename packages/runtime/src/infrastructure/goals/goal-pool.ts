@@ -1,4 +1,4 @@
-import { realpathSync, rmSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   GOAL_DELIVERY_FOOTER,
@@ -22,7 +22,7 @@ export type GoalMutationResult =
   | { readonly ok: true; readonly goal: Goal }
   | { readonly ok: false; readonly error: string };
 
-/** A host delivery binding for one cwd's goal scheduler. */
+/** A host delivery binding for the goal's delivery cwd. */
 export interface GoalDeliveryBinding {
   readonly cwd: string;
   readonly sendUserMessage: (content: string, options?: { readonly deliverAs?: "steer" }) => void;
@@ -48,17 +48,15 @@ export interface GoalPool {
   readonly rootSessionId: string;
   readonly store: GoalStore;
   create(input: GoalCreateInput): GoalMutationResult;
-  pause(cwd: string, reason: string): GoalMutationResult;
-  resume(cwd: string): GoalMutationResult;
-  get(cwd: string): Goal | undefined;
-  clear(cwd: string): boolean;
+  pause(reason: string): GoalMutationResult;
+  resume(): GoalMutationResult;
+  get(): Goal | undefined;
+  clear(): boolean;
   all(): Map<string, Goal>;
   /** Bind or replace the current host delivery handle. */
   bind(binding: GoalDeliveryBinding): void;
   /** Stop every timer and detach every host handle. */
   shutdown(): void;
-  /** Remove this root session's persisted goal store during root cleanup. */
-  clearStore(): void;
   /** Pause all active delivery while a fresh session is confirmed. */
   beginSessionConfirmation(): boolean;
   /** Resume delivery after the replacement confirmation chooses Continue. */
@@ -67,6 +65,8 @@ export interface GoalPool {
   takeReplacementContinuation(): boolean;
   /** Clear all active persisted goals after the replacement confirmation chooses Clear. */
   clearActiveGoals(): number;
+  /** Pause all active persisted goals without removing them, e.g. on session exit. */
+  pauseAllActive(reason: string): number;
   /** Resume timers after a fresh host binding is ready. */
   resumeDelivery(): void;
   /** Replace timer creation for deterministic unit tests. */
@@ -111,7 +111,7 @@ interface SchedulerRecord {
 }
 
 export function createGoalPool(projectRoot: string, rootSessionId = "root"): GoalPool {
-  const store = createGoalStore(homeGoalFile(encodeProjectId(projectRoot), rootSessionId));
+  const store = createGoalStore(homeGoalFile(encodeProjectId(projectRoot), rootSessionId), rootSessionId);
   const lockByCwd = new Set<string>();
   const bindings = new Map<string, GoalDeliveryBinding>();
   const schedulers = new Map<string, SchedulerRecord>();
@@ -143,9 +143,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     const execute = (): void => {
       processWithLog({ operation: GOAL_OPERATIONS.TICK, parameters: { cwd } }, () => {
         if (deliverySuspended) return;
-        const normalizedCwd = normalizeGoalCwd(cwd);
-        const goals = store.fold();
-        const goal = goals.get(normalizedCwd);
+        const goal = store.fold().get(rootSessionId);
         if (!goal) {
           clearScheduler(cwd);
           return;
@@ -172,7 +170,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
   const ensureScheduler = (cwd: string): void => {
     const existing = schedulers.get(cwd);
     if (existing) return;
-    const goal = store.get(cwd);
+    const goal = store.get();
     if (!goal) return;
     const generation = schedulerGeneration;
     const timer = schedule(() => {
@@ -225,28 +223,29 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         return result;
       });
     },
-    pause(cwd, reason) {
-      const normalized = normalizeGoalCwd(cwd);
-      return processWithLog({ operation: GOAL_OPERATIONS.PAUSE, parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => {
+    pause(reason) {
+      return processWithLog({ operation: GOAL_OPERATIONS.PAUSE, parameters: { rootSessionId } }, () => withCwdMutation(rootSessionId, () => {
         if (reason.trim().length === 0) {
           return { ok: false, error: "pause reason must contain non-whitespace text" } as const;
         }
-        return store.pause(normalized, reason);
+        return store.pause(reason);
       }));
     },
-    resume(cwd) {
-      const normalized = normalizeGoalCwd(cwd);
-      const result = processWithLog({ operation: GOAL_OPERATIONS.RESUME, parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => store.resume(normalized)));
-      if (result.ok) ensureScheduler(normalized);
+    resume() {
+      const result = processWithLog({ operation: GOAL_OPERATIONS.RESUME, parameters: { rootSessionId } }, () => withCwdMutation(rootSessionId, () => store.resume()));
+      if (result.ok) {
+        const goal = store.get();
+        if (goal) ensureScheduler(goal.cwd);
+      }
       return result;
     },
-    get(cwd) {
-      return store.get(normalizeGoalCwd(cwd));
+    get() {
+      return store.get();
     },
-    clear(cwd) {
-      const normalized = normalizeGoalCwd(cwd);
-      const cleared = processWithLog({ operation: GOAL_OPERATIONS.CLEAR, parameters: { cwd: normalized } }, () => withCwdMutation(normalized, () => store.clear(normalized)));
-      if (cleared) clearScheduler(normalized);
+    clear() {
+      const goal = store.get();
+      const cleared = processWithLog({ operation: GOAL_OPERATIONS.CLEAR, parameters: { rootSessionId } }, () => withCwdMutation(rootSessionId, () => store.clear()));
+      if (cleared && goal) clearScheduler(goal.cwd);
       return cleared;
     },
     all() {
@@ -258,7 +257,8 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
       currentBinding = normalized;
       processWithLog({ operation: GOAL_OPERATIONS.BIND, parameters: { cwd: normalized.cwd } }, () => {
         if (!deliverySuspended) {
-          for (const cwd of store.fold().keys()) ensureScheduler(cwd);
+          const goal = store.get();
+          if (goal) ensureScheduler(goal.cwd);
         }
       });
     },
@@ -270,18 +270,9 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         deliverySuspended = true;
       });
     },
-    clearStore() {
-      processWithLog({ operation: GOAL_OPERATIONS.CLEAR_STORE }, () => {
-        clearAllSchedulers();
-        bindings.clear();
-        currentBinding = undefined;
-        deliverySuspended = true;
-        rmSync(store.filePath, { force: true });
-      });
-    },
     beginSessionConfirmation() {
-      const activeGoals = Array.from(store.fold().values()).filter((goal) => goal.status === "active");
-      if (activeGoals.length === 0) return false;
+      const goal = store.get();
+      if (!goal || goal.status !== "active") return false;
       deliverySuspended = true;
       // Stop every cwd timer while the host replacement is unresolved. This
       // also suppresses paused-goal warnings until the decision completes.
@@ -297,15 +288,24 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
       return continued;
     },
     clearActiveGoals() {
-      const activeGoals = Array.from(store.fold().values()).filter((goal) => goal.status === "active");
-      processWithLog({ operation: GOAL_OPERATIONS.CLEAR_ACTIVE, parameters: { count: activeGoals.length } }, () => {
-        for (const goal of activeGoals) {
-          clearScheduler(goal.cwd);
-          store.clear(goal.cwd);
-        }
+      const goal = store.get();
+      if (!goal || goal.status !== "active") return 0;
+      processWithLog({ operation: GOAL_OPERATIONS.CLEAR_ACTIVE, parameters: { count: 1 } }, () => {
+        clearScheduler(goal.cwd);
+        store.clear();
         deliverySuspended = true;
       });
-      return activeGoals.length;
+      return 1;
+    },
+    pauseAllActive(reason) {
+      const goal = store.get();
+      if (!goal || goal.status !== "active") return 0;
+      processWithLog({ operation: GOAL_OPERATIONS.PAUSE_ALL, parameters: { count: 1, reason } }, () => {
+        clearScheduler(goal.cwd);
+        store.pause(reason);
+        deliverySuspended = true;
+      });
+      return 1;
     },
     setScheduler(factory) {
       schedule = factory;
@@ -314,7 +314,8 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     resumeDelivery() {
       deliverySuspended = false;
       processWithLog({ operation: GOAL_OPERATIONS.RESUME_DELIVERY }, () => {
-        for (const cwd of store.fold().keys()) ensureScheduler(cwd);
+        const goal = store.get();
+        if (goal) ensureScheduler(goal.cwd);
       });
     },
   };

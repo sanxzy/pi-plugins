@@ -56,7 +56,7 @@ async function withCwd(run: (cwd: string, registered: Map<string, RegisteredTool
   }
 }
 
-test("registers exactly the five cwd-scoped goal tools", () => {
+test("registers exactly the five session-scoped goal tools", () => {
   const registered = tools();
   assert.deepEqual([...registered.keys()], ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"]);
   assert.deepEqual(Object.keys(registered.get("goal_create")?.parameters.properties ?? {}), ["prompt", "interval"]);
