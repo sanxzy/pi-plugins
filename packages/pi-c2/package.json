@@ -1,24 +1,33 @@
 {
   "name": "@xzy-ai/pi-c2",
-  "version": "0.1.0",
+  "version": "0.0.6",
   "description": "PI extension: delegate work to isolated in-process subagents through model-callable tools",
   "type": "module",
   "main": "./index.ts",
+  "files": [
+    "index.ts",
+    "scripts/"
+  ],
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/postinstall.mjs",
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/extension.test.ts tests/manager-removal.test.ts"
+    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/extension.test.ts tests/manager-removal.test.ts tests/postinstall.test.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.2",
+    "@earendil-works/pi-tui": "^0.84.2",
     "@xzy-ai/commands": "workspace:*",
     "@xzy-ai/core": "workspace:*",
     "@xzy-ai/mcp": "workspace:*",
     "@xzy-ai/runtime": "workspace:*",
     "@xzy-ai/tools": "workspace:*",
-    "@earendil-works/pi-coding-agent": "^0.84.1"
+    "diff": "^9.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

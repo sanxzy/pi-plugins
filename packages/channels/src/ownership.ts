@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+/// <reference path="./proper-lockfile.d.ts" />
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -33,12 +33,7 @@ export interface ChannelOwner {
 
 type ProcessLiveness = (pid: number) => boolean;
 
-interface LockfileModule {
-  lockSync(file: string, options?: Record<string, unknown>): () => void;
-}
-
-const require = createRequire(import.meta.url);
-const lockfileApi = require("proper-lockfile") as LockfileModule;
+import lockfile from "proper-lockfile";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -136,7 +131,7 @@ export function createChannelOwner(
       // held; stale takeover is possible only after the original process dies
       // and its lease stops refreshing.
       const lockPolicy = resolveChannelLockPolicy(projectRoot, options);
-      release = lockfileApi.lockSync(filePath, {
+      release = lockfile.lockSync(filePath, {
         realpath: false,
         stale: lockPolicy.staleMs,
         update: lockPolicy.updateMs,

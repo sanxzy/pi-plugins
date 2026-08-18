@@ -40,10 +40,10 @@ index 418865ad891951e3fb7e2a65f4dca4d7d87e3895..513c356b16804becbbea5142940681e7
          this.getModel = contextActions.getModel;
          this.getScopedModels = contextActions.getScopedModels;
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
-index cb7b8e7cfb9d1fb07f4f8c3161d25927b3186e94..a11ae550189bc3d4d3dc395bae588f823561d2e6 100644
+index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..4408e8a4e442114e10f058f9f6eb6521f1d87cf8 100644
 --- a/dist/core/extensions/types.d.ts
 +++ b/dist/core/extensions/types.d.ts
-@@ -956,6 +956,11 @@ export interface ExtensionAPI {
+@@ -959,6 +959,11 @@ export interface ExtensionAPI {
      getThinkingLevel(): ThinkingLevel;
      /** Set thinking level (clamped to model capabilities). */
      setThinkingLevel(level: ThinkingLevel): void;
@@ -55,7 +55,7 @@ index cb7b8e7cfb9d1fb07f4f8c3161d25927b3186e94..a11ae550189bc3d4d3dc395bae588f82
      /**
       * Register or override a model provider.
       *
-@@ -1202,6 +1207,8 @@ export interface ExtensionActions {
+@@ -1206,6 +1211,8 @@ export interface ExtensionActions {
      setModel: SetModelHandler;
      getThinkingLevel: GetThinkingLevelHandler;
      setThinkingLevel: SetThinkingLevelHandler;
@@ -65,7 +65,7 @@ index cb7b8e7cfb9d1fb07f4f8c3161d25927b3186e94..a11ae550189bc3d4d3dc395bae588f82
  /**
   * Actions for ExtensionContext (ctx.* in event handlers).
 diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index 8cdfbdec42f696b8cd6b762a92180a81ec142433..0ff5ec7eb0ce6e7c32b0dc516780c979f3852fbf 100644
+index 8cdfbdec42f696b8cd6b762a92180a81ec142433..ad315766add63f2fe9f9ecc393ef1ff1b200df7e 100644
 --- a/dist/core/session-manager.d.ts
 +++ b/dist/core/session-manager.d.ts
 @@ -13,6 +13,10 @@ export interface SessionHeader {
@@ -80,7 +80,7 @@ index 8cdfbdec42f696b8cd6b762a92180a81ec142433..0ff5ec7eb0ce6e7c32b0dc516780c979
  export interface SessionEntryBase {
      type: string;
 diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index e69e4d7f2dadbd68982feddfae45432fa197a286..d4b8cda9b2eed38d7f2caf2a6013008589e1b54c 100644
+index 92e8070ce1c60e7780aba7a4a0ea8b1d1652156f..13a5e22c1159a80b8472b3ddbabb13b30bde7718 100644
 --- a/dist/core/session-manager.js
 +++ b/dist/core/session-manager.js
 @@ -1,14 +1,34 @@
@@ -93,7 +93,7 @@ index e69e4d7f2dadbd68982feddfae45432fa197a286..d4b8cda9b2eed38d7f2caf2a60130085
 +import { dirname, join, resolve } from "path";
  import { createInterface } from "readline";
  import { StringDecoder } from "string_decoder";
- import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
+ import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
  import { normalizePath, resolvePath } from "../utils/paths.js";
  import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage, } from "./messages.js";
  export const CURRENT_SESSION_VERSION = 3;
@@ -164,15 +164,7 @@ index e69e4d7f2dadbd68982feddfae45432fa197a286..d4b8cda9b2eed38d7f2caf2a60130085
      _buildIndex() {
          this.byId.clear();
          this.labelsById.clear();
-@@ -702,6 +734,7 @@ export class SessionManager {
-         finally {
-             closeSync(fd);
-         }
-+        ensurePrivateSessionFile(this.sessionFile);
-     }
-     isPersisted() {
-         return this.persist;
-@@ -736,7 +769,7 @@ export class SessionManager {
+@@ -736,7 +768,7 @@ export class SessionManager {
              return;
          }
          if (!this.flushed) {
@@ -181,7 +173,7 @@ index e69e4d7f2dadbd68982feddfae45432fa197a286..d4b8cda9b2eed38d7f2caf2a60130085
              try {
                  for (const e of this.fileEntries) {
                      writeFileSync(fd, `${JSON.stringify(e)}\n`);
-@@ -745,10 +778,12 @@ export class SessionManager {
+@@ -745,10 +777,12 @@ export class SessionManager {
              finally {
                  closeSync(fd);
              }

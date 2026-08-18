@@ -1,0 +1,188 @@
+diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
+index 324d30ad5708b842f1a536f8d14950469a5ed707..50a312a8e8362769945054c99c628a800ab69d63 100644
+--- a/dist/core/extensions/loader.js
++++ b/dist/core/extensions/loader.js
+@@ -157,6 +157,8 @@ export function createExtensionRuntime() {
+         setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
+         getThinkingLevel: notInitialized,
+         setThinkingLevel: notInitialized,
++        // Local experiment: command-only APIs become available after the runner binds.
++        createCommandContext: notInitialized,
+         flagValues: new Map(),
+         pendingProviderRegistrations: [],
+         pendingNativeProviderRegistrations: [],
+@@ -316,6 +318,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
+             runtime.assertActive();
+             runtime.setThinkingLevel(level);
+         },
++        // Local experiment: expose command-context creation to extensions so
++        // lifecycle handlers can obtain an ExtensionCommandContext.
++        createCommandContext() {
++            runtime.assertActive();
++            return runtime.createCommandContext();
++        },
+         registerProvider(providerOrName, config) {
+             runtime.assertActive();
+             if (typeof providerOrName === "string") {
+diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
+index 418865ad891951e3fb7e2a65f4dca4d7d87e3895..513c356b16804becbbea5142940681e747f3cae2 100644
+--- a/dist/core/extensions/runner.js
++++ b/dist/core/extensions/runner.js
+@@ -171,6 +171,10 @@ export class ExtensionRunner {
+         this.runtime.setModel = actions.setModel;
+         this.runtime.getThinkingLevel = actions.getThinkingLevel;
+         this.runtime.setThinkingLevel = actions.setThinkingLevel;
++        // Local experiment: let extensions create an ExtensionCommandContext
++        // through the shared runtime (used by lifecycle handlers, not only
++        // command dispatch).
++        this.runtime.createCommandContext = () => this.createCommandContext();
+         // Context actions (required)
+         this.getModel = contextActions.getModel;
+         this.getScopedModels = contextActions.getScopedModels;
+diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
+index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..4408e8a4e442114e10f058f9f6eb6521f1d87cf8 100644
+--- a/dist/core/extensions/types.d.ts
++++ b/dist/core/extensions/types.d.ts
+@@ -959,6 +959,11 @@ export interface ExtensionAPI {
+     getThinkingLevel(): ThinkingLevel;
+     /** Set thinking level (clamped to model capabilities). */
+     setThinkingLevel(level: ThinkingLevel): void;
++    /**
++     * Create a fresh ExtensionCommandContext bound to the current runner.
++     * Local experiment: exposes command-only APIs (e.g. reload()) to lifecycle handlers.
++     */
++    createCommandContext(): ExtensionCommandContext;
+     /**
+      * Register or override a model provider.
+      *
+@@ -1206,6 +1211,8 @@ export interface ExtensionActions {
+     setModel: SetModelHandler;
+     getThinkingLevel: GetThinkingLevelHandler;
+     setThinkingLevel: SetThinkingLevelHandler;
++    /** Create a fresh ExtensionCommandContext bound to the current runner. Local experiment. */
++    createCommandContext: () => ExtensionCommandContext;
+ }
+ /**
+  * Actions for ExtensionContext (ctx.* in event handlers).
+diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
+index 8cdfbdec42f696b8cd6b762a92180a81ec142433..ad315766add63f2fe9f9ecc393ef1ff1b200df7e 100644
+--- a/dist/core/session-manager.d.ts
++++ b/dist/core/session-manager.d.ts
+@@ -13,6 +13,10 @@ export interface SessionHeader {
+ export interface NewSessionOptions {
+     id?: string;
+     parentSession?: string;
++    /** pi-c2 patch: fixed filename for the session transcript (e.g. "transcript.jsonl"). */
++    sessionFilename?: string;
++    /** pi-c2 patch: private storage boundary whose existing ancestors are repaired to 0700. */
++    privateRoot?: string;
+ }
+ export interface SessionEntryBase {
+     type: string;
+diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
+index 92e8070ce1c60e7780aba7a4a0ea8b1d1652156f..13a5e22c1159a80b8472b3ddbabb13b30bde7718 100644
+--- a/dist/core/session-manager.js
++++ b/dist/core/session-manager.js
+@@ -1,14 +1,34 @@
+ import { uuidv7 } from "@earendil-works/pi-ai";
+ import { randomUUID } from "crypto";
+-import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
++import { appendFileSync, chmodSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
+ import { readdir, stat } from "fs/promises";
+-import { join, resolve } from "path";
++import { dirname, join, resolve } from "path";
+ import { createInterface } from "readline";
+ import { StringDecoder } from "string_decoder";
+ import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
+ import { normalizePath, resolvePath } from "../utils/paths.js";
+ import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage, } from "./messages.js";
+ export const CURRENT_SESSION_VERSION = 3;
++
++/** pi-c2 patch: enforce owner-only modes on the session directory and file. */
++function ensurePrivateSessionDir(dir, boundary) {
++    if (!dir) return;
++    mkdirSync(dir, { recursive: true, mode: 0o700 });
++    const resolved = resolve(dir);
++    const stop = boundary ? resolve(boundary) : resolved;
++    for (let current = resolved; ; ) {
++        chmodSync(current, 0o700);
++        if (current === stop) break;
++        const parent = dirname(current);
++        if (parent === current) break;
++        current = parent;
++    }
++}
++function ensurePrivateSessionFile(file) {
++    if (!file) return;
++    try { chmodSync(file, 0o600); } catch { /* best-effort */ }
++}
++
+ function createSessionId() {
+     return uuidv7();
+ }
+@@ -597,8 +617,8 @@ export class SessionManager {
+         this.cwd = resolvePath(cwd);
+         this.sessionDir = normalizePath(sessionDir);
+         this.persist = persist;
+-        if (persist && this.sessionDir && !existsSync(this.sessionDir)) {
+-            mkdirSync(this.sessionDir, { recursive: true });
++        if (persist && this.sessionDir) {
++            ensurePrivateSessionDir(this.sessionDir, newSessionOptions?.privateRoot);
+         }
+         if (sessionFile) {
+             this._setSessionFile(sessionFile, preloadedFileEntries);
+@@ -613,6 +633,10 @@ export class SessionManager {
+     }
+     _setSessionFile(sessionFile, preloadedFileEntries) {
+         this.sessionFile = resolvePath(sessionFile);
++        if (this.persist) {
++            ensurePrivateSessionDir(this.getSessionDir(), undefined);
++            ensurePrivateSessionFile(this.sessionFile);
++        }
+         if (existsSync(this.sessionFile)) {
+             this.fileEntries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
+             // If file was empty, initialize it with a valid session header. If it was
+@@ -663,11 +687,19 @@ export class SessionManager {
+         this.leafId = null;
+         this.flushed = false;
+         if (this.persist) {
+-            const fileTimestamp = timestamp.replace(/[:.]/g, "-");
+-            this.sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${this.sessionId}.jsonl`);
++            ensurePrivateSessionDir(this.getSessionDir(), undefined);
++            this.sessionFile = join(this.getSessionDir(), this._resolveSessionFilename(options));
+         }
+         return this.sessionFile;
+     }
++    /** pi-c2 patch: prefer a caller-fixed sessionFilename, else the stock timestamped name. */
++    _resolveSessionFilename(options) {
++        const explicit = options?.sessionFilename;
++        if (typeof explicit === "string" && explicit.length > 0) return explicit;
++        const timestamp = new Date().toISOString();
++        const fileTimestamp = timestamp.replace(/[:.]/g, "-");
++        return `${fileTimestamp}_${this.sessionId}.jsonl`;
++    }
+     _buildIndex() {
+         this.byId.clear();
+         this.labelsById.clear();
+@@ -736,7 +768,7 @@ export class SessionManager {
+             return;
+         }
+         if (!this.flushed) {
+-            const fd = openSync(this.sessionFile, "wx");
++            const fd = openSync(this.sessionFile, existsSync(this.sessionFile) ? "w" : "wx");
+             try {
+                 for (const e of this.fileEntries) {
+                     writeFileSync(fd, `${JSON.stringify(e)}\n`);
+@@ -745,10 +777,12 @@ export class SessionManager {
+             finally {
+                 closeSync(fd);
+             }
++            ensurePrivateSessionFile(this.sessionFile);
+             this.flushed = true;
+         }
+         else {
+             appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
++            ensurePrivateSessionFile(this.sessionFile);
+         }
+     }
+     _appendEntry(entry) {

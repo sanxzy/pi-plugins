@@ -5,7 +5,8 @@
   "scripts": {
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "pnpm -r --if-present run test",
-    "test:all": "bash scripts/test-all.sh"
+    "test:all": "bash scripts/test-all.sh",
+    "build:pi-c2": "node packages/pi-c2/scripts/build.mjs"
   },
   "engines": {
     "node": ">=22.19.0",

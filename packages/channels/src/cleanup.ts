@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+/// <reference path="./proper-lockfile.d.ts" />
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, type Dirent } from "node:fs";
 import { join } from "node:path";
 import {
@@ -12,15 +12,10 @@ import {
   sessionTreeJobs,
 } from "@xzy-ai/runtime";
 import { CHANNEL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import lockfile from "proper-lockfile";
 import { isProcessAlive } from "./ownership.ts";
 import { resolveChannelLockPolicy, type ChannelLockPolicyOverrides } from "./lock-policy.ts";
 import { resolveChannelSettings } from "./settings.ts";
-
-interface LockfileModule {
-  lockSync(file: string, options?: Record<string, unknown>): () => void;
-}
-const require = createRequire(import.meta.url);
-const lockfileApi = require("proper-lockfile") as LockfileModule;
 
 export const MAX_ROOT_SESSIONS = 200;
 
@@ -105,7 +100,7 @@ export function cleanupRootSessions(
   const maxRootSessions = resolveChannelSettings(projectRoot).maxRootSessions;
   let release: (() => void) | undefined;
   try {
-    release = lockfileApi.lockSync(cleanupLockFile(projectRoot), {
+    release = lockfile.lockSync(cleanupLockFile(projectRoot), {
       realpath: false,
       stale: lockPolicy.staleMs,
       update: lockPolicy.updateMs,
