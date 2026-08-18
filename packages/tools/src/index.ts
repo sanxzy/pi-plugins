@@ -22,6 +22,20 @@ export {
   type EditMarkdownDetails,
   type EditMarkdownParams,
 } from "./registrations/edit-markdown.ts";
+export {
+  executeWrite,
+  registerWriteTool,
+  writeParams,
+  type WriteDetails,
+  type WriteParams,
+} from "./registrations/write.ts";
+export {
+  editParams,
+  executeEdit,
+  registerEditTool,
+  type EditDetails,
+  type EditParams,
+} from "./registrations/edit.ts";
 export { registerAgentTool } from "./registrations/agent.ts";
 export { registerCancelTool } from "./registrations/cancel.ts";
 export { registerStatusTool } from "./registrations/status.ts";

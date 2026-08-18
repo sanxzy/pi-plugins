@@ -228,6 +228,41 @@ async function createIsolatedChild(options: {
   await resourceLoader.reload();
 
   const { runtime, modelRuntime } = await createChildModelRuntime({ agentDir });
+  // Flush extension-registered providers (e.g. the `commandcode` provider
+  // installed via settings packages) into the isolated child runtime so
+  // frontmatter `model: commandcode/...` resolves instead of falling back
+  // to the parent model. Mirrors `createAgentSessionServices` in the SDK.
+  if (modelRuntime) {
+    const extensionsResult = resourceLoader.getExtensions() as unknown as {
+      runtime: {
+        pendingProviderRegistrations: Array<{ name: string; config: unknown }>;
+        pendingNativeProviderRegistrations: Array<{ provider: unknown }>;
+      };
+    };
+    for (const { name, config } of extensionsResult.runtime.pendingProviderRegistrations ?? []) {
+      try {
+        (modelRuntime as unknown as { registerProvider(name: string, config: unknown): void }).registerProvider(name, config);
+      } catch {
+        // Provider composition errors are surfaced via diagnostics; do not
+        // abort child creation for one bad extension.
+      }
+    }
+    for (const { provider } of extensionsResult.runtime.pendingNativeProviderRegistrations ?? []) {
+      try {
+        (modelRuntime as unknown as { registerNativeProvider(provider: unknown): void }).registerNativeProvider(provider);
+      } catch {
+        // Same: keep the child alive on native-provider errors.
+      }
+    }
+    extensionsResult.runtime.pendingProviderRegistrations = [];
+    extensionsResult.runtime.pendingNativeProviderRegistrations = [];
+    try {
+      await (modelRuntime as unknown as { refresh(opts?: unknown): Promise<unknown> }).refresh({ allowNetwork: false });
+    } catch {
+      // Availability refresh is best-effort; resolution can still proceed
+      // against `getModels()` even if availability checks fail.
+    }
+  }
   const sessionManager = createChildSessionManager({
     cwd: options.cwd,
     jobId: options.jobId,

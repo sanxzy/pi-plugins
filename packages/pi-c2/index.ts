@@ -2,10 +2,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   registerAgentTool,
   registerCancelTool,
+  registerEditTool,
   registerQuestionTool,
   registerWriteMarkdownTool,
   registerEditMarkdownTool,
   registerWriteEditTicketTool,
+  registerWriteTool,
   registerStatusTool,
   registerJobsTool,
   registerAgentListTool,
@@ -20,7 +22,6 @@ import {
   registerSessionEvents,
   registerSystemPrompt,
   registerLifecycleGates,
-  registerPonytailEnforcement,
   registerPonytailSetup,
   registerTelegramSetup,
   registerReferencesSetup,
@@ -85,6 +86,8 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerTelegramLifecycle(pi, { getCommands: getMenuCommands });
   registerMcpLifecycle(pi);
   registerQuestionTool(pi);
+  registerWriteTool(pi);
+  registerEditTool(pi);
   registerWriteMarkdownTool(pi);
   registerEditMarkdownTool(pi);
   registerWriteEditTicketTool(pi);
@@ -100,7 +103,6 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerAgentFooter(pi);
   registerTelegramChatTool(pi);
   registerSessionEvents(pi);
-  registerPonytailEnforcement(pi);
   registerPonytailSetup(pi);
   registerSystemPrompt(pi);
   registerLifecycleGates(pi);

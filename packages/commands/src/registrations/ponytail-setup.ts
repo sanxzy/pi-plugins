@@ -33,6 +33,11 @@ export function registerPonytailSetup(pi: ExtensionAPI): void {
           return;
         }
         const enabled = selected === ENABLE;
+        // Capture cwd/ui before reload: after await ctx.reload() the command ctx
+        // is invalidated and any access throws "stale after session replacement".
+        const cwd = ctx.cwd;
+        const ui = ctx.ui;
+        const reloadFn = typeof ctx.reload === "function" ? ctx.reload.bind(ctx) : undefined;
         try {
           await mutatePonytailState(sessionId, Date.now(), (state) => ({
             version: 1,
@@ -40,23 +45,36 @@ export function registerPonytailSetup(pi: ExtensionAPI): void {
             tickets: state?.tickets ?? [],
           }));
         } catch {
-          ctx.ui.notify("Unable to persist Ponytail state; the active session was not changed.", "error");
+          ui.notify("Unable to persist Ponytail state; the active session was not changed.", "error");
           return;
         }
-        ctx.ui.notify(`Ponytail ${enabled ? "enable" : "disable"} choice persisted successfully.`, "info");
-        markSessionReload(ctx.cwd);
-        const reloadFn = typeof ctx.reload === "function" ? ctx.reload : undefined;
+        ui.notify(`Ponytail ${enabled ? "enable" : "disable"} choice persisted successfully.`, "info");
+        markSessionReload(cwd);
         if (reloadFn === undefined) {
-          clearSessionReload(ctx.cwd);
-          ctx.ui.notify(`Session reload unavailable; the current runtime was not changed. The Ponytail ${enabled ? "enable" : "disable"} choice takes effect at the next successful reload or session start.`, "warning");
+          clearSessionReload(cwd);
+          ui.notify(`Session reload unavailable; the current runtime was not changed. The Ponytail ${enabled ? "enable" : "disable"} choice takes effect at the next successful reload or session start.`, "warning");
           return;
         }
         try {
           await reloadFn();
-          ctx.ui.notify("Session reload succeeded; the current runtime now reflects the persisted Ponytail choice.", "info");
         } catch {
-          clearSessionReload(ctx.cwd);
-          ctx.ui.notify(`Session reload failed; the current runtime was not changed. The persisted Ponytail choice takes effect at the next successful reload or session start.`, "warning");
+          clearSessionReload(cwd);
+          try {
+            ui.notify(`Session reload failed; the current runtime was not changed. The persisted Ponytail choice takes effect at the next successful reload or session start.`, "warning");
+          } catch {
+            // ui is from the stale ctx; ignore if notify throws after reload.
+          }
+          return;
+        }
+        // Do not use ctx after successful reload — it is stale. Use the
+        // captured ui and swallow the stale error if the runner has already
+        // invalidated it. The session_start gate will also send
+        // "Your session was reloaded." via the fresh runtime.
+        try {
+          ui.notify("Session reload succeeded; the current runtime now reflects the persisted Ponytail choice.", "info");
+        } catch {
+          // Stale ctx — the reload itself already succeeded and the persisted
+          // choice will be visible in the fresh session.
         }
       });
     },
