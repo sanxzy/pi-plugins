@@ -7,7 +7,6 @@ import {
   readPrivateJson,
   writePrivateJson,
 } from "../../shared/paths.ts";
-import { isWithinScope } from "./containment.ts";
 
 /** One persisted authorization record. */
 export interface PonytailTicket {
@@ -166,13 +165,6 @@ export function initializeChildPonytailState(rootSessionId: string, childSession
 }
 
 /**
- * A pre-execution write/edit authorization decision for the host `tool_call`
- * boundary. `block` with a concise `reason` stops the built-in operation;
- * `allow` lets it run unchanged.
- */
-export type WriteEditDecision = { readonly block: true; readonly reason: string } | { readonly block: false };
-
-/**
  * Canonicalize a target path for authorization without mutating the
  * filesystem. Existing targets must resolve to the same real path; missing
  * targets are canonicalized through their nearest existing ancestor.
@@ -204,29 +196,6 @@ export function canonicalizeWriteEditTarget(target: string): string | undefined 
   }
   const suffix = relative(ancestor, resolved);
   return resolve(canonicalAncestor, suffix);
-}
-
-/**
- * Check whether a canonical target is authorized by any unexpired ticket in
- * the current session's effective state. Stored scopes are used directly; the
- * target is never re-resolved against a changed cwd.
- */
-export function isWriteEditAuthorized(
-  sessionId: string,
-  target: string,
-  nowMs = Date.now(),
-  persistence: PonytailPersistence = defaultPersistence,
-): { ok: boolean; reason?: string } {
-  const state = loadPonytailState(sessionId, nowMs, persistence);
-  if (!state) return { ok: false, reason: "Ponytail is not enabled for this session." };
-  if (!state.enabled) return { ok: true };
-  const canonical = canonicalizeWriteEditTarget(target);
-  if (!canonical) return { ok: false, reason: "The target path is unsafe or outside the project." };
-  for (const ticket of state.tickets) {
-    if (ticket.expiresAt <= nowMs) continue;
-    if (ticket.scopes.some((scope) => isWithinScope(scope, canonical))) return { ok: true };
-  }
-  return { ok: false, reason: "No unexpired Ponytail ticket covers this write/edit target. Request a correctly scoped ticket first." };
 }
 
 /** The exact state-file path for one session. */

@@ -4,6 +4,7 @@ import type {
   ExtensionContext,
   SessionShutdownEvent,
   SessionStartEvent,
+  ToolDefinition,
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { allMcpNames, sessionMcpActive, sessionMcpNames } from "@xzy-ai/core";
@@ -79,6 +80,18 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLog
   };
 }
 
+/** Optional registration dependencies for the per-session lifecycle events. */
+export interface SessionEventsOptions {
+  /**
+   * Ponytail `write`/`edit` wrapper definitions, supplied by the composition
+   * root. When the session's effective Ponytail state is enabled they are
+   * registered before the active-tool filter runs so the model sees the
+   * required-ticket surface; when disabled nothing is registered and the host
+   * built-in tools remain.
+   */
+  readonly ponytailWriteEditTools?: () => { readonly write: ToolDefinition<any, any, any>; readonly edit: ToolDefinition<any, any, any> };
+}
+
 /**
  * Register the per-session lifecycle events.
  *
@@ -87,7 +100,7 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLog
  * `session_shutdown` unregisters the sink and, for the root session only,
  * interrupts running jobs on process quit or `/new`.
  */
-export function registerSessionEvents(pi: ExtensionAPI): void {
+export function registerSessionEvents(pi: ExtensionAPI, options: SessionEventsOptions = {}): void {
   pi.on("turn_start", (_event: TurnStartEvent, ctx: ExtensionContext) => {
     processWithLog({ operation: SESSION_OPERATIONS.TURN_START, parameters: { cwd: ctx.cwd } }, () => {
       // A turn is one model response and its tool batch. Resetting here means
@@ -104,12 +117,12 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     return runWithLogContext(logger, () => processWithLog(
       { operation: SESSION_OPERATIONS.START, parameters: { reason: event.reason } },
       async () => {
-        await startSession(event, ctx, pi, projectRoot, sessionId, logger);
+        await startSession(event, ctx, pi, projectRoot, sessionId, logger, options);
       },
     ));
   });
 
-  async function startSession(event: SessionStartEvent, ctx: ExtensionContext, pi: ExtensionAPI, projectRoot: string, sessionId: string, logger: SessionLogger): Promise<void> {
+  async function startSession(event: SessionStartEvent, ctx: ExtensionContext, pi: ExtensionAPI, projectRoot: string, sessionId: string, logger: SessionLogger, options: SessionEventsOptions): Promise<void> {
     const rootPool = getChildPool(ctx.cwd, sessionId);
     // Host-bound model messages (reload notice, background results, goals) are
     // gated behind the agent's run state so they never race an active prompt
@@ -166,6 +179,18 @@ export function registerSessionEvents(pi: ExtensionAPI): void {
     const mcpActive = sessionMcpActive(ctx.cwd, sessionId);
     const mcpResourceTools = new Set(["mcp_resources_list", "mcp_resources_read"]);
     const ponytailActive = loadPonytailState(sessionId, Date.now())?.enabled === true;
+    // The Ponytail write/edit wrapper definitions are registered only for an
+    // enabled session, before the active-tool filter computes the model-facing
+    // surface. A disabled session never sees them; the host built-in write/edit
+    // remain the only definitions. Registration is idempotent per runner, so a
+    // reload that re-registers the same definitions is safe.
+    if (ponytailActive) {
+      const ponytailTools = options.ponytailWriteEditTools?.();
+      if (ponytailTools) {
+        pi.registerTool(ponytailTools.write);
+        pi.registerTool(ponytailTools.edit);
+      }
+    }
     const markdownTools = new Set(["write_markdown", "edit_markdown"]);
     pi.setActiveTools(
       pi

@@ -37,12 +37,11 @@ export {
 } from "./infrastructure/references/catalog.ts";
 export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
-export { createChildSessionManager, resolveChildTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
+export { createChildSessionManager, resolveChildTools, resolveChildCustomTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
 export { maxAgentDepth } from "./shared/pi-c2-config.ts";
 export {
   canonicalizeWriteEditTarget,
   initializeChildPonytailState,
-  isWriteEditAuthorized,
   loadPonytailState,
   mutatePonytailState,
   ponytailStateExists,
@@ -52,12 +51,11 @@ export {
   type PonytailPersistence,
   type PonytailState,
   type PonytailTicket,
-  type WriteEditDecision,
 } from "./infrastructure/ponytail/state.ts";
 export { resolveTicketScopes, type ResolveTicketScopeError, type ResolveTicketScopesInput, type ResolvedTicketScope } from "./infrastructure/ponytail/scopes.ts";
 export { isWithinScope, isDescendantScope } from "./infrastructure/ponytail/containment.ts";
 export { clearSettingsCache, resolveSettings, resolveSettingsForProject, settingsConfigPath, bootstrapSettingsConfig, type AgentSettings, type ChannelSettings, type CommandSettings, type McpSettings, type PonytailSettings, type ResolvedSettings, type RuntimeSettings, type WebSettings } from "./shared/settings.ts";
-export { getChildExtensionFactories, registerChildExtensionFactory } from "./infrastructure/pi-sdk/child-extensions.ts";
+export { getChildExtensionFactories, registerChildExtensionFactory, getChildPonytailTools, registerChildPonytailTools, type ChildPonytailTools } from "./infrastructure/pi-sdk/child-extensions.ts";
 export {
   attachAgentSessionLiveFeed,
   liveStatusForSession,

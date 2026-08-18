@@ -2,12 +2,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   registerAgentTool,
   registerCancelTool,
-  registerEditTool,
   registerQuestionTool,
   registerWriteMarkdownTool,
   registerEditMarkdownTool,
   registerWriteEditTicketTool,
-  registerWriteTool,
+  createPonytailWriteTool,
+  createPonytailEditTool,
   registerStatusTool,
   registerJobsTool,
   registerAgentListTool,
@@ -34,7 +34,7 @@ import {
   createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
-import { registerChildExtensionFactory } from "@xzy-ai/runtime";
+import { registerChildExtensionFactory, registerChildPonytailTools } from "@xzy-ai/runtime";
 import { bootstrapSettingsConfig } from "@xzy-ai/runtime";
 import { registerMcpLifecycle } from "@xzy-ai/mcp";
 import type {
@@ -64,8 +64,15 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   // Child sessions create an isolated SDK resource loader. Register this same
   // inline factory process-wide before composing tools so those loaders can
   // construct the agent-family/web registrations; their child allowlists still
-  // exclude goal and MCP root-only tools.
+  // exclude goal and MCP root-only tools. The Ponytail write/edit wrapper
+  // definitions are published the same way: children inject them through their
+  // custom-tools list only when the child's effective Ponytail state is
+  // enabled.
   registerChildExtensionFactory(piC2Extension);
+  registerChildPonytailTools({
+    write: createPonytailWriteTool(),
+    edit: createPonytailEditTool(),
+  });
 
   // The Telegram bridge dispatches extension commands with explicit expanders
   // (goal) plus prompt/skill files discovered from the Pi command catalog, and
@@ -86,8 +93,6 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerTelegramLifecycle(pi, { getCommands: getMenuCommands });
   registerMcpLifecycle(pi);
   registerQuestionTool(pi);
-  registerWriteTool(pi);
-  registerEditTool(pi);
   registerWriteMarkdownTool(pi);
   registerEditMarkdownTool(pi);
   registerWriteEditTicketTool(pi);
@@ -102,7 +107,12 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerKnowledgeSearchTool(pi);
   registerAgentFooter(pi);
   registerTelegramChatTool(pi);
-  registerSessionEvents(pi);
+  registerSessionEvents(pi, {
+    ponytailWriteEditTools: () => ({
+      write: createPonytailWriteTool(),
+      edit: createPonytailEditTool(),
+    }),
+  });
   registerPonytailSetup(pi);
   registerSystemPrompt(pi);
   registerLifecycleGates(pi);

@@ -24,7 +24,7 @@ import type {
 import { AGENT_OPERATIONS, MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
-import { getChildExtensionFactories } from "./child-extensions.ts";
+import { getChildExtensionFactories, getChildPonytailTools, type ChildPonytailTools } from "./child-extensions.ts";
 import { inheritedMcpRenderCall, inheritedMcpRenderResult } from "./render-safe.ts";
 
 /**
@@ -80,6 +80,53 @@ const MCP_RESOURCE_TOOLS = [
   "mcp_resources_list",
   "mcp_resources_read",
 ] as const;
+
+/**
+ * Compose the child session's `customTools` list.
+ *
+ * Inherited MCP definitions are always included when the bridge is enabled and
+ * definitions are supplied. The Ponytail `write`/`edit` wrapper definitions are
+ * appended ONLY when the child's effective Ponytail state is enabled and the
+ * definitions were published by the composition root; when Ponytail is
+ * disabled the child uses the normal built-in `write`/`edit` tools and no
+ * wrapper is injected.
+ */
+export function resolveChildCustomTools(options: {
+  mcpToolDefs?: ReadonlyArray<{ name: string; description: string; parameters: unknown }>;
+  mcpEnabled?: boolean;
+  mcpBridge?: {
+    invokeTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>;
+    listResources(server: string): unknown;
+    readResource(server: string, uri: string, signal?: AbortSignal): Promise<unknown>;
+  };
+  ponytailEnabled: boolean;
+  ponytailTools?: ChildPonytailTools;
+}): Array<{ name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> }> {
+  const customTools: Array<{ name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> }> = [];
+  if (options.mcpToolDefs?.length && options.mcpEnabled !== false && options.mcpBridge) {
+    customTools.push(...options.mcpToolDefs.map((definition) => ({
+      name: definition.name,
+      label: definition.name,
+      description: definition.description,
+      parameters: definition.parameters,
+      execute: async (_id: string, args: Record<string, unknown>, signal: AbortSignal | undefined) => processWithLog({
+        operation: MCP_OPERATIONS.INVOKE_TOOL,
+        parameters: { name: definition.name, args },
+      }, async () => options.mcpBridge
+        ? await options.mcpBridge.invokeTool(definition.name, args, signal)
+        : { content: [{ type: "text", text: "Inherited MCP execution bridge is unavailable" }], details: { error: "mcp bridge unavailable" } }),
+      renderCall: (args: unknown, theme: { fg(color: string, text: string): string; bold(text: string): string }, context: { expanded?: boolean; args?: unknown }) => inheritedMcpRenderCall(definition.name, definition.name, theme, { ...context, args }),
+      renderResult: (result: unknown, renderOptions: { expanded?: boolean; isPartial: boolean }, theme: { fg(color: string, text: string): string }, context: { isError?: boolean }) => inheritedMcpRenderResult(result, renderOptions, theme, context),
+    })));
+  }
+  if (options.ponytailEnabled && options.ponytailTools) {
+    customTools.push(
+      options.ponytailTools.write as unknown as { name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> },
+      options.ponytailTools.edit as unknown as { name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> },
+    );
+  }
+  return customTools;
+}
 
 /**
  * Map a resolved agent to its child tool allowlist.
@@ -338,22 +385,20 @@ async function createIsolatedChild(options: {
   // Dynamic MCP definitions are supplied by the parent composition root. The
   // child loader cannot discover the parent's MCP manager, so register the
   // inherited definitions as isolated local tools whose execution is routed
-  // through the parent's stable MCP tool bridge.
-  if (options.mcpToolDefs?.length && options.mcpEnabled !== false) {
-    sessionOptions.customTools = options.mcpToolDefs.map((definition) => ({
-      name: definition.name,
-      label: definition.name,
-      description: definition.description,
-      parameters: definition.parameters,
-      execute: async (_id: string, args: Record<string, unknown>, signal: AbortSignal | undefined) => processWithLog({
-        operation: MCP_OPERATIONS.INVOKE_TOOL,
-        parameters: { name: definition.name, args },
-      }, async () => options.mcpBridge
-        ? await options.mcpBridge.invokeTool(definition.name, args, signal)
-        : { content: [{ type: "text", text: "Inherited MCP execution bridge is unavailable" }], details: { error: "mcp bridge unavailable" } }),
-      renderCall: (args: unknown, theme: { fg(color: string, text: string): string; bold(text: string): string }, context: { expanded?: boolean; args?: unknown }) => inheritedMcpRenderCall(definition.name, definition.name, theme, { ...context, args }),
-      renderResult: (result: unknown, renderOptions: { expanded?: boolean; isPartial: boolean }, theme: { fg(color: string, text: string): string }, context: { isError?: boolean }) => inheritedMcpRenderResult(result, renderOptions, theme, context),
-    }));
+  // through the parent's stable MCP tool bridge. When the child's effective
+  // Ponytail state is enabled, the Ponytail `write`/`edit` wrapper definitions
+  // (published by the composition root) are appended so the child enforces the
+  // same required-ticket boundary as a root session; when disabled, no wrapper
+  // is injected and the child uses the normal built-in tools.
+  const childCustomTools = resolveChildCustomTools({
+    mcpToolDefs: options.mcpToolDefs,
+    mcpEnabled: options.mcpEnabled,
+    mcpBridge: options.mcpBridge,
+    ponytailEnabled: childPonytailEnabled,
+    ponytailTools: getChildPonytailTools(),
+  });
+  if (childCustomTools.length > 0) {
+    sessionOptions.customTools = childCustomTools;
   }
 
   const { session } = await (createAgentSession as unknown as (options: Record<string, unknown>) => Promise<{ session: AgentSession }>)(sessionOptions);

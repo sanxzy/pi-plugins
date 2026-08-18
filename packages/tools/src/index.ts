@@ -23,6 +23,7 @@ export {
   type EditMarkdownParams,
 } from "./registrations/edit-markdown.ts";
 export {
+  createPonytailWriteTool,
   executeWrite,
   registerWriteTool,
   writeParams,
@@ -30,6 +31,7 @@ export {
   type WriteParams,
 } from "./registrations/write.ts";
 export {
+  createPonytailEditTool,
   editParams,
   executeEdit,
   registerEditTool,

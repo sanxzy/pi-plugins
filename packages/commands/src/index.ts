@@ -1,4 +1,4 @@
-export { registerSessionEvents } from "./registrations/session-events.ts";
+export { registerSessionEvents, type SessionEventsOptions } from "./registrations/session-events.ts";
 export {
   notifyHost,
   registerNotifyEntry,

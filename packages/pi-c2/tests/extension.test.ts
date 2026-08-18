@@ -143,8 +143,6 @@ test("question registration is main-agent-only (no child tool registrations)", (
     "mcp_resources_list",
     "mcp_resources_read",
     "question",
-    "write",
-    "edit",
     "write_markdown",
     "edit_markdown",
     "create_write_edit_ticket",
@@ -213,7 +211,7 @@ test("parent startup activates the registered tools including web_search and web
   assert.equal(activeTools.includes("create_write_edit_ticket"), false, "absent Ponytail state hides the ticket tool");
 });
 
-test("Ponytail ticket tool is active only for an enabled session", async () => {
+test("Ponytail ticket tool and write/edit wrappers are active only for an enabled session", async () => {
   const home = tempHome();
   const project = mkdtempSync(join(tmpdir(), "pi-c2-ponytail-composition-project-"));
   mkdirSync(join(project, "src"));
@@ -237,6 +235,9 @@ test("Ponytail ticket tool is active only for an enabled session", async () => {
   process.env.PI_C2_TEST_HOME = home;
   try {
     piC2Extension(pi);
+    // The Ponytail write/edit wrappers are never registered at factory time.
+    assert.equal(registered.includes("write"), false, "write wrapper not registered at factory load");
+    assert.equal(registered.includes("edit"), false, "edit wrapper not registered at factory load");
     const ctx = {
       mode: "print", hasUI: false, cwd: project,
       sessionManager: { getSessionId: () => "composition-session", getSessionFile: () => undefined },
@@ -245,18 +246,39 @@ test("Ponytail ticket tool is active only for an enabled session", async () => {
     assert.ok(activeTools.includes("create_write_edit_ticket"));
     assert.ok(activeTools.includes("write_markdown"), "enabled session exposes write_markdown");
     assert.ok(activeTools.includes("edit_markdown"), "enabled session exposes edit_markdown");
+    assert.ok(activeTools.includes("write"), "enabled session exposes the Ponytail write wrapper");
+    assert.ok(activeTools.includes("edit"), "enabled session exposes the Ponytail edit wrapper");
 
+    // A disabled session (separate pi instance) registers no wrappers.
     writeFileSync(join(configDir, "config.json"), JSON.stringify({ tools: { ponytailEnabled: false } }));
     clearSettingsCache();
-    activeTools = [];
+    const registeredDisabled: string[] = [];
+    let activeDisabled: string[] = [];
+    const sessionStartsDisabled: Array<(event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown> = [];
+    const piDisabled = {
+      registerTool(tool: { name: string }) { registeredDisabled.push(tool.name); },
+      registerShortcut() {}, registerCommand() {},
+      on(event: string, handler: (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown) {
+        if (event === "session_start") sessionStartsDisabled.push(handler);
+      },
+      setActiveTools(names: string[]) { activeDisabled = names; },
+      getAllTools() { return registeredDisabled.map((name) => ({ name })); },
+      sendUserMessage() {},
+    } as unknown as ExtensionAPI;
+    piC2Extension(piDisabled);
     const disabledCtx = { ...ctx, sessionManager: { getSessionId: () => "disabled-session", getSessionFile: () => undefined } } as unknown as ExtensionContext;
-    await Promise.all(sessionStarts.map((handler) => handler({ type: "session_start", reason: "startup" }, disabledCtx)));
-    assert.equal(activeTools.includes("create_write_edit_ticket"), false);
-    assert.equal(activeTools.includes("write_markdown"), false);
-    assert.equal(activeTools.includes("edit_markdown"), false);
+    await Promise.all(sessionStartsDisabled.map((handler) => handler({ type: "session_start", reason: "startup" }, disabledCtx)));
+    assert.equal(registeredDisabled.includes("write"), false, "disabled session registers no write wrapper");
+    assert.equal(registeredDisabled.includes("edit"), false, "disabled session registers no edit wrapper");
+    assert.equal(activeDisabled.includes("create_write_edit_ticket"), false);
+    assert.equal(activeDisabled.includes("write_markdown"), false);
+    assert.equal(activeDisabled.includes("edit_markdown"), false);
+    assert.equal(activeDisabled.includes("write"), false, "disabled session active list has no write wrapper");
+    assert.equal(activeDisabled.includes("edit"), false, "disabled session active list has no edit wrapper");
   } finally {
     if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
     else process.env.PI_C2_TEST_HOME = previous;
+    clearSettingsCache();
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   }

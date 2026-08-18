@@ -1,20 +1,22 @@
-import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createEditTool } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
-import { canonicalProjectRoot, canonicalizeWriteEditTarget, loadPonytailState, ponytailStateExists, resolveSettingsForProject } from "@xzy-ai/runtime";
+import { canonicalProjectRoot, canonicalizeWriteEditTarget, loadPonytailState, ponytailStateExists } from "@xzy-ai/runtime";
 import { isWithinScope } from "@xzy-ai/runtime";
 import { PONYTAIL_OPERATIONS, TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { errorResult, textResult } from "../results.ts";
 
 /**
- * Ponytail-aware wrapper around the built-in `edit` tool.
+ * Ponytail-aware `edit` tool.
  *
- * When Ponytail is enabled for the active session the wrapper requires a
- * `ticket` issued by `create_write_edit_ticket` and validates that the ticket
- * is unexpired and its scopes canonically contain the target. When Ponytail is
- * disabled the wrapper delegates directly to the host edit behaviour with no
- * ticket required. Validation is inside the tool execution flow rather than a
- * `tool_call` hook.
+ * The definition is registered ONLY for sessions whose effective Ponytail
+ * state is enabled (root sessions at `session_start`, child sessions through
+ * their isolated custom-tools list). When Ponytail is disabled the definition
+ * is absent and the host built-in `edit` operates normally. The schema
+ * therefore requires a `ticket` issued by `create_write_edit_ticket`: the
+ * model must hold a valid unexpired ticket whose canonical scopes contain the
+ * target before any file is edited. Validation happens inside the tool
+ * execution flow; the host `tool_call` hook is not used.
  */
 
 export const editParams = Type.Object({
@@ -23,7 +25,7 @@ export const editParams = Type.Object({
     oldText: Type.String({ description: "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call." }),
     newText: Type.String({ description: "Replacement text for this targeted edit." }),
   }, { additionalProperties: false }), { description: "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead." }),
-  ticket: Type.Optional(Type.String({ description: "Ponytail ticket obtained from create_write_edit_ticket when Ponytail is enabled. Required when Ponytail is enabled; omit when Ponytail is disabled.", minLength: 1 })),
+  ticket: Type.String({ description: "Ponytail ticket obtained from create_write_edit_ticket. Required: write/edit is authorized only with a valid unexpired ticket covering the target." }),
 }, { additionalProperties: false });
 
 export type EditParams = Static<typeof editParams>;
@@ -61,9 +63,9 @@ function logDecision<T>(tool: string, outcome: "allowed" | "blocked", result: T)
   return processWithLog({ operation: PONYTAIL_OPERATIONS.ENFORCE, parameters: { tool, outcome } }, () => result);
 }
 
-/** Register the Ponytail-aware edit wrapper. It overrides the built-in `edit` definition. */
-export function registerEditTool(pi: ExtensionAPI): void {
-  pi.registerTool({
+/** Construct the Ponytail-aware `edit` definition (root registration and child custom tools). */
+export function createPonytailEditTool(): ToolDefinition<typeof editParams, EditDetails> {
+  return {
     name: "edit",
     label: "Edit",
     description: "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
@@ -79,7 +81,12 @@ export function registerEditTool(pi: ExtensionAPI): void {
     ): Promise<AgentToolResult<EditDetails>> {
       return processWithLog({ operation: TOOL_OPERATIONS.EDIT_EXECUTE, parameters: { path: params.path } }, () => executeEdit(params, ctx, signal));
     },
-  });
+  };
+}
+
+/** Register the Ponytail-aware edit definition on an extension API. */
+export function registerEditTool(pi: ExtensionAPI): void {
+  pi.registerTool(createPonytailEditTool());
 }
 
 /** Execute one edit request with Ponytail ticket validation baked into the tool flow. */
@@ -111,15 +118,15 @@ export async function executeEdit(
   const now = Date.now();
   const state = loadPonytailState(sessionId, now);
 
+  // See executeWrite: the definition only exists for enabled sessions, so
+  // missing/malformed state fails closed; an explicitly disabled state is a
+  // stale-runtime edge and delegates without a ticket.
   if (!state) {
     if (ponytailStateExists(sessionId)) {
       const reason = "Ponytail state is malformed or unrecoverable for this session. Write/edit is blocked until the state is repaired or reset.";
       return logDecision("edit", "blocked", errorResult(reason, { rejected: true, reason }));
     }
-    if (!resolveSettingsForProject(ctx.cwd).tools.ponytailEnabled) {
-      return logDecision("edit", "allowed", await delegateEdit(target, params.edits, ctx.cwd, signal));
-    }
-    const reason = "Ponytail is not enabled for this session.";
+    const reason = "Ponytail state is missing for this session. Write/edit is blocked until the state is repaired or reset.";
     return logDecision("edit", "blocked", errorResult(reason, { rejected: true, reason }));
   }
 

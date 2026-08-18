@@ -1,4 +1,4 @@
-import type { InlineExtension, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { InlineExtension, ExtensionFactory, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 /**
  * Process-wide registry of inline extension factories that child sessions must
@@ -56,4 +56,40 @@ export function registerChildExtensionFactory(input: InlineExtension): void {
 /** The current set of extension factories a child loader should inherit. */
 export function getChildExtensionFactories(): InlineExtension[] {
   return [...registries().values()];
+}
+
+/**
+ * Process-wide registry of Ponytail `write`/`edit` tool definitions that child
+ * sessions must inject through their isolated custom-tools list.
+ *
+ * Children create their own `AgentSession` and never emit `session_start`, so
+ * they cannot register tools through the extension lifecycle. The composition
+ * root publishes the same Ponytail wrapper definitions here that it registers
+ * for root sessions; the child adapter appends them to `customTools` only when
+ * the child's effective Ponytail state is enabled. A re-registration replaces
+ * the previous entry (single slot), mirroring the factory registry's reload
+ * safety.
+ */
+
+export interface ChildPonytailTools {
+  readonly write: ToolDefinition<any, any, any>;
+  readonly edit: ToolDefinition<any, any, any>;
+}
+
+const CHILD_PONYTAIL_TOOLS_KEY = Symbol.for("@xzy-ai/pi-c2:child-ponytail-tools");
+
+function ponytailToolsSlot(): { current?: ChildPonytailTools } {
+  const root = globalThis as unknown as Record<symbol, { current?: ChildPonytailTools } | undefined>;
+  root[CHILD_PONYTAIL_TOOLS_KEY] ??= {};
+  return root[CHILD_PONYTAIL_TOOLS_KEY]!;
+}
+
+/** Publish the Ponytail write/edit definitions isolated child loaders should inject. */
+export function registerChildPonytailTools(tools: ChildPonytailTools): void {
+  ponytailToolsSlot().current = tools;
+}
+
+/** The current Ponytail write/edit definitions for child custom-tools injection. */
+export function getChildPonytailTools(): ChildPonytailTools | undefined {
+  return ponytailToolsSlot().current;
 }

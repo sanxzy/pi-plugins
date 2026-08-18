@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { clearMcpNames, createJob, publishSessionMcpActive } from "@xzy-ai/core";
-import { getChildPool } from "@xzy-ai/runtime";
+import { clearSettingsCache, getChildPool, homePonytailStateFile, writePonytailState } from "@xzy-ai/runtime";
 import {
   markSessionReload,
   registerSessionEvents,
@@ -20,6 +20,85 @@ type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unk
 function projectRoot(): string {
   return mkdtempSync(join(tmpdir(), "pi-c2-session-events-"));
 }
+
+function ponytailDef(name: string) {
+  return {
+    name,
+    label: name,
+    description: `ponytail ${name}`,
+    parameters: { type: "object", properties: {}, required: ["ticket"] },
+    execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+  };
+}
+
+function withTempHome<T>(homeRoot: string, run: () => T): T {
+  const previous = process.env.PI_C2_TEST_HOME;
+  process.env.PI_C2_TEST_HOME = homeRoot;
+  clearSettingsCache();
+  try { return run(); } finally {
+    if (previous === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previous;
+    clearSettingsCache();
+  }
+}
+
+test("session_start registers the Ponytail write/edit wrappers only for an enabled session", async () => {
+  const cwd = projectRoot();
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-ponytail-session-home-"));
+  try {
+    const registered: string[] = [];
+    const handlers = new Map<string, Handler>();
+    const pi = {
+      on(event: string, handler: Handler) { handlers.set(event, handler); },
+      sendUserMessage() {},
+      setActiveTools() {},
+      registerTool(tool: { name: string }) { registered.push(tool.name); },
+      getAllTools() { return registered.map((name) => ({ name })); },
+    } as unknown as ExtensionAPI;
+    registerSessionEvents(pi, {
+      ponytailWriteEditTools: () => ({ write: ponytailDef("write"), edit: ponytailDef("edit") }),
+    });
+    withTempHome(home, () => writePonytailState("enabled-session", { version: 1, enabled: true, tickets: [] }));
+    process.env.PI_C2_TEST_HOME = home;
+    clearSettingsCache();
+    try {
+      await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "enabled-session"));
+      assert.deepEqual(registered, ["write", "edit"], "wrappers registered for enabled session");
+    } finally {
+      delete process.env.PI_C2_TEST_HOME;
+      clearSettingsCache();
+    }
+    // A disabled (or absent-state) session registers nothing.
+    const registeredDisabled: string[] = [];
+    const handlersDisabled = new Map<string, Handler>();
+    const piDisabled = {
+      on(event: string, handler: Handler) { handlersDisabled.set(event, handler); },
+      sendUserMessage() {},
+      setActiveTools() {},
+      registerTool(tool: { name: string }) { registeredDisabled.push(tool.name); },
+      getAllTools() { return registeredDisabled.map((name) => ({ name })); },
+    } as unknown as ExtensionAPI;
+    registerSessionEvents(piDisabled, {
+      ponytailWriteEditTools: () => ({ write: ponytailDef("write"), edit: ponytailDef("edit") }),
+    });
+    withTempHome(home, () => writePonytailState("disabled-session", { version: 1, enabled: false, tickets: [] }));
+    process.env.PI_C2_TEST_HOME = home;
+    clearSettingsCache();
+    try {
+      await handlersDisabled.get("session_start")!({ reason: "startup" }, context(cwd, "disabled-session"));
+      assert.deepEqual(registeredDisabled, [], "no wrappers registered for disabled session");
+      // Absent state also registers nothing.
+      await handlersDisabled.get("session_start")!({ reason: "startup" }, context(cwd, "absent-session"));
+      assert.deepEqual(registeredDisabled, [], "no wrappers registered for absent-state session");
+    } finally {
+      delete process.env.PI_C2_TEST_HOME;
+      clearSettingsCache();
+    }
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 function context(cwd: string, sessionId: string): ExtensionContext {
   return {
