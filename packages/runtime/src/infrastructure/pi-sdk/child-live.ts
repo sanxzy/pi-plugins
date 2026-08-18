@@ -4,6 +4,7 @@ import {
   type ChildLiveEvent,
   type ChildLiveFeed,
   type ChildLiveStatus,
+  type ChildLiveUsage,
 } from "@xzy-ai/core";
 
 /** Extract display text from SDK message content without exposing SDK types. */
@@ -20,6 +21,28 @@ function messageText(message: { content?: unknown }): string {
     })
     .filter(Boolean)
     .join("");
+}
+
+/** Extract token usage from a finalized assistant message, if reported. */
+function messageUsage(message: { role?: string; usage?: unknown }): ChildLiveUsage | undefined {
+  if (message.role !== "assistant") return undefined;
+  const usage = message.usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  const record = usage as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; cost?: unknown };
+  const cost = record.cost && typeof record.cost === "object"
+    ? (record.cost as { total?: unknown }).total
+    : undefined;
+  return {
+    input: finiteNumber(record.input),
+    output: finiteNumber(record.output),
+    cacheRead: finiteNumber(record.cacheRead),
+    cacheWrite: finiteNumber(record.cacheWrite),
+    cost: finiteNumber(cost),
+  };
+}
+
+function finiteNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 /**
@@ -81,6 +104,7 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         phase: "end",
         role: event.message.role,
         text: messageText(event.message),
+        usage: messageUsage(event.message),
       };
     case "tool_execution_start":
       return {

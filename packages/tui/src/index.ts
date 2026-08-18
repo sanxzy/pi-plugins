@@ -5,6 +5,7 @@ export type {
   AgentFooterInfo,
   AgentFooterOptions,
   AgentFooterTheme,
+  FooterTreeLiveStats,
   FooterTreeRow,
   FooterTreeStatus,
 } from "./agent-footer.ts";

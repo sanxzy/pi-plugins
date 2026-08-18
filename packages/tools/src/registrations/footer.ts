@@ -10,6 +10,7 @@ import {
   AgentFooter,
   AgentLiveManager,
   type AgentFooterInfo,
+  type FooterTreeLiveStats,
   type FooterTreeRow,
 } from "@xzy-ai/tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
@@ -202,17 +203,35 @@ function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>
   };
   return [
     root,
-    ...descendants.map((row) => ({
-      rowId: row.rowId,
-      status: row.status,
-      depth: row.depth + 1,
-      description: row.description,
-      durationMs: row.durationMs,
-      leaf: latestLeaf(liveChildFor(pool, row.jobId)),
-      enterable: row.enterable,
-      updatedAtMs: isTerminal(row.status) ? settledMs(jobs.get(row.jobId)) : undefined,
-    })),
+    ...descendants.map((row) => {
+      const job = jobs.get(row.jobId);
+      return {
+        rowId: row.rowId,
+        status: row.status,
+        depth: row.depth + 1,
+        description: row.description,
+        durationMs: row.durationMs,
+        leaf: latestLeaf(liveChildFor(pool, row.jobId)),
+        live: liveStats(job, liveChildFor(pool, row.jobId)),
+        enterable: row.enterable,
+        updatedAtMs: isTerminal(row.status) ? settledMs(job) : undefined,
+      };
+    }),
   ];
+}
+
+/** Project the running child's live counters into a compact footer row segment. */
+function liveStats(
+  job: { subagentType?: string } | undefined,
+  control: { live?: { snapshot: { counters: { toolUses: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } } } } | undefined,
+): FooterTreeLiveStats | undefined {
+  const counters = control?.live?.snapshot?.counters;
+  if (!counters) return undefined;
+  const subagentType = job?.subagentType;
+  if (!subagentType) return undefined;
+  const tokens =
+    counters.inputTokens + counters.outputTokens + counters.cacheReadTokens + counters.cacheWriteTokens;
+  return { subagentType, toolUses: counters.toolUses, tokens };
 }
 
 function liveChildFor(

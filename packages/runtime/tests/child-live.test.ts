@@ -182,6 +182,42 @@ test("maps SDK message and tool events to the core live feed", () => {
   );
 });
 
+test("message_end maps finalized assistant usage into the live event", () => {
+  const mapped = mapAgentSessionEvent({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      timestamp: 5,
+      usage: { input: 100, output: 20, cacheRead: 3, cacheWrite: 0, totalTokens: 123, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 } },
+      // Full AssistantMessage shape is not needed by the mapper; the SDK type
+      // is satisfied through the same cast used by the event-mapping tests.
+    } as never,
+  });
+  assert.deepEqual(mapped, {
+    type: "message",
+    id: "assistant-5",
+    phase: "end",
+    role: "assistant",
+    text: "done",
+    usage: { input: 100, output: 20, cacheRead: 3, cacheWrite: 0, cost: 0.01 },
+  });
+});
+
+test("message_end never carries usage for user messages or missing usage", () => {
+  const user = mapAgentSessionEvent({
+    type: "message_end",
+    message: { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 6 } as never,
+  });
+  assert.equal(user?.type === "message" && "usage" in user ? user.usage : "missing", undefined);
+
+  const noUsage = mapAgentSessionEvent({
+    type: "message_end",
+    message: { role: "assistant", content: [{ type: "text", text: "hi" }], timestamp: 7 } as never,
+  });
+  assert.equal(noUsage?.type === "message" && "usage" in noUsage ? noUsage.usage : "missing", undefined);
+});
+
 test("live feed retains tool-call args for runtime control but UI must not render them", () => {
   const feed = createChildLiveFeed();
   feed.emit({

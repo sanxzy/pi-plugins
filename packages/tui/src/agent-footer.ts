@@ -38,6 +38,16 @@ export type FooterTreeStatus =
   | "cancelled"
   | "interrupted";
 
+/** Live per-agent stats projected by the host while a child session is running. */
+export interface FooterTreeLiveStats {
+  /** Agent definition name (subagent type) that runs the job. */
+  readonly subagentType: string;
+  /** Tool executions observed so far. */
+  readonly toolUses: number;
+  /** Total tokens reported by the session so far (input + output + cache). */
+  readonly tokens: number;
+}
+
 /** One projected descendant row rendered below the native information rows. */
 export interface FooterTreeRow {
   readonly rowId: string;
@@ -48,6 +58,8 @@ export interface FooterTreeRow {
   readonly description: string;
   readonly durationMs: number;
   readonly leaf?: string;
+  /** Live counters shown in the compact running-agent line when present. */
+  readonly live?: FooterTreeLiveStats;
   readonly enterable: boolean;
   readonly updatedAt?: string;
   /** Test and adapter seam when the caller already has a settled timestamp. */
@@ -106,7 +118,7 @@ export class AgentFooter implements Component {
     if (this.selectedIndex >= rows.length) this.selectedIndex = Math.max(0, rows.length - 1);
 
     const lastByDepth = computeLastByDepth(rows);
-    const lines = [pathLine, statsLine, this.theme.fg("dim", "-- current active subagents --")];
+    const lines = [pathLine, statsLine, footerHeading(rows, this.theme)];
     if (this.hint) lines.push(this.theme.fg("warning", this.hint));
     // The heading gets its own visual separation from the tree. Do not add a
     // second spacer after `main`: doing so only when multiple level-1 children
@@ -234,9 +246,27 @@ export function filterFooterRows(
 
 export function formatDuration(durationMs: number): string {
   const seconds = Math.max(0, Math.floor(durationMs / 1000));
-  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
   const remaining = seconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${remaining}s`;
   return minutes === 0 ? `${remaining}s` : `${minutes}m ${remaining}s`;
+}
+
+/** Live status-count summary appended to the agent-section heading. */
+function footerHeading(rows: readonly FooterTreeRow[], theme: AgentFooterTheme): string {
+  const counts = new Map<FooterTreeStatus, number>();
+  for (const row of rows) {
+    if (row.root) continue;
+    counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
+  }
+  const parts: string[] = [];
+  for (const status of ["running", "queued", "created", "completed", "failed", "cancelled", "interrupted", "active"] as const) {
+    const count = counts.get(status);
+    if (count) parts.push(`${count} ${status}`);
+  }
+  const summary = parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+  return theme.fg("dim", `-- current active subagents${summary} --`);
 }
 
 function isTerminalFooterStatus(status: FooterTreeStatus): boolean {
@@ -261,6 +291,11 @@ function renderTreeRow(
   width: number,
   theme: AgentFooterTheme,
 ): string {
+  // Running agents with live counters render as a compact flat line; rows
+  // without live data (root, queued, settled) keep the tree layout.
+  if (row.live) {
+    return truncateToWidth(renderLiveRow(row), width, theme.fg("dim", "..."));
+  }
   const prefix = row.root
     ? ""
     : row.depth === 0
@@ -269,6 +304,13 @@ function renderTreeRow(
   const status = statusGlyph(row.status, theme);
   const leaf = row.leaf ? ` · ${sanitizeLeaf(row.leaf)}` : "";
   return truncateToWidth(`${prefix}${status} ${row.description} ${formatDuration(row.durationMs)}${leaf}`, width, theme.fg("dim", "..."));
+}
+
+/** Compact single-line format for a running agent: `type:id › title · uses · tokens · time`. */
+function renderLiveRow(row: FooterTreeRow): string {
+  const live = row.live!;
+  const uses = live.toolUses === 1 ? "1 tool use" : `${live.toolUses} tool uses`;
+  return `${live.subagentType}:${row.rowId} › ${row.description} · ${uses} · ${formatTokens(live.tokens)} tokens · ${formatDuration(row.durationMs)}`;
 }
 
 function treePrefix(
@@ -311,8 +353,12 @@ function sanitizeLeaf(leaf: string): string {
 
 export function formatTokens(count: number): string {
   if (count < 1000) return String(Math.max(0, Math.round(count)));
-  if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
+  if (count < 1_000_000) {
+    const thousands = count / 1000;
+    return thousands >= 100 || Number.isInteger(thousands)
+      ? `${Math.round(thousands)}k`
+      : `${thousands.toFixed(1)}k`;
+  }
   if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   return `${Math.round(count / 1_000_000)}M`;
 }

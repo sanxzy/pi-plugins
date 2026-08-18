@@ -31,6 +31,8 @@ export type ChildLiveEvent =
       readonly phase: "start" | "update" | "end";
       readonly role: "user" | "assistant";
       readonly text: string;
+      /** Token usage carried by the finalized assistant message; absent for user messages and partial phases. */
+      readonly usage?: ChildLiveUsage;
     }
   | {
       readonly type: "tool";
@@ -45,11 +47,33 @@ export type ChildLiveEvent =
   | { readonly type: "agent_end"; readonly willRetry: boolean }
   | { readonly type: "settled"; readonly status: Exclude<ChildLiveStatus, "running"> };
 
+/** Token/cost accounting reported by one finalized assistant message. */
+export interface ChildLiveUsage {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly cost: number;
+}
+
+/** Cumulative live counters derived from the transcript and reported usage. */
+export interface ChildLiveCounters {
+  /** Tool executions observed so far (distinct tool call ids, started or completed). */
+  readonly toolUses: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+}
+
 /** Snapshot retained after a live child leaves the pool. */
 export interface ChildLiveSnapshot {
   readonly status: ChildLiveStatus;
   readonly settled: boolean;
   readonly transcript: readonly ChildLiveTranscriptEntry[];
+  readonly counters: ChildLiveCounters;
+  /** Epoch ms of the first observed event; undefined until the child starts producing activity. */
+  readonly startedAtMs?: number;
 }
 
 /** Observable/control surface for one isolated child. */
@@ -65,10 +89,44 @@ export interface ChildLiveFeed extends ChildLiveControl {
   emit(event: ChildLiveEvent): void;
 }
 
+function emptyCounters(): ChildLiveCounters {
+  return { toolUses: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+}
+
+/** Recompute cumulative counters from the current transcript and usage map. */
+function reduceCounters(
+  transcript: readonly ChildLiveTranscriptEntry[],
+  usageByMessage: ReadonlyMap<string, ChildLiveUsage>,
+): ChildLiveCounters {
+  const toolIds = new Set<string>();
+  let input = 0;
+  let output = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  for (const entry of transcript) {
+    if (entry.kind === "tool") toolIds.add(entry.toolCallId);
+  }
+  for (const usage of usageByMessage.values()) {
+    input += usage.input;
+    output += usage.output;
+    cacheRead += usage.cacheRead;
+    cacheWrite += usage.cacheWrite;
+  }
+  return {
+    toolUses: toolIds.size,
+    inputTokens: input,
+    outputTokens: output,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
+  };
+}
+
 /** Create a feed whose snapshot remains available after all subscribers leave. */
 export function createChildLiveFeed(): ChildLiveFeed {
   const listeners = new Set<(event: ChildLiveEvent) => void>();
-  let snapshot: ChildLiveSnapshot = { status: "running", settled: false, transcript: [] };
+  const usageByMessage = new Map<string, ChildLiveUsage>();
+  let startedAtMs: number | undefined;
+  let snapshot: ChildLiveSnapshot = { status: "running", settled: false, transcript: [], counters: emptyCounters() };
 
   const replaceTranscript = (event: ChildLiveEvent): readonly ChildLiveTranscriptEntry[] => {
     if (event.type === "message") {
@@ -118,14 +176,34 @@ export function createChildLiveFeed(): ChildLiveFeed {
     },
     emit(event) {
       if (snapshot.settled) return;
+      if (startedAtMs === undefined) startedAtMs = Date.now();
       if (event.type === "settled") {
         snapshot = {
           status: event.status,
           settled: true,
           transcript: snapshot.transcript,
+          counters: reduceCounters(snapshot.transcript, usageByMessage),
+          startedAtMs,
+        };
+      } else if (event.type === "message" && event.usage !== undefined) {
+        // The finalized assistant message is the only usage source; partial
+        // updates never carry usage, so the map keyed by message id stays stable.
+        usageByMessage.set(event.id, event.usage);
+        const transcript = replaceTranscript(event);
+        snapshot = {
+          ...snapshot,
+          transcript,
+          counters: reduceCounters(transcript, usageByMessage),
+          startedAtMs,
         };
       } else {
-        snapshot = { ...snapshot, transcript: replaceTranscript(event) };
+        const transcript = replaceTranscript(event);
+        snapshot = {
+          ...snapshot,
+          transcript,
+          counters: reduceCounters(transcript, usageByMessage),
+          startedAtMs,
+        };
       }
       for (const listener of [...listeners]) listener(event);
     },

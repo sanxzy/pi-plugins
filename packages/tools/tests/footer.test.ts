@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { mock, test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createChildLiveFeed, createJob } from "@xzy-ai/core";
@@ -30,6 +31,8 @@ function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
     mode: "tui",
     hasUI: true,
     cwd,
+    model: undefined,
+    getContextUsage: () => undefined,
     ui: {
       setFooter: recordedSetFooter,
       onTerminalInput: recordedOnTerminalInput,
@@ -39,6 +42,10 @@ function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
     sessionManager: {
       getSessionId: () => sessionId,
       getSessionFile: () => join(cwd, "sessions", `${sessionId}.jsonl`),
+      getLeafId: () => undefined,
+      getSessionName: () => undefined,
+      getCwd: () => cwd,
+      getEntries: () => [],
     } as unknown as ExtensionContext["sessionManager"],
   } as unknown as ExtensionContext;
 }
@@ -365,6 +372,44 @@ test("the live overlay mount does not delegate height truncation to the host", (
 
     const options = capturedCustomOptions as { overlayOptions?: { maxHeight?: unknown } } | undefined;
     assert.equal(options?.overlayOptions?.maxHeight, undefined, "the host must not slice the bottom of the panel");
+    footer.dispose();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("running child rows project live tool/token counters into the footer", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
+  try {
+    const d = piDouble();
+    registerAgentFooter(d.pi);
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd));
+    assert.ok(capturedFooterFactory);
+
+    const pool = getChildPool(cwd, "root-session");
+    const feed = createChildLiveFeed();
+    feed.emit({ type: "message", id: "m1", phase: "end", role: "assistant", text: "working", usage: { input: 12_000, output: 900, cacheRead: 5_500, cacheWrite: 0, cost: 0 } });
+    feed.emit({ type: "tool", id: "t1", phase: "start", toolCallId: "call-1", toolName: "grep", text: "" });
+    pool.liveChildren.set("8f2a", {
+      sessionFile: join(cwd, "sessions", "8f2a.jsonl"),
+      live: feed,
+      steer: async () => {},
+      abort: async () => {},
+    });
+    pool.registry.createJob(createJob({ jobId: "8f2a", parentSessionId: "root-session", sessionId: "8f2a", status: "running", description: "Trace provider compatibility", subagentType: "explore" }));
+
+    const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
+    const footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+    }) as { render(width: number): string[]; dispose(): void };
+
+    const output = footer.render(100).map(stripVTControlCharacters);
+    assert.match(output.join("\n"), /explore:8f2a › Trace provider compatibility/, "subagent type and job id lead the live row");
+    assert.match(output.join("\n"), /1 tool use/, "tool use count projects from the live feed");
+    assert.match(output.join("\n"), /18\.4k tokens/, "token total projects from the live feed");
+    for (const line of output) assert.ok(line.length <= 100, `line fits: ${line}`);
     footer.dispose();
   } finally {
     rmSync(cwd, { recursive: true, force: true });

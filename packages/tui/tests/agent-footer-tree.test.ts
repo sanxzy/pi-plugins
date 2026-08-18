@@ -93,6 +93,7 @@ test("renders a depth-first tree with status glyphs, time, and latest leaf", () 
   const lines = renderRows(footer);
   const output = lines.join("\n");
   assert.match(output, /current active subagents/i);
+  assert.match(output, /1 running · 1 queued · 1 completed/, "heading summarizes live status counts");
   assert.match(output, /Explore docs.*2m 56s/);
   assert.match(output, /⌘ grep \/auth\//);
   assert.match(output, /└─|├─/, "tree connectors drawn");
@@ -118,6 +119,7 @@ test("does not add a spacer between main and its only child", () => {
     "⏺ main 0s",
     "└─ ◯ Run parallel recursive descendant 2m 56s",
   ]);
+  assert.match(renderRows(footer)[2]!, /1 queued/, "heading carries the live summary");
 });
 
 test("renders every descendant on one uniformly spaced tree row", () => {
@@ -152,6 +154,7 @@ test("renders every descendant on one uniformly spaced tree row", () => {
     "      │  └─ ◯ branch B1 child 2m 56s",
     "      └─ ◯ branch B2 2m 56s",
   ]);
+  assert.match(renderRows(footer)[2]!, /8 queued · 1 completed/, "heading carries the live summary");
   assert.equal(renderRows(footer).some((line) => line.trim() === "│"), false, "no depth-specific spacer rows");
 });
 
@@ -177,8 +180,68 @@ test("removes the subagent section after the last retained descendant expires", 
   assert.deepEqual(past, []);
 });
 
-test("formatDuration renders compact elapsed time", () => {
+test("formatDuration renders compact elapsed time including hours", () => {
   assert.equal(formatDuration(0), "0s");
   assert.equal(formatDuration(56_000), "56s");
   assert.equal(formatDuration(176_000), "2m 56s");
+  assert.equal(formatDuration(3_573_000), "59m 33s");
+  assert.equal(formatDuration(3_600_000), "1h 0m 0s");
+  assert.equal(formatDuration(5_703_000), "1h 35m 3s");
+});
+
+test("heading omits the status summary for a root-only tree", () => {
+  const footer = new AgentFooter({
+    tui: fakeTUI(),
+    theme,
+    getInfo: () => info(),
+    getRows: () => [
+      row({ rowId: "main", root: true, status: "active", description: "main", depth: 0, durationMs: 0, enterable: false }),
+      row({ rowId: "job-a", status: "running", depth: 1, description: "child" }),
+    ],
+  });
+  const lines = renderRows(footer);
+  assert.match(lines[2]!, /-- current active subagents · 1 running --/);
+  assert.ok(lines[2]!.length <= 100, `heading fits: ${lines[2]}`);
+});
+
+test("running agents with live stats render as a compact stats line", () => {
+  const footer = new AgentFooter({
+    tui: fakeTUI(),
+    theme,
+    getInfo: () => info(),
+    getRows: () => [
+      row({ rowId: "main", root: true, status: "active", description: "main", depth: 0, durationMs: 0, enterable: false }),
+      row({
+        rowId: "8f2a",
+        status: "running",
+        depth: 1,
+        description: "Trace provider compatibility",
+        durationMs: 151_000,
+        enterable: true,
+        live: { subagentType: "explore", toolUses: 24, tokens: 18_400 },
+      }),
+    ],
+  });
+
+  const lines = renderRows(footer);
+  assert.ok(lines.some((line) => line.includes("explore:8f2a › Trace provider compatibility · 24 tool uses · 18.4k tokens · 2m 31s")), `compact line rendered: ${lines.join("\n")}`);
+  for (const line of lines) assert.ok(line.length <= 100, `line fits: ${line}`);
+});
+
+test("live stats rows keep the tree layout for rows without counters", () => {
+  const footer = new AgentFooter({
+    tui: fakeTUI(),
+    theme,
+    getInfo: () => info(),
+    getRows: () => [
+      row({ rowId: "main", root: true, status: "active", description: "main", depth: 0, durationMs: 0, enterable: false }),
+      row({ rowId: "queued", status: "queued", depth: 1, description: "Wait for slot", enterable: false }),
+      row({ rowId: "done", status: "completed", depth: 1, description: "Summarize", durationMs: 94_000, enterable: false }),
+    ],
+  });
+
+  const output = renderRows(footer).join("\n");
+  assert.match(output, /Wait for slot/, "queued rows keep the tree layout");
+  assert.match(output, /Summarize/, "settled rows keep the tree layout");
+  assert.doesNotMatch(output, /tool uses/, "no live stats without counters");
 });
