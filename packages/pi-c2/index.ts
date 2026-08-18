@@ -30,6 +30,7 @@ import {
   registerTelegramLifecycle,
   registerTelegramInbound,
   registerGoalCommand,
+  registerManageGoal,
   registerNotifyEntry,
   createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
@@ -117,6 +118,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerSystemPrompt(pi);
   registerLifecycleGates(pi);
   registerGoalCommand(pi);
+  registerManageGoal(pi);
   registerNotifyEntry(pi);
 }
 

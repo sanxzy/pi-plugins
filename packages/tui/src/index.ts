@@ -41,3 +41,11 @@ export type {
   ManageAgentModelThinkingItem,
   ManageAgentModelWizardOptions,
 } from "./manage-agent-model-wizard.ts";
+export { ManageGoalWizard, formatGoalInterval } from "./manage-goal-wizard.ts";
+export type {
+  ManageGoalApplyResult,
+  ManageGoalController,
+  ManageGoalItem,
+  ManageGoalResult,
+  ManageGoalWizardOptions,
+} from "./manage-goal-wizard.ts";

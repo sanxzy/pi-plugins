@@ -21,6 +21,9 @@ export { registerReferencesSetup } from "./registrations/references-setup-comman
 export { registerManageAgentModel } from "./registrations/manage-agent-model-command.ts";
 export { createManageAgentModelController } from "./registrations/manage-agent-model.ts";
 export type { ManageAgentModelControllerOptions } from "./registrations/manage-agent-model.ts";
+export { registerManageGoal } from "./registrations/manage-goal-command.ts";
+export { createManageGoalController } from "./registrations/manage-goal.ts";
+export type { ManageGoalControllerOptions } from "./registrations/manage-goal.ts";
 export {
   createReferencesSetupController,
   type ReferencesSetupController,
