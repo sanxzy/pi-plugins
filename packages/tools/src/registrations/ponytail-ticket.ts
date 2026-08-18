@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { nanoid } from "nanoid";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import Type, { type Static } from "typebox";
 import {
@@ -69,7 +69,7 @@ export async function executeCreateWriteEditTicket(
       if (!current || !current.enabled) {
         throw new Error("Ponytail is not enabled for this session.");
       }
-      issuedTicket = randomBytes(32).toString("base64url");
+      issuedTicket = nanoid(5);
       const ticket: PonytailTicket = {
         value: issuedTicket,
         scopes,

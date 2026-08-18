@@ -93,7 +93,7 @@ test("positive request persists a high-entropy ticket before returning ordered r
   try { withHome(h, () => setup(root)); activateHome(h);
     const result = await executeCreateWriteEditTicket(input(), context(root), { now: () => 1_000 });
     const text = textOf(result);
-    assert.match(text, /^Write\/edit ticket: [A-Za-z0-9_-]+\nAdvisor:\n/);
+    assert.match(text, /^Write\/edit ticket: [A-Za-z0-9_-]{5}\nAdvisor:\n/);
     assert.equal(text.includes("doesNeedToExist"), false);
     assert.equal(text.includes("alreadyAvailableInCodebase"), false);
     assert.equal(text.includes("true"), false);
@@ -102,6 +102,7 @@ test("positive request persists a high-entropy ticket before returning ordered r
     assert.equal(text.includes("600000"), false);
     const state = withHome(h, () => loadPonytailState("root-ticket", 1_001));
     assert.equal(state?.tickets.length, 1);
+    assert.equal(state?.tickets[0]?.value.length, 5, "ticket id is exactly 5 characters");
     assert.equal(state?.tickets[0]?.scopes[0], join(canonicalProjectRoot(root), "src"));
     assert.equal(state?.tickets[0]?.createdAt, 1_000);
     assert.equal(state?.tickets[0]?.expiresAt, 601_000);
