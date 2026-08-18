@@ -121,6 +121,7 @@ export const COMMAND_OPERATIONS = {
   SETUP_CHANNEL: "command.setupChannel",
   CLEAR_CHANNEL: "command.clearChannel",
   SETUP_REFERENCES: "command.setupReferences",
+  MANAGE_AGENT_MODEL: "command.manageAgentModel",
   CONTROLS: "command.controls",
 } as const;
 

@@ -1,3 +1,5 @@
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+
 /**
  * Agent-definition types.
  *
@@ -19,6 +21,8 @@ export interface DiscoveredAgent {
   readonly tools?: string[];
   /** Present only when frontmatter explicitly supplies a model. */
   readonly model?: string;
+  /** Present only when frontmatter explicitly supplies a thinking level. */
+  readonly thinking?: ThinkingLevel;
   /** Markdown body applied as the child system prompt. */
   readonly systemPrompt: string;
   readonly source: "user" | "project";
@@ -27,3 +31,27 @@ export interface DiscoveredAgent {
 
 /** A resolved agent loaded from disk. */
 export type ResolvedAgent = DiscoveredAgent;
+
+/** All thinking levels, in ascending order, as accepted by the SDK. */
+export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Structural view of a model's thinking capability (subset of `Model`). */
+export interface ThinkingCapableModel {
+  readonly reasoning: boolean;
+  readonly thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
+}
+
+/**
+ * The thinking levels a model supports, mirroring `getSupportedThinkingLevels`
+ * from `@earendil-works/pi-ai`: non-reasoning models only support `off`;
+ * reasoning models support the extended set filtered by their level map.
+ */
+export function supportedThinkingLevels(model: ThinkingCapableModel): readonly ThinkingLevel[] {
+  if (!model.reasoning) return ["off"];
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return mapped !== undefined;
+    return true;
+  });
+}

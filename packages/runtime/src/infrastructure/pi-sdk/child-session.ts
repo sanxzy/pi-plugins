@@ -262,6 +262,12 @@ async function createIsolatedChild(options: {
     sessionManager,
     resourceLoader,
   };
+  // Thinking mapping: an explicit frontmatter `thinking` level applies to the
+  // child session; the SDK clamps unsupported levels to the model's range. An
+  // absent level inherits the SDK default.
+  if (discovered?.thinking) {
+    sessionOptions.thinkingLevel = discovered.thinking;
+  }
   // Tool mapping: an explicit non-empty `tools` list becomes the child
   // allowlist; an absent/empty list enables the full built-in set (excluding
   // `ls`) plus the depth-aware extension/MCP policy.

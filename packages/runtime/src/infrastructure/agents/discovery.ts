@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { DiscoveredAgent } from "@xzy-ai/core";
 import type { AgentDiscovery } from "@xzy-ai/core";
 
@@ -42,16 +43,28 @@ function parseAgentFile(filePath: string, source: "user" | "project"): Discovere
 
   const tools = splitTools(frontmatter.tools);
   const model = typeof frontmatter.model === "string" && frontmatter.model.trim() ? frontmatter.model.trim() : undefined;
+  const thinking = normalizeThinking(frontmatter.thinking);
 
   return {
     name,
     description,
     tools: tools && tools.length > 0 ? tools : undefined,
     model,
+    thinking,
     systemPrompt: body,
     source,
     filePath,
   };
+}
+
+/** The thinking levels the SDK accepts for a model. */
+const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Normalize a `thinking` frontmatter value to a known level, or `undefined`. */
+function normalizeThinking(value: unknown): ThinkingLevel | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return THINKING_LEVELS.includes(trimmed as ThinkingLevel) ? (trimmed as ThinkingLevel) : undefined;
 }
 
 /** Split a comma-delimited `tools:` frontmatter value into trimmed names. */

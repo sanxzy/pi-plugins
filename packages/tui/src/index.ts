@@ -31,3 +31,13 @@ export type {
   ReferencesSetupResult,
   ReferencesSetupWizardOptions,
 } from "./references-setup-wizard.ts";
+export { ManageAgentModelWizard } from "./manage-agent-model-wizard.ts";
+export type {
+  ManageAgentModelAgentItem,
+  ManageAgentModelApplyResult,
+  ManageAgentModelController,
+  ManageAgentModelModelItem,
+  ManageAgentModelResult,
+  ManageAgentModelThinkingItem,
+  ManageAgentModelWizardOptions,
+} from "./manage-agent-model-wizard.ts";

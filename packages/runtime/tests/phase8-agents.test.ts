@@ -292,6 +292,36 @@ test("an explicit model is preserved and an absent model stays undefined", () =>
   }
 });
 
+test("an explicit thinking level is preserved and an invalid one stays undefined", () => {
+  const root = tmpRoot();
+  try {
+    writeAgent(
+      join(root, ".pi", "agents"),
+      "thinking-agent",
+      { name: "thinking-agent", description: "d", thinking: "high" },
+      "body",
+    );
+    writeAgent(
+      join(root, ".pi", "agents"),
+      "bad-thinking",
+      { name: "bad-thinking", description: "d", thinking: "overdrive" },
+      "body",
+    );
+    writeAgent(
+      join(root, ".pi", "agents"),
+      "no-thinking",
+      { name: "no-thinking", description: "d" },
+      "body",
+    );
+    const discovery = discover(root, join(root, "nouser"));
+    assert.equal(asDiscovered(discovery.resolve("thinking-agent")).thinking, "high");
+    assert.equal(asDiscovered(discovery.resolve("bad-thinking")).thinking, undefined);
+    assert.equal(asDiscovered(discovery.resolve("no-thinking")).thinking, undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("all() returns discovered agents with project precedence", () => {
   const root = tmpRoot();
   try {

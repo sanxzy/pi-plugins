@@ -24,10 +24,12 @@ import {
   registerPonytailSetup,
   registerTelegramSetup,
   registerReferencesSetup,
+  registerManageAgentModel,
   registerTelegramClear,
   registerTelegramLifecycle,
   registerTelegramInbound,
   registerGoalCommand,
+  registerNotifyEntry,
   createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
@@ -73,6 +75,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   const getMenuCommands = () => expander.menuSources();
   registerTelegramSetup(pi, { getCommands: getMenuCommands });
   registerReferencesSetup(pi);
+  registerManageAgentModel(pi);
   registerTelegramClear(pi);
   // Inbound registration precedes the connection lifecycle so its message
   // middleware is attached before the shared manager starts polling.
@@ -102,6 +105,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerSystemPrompt(pi);
   registerLifecycleGates(pi);
   registerGoalCommand(pi);
+  registerNotifyEntry(pi);
 }
 
 export { extensionName };

@@ -11,9 +11,10 @@
   },
   "dependencies": {
     "@xzy-ai/core": "workspace:*",
-    "@earendil-works/pi-coding-agent": "^0.84.1",
-    "@earendil-works/pi-tui": "^0.84.1",
-    "@xzy-ai/observability": "workspace:*"
+    "@earendil-works/pi-coding-agent": "^0.84.2",
+    "@earendil-works/pi-tui": "^0.84.2",
+    "@xzy-ai/observability": "workspace:*",
+    "@earendil-works/pi-agent-core": "^0.84.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

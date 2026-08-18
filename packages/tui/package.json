@@ -7,10 +7,10 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/question-dialog.test.ts tests/agent-footer.test.ts tests/agent-footer-tree.test.ts tests/agent-footer-management.test.ts tests/agent-footer-live.test.ts tests/telegram-setup-wizard.test.ts tests/references-setup-wizard.test.ts"
+    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/question-dialog.test.ts tests/agent-footer.test.ts tests/agent-footer-tree.test.ts tests/agent-footer-management.test.ts tests/agent-footer-live.test.ts tests/telegram-setup-wizard.test.ts tests/references-setup-wizard.test.ts tests/manage-agent-model-wizard.test.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "^0.84.1"
+    "@earendil-works/pi-tui": "^0.84.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

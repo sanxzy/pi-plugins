@@ -1,5 +1,12 @@
 export { registerSessionEvents } from "./registrations/session-events.ts";
-export { notifyHost } from "./registrations/notify-entry.ts";
+export {
+  notifyHost,
+  registerNotifyEntry,
+  appendNotifyEntry,
+  NOTIFY_ENTRY_TYPE,
+  notifyEntryRenderer,
+  type NotifyEntryData,
+} from "./registrations/notify-entry.ts";
 export { registerPonytailEnforcement } from "./registrations/ponytail-enforcement.ts";
 export { registerPonytailSetup } from "./registrations/ponytail-setup.ts";
 export { registerSystemPrompt } from "./registrations/system-prompt.ts";
@@ -12,6 +19,9 @@ export { registerLifecycleGates } from "./registrations/lifecycle-gates.ts";
 export { registerGoalCommand, expandTelegramGoalCommand, GOAL_WORKFLOW_PROMPT } from "./registrations/goal-command.ts";
 export { registerTelegramSetup, type TelegramSetupRegistrationDeps } from "./registrations/telegram-setup.ts";
 export { registerReferencesSetup } from "./registrations/references-setup-command.ts";
+export { registerManageAgentModel } from "./registrations/manage-agent-model-command.ts";
+export { createManageAgentModelController } from "./registrations/manage-agent-model.ts";
+export type { ManageAgentModelControllerOptions } from "./registrations/manage-agent-model.ts";
 export {
   createReferencesSetupController,
   type ReferencesSetupController,
