@@ -379,7 +379,7 @@ test("a background result raced into an active run is delivered after the run se
     assert.equal(hidden.at(-1)?.message.customType, "pi-c2:internal-context");
     assert.equal(hidden.at(-1)?.message.display, false);
     assert.equal(hidden.at(-1)?.message.content, "result-a");
-    assert.deepEqual(notifications, ["※ Agent result delivered to the root session."]);
+    assert.deepEqual(notifications, ["Agent result delivered to the root session."]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -405,25 +405,34 @@ test("background result notification includes subagent type and job id when meta
       { subagentType: "impl-reviewer", jobId: "job-42" },
     );
     assert.equal(sent, true);
-    assert.deepEqual(notifications, ["※ Agent result delivered to the root session (impl-reviewer, job-42)."]);
+    assert.deepEqual(notifications, ["Agent result delivered to the root session (impl-reviewer, job-42)."]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("notifyHost prefixes ※ and delivers as warning; no-ops without UI", async () => {
-  const { notifyHost } = await import("../src/registrations/notify-entry.ts");
-  const notified: Array<{ message: string; type: string }> = [];
-  const pi = {} as unknown as ExtensionAPI;
-  notifyHost(pi, { ui: { notify: (message: string, type: string) => notified.push({ message, type }) } } as unknown as ExtensionContext, "goal message");
-  notifyHost(pi, { ui: { notify: (message: string, type: string) => notified.push({ message, type }) } } as unknown as ExtensionContext, "agent message");
-  assert.deepEqual(notified, [
-    { message: "※ goal message", type: "warning" },
-    { message: "※ agent message", type: "warning" },
-  ]);
-  // Without a UI notify channel the delivery is a silent no-op.
+test("notifyHost appends the ※ entry when the renderer is registered and falls back to ui.notify otherwise", async () => {
+  const { notifyHost, registerNotifyEntry, NOTIFY_ENTRY_TYPE } = await import("../src/registrations/notify-entry.ts");
+  // Fallback: no renderer API → host notify UI (plain message, no prefix).
+  const notified: string[] = [];
+  let pi = { appendEntry: () => {} } as unknown as ExtensionAPI;
+  registerNotifyEntry(pi);
+  const ctx = { hasUI: true, ui: { notify: (message: string) => notified.push(message) } } as unknown as ExtensionContext;
+  notifyHost(pi, ctx, "fallback message");
+  assert.deepEqual(notified, ["fallback message"]);
+  // Primary: renderer registered → yellow ※ entry, no ui.notify call.
+  const appended: Array<{ customType: string; data: { message: string } }> = [];
+  pi = {
+    appendEntry: (customType: string, data: { message: string }) => appended.push({ customType, data }),
+    registerEntryRenderer: () => {},
+  } as unknown as ExtensionAPI;
+  registerNotifyEntry(pi);
+  notifyHost(pi, ctx, "entry message");
+  assert.deepEqual(notified, ["fallback message"], "ui.notify is not called on the entry path");
+  assert.deepEqual(appended, [{ customType: NOTIFY_ENTRY_TYPE, data: { message: "entry message" } }]);
+  // Without a UI channel the delivery is a silent no-op.
   notifyHost(pi, {} as unknown as ExtensionContext, "dropped");
-  assert.equal(notified.length, 2);
+  assert.deepEqual(appended, [{ customType: NOTIFY_ENTRY_TYPE, data: { message: "entry message" } }]);
 });
 
 test("session_shutdown disposes the host gate so a stale context cannot crash the host", async () => {
