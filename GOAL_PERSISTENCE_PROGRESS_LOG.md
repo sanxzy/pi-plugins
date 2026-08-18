@@ -236,6 +236,130 @@ instead call `ctx.ui.notify` directly.
   the built-in status/warning/error channel, so the user sees the goal-trigger
   notification without depending on host custom-entry renderer support.
 
+## 2026-08-18 — Restore custom-entry renderer with ui.notify fallback
+
+User: notifications should be `※`-prefixed and yellow; `ctx.ui.notify`
+(warning type) renders `Warning: <text>` which must not appear. They
+approved patching the pi package if needed.
+
+### Change
+
+- `notify-entry.ts`: reinstated the custom-entry renderer as the primary
+  path. `NOTIFY_ENTRY_TYPE = "pi-c2:notify"`, `notifyEntryRenderer` renders
+  `theme.fg("warning", "※ <message>")` (bare yellow `※` line, no
+  `Warning:`), `appendNotifyEntry` appends via `pi.appendEntry`, and
+  `registerNotifyEntry` registers the renderer.
+- Auto-fallback: `notifyHost` tracks whether the host accepted the renderer
+  (module flag set by `registerNotifyEntry` when both
+  `pi.registerEntryRenderer` and `pi.appendEntry` exist). With UI + renderer
+  → yellow `※` entry; otherwise → `ctx.ui.notify(message, "info")` (no
+  `Warning:` prefix, dim status) or no-op without any UI. This satisfies
+  "if notification component not working correctly, auto fallback to host
+  notify ui" with the same semantic notify type.
+- `commands/src/index.ts`: re-exported `registerNotifyEntry`,
+  `appendNotifyEntry`, `NOTIFY_ENTRY_TYPE`, `notifyEntryRenderer`,
+  `NotifyEntryData`.
+- `pi-c2/index.ts`: calls `registerNotifyEntry(pi)`.
+- SDK path verified end-to-end: `appendEntry` → `entry_appended` event →
+  TUI `addCustomEntryToChat` → `getEntryRenderer` (runner reads the
+  extension's `entryRenderers` map) → `CustomEntryComponent`. Custom entries
+  stay out of LLM context. No SDK patch needed.
+- Tests: `session-events.test.ts` covers the fallback (plain message via
+  `ui.notify`) and the primary path (renderer registered → `※` entry
+  appended, `ui.notify` untouched), plus silent no-op without UI.
+
+## 2026-08-18 — Upgrade Pi SDK to 0.84.2 and re-base the local patch
+
+Diagnosis: the live host is the globally installed `@earendil-works/pi-coding-agent`
+0.80.2, which predates `registerEntryRenderer` — that is why the yellow `※`
+entry never rendered (fallback fired instead). Workspace deps pinned `^0.84.1`
+with a local patch.
+
+### Change
+
+- All `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui`
+  dependencies across 8 packages: `^0.84.1` → `^0.84.2`.
+- Re-based `patches/@earendil-works__pi-coding-agent@0.84.2.patch` from the
+  0.84.1 patch via `pnpm patch` + `pnpm patch-commit`. 0.84.2 changes were
+  small (`expandPromptTemplates` option in types.d.ts; `APP_NAME` in a
+  session-manager.js import string); all original hunks re-applied cleanly
+  with adjusted offsets.
+- `pnpm-workspace.yaml` `patchedDependencies` now points at 0.84.2 with the
+  new patch hash; lockfile updated.
+- Removed orphaned 0.84.1 / stale 0.84.2 store directories.
+
+### Verification
+
+- `pnpm install` clean; all 9 package typechecks pass; `pnpm test:all` all 18
+  checks pass (59s).
+
+## 2026-08-18 — Render experiment: patched 0.84.2 host renders yellow ※ notify
+
+Live diagnosis: `pi --version` is **0.80.2** (global install). It has
+`appendEntry` but no `registerEntryRenderer`, no `getEntryRenderer`, and its
+interactive mode has no `entry_appended` handler — so custom entries are
+silently dropped and the fallback (`ui.notify`) is what the user saw as plain
+text. The extension is loaded from `settings.json` packages pointing at
+`plugins/packages/pi-c2/index.ts`.
+
+### Experiment (isolated, no live-host change)
+
+Wrote a throwaway harness (`packages/pi-c2/experiment-notify.ts`, removed
+after) that loaded the REAL notify renderer and goal pool against the REAL
+patched 0.84.2 SDK, mirroring the loader wiring (`extension.entryRenderers`
+map + `ExtensionRunner.getEntryRenderer`). Results — all 7 checks pass:
+
+- host discovers a registered renderer for `pi-c2:notify`
+- renderer produces a `Text` component
+- rendered text has the `※` prefix
+- rendered text is yellow: `\x1b[38;2;255;255;0m` (RGB 255,255,0)
+- no `Warning:` prefix
+- `appendNotifyEntry` appends `pi-c2:notify` with the message
+- a real goal pool tick produces the notify
+
+### Conclusion / next step
+
+The patched 0.84.2 host renders the yellow `※` goal notification exactly as
+intended. Adoption requires upgrading the **global** `pi` install (0.80.2 →
+patched 0.84.2) so the live host has `registerEntryRenderer` + the patch's
+`createCommandContext` (stock 0.84.2 lacks the latter; the telegram lifecycle
+code calls it). User has offered to run the global upgrade.
+
+## 2026-08-18 — Postinstall host-patch automation for published pi-c2
+
+User asked: when `@xzy-ai/pi-c2` is published, how should patching work?
+Preferred: a `postinstall` that auto-applies the host patch, backed up and
+reversible. I recommended (and the user accepted) a pure-JS unified-diff
+applier (`diff` package's `applyPatches`) instead of `git apply` — no `.git`
+dir left in the user's global SDK, no external tool, idempotent.
+
+### Change
+
+- `packages/pi-c2/scripts/postinstall.mjs`:
+  - Locates the HOST `pi-coding-agent` via `npm root -g` (flat global layout
+    fallback, then local workspace fallback).
+  - Reads `package.json` version; skips with a clear message when < 0.84.2.
+  - Idempotent: marker-greps (`createCommandContext` in loader.js,
+    `ensurePrivateSessionDir` in session-manager.js) and no-ops when patched.
+  - Backs up the host SDK to `pi-coding-agent.bak-<version>` (cpSync), applies
+    the bundled patch via `diff.applyPatches` (strips `a/`/`b/` prefixes,
+    fuzzFactor 0), verifies markers, and rolls back to the backup on any
+    failure. Never throws — npm postinstall failures are confusing.
+- `packages/pi-c2/scripts/pi-coding-agent@0.84.2.patch`: bundled copy of the
+  workspace patch (the postinstall applies this exact file).
+- `packages/pi-c2/package.json`: `postinstall` script; `files` field
+  (`index.ts`, `scripts/`) so the patch ships; added `diff@^9.0.0` dep.
+- `packages/pi-c2/tests/postinstall.test.ts`: 4 deterministic tests using a
+  fake global root + stubbed `npm` on PATH. Pristine 0.84.2 fixture built by
+  reverse-applying the bundled patch to the workspace's patched SDK (offline).
+  Covers: patch+backup, idempotency, old-version skip, rollback-to-prestate.
+
+### Verification
+
+- `pnpm test:all`: all 18 checks pass (62s). `npm pack --dry-run`: ships
+  index.ts + scripts/ (patch + postinstall). Live run against the workspace
+  correctly reports the real global host (0.80.2) and leaves it untouched.
+
 ## 2026-08-18 — ※ + warning styling for goal and agent notifications
 
 User: notifications (both agent completion and goal trigger) should be
