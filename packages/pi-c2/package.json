@@ -17,7 +17,7 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/extension.test.ts tests/manager-removal.test.ts tests/postinstall.test.ts"
+    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/extension.test.ts tests/manager-removal.test.ts tests/postinstall.test.ts tests/percentage-compaction.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.2",

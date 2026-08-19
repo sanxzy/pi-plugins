@@ -52,7 +52,7 @@ test("first-start bootstrap creates every settings key with resolver defaults", 
       const parsed = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
       assert.deepEqual(parsed, {
         agents: { maxAgentDepth: 4, maxConcurrency: 2, maxParallelAgents: 3, retainedTerminalJobs: 25, retainedTerminalAgents: 25 },
-        runtime: { deliveryRetryDelayMs: 2_000, gitTimeoutMs: 60_000, gitLockStaleMs: 30_000, gitLockAcquireTimeoutMs: 30_000, gitMaxBufferBytes: 16 * 1024 * 1024 },
+        runtime: { deliveryRetryDelayMs: 2_000, gitTimeoutMs: 60_000, gitLockStaleMs: 30_000, gitLockAcquireTimeoutMs: 30_000, gitMaxBufferBytes: 16 * 1024 * 1024, contextCompactThresholdPercent: 80 },
         channels: { maxRootSessions: 200, lockStaleMs: 10_000, lockUpdateMs: 5_000, lockAcquireRetries: 0, maxTextLength: 4_000, pairingPendingTtlMs: 3_600_000, pairingPendingMax: 3, mediaPhotoMaxBytes: 10 * 1024 * 1024, mediaDocumentMaxBytes: 50 * 1024 * 1024, mediaTimeoutMs: 30_000 },
         tools: { ponytailEnabled: false, writeEditTicketTtlMs: 600_000, web: { searchTimeoutMs: 30_000, fetchTimeoutSeconds: 30, maxResponseBytes: 5 * 1024 * 1024, defaultNumResults: 5, defaultSearchType: "auto", defaultLivecrawl: "fallback", exaApiKey: "" } },
         mcp: { startupTimeoutMs: 30_000, requestTimeoutMs: 30_000, reconnectMaxAttempts: 5, reconnectBaseDelayMs: 2_000, resultMaxText: 50_000, resultMaxAttachmentBytes: 5 * 1024 * 1024, oauthCallbackTimeoutMs: 5 * 60 * 1000 },
@@ -161,6 +161,7 @@ test("resolved settings expose all six groups with defaults filled", () => {
         gitLockStaleMs: 30_000,
         gitLockAcquireTimeoutMs: 30_000,
         gitMaxBufferBytes: 16 * 1024 * 1024,
+        contextCompactThresholdPercent: 80,
       });
       assert.deepEqual(settings.channels, {
         maxRootSessions: 200,
@@ -649,6 +650,44 @@ test("invalid agent/runtime values are ignored per-field rather than accepted", 
       assert.equal(settings.agents.retainedTerminalJobs, 25);
       assert.equal(settings.runtime.gitMaxBufferBytes, 16 * 1024 * 1024);
     });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("contextCompactThresholdPercent defaults to 80 and accepts 1-100", () => {
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      assert.equal(resolveSettings().runtime.contextCompactThresholdPercent, 80, "default 80");
+    });
+    writeHomeConfig(home, { runtime: { contextCompactThresholdPercent: 65 } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().runtime.contextCompactThresholdPercent, 65, "home config override");
+    });
+    writeHomeConfig(home, { runtime: { contextCompactThresholdPercent: 1 } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().runtime.contextCompactThresholdPercent, 1, "lower bound 1 accepted");
+    });
+    writeHomeConfig(home, { runtime: { contextCompactThresholdPercent: 100 } });
+    withHome(home, () => {
+      assert.equal(resolveSettings().runtime.contextCompactThresholdPercent, 100, "upper bound 100 accepted");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("contextCompactThresholdPercent rejects out-of-range and non-integer values", () => {
+  const home = tempHome();
+  try {
+    const cases = [0, -1, 101, 1.5, "80", null];
+    for (const value of cases) {
+      writeHomeConfig(home, { runtime: { contextCompactThresholdPercent: value } });
+      withHome(home, () => {
+        assert.equal(resolveSettings().runtime.contextCompactThresholdPercent, 80, `invalid ${JSON.stringify(value)} falls back to default`);
+      });
+    }
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
