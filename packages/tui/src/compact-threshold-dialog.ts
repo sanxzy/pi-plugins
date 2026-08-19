@@ -1,4 +1,4 @@
-import { Editor, Key, matchesKey, type Component, type EditorTheme, type TUI, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Editor, Key, matchesKey, type Component, type EditorTheme, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 /** Result of the compact-threshold input dialog: the submitted text, or undefined when cancelled. */
 export type CompactThresholdDialogResult = string | undefined;
@@ -108,16 +108,14 @@ export class CompactThresholdDialog implements Component {
     lines.push(this.theme.fg("accent", "─".repeat(renderWidth)));
     add(" ", this.theme.fg("accent", this.title));
     add(" ", this.theme.fg("muted", this.hint));
-    const editorLines = this.editor.render(Math.max(1, renderWidth - 3));
-    // The editor renders [top border, content, bottom border]; place the `› `
-    // prompt beside the CONTENT line so the input reads `  › 85`.
+    // The editor line carries a 4-column prefix (`  › `), so render it 4
+    // columns narrower; every emitted line is truncated to renderWidth so the
+    // component can never exceed the terminal width.
+    const editorLines = this.editor.render(Math.max(1, renderWidth - 4));
     editorLines.forEach((line, index) => {
       const isContent = index === 1 && editorLines.length >= 3;
-      if (isContent) {
-        lines.push(`  ${this.theme.fg("accent", "›")} ${line}`);
-      } else {
-        lines.push(`    ${line}`);
-      }
+      const prefixed = isContent ? `  ${this.theme.fg("accent", "›")} ${line}` : `    ${line}`;
+      lines.push(truncateToWidth(prefixed, renderWidth));
     });
     add(" ", this.theme.fg("dim", "enter submit  escape/ctrl+c cancel"));
     lines.push(this.theme.fg("accent", "─".repeat(renderWidth)));

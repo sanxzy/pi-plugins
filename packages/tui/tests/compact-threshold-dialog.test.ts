@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
-import type { TUI } from "@earendil-works/pi-tui";
+import { visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { CompactThresholdDialog } from "../src/compact-threshold-dialog.ts";
 
 function tui(): TUI {
@@ -35,6 +35,17 @@ test("compact-threshold-dialog: renders a › prompt with 1-space left padding a
   assert.ok(lines.some((line) => line.includes("Title")), "title rendered");
   assert.ok(lines.some((line) => line.includes("Hint")), "hint rendered");
   assert.ok(lines.some((line) => line.includes("enter submit")), "submit hint rendered");
+});
+
+test("compact-threshold-dialog: never renders lines wider than the terminal width", () => {
+  const { dialog } = mount("85", "A long title that must wrap or truncate cleanly within the given width", "A long hint that must also fit");
+  for (const width of [20, 40, 80, 153]) {
+    const lines = dialog.render(width);
+    for (const line of lines) {
+      const cols = visibleWidth(line);
+      assert.ok(cols <= width, `line exceeds width ${width}: ${JSON.stringify(line)} (${cols} cols)`);
+    }
+  }
 });
 
 test("compact-threshold-dialog: enter submits the edited value", () => {
