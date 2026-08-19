@@ -48,11 +48,14 @@ function makeModel(contextWindow: number) {
 }
 
 function makeAssistantMessage(text: string, totalTokens: number, stopReason: string, toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }>) {
-  const content: Array<{ type: string; text?: string; id?: string; name?: string; arguments?: Record<string, unknown> }> = [];
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
+  > = [];
   if (text) content.push({ type: "text", text });
   for (const call of toolCalls ?? []) content.push({ type: "toolCall", id: call.id, name: call.name, arguments: call.arguments });
   return {
-    role: "assistant",
+    role: "assistant" as const,
     content,
     api: "anthropic-messages",
     provider: "test-provider",
@@ -65,7 +68,7 @@ function makeAssistantMessage(text: string, totalTokens: number, stopReason: str
       totalTokens,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
-    stopReason,
+    stopReason: stopReason as "stop" | "toolUse" | "aborted" | "pending",
     timestamp: Date.now(),
   };
 }
@@ -86,7 +89,10 @@ function makeAssistantMessage(text: string, totalTokens: number, stopReason: str
 function scriptedStream(opts: ScriptedStreamOptions, signal: AbortSignal | undefined, state: { calls: number }) {
   const contextWindow = opts.contextWindow;
   const threshold = opts.thresholdPercent;
-  const below = Math.floor((contextWindow * (threshold - 5)) / 100); // e.g. 75% of 200k = 150k
+  // Assistant usage sits ABOVE the threshold (e.g. 170k of a 200k window at
+  // 80% = 160k), so the first assistant message_end (toolUse) crosses it and
+  // the mid-turn check aborts the run.
+  const below = Math.floor((contextWindow * (threshold + 5)) / 100);
   const summaryMessage = makeAssistantMessage("Summarized conversation.", 50, "stop");
 
   let finalResult = summaryMessage;
@@ -165,6 +171,18 @@ async function createTestSession(opts: ScriptedStreamOptions) {
     noThemes: true,
     noContextFiles: true,
   });
+  const sessionManager = SessionManager.inMemory(cwd);
+  // Pre-seed a long prior conversation so prepareCompaction() has history to
+  // summarize (a tiny session cannot compact: nothing exceeds keepRecentTokens).
+  // ~80 pairs × ~300 tokens ≈ 24k tokens > keepRecentTokens (20k).
+  for (let i = 0; i < 80; i++) {
+    sessionManager.appendMessage({
+      role: "user",
+      content: [{ type: "text", text: `Prior user message ${i} ` + "x".repeat(800) }],
+      timestamp: Date.now() - (100 - i) * 1000,
+    });
+    sessionManager.appendMessage(makeAssistantMessage(`Prior assistant response ${i} ` + "y".repeat(800), 600, "stop"));
+  }
   const { session } = await createAgentSession({
     cwd,
     agentDir,
@@ -172,16 +190,16 @@ async function createTestSession(opts: ScriptedStreamOptions) {
     modelRuntime: fakeRuntime(opts),
     resourceLoader: loader,
     settingsManager,
-    sessionManager: SessionManager.inMemory(cwd),
+    sessionManager,
     tools: ["read"],
   });
   return { cwd, session };
 }
 
-test("message_end: a completed tool result crossing the threshold aborts the turn immediately and compacts", async () => {
+test("message_end: a completed assistant message crossing the threshold aborts the turn immediately and compacts", async () => {
   const cwd = tempDir();
   const filePath = join(cwd, "target.txt");
-  writeFileSync(filePath, "file content that pushes context usage across the threshold when returned as a tool result");
+  writeFileSync(filePath, "small file");
   const { session } = await createTestSession({ contextWindow: 200_000, thresholdPercent: 80, readPath: filePath });
   try {
 
@@ -212,7 +230,7 @@ test("message_end: a completed tool result crossing the threshold aborts the tur
 test("message_end: the aborted turn auto-continues after compaction without a manual message", async () => {
   const cwd = tempDir();
   const filePath = join(cwd, "target.txt");
-  writeFileSync(filePath, "file content that pushes context usage across the threshold when returned as a tool result");
+  writeFileSync(filePath, "small file");
   const { session } = await createTestSession({ contextWindow: 200_000, thresholdPercent: 80, readPath: filePath });
   try {
 

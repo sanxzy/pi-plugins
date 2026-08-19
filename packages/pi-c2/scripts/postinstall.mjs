@@ -41,6 +41,7 @@ const PATCH_MARKERS = [
   "dist/core/extensions/loader.js:createCommandContext",
   "dist/core/session-manager.js:ensurePrivateSessionDir",
   "dist/core/settings-manager.js:thresholdPercentOverride",
+  "dist/core/agent-session.js:_maybeAbortForThreshold",
 ];
 
 function log(message) {
