@@ -25,7 +25,7 @@ export function parseThinkingRequiredTurnsInput(value: string): number | undefin
 
 /** Register the root-session thinking tool enable/disable command. */
 export function registerThinkingSetup(pi: ExtensionAPI): void {
-  pi.registerCommand("setup-thinking-tool", {
+  pi.registerCommand("c2-setup-thinking-tool", {
     description: `Enable or disable the deep_think tool for this session (required turns ${THINKING_REQUIRED_TURNS_MIN}-${THINKING_REQUIRED_TURNS_MAX}, default ${DEFAULT_THINKING_REQUIRED_TURNS})`,
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.SETUP_THINKING }, async () => {

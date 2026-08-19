@@ -27,12 +27,12 @@ function setupTheme(theme: { fg: (color: ThemeColor, text: string) => string }):
   return { fg: (color, text) => theme.fg(color as ThemeColor, text) };
 }
 
-/** Register the rerunnable, dedicated `/setup-channel-telegram` command. */
+/** Register the rerunnable, dedicated `/c2-setup-channel-telegram` command. */
 export function registerTelegramSetup(
   pi: ExtensionAPI,
   deps: TelegramSetupRegistrationDeps = {},
 ): void {
-  pi.registerCommand("setup-channel-telegram", {
+  pi.registerCommand("c2-setup-channel-telegram", {
     description: "Configure and connect a Telegram bot for this project",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.SETUP_CHANNEL }, async () => {

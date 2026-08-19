@@ -76,7 +76,7 @@ export function formatGoalInterval(intervalMs: number): string {
 }
 
 /**
- * Interactive goal management wizard for `/manage-goal`.
+ * Interactive goal management wizard for `/c2-manage-goal`.
  *
  * The wizard owns only presentation and input state. The controller supplies
  * the goal record and mutations; `done` resolves with a status the command

@@ -1,5 +1,5 @@
 /**
- * `/clear-channel-telegram` command registration.
+ * `/c2-clear-channel-telegram` command registration.
  *
  * Stops the active Telegram listener through the shared project manager, then
  * removes the persisted channel config and runtime cursor. TUI-only: the
@@ -23,12 +23,12 @@ export interface TelegramClearRegistrationDeps {
   createPoller?: (config: Parameters<ChannelPoller["start"]>[0], projectRoot: string, sessionId: string) => ChannelPoller;
 }
 
-/** Register the rerunnable `/clear-channel-telegram` command. */
+/** Register the rerunnable `/c2-clear-channel-telegram` command. */
 export function registerTelegramClear(
   pi: ExtensionAPI,
   deps: TelegramClearRegistrationDeps = {},
 ): void {
-  pi.registerCommand("clear-channel-telegram", {
+  pi.registerCommand("c2-clear-channel-telegram", {
     description: "Disconnect and remove the Telegram channel setup for this project",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.CLEAR_CHANNEL }, async () => {

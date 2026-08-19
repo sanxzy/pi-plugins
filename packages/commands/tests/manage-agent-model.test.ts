@@ -313,7 +313,7 @@ test("removeGlobalModel with nothing configured reports no-change", () => {
   }
 });
 
-test("/manage-agent-model is registered and maps wizard results to notifications", async () => {
+test("/c2-manage-agent-model is registered and maps wizard results to notifications", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: Array<[string, string]> = [];
   const pi = {
@@ -322,7 +322,7 @@ test("/manage-agent-model is registered and maps wizard results to notifications
     },
   } as unknown as ExtensionAPI;
   registerManageAgentModel(pi);
-  assert.equal(handlers.has("manage-agent-model"), true);
+  assert.equal(handlers.has("c2-manage-agent-model"), true);
   const ctxFor = (result: unknown): ExtensionCommandContext => ({
     mode: "tui",
     hasUI: true,
@@ -334,9 +334,9 @@ test("/manage-agent-model is registered and maps wizard results to notifications
       notify: (message: string, kind?: string) => notifications.push([message, kind ?? "info"] as [string, string]),
     },
   } as unknown as ExtensionCommandContext);
-  await handlers.get("manage-agent-model")!("", ctxFor({ status: "saved", message: "Agent model set." }));
-  await handlers.get("manage-agent-model")!("", ctxFor({ status: "error", message: "Broken" }));
-  await handlers.get("manage-agent-model")!("", ctxFor({ status: "cancelled" }));
+  await handlers.get("c2-manage-agent-model")!("", ctxFor({ status: "saved", message: "Agent model set." }));
+  await handlers.get("c2-manage-agent-model")!("", ctxFor({ status: "error", message: "Broken" }));
+  await handlers.get("c2-manage-agent-model")!("", ctxFor({ status: "cancelled" }));
   assert.deepEqual(notifications, [
     ["Agent model set.", "info"],
     ["Broken", "error"],
@@ -344,7 +344,7 @@ test("/manage-agent-model is registered and maps wizard results to notifications
   ]);
 });
 
-test("/manage-agent-model is gated to interactive TUI", async () => {
+test("/c2-manage-agent-model is gated to interactive TUI", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: string[] = [];
   const pi = {
@@ -353,7 +353,7 @@ test("/manage-agent-model is gated to interactive TUI", async () => {
     },
   } as unknown as ExtensionAPI;
   registerManageAgentModel(pi);
-  await handlers.get("manage-agent-model")!("", {
+  await handlers.get("c2-manage-agent-model")!("", {
     mode: "rpc",
     hasUI: true,
     ui: { notify: (message: string) => notifications.push(message) },

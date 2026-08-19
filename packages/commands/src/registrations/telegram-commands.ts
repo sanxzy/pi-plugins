@@ -95,13 +95,13 @@ export function createTelegramCommandExpander(
   return { expand, menuSources };
 }
 
-/** Default expander: `/goal` plus discovered prompt/skill files. */
+/** Default expander: `/c2-goal` (Telegram `/c2_goal`) plus discovered prompt/skill files. */
 export function createDefaultTelegramCommandExpander(
   getCommands: () => readonly TelegramMenuCommandSource[],
 ): TelegramCommandExpander {
   return createTelegramCommandExpander({
     getCommands,
-    extensionExpanders: { goal: expandTelegramGoalCommand },
+    extensionExpanders: { "c2-goal": expandTelegramGoalCommand, "c2_goal": expandTelegramGoalCommand },
     nativeMenuCommands: TELEGRAM_NATIVE_MENU_COMMANDS,
     isDevMode: isTelegramDevelopmentMode,
   });

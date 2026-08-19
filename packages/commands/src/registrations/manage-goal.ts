@@ -38,7 +38,7 @@ function goalToItem(goal: NonNullable<ReturnType<GoalPool["get"]>>): ManageGoalI
   };
 }
 
-/** Create the controller for `/manage-goal`. */
+/** Create the controller for `/c2-manage-goal`. */
 export function createManageGoalController(options: ManageGoalControllerOptions): ManageGoalController {
   const { cwd, sessionId } = options;
   const pool = options.pool ?? getGoalPool(cwd, sessionId);

@@ -781,11 +781,11 @@ test("a recognized slash command is dispatched natively with a compact signature
   let listener: TelegramInboundListener | undefined;
   registerTelegramInbound(pi, {
     createInbound: (opts) => (listener = createTelegramInbound(opts)),
-    expandCommand: (name, args) => (name === "goal" ? `GOAL_WORKFLOW+${args}` : undefined),
+    expandCommand: (name, args) => (name === "c2_goal" ? `GOAL_WORKFLOW+${args}` : undefined),
   });
 
   await handlers.get("session_start")!({ reason: "startup" }, context(cwd, "root-a"));
-  await listener!.handle(privateText(1, "111", "/goal 10s testing"));
+  await listener!.handle(privateText(1, "111", "/c2_goal 10s testing"));
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(sent.length, 1);

@@ -41,7 +41,7 @@ function collectReplies(): { messages: string[]; send: (projectRoot: string, cha
 test("non-control commands are not owned by the handler", async () => {
   const { messages, send } = collectReplies();
   const handled = await dispatchTelegramControl(
-    command("goal"),
+    command("c2-goal"),
     { projectRoot: "/tmp/project", chatId: "555", context: context(), sendMessage: send },
   );
   assert.equal(handled, false);

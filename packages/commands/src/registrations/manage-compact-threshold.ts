@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 /**
  * Allowed range for the percentage-based auto-compaction threshold managed
- * through `/manage-compact-threshold`. The default is 80; users may set any
+ * through `/c2-manage-compact-threshold`. The default is 80; users may set any
  * integer from 50 (inclusive) to 90 (inclusive).
  */
 export const COMPACT_THRESHOLD_MIN = 50;
@@ -70,9 +70,9 @@ export function setCompactThreshold(percent: number): { ok: true; message: strin
   }
 }
 
-/** Register the `/manage-compact-threshold` command. */
+/** Register the `/c2-manage-compact-threshold` command. */
 export function registerManageCompactThreshold(pi: ExtensionAPI): void {
-  pi.registerCommand("manage-compact-threshold", {
+  pi.registerCommand("c2-manage-compact-threshold", {
     description: "View or change the context-usage percentage that triggers automatic compaction (50-90, default 80)",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.MANAGE_COMPACT_THRESHOLD }, async () => {

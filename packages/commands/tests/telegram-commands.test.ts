@@ -4,19 +4,19 @@ import { createDefaultTelegramCommandExpander, createTelegramCommandExpander, TE
 
 test("Telegram command expander combines explicit extension commands with prompt and skill sources", () => {
   const commands = [
-    { name: "goal", description: "Goal", source: "extension" },
+    { name: "c2-goal", description: "Goal", source: "extension" },
     { name: "review", description: "Review", source: "prompt", sourceInfo: { path: "/prompts/review.md" } },
     { name: "skill:docs", description: "Docs", source: "skill", sourceInfo: { path: "/skills/docs/SKILL.md" } },
-    { name: "setup-channel-telegram", description: "TUI only", source: "extension" },
+    { name: "c2-setup-channel-telegram", description: "TUI only", source: "extension" },
   ] as const;
   const expander = createTelegramCommandExpander({
     getCommands: () => commands,
-    extensionExpanders: { goal: (args) => `GOAL:${args}` },
+    extensionExpanders: { "c2-goal": (args) => `GOAL:${args}` },
   });
 
-  assert.equal(expander.expand("goal", "10s test"), "GOAL:10s test");
+  assert.equal(expander.expand("c2-goal", "10s test"), "GOAL:10s test");
   assert.equal(expander.expand("review", "changes"), undefined, "default file reader cannot read fake path");
-  assert.deepEqual(expander.menuSources().map((command) => command.name), ["goal", "review", "skill_docs"]);
+  assert.deepEqual(expander.menuSources().map((command) => command.name), ["c2-goal", "review", "skill_docs"]);
 });
 
 test("default expander excludes system_prompt unless development mode is enabled", () => {
@@ -55,10 +55,10 @@ test("native menu sources are populated", () => {
 test("Telegram command expander keeps extension command names reserved from prompt collisions", () => {
   const expander = createTelegramCommandExpander({
     getCommands: () => [
-      { name: "goal", source: "prompt", sourceInfo: { path: "/prompts/goal.md" } },
+      { name: "c2-goal", source: "prompt", sourceInfo: { path: "/prompts/c2-goal.md" } },
     ],
-    extensionExpanders: { goal: (args) => `native:${args}` },
+    extensionExpanders: { "c2-goal": (args) => `native:${args}` },
   });
-  assert.equal(expander.expand("goal", "test"), "native:test");
+  assert.equal(expander.expand("c2-goal", "test"), "native:test");
   assert.deepEqual(expander.menuSources().map((command) => command.name), []);
 });

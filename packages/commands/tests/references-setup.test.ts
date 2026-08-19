@@ -199,7 +199,7 @@ test("controller removes an entry atomically and preserves the rest", async () =
   assert.deepEqual(document, { references: { keep: "~/keep" } });
 });
 
-test("/setup-references maps saved, error, and cancelled results to notifications", async () => {
+test("/c2-setup-references maps saved, error, and cancelled results to notifications", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: Array<[string, string]> = [];
   const pi = {
@@ -217,9 +217,9 @@ test("/setup-references maps saved, error, and cancelled results to notification
       notify: (message: string, kind?: string) => notifications.push([message, kind ?? "info"] as [string, string]),
     },
   } as unknown as ExtensionCommandContext);
-  await handlers.get("setup-references")!("", ctxFor({ status: "saved", message: "Done" }));
-  await handlers.get("setup-references")!("", ctxFor({ status: "error", message: "Broken" }));
-  await handlers.get("setup-references")!("", ctxFor({ status: "cancelled" }));
+  await handlers.get("c2-setup-references")!("", ctxFor({ status: "saved", message: "Done" }));
+  await handlers.get("c2-setup-references")!("", ctxFor({ status: "error", message: "Broken" }));
+  await handlers.get("c2-setup-references")!("", ctxFor({ status: "cancelled" }));
   assert.deepEqual(notifications, [
     ["Done", "info"],
     ["Broken", "error"],
@@ -227,7 +227,7 @@ test("/setup-references maps saved, error, and cancelled results to notification
   ]);
 });
 
-test("registers /setup-references and gates it to interactive TUI", async () => {
+test("registers /c2-setup-references and gates it to interactive TUI", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: string[] = [];
   const pi = {
@@ -236,8 +236,8 @@ test("registers /setup-references and gates it to interactive TUI", async () => 
     },
   } as unknown as ExtensionAPI;
   registerReferencesSetup(pi);
-  assert.equal(handlers.has("setup-references"), true);
-  await handlers.get("setup-references")!("", {
+  assert.equal(handlers.has("c2-setup-references"), true);
+  await handlers.get("c2-setup-references")!("", {
     mode: "rpc",
     hasUI: true,
     ui: { notify: (message: string) => notifications.push(message) },

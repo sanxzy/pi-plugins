@@ -130,6 +130,6 @@ export function formatPairingChallenge(request: PairingRequest): string {
     "Telegram access requires approval.",
     `Your Telegram user ID: ${request.userId}`,
     `Pairing code: ${request.code}`,
-    "Ask the project owner to approve this request in /setup-channel-telegram.",
+    "Ask the project owner to approve this request in /c2-setup-channel-telegram.",
   ].join("\n");
 }

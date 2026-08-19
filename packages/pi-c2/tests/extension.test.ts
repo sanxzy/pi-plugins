@@ -102,18 +102,18 @@ test("pi-c2 extension registers Telegram setup and goal workflow alongside exist
     ["goal_create", "goal_pause", "goal_resume", "goal_status", "goal_clear"],
   );
   assert.equal(
-    commands.filter((name) => name === "setup-channel-telegram").length,
+    commands.filter((name) => name === "c2-setup-channel-telegram").length,
     1,
     "setup command registered exactly once",
   );
   assert.equal(
-    commands.filter((name) => name === "setup-references").length,
+    commands.filter((name) => name === "c2-setup-references").length,
     1,
     "references setup command registered exactly once",
   );
-  assert.equal(commands.filter((name) => name === "goal").length, 1, "goal command registered exactly once");
-  assert.equal(commands.filter((name) => name === "manage-goal").length, 1, "manage-goal command registered exactly once");
-  assert.equal(commands.filter((name) => name === "setup-ponytail").length, 1, "Ponytail setup command registered exactly once");
+  assert.equal(commands.filter((name) => name === "c2-goal").length, 1, "goal command registered exactly once");
+  assert.equal(commands.filter((name) => name === "c2-manage-goal").length, 1, "manage-goal command registered exactly once");
+  assert.equal(commands.filter((name) => name === "c2-setup-ponytail").length, 1, "Ponytail setup command registered exactly once");
   assert.equal(events.filter((event) => event === "tool_call").length, 0, "Ponytail enforcement must not use tool_call hooks");
   assert.ok(events.includes("session_start"), "session_start lifecycle handler registered");
   assert.ok(events.includes("session_shutdown"), "session_shutdown lifecycle handler registered");

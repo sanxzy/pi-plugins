@@ -165,7 +165,7 @@ export function createReferenceCatalogWithInfrastructure(
       const preflightResult = await preflight(document, operationOptions);
       if (!preflightResult.ok) return preflightResult;
       if (operationOptions.signal?.aborted) return { ok: false, error: "Git materialization aborted" };
-      // /setup-references is the sole intake for new references, so persisting
+      // /c2-setup-references is the sole intake for new references, so persisting
       // is a provisioning step: materialize every Git source before publishing
       // the catalog. Nothing is written if any remote cannot be checked out.
       try {

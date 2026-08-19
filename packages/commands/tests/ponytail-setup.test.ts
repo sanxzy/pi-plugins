@@ -16,8 +16,8 @@ function registrations(): { handler: CommandHandler; commands: Map<string, unkno
   const commands = new Map<string, unknown>();
   const pi = { registerCommand(name: string, options: { handler: CommandHandler }) { commands.set(name, options); } } as unknown as ExtensionAPI;
   registerPonytailSetup(pi);
-  const command = commands.get("setup-ponytail") as { handler?: CommandHandler } | undefined;
-  if (!command?.handler) throw new Error("setup-ponytail was not registered");
+  const command = commands.get("c2-setup-ponytail") as { handler?: CommandHandler } | undefined;
+  if (!command?.handler) throw new Error("c2-setup-ponytail was not registered");
   return { handler: command.handler, commands };
 }
 function context(cwd: string, sessionId: string, select: (title: string, options: string[]) => Promise<string | undefined>, reload?: () => Promise<void>, sessionFile?: string): ExtensionCommandContext {

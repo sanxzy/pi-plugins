@@ -10,7 +10,7 @@ function setupTheme(theme: { fg: (color: ThemeColor, text: string) => string }):
 
 /** Register the global references setup wizard. */
 export function registerReferencesSetup(pi: ExtensionAPI): void {
-  pi.registerCommand("setup-references", {
+  pi.registerCommand("c2-setup-references", {
     description: "Configure global local and Git references",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.SETUP_REFERENCES }, async () => {

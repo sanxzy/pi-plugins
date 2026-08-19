@@ -79,7 +79,7 @@ export async function executeDeepThink(
   const now = Date.now();
   const state = loadThinkingState(sessionId, now);
   if (!state || state.enabled !== true) {
-    return errorResult("Thinking tool is not enabled for this session. Enable it with /setup-thinking-tool.", {
+    return errorResult("Thinking tool is not enabled for this session. Enable it with /c2-setup-thinking-tool.", {
       id: params.id ?? "",
       recorded: 0,
       scratchpad: [],

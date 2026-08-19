@@ -124,7 +124,7 @@ test("controller is unavailable in child sessions", async () => {
   }
 });
 
-test("/manage-goal is registered and maps wizard results to notifications", async () => {
+test("/c2-manage-goal is registered and maps wizard results to notifications", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: Array<[string, string]> = [];
   const pi = {
@@ -133,7 +133,7 @@ test("/manage-goal is registered and maps wizard results to notifications", asyn
     },
   } as unknown as ExtensionAPI;
   registerManageGoal(pi);
-  assert.equal(handlers.has("manage-goal"), true);
+  assert.equal(handlers.has("c2-manage-goal"), true);
   const ctxFor = (result: unknown): ExtensionCommandContext => ({
     mode: "tui",
     hasUI: true,
@@ -145,9 +145,9 @@ test("/manage-goal is registered and maps wizard results to notifications", asyn
       notify: (message: string, kind?: string) => notifications.push([message, kind ?? "info"] as [string, string]),
     },
   } as unknown as ExtensionCommandContext);
-  await handlers.get("manage-goal")!("", ctxFor({ status: "saved", message: "Goal created." }));
-  await handlers.get("manage-goal")!("", ctxFor({ status: "error", message: "Broken" }));
-  await handlers.get("manage-goal")!("", ctxFor({ status: "cancelled" }));
+  await handlers.get("c2-manage-goal")!("", ctxFor({ status: "saved", message: "Goal created." }));
+  await handlers.get("c2-manage-goal")!("", ctxFor({ status: "error", message: "Broken" }));
+  await handlers.get("c2-manage-goal")!("", ctxFor({ status: "cancelled" }));
   assert.deepEqual(notifications, [
     ["Goal created.", "info"],
     ["Broken", "error"],
@@ -155,7 +155,7 @@ test("/manage-goal is registered and maps wizard results to notifications", asyn
   ]);
 });
 
-test("/manage-goal is gated to interactive TUI", async () => {
+test("/c2-manage-goal is gated to interactive TUI", async () => {
   const handlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
   const notifications: string[] = [];
   const pi = {
@@ -164,7 +164,7 @@ test("/manage-goal is gated to interactive TUI", async () => {
     },
   } as unknown as ExtensionAPI;
   registerManageGoal(pi);
-  await handlers.get("manage-goal")!("", {
+  await handlers.get("c2-manage-goal")!("", {
     mode: "rpc",
     hasUI: true,
     ui: { notify: (message: string) => notifications.push(message) },

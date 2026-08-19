@@ -31,10 +31,10 @@ function commandContext(overrides: Partial<ExtensionCommandContext> = {}): Exten
   } as unknown as ExtensionCommandContext;
 }
 
-test("registers /setup-channel-telegram", () => {
+test("registers /c2-setup-channel-telegram", () => {
   const { pi, handlers } = api();
   registerTelegramSetup(pi);
-  assert.equal(handlers.has("setup-channel-telegram"), true);
+  assert.equal(handlers.has("c2-setup-channel-telegram"), true);
 });
 
 test("refuses safely outside an interactive TUI context", async () => {
@@ -46,7 +46,7 @@ test("refuses safely outside an interactive TUI context", async () => {
     hasUI: true,
     ui: { notify: (m: string) => notified.push(m) } as unknown as ExtensionCommandContext["ui"],
   });
-  await handlers.get("setup-channel-telegram")!("/tmp/project", ctx);
+  await handlers.get("c2-setup-channel-telegram")!("/tmp/project", ctx);
   assert.equal(notified.length, 1, "a safe notification is emitted outside TUI");
   assert.match(notified[0]!, /requires an interactive TUI/);
 });
@@ -64,6 +64,6 @@ test("opens the component through the host custom UI surface in TUI mode", async
       notify: () => {},
     } as unknown as ExtensionCommandContext["ui"],
   });
-  await handlers.get("setup-channel-telegram")!("/tmp/project", ctx);
+  await handlers.get("c2-setup-channel-telegram")!("/tmp/project", ctx);
   assert.deepEqual(opened, ["custom"], "the setup component is mounted via ui.custom()");
 });

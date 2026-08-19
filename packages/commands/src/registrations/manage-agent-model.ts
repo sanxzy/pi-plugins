@@ -60,7 +60,7 @@ function writeSettingsConfig(filePath: string, value: Record<string, unknown>): 
 }
 
 /**
- * Create the controller for `/manage-agent-model`.
+ * Create the controller for `/c2-manage-agent-model`.
  *
  * The agent list comes from the shared cached discovery (same seam as the
  * `agent` tool); the model list comes from the session model registry. Writes

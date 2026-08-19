@@ -8,7 +8,7 @@ const DISABLE = "Disable Ponytail";
 
 /** Register the root-session Ponytail enable/disable command. */
 export function registerPonytailSetup(pi: ExtensionAPI): void {
-  pi.registerCommand("setup-ponytail", {
+  pi.registerCommand("c2-setup-ponytail", {
     description: "Enable or disable Ponytail write/edit authorization for this session",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.SETUP_PONYTAIL }, async () => {

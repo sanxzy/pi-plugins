@@ -33,9 +33,9 @@ function registrations(): { pi: ExtensionAPI; command?: RegisteredCommand; sent:
   return { pi, command, sent, hidden };
 }
 
-test("registerGoalCommand registers a single current-session /goal command", () => {
+test("registerGoalCommand registers a single current-session /c2-goal command", () => {
   const { command } = registrations();
-  assert.equal(command?.name, "goal");
+  assert.equal(command?.name, "c2-goal");
 });
 
 test("the workflow describes a self-managed goal and separates leading interval metadata", () => {
@@ -62,7 +62,7 @@ test("registerGoalCommand forwards the workflow prompt and exact text as hidden 
   assert.deepEqual(hidden[0].options, { triggerTurn: true, deliverAs: "steer" });
 });
 
-test("a /goal with no text asks the model to propose next steps in hidden context", () => {
+test("a /c2-goal with no text asks the model to propose next steps in hidden context", () => {
   const { command, sent, hidden } = registrations();
   command!.handler("", {} as unknown as ExtensionCommandContext);
   assert.equal(sent.length, 0);
@@ -78,7 +78,7 @@ test("the workflow tells the model to separate a leading interval from the exact
   assert.match(GOAL_WORKFLOW_PROMPT, /remaining.*exact.*prompt|exact.*prompt.*remaining/i);
 });
 
-test("/goal forwards an interval-prefixed request verbatim for model interpretation", () => {
+test("/c2-goal forwards an interval-prefixed request verbatim for model interpretation", () => {
   const { command, sent, hidden } = registrations();
   const request = "2m testing goal, is it working, clear after 2nd triggered";
   command!.handler(request, {} as unknown as ExtensionCommandContext);
@@ -88,7 +88,7 @@ test("/goal forwards an interval-prefixed request verbatim for model interpretat
   assert.equal(hidden[0].message.display, false);
 });
 
-test("/goal returns the logging promise so delivery failures reach the command caller", async () => {
+test("/c2-goal returns the logging promise so delivery failures reach the command caller", async () => {
   const { command } = registrations();
   const failing = registrations();
   failing.pi.sendMessage = (() => {

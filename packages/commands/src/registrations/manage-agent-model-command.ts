@@ -9,7 +9,7 @@ function setupTheme(theme: { fg: (color: ThemeColor, text: string) => string }):
 
 /** Register the interactive agent-model management wizard. */
 export function registerManageAgentModel(pi: ExtensionAPI): void {
-  pi.registerCommand("manage-agent-model", {
+  pi.registerCommand("c2-manage-agent-model", {
     description: "Set or remove the model an agent runs with",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.MANAGE_AGENT_MODEL }, async () => {

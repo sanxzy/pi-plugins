@@ -90,7 +90,7 @@ test("registerManageCompactThreshold registers the command with bounds in the de
     },
   } as unknown as ExtensionAPI;
   registerManageCompactThreshold(pi);
-  const definition = commands.get("manage-compact-threshold");
+  const definition = commands.get("c2-manage-compact-threshold");
   assert.ok(definition, "command registered");
   assert.match(definition.description, /50-90/);
   assert.match(definition.description, /default 80/);
@@ -143,7 +143,7 @@ test("command handler prompts, validates, and persists the threshold", async () 
         },
       } as unknown as ExtensionAPI;
       registerManageCompactThreshold(pi);
-      const handler = commands.get("manage-compact-threshold")!.handler;
+      const handler = commands.get("c2-manage-compact-threshold")!.handler;
       await handler("", ctx);
 
       assert.equal(capturedPrefill, "80", "dialog pre-fills the current threshold (80) when config has 80");

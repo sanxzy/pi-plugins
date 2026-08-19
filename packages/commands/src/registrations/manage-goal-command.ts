@@ -9,7 +9,7 @@ function setupTheme(theme: { fg: (color: ThemeColor, text: string) => string }):
 
 /** Register the interactive goal management wizard. */
 export function registerManageGoal(pi: ExtensionAPI): void {
-  pi.registerCommand("manage-goal", {
+  pi.registerCommand("c2-manage-goal", {
     description: "Create, edit, pause, resume, or clear the current session goal",
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.MANAGE_GOAL }, async () => {
