@@ -30,6 +30,8 @@ interface ScriptedStreamOptions {
   thresholdPercent: number;
   /** Absolute path the scripted `read` tool call targets. */
   readPath: string;
+  /** When set, summarization result() calls await this gate (race testing). */
+  summaryGate?: () => Promise<void>;
 }
 
 function makeModel(contextWindow: number) {
@@ -96,6 +98,18 @@ function scriptedStream(opts: ScriptedStreamOptions, signal: AbortSignal | undef
   const summaryMessage = makeAssistantMessage("Summarized conversation.", 50, "stop");
 
   let finalResult = summaryMessage;
+  // Summarization calls (cacheRetention "none") resolve via result() WITHOUT
+  // iterating. When a summaryGate is configured, block the first summary so
+  // the test can start a second overlapping compaction while the first is
+  // still awaiting its summarization result().
+  let gateUsed = false;
+  const result = async () => {
+    if (opts.summaryGate && !gateUsed) {
+      gateUsed = true;
+      await opts.summaryGate();
+    }
+    return finalResult;
+  };
   const iterator = (async function* () {
     const call = ++state.calls;
     if (call === 1) {
@@ -137,7 +151,7 @@ function scriptedStream(opts: ScriptedStreamOptions, signal: AbortSignal | undef
 
   return {
     [Symbol.asyncIterator]: () => iterator,
-    result: async () => finalResult,
+    result,
   };
 }
 
@@ -253,6 +267,54 @@ test("message_end: the aborted turn auto-continues after compaction without a ma
       events.length >= 2,
       `expected at least 2 agent_end events (abort + auto-continue), got ${events.join(", ")}`,
     );
+    unsubscribe();
+  } finally {
+    session.dispose();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("overlapping manual compactions never read a cleared shared controller (signal race)", async () => {
+  const cwd = tempDir();
+  const filePath = join(cwd, "target.txt");
+  writeFileSync(filePath, "small file");
+  // Gate the FIRST summarization result() so the test can start a second
+  // compaction while the first is still awaiting its summary. The SDK shares
+  // one _compactionAbortController field across concurrent compact() calls;
+  // when the second finishes first its finally clears the field and the first
+  // must not read undefined.signal.
+  let releaseSummary: (() => void) | undefined;
+  const summaryGate = new Promise<void>((resolve) => { releaseSummary = resolve; });
+  const { session } = await createTestSession({
+    contextWindow: 200_000,
+    thresholdPercent: 80,
+    readPath: filePath,
+    summaryGate: () => summaryGate,
+  });
+  try {
+    let compactions = 0;
+    let failures = 0;
+    const unsubscribe = session.subscribe((event: { type: string; errorMessage?: string }) => {
+      if (event.type === "compaction_end") {
+        compactions++;
+        if (event.errorMessage) failures++;
+      }
+    });
+
+    session.settingsManager.setCompactionThresholdPercent(80);
+
+    // Compaction #1 starts and its summarization is gated.
+    const first = session.compact();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Compaction #2 starts while #1 is still awaiting: it shares the
+    // controller field, finishes first, and clears it.
+    const second = session.compact();
+    // Release #1's summary. It must not read undefined.signal.
+    releaseSummary!();
+    await Promise.allSettled([first, second]);
+
+    assert.ok(compactions >= 1, "at least one compaction_end must be emitted");
+    assert.equal(failures, 0, `no compaction_end errorMessage: ${failures}`);
     unsubscribe();
   } finally {
     session.dispose();

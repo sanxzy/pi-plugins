@@ -1,5 +1,5 @@
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index 4bcf0d4..748ec14 100644
+index 4bcf0d4..778df7c 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
 @@ -97,6 +97,8 @@ export class AgentSession {
@@ -54,7 +54,58 @@ index 4bcf0d4..748ec14 100644
      _willRetryAfterAgentEnd(event) {
          const settings = this.settingsManager.getRetrySettings();
          if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
-@@ -1511,8 +1547,13 @@ export class AgentSession {
+@@ -1366,7 +1402,12 @@ export class AgentSession {
+      */
+     async compact(customInstructions) {
+         await this.abort();
+-        this._compactionAbortController = new AbortController();
++        // pi-c2 patch: keep the manual compaction controller in a LOCAL variable
++        // so overlapping compact() calls (e.g. extension-triggered and /compact)
++        // never read a cleared shared field as undefined.signal. The shared
++        // field is still assigned so abortCompaction() works.
++        const abortController = new AbortController();
++        this._compactionAbortController = abortController;
+         this._emit({ type: "compaction_start", reason: "manual" });
+         try {
+             if (!this.model) {
+@@ -1394,7 +1435,7 @@ export class AgentSession {
+                     customInstructions,
+                     reason: "manual",
+                     willRetry: false,
+-                    signal: this._compactionAbortController.signal,
++                    signal: abortController.signal,
+                 }));
+                 if (result?.cancel) {
+                     throw new Error("Compaction cancelled");
+@@ -1419,14 +1460,14 @@ export class AgentSession {
+             }
+             else {
+                 // Generate compaction result
+-                const result = await compact(preparation, requestModel, apiKey, headers, customInstructions, this._compactionAbortController.signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }));
++                const result = await compact(preparation, requestModel, apiKey, headers, customInstructions, abortController.signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }));
+                 summary = result.summary;
+                 firstKeptEntryId = result.firstKeptEntryId;
+                 tokensBefore = result.tokensBefore;
+                 usage = result.usage;
+                 details = result.details;
+             }
+-            if (this._compactionAbortController.signal.aborted) {
++            if (abortController.signal.aborted) {
+                 throw new Error("Compaction cancelled");
+             }
+             this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+@@ -1479,7 +1520,9 @@ export class AgentSession {
+             throw error;
+         }
+         finally {
+-            this._compactionAbortController = undefined;
++            if (this._compactionAbortController === abortController) {
++                this._compactionAbortController = undefined;
++            }
+         }
+     }
+     /**
+@@ -1511,8 +1554,13 @@ export class AgentSession {
          const settings = this.settingsManager.getCompactionSettings();
          if (!settings.enabled)
              return false;
@@ -69,7 +120,7 @@ index 4bcf0d4..748ec14 100644
              return false;
          const contextWindow = this.model?.contextWindow ?? 0;
          // Skip overflow check if the message came from a different model.
-@@ -1585,7 +1626,9 @@ export class AgentSession {
+@@ -1585,7 +1633,9 @@ export class AgentSession {
              contextTokens = directContextTokens;
          }
          if (shouldCompact(contextTokens, contextWindow, settings)) {
@@ -80,7 +131,57 @@ index 4bcf0d4..748ec14 100644
          }
          return false;
      }
-@@ -1699,7 +1742,10 @@ export class AgentSession {
+@@ -1595,6 +1645,13 @@ export class AgentSession {
+     async _runAutoCompaction(reason, willRetry) {
+         const settings = this.settingsManager.getCompactionSettings();
+         let started = false;
++        // pi-c2 patch: keep the abort controller in a LOCAL variable so
++        // overlapping compaction runs (threshold compaction plus the
++        // pre-prompt check in _handleAgentPrompt) can never observe each
++        // other's finally-clear of the shared field as `undefined.signal`.
++        // The shared field is still assigned so abortCompaction() works.
++        // Declared OUTSIDE the try so the finally block can reference it.
++        let abortController;
+         try {
+             if (!this.model) {
+                 return false;
+@@ -1606,7 +1663,8 @@ export class AgentSession {
+                 return false;
+             }
+             this._emit({ type: "compaction_start", reason });
+-            this._autoCompactionAbortController = new AbortController();
++            abortController = new AbortController();
++            this._autoCompactionAbortController = abortController;
+             started = true;
+             let extensionCompaction;
+             let fromExtension = false;
+@@ -1618,7 +1676,7 @@ export class AgentSession {
+                     customInstructions: undefined,
+                     reason,
+                     willRetry,
+-                    signal: this._autoCompactionAbortController.signal,
++                    signal: abortController.signal,
+                 }));
+                 if (extensionResult?.cancel) {
+                     this._emit({
+@@ -1650,14 +1708,14 @@ export class AgentSession {
+             }
+             else {
+                 // Generate compaction result
+-                const compactResult = await compact(preparation, requestModel, apiKey, headers, undefined, this._autoCompactionAbortController.signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }));
++                const compactResult = await compact(preparation, requestModel, apiKey, headers, undefined, abortController.signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }));
+                 summary = compactResult.summary;
+                 firstKeptEntryId = compactResult.firstKeptEntryId;
+                 tokensBefore = compactResult.tokensBefore;
+                 usage = compactResult.usage;
+                 details = compactResult.details;
+             }
+-            if (this._autoCompactionAbortController.signal.aborted) {
++            if (abortController.signal.aborted) {
+                 this._emit({
+                     type: "compaction_end",
+                     reason,
+@@ -1699,7 +1757,10 @@ export class AgentSession {
                  // from agent state. Rebuilding state from the new compaction can restore that kept entry,
                  // leaving an assistant as the final message. agent.continue() rejects that state, so remove
                  // the retriable error or truncated-length response again before continuing the interrupted turn.
@@ -92,7 +193,18 @@ index 4bcf0d4..748ec14 100644
                      this.agent.state.messages = messages.slice(0, -1);
                  }
                  return true;
-@@ -1908,6 +1954,7 @@ export class AgentSession {
+@@ -1725,7 +1786,9 @@ export class AgentSession {
+             return false;
+         }
+         finally {
+-            this._autoCompactionAbortController = undefined;
++            if (abortController !== undefined && this._autoCompactionAbortController === abortController) {
++                this._autoCompactionAbortController = undefined;
++            }
+         }
+     }
+     /**
+@@ -1908,6 +1971,7 @@ export class AgentSession {
                  this._extensionShutdownHandler?.();
              },
              getContextUsage: () => this.getContextUsage(),
