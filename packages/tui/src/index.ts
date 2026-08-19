@@ -41,6 +41,8 @@ export type {
   ManageAgentModelThinkingItem,
   ManageAgentModelWizardOptions,
 } from "./manage-agent-model-wizard.ts";
+export { CompactThresholdDialog } from "./compact-threshold-dialog.ts";
+export type { CompactThresholdDialogOptions, CompactThresholdDialogResult } from "./compact-threshold-dialog.ts";
 export { ManageGoalWizard, formatGoalInterval } from "./manage-goal-wizard.ts";
 export type {
   ManageGoalApplyResult,

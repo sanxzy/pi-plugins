@@ -103,13 +103,34 @@ test("command handler prompts, validates, and persists the threshold", async () 
       writeHomeConfig(h, { runtime: { contextCompactThresholdPercent: 80 } });
       const notifications: string[] = [];
       let inputAnswer: string | undefined = "75";
-      let inputPlaceholder = "";
+      let capturedPrefill = "";
       const ctx = {
         cwd: process.cwd(),
+        signal: undefined,
         ui: {
-          input: async (_title: string, placeholder?: string) => {
-            inputPlaceholder = placeholder ?? "";
-            return inputAnswer;
+          custom: async <T>(factory: (tui: unknown, theme: unknown, _keybindings: unknown, done: (result: T) => void) => unknown) => {
+            // Mount the dialog with a captured prefill and drive `done` with the
+            // scripted answer (mirrors the host's ctx.ui.custom() contract).
+            let resolveDone: ((value: T) => void) | undefined;
+            const done = (result: T) => { resolveDone?.(result); };
+            const promise = new Promise<T>((resolve) => { resolveDone = resolve; });
+            const component = factory(
+              { terminal: { rows: 24 }, requestRender: () => {} },
+              { fg: (_color: string, text: string) => text },
+              undefined,
+              done,
+            ) as { editor?: { getText(): string } } & { render(width: number): string[]; handleInput?(data: string): void };
+            capturedPrefill = (component as unknown as { editor: { getText(): string } }).editor?.getText() ?? "";
+            // Simulate submit (enter) with the scripted answer: set the editor
+            // text and invoke onSubmit via handleInput enter.
+            if (inputAnswer !== undefined) {
+              const editor = (component as unknown as { editor: { setText(t: string): void; onSubmit?: (v: string) => void } }).editor;
+              editor.setText(inputAnswer);
+              editor.onSubmit?.(inputAnswer);
+            } else {
+              component.handleInput?.("\x1b"); // escape cancels
+            }
+            return promise;
           },
           notify: (message: string) => { notifications.push(message); },
         },
@@ -125,14 +146,14 @@ test("command handler prompts, validates, and persists the threshold", async () 
       const handler = commands.get("manage-compact-threshold")!.handler;
       await handler("", ctx);
 
-      assert.equal(inputPlaceholder, "80", "placeholder shows the current threshold (80) when config has 80");
+      assert.equal(capturedPrefill, "80", "dialog pre-fills the current threshold (80) when config has 80");
       assert.equal(resolveSettingsForProject(undefined).runtime.contextCompactThresholdPercent, 75, "threshold persisted via command");
       assert.equal(notifications.length, 1);
       assert.match(notifications[0], /set to 75%/);
 
       // A later invocation must pre-fill the NEW current threshold (75), not the default 80.
       await handler("", ctx);
-      assert.equal(inputPlaceholder, "75", "placeholder reflects the updated current threshold");
+      assert.equal(capturedPrefill, "75", "dialog pre-fill reflects the updated current threshold");
 
       // Invalid input: no change, error notification.
       inputAnswer = "120";

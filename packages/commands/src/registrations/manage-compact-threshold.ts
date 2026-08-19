@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { COMMAND_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { clearSettingsCache, resolveSettingsForProject, settingsConfigPath } from "@xzy-ai/runtime";
+import { CompactThresholdDialog } from "@xzy-ai/tui";
 import { readFileSync, writeFileSync } from "node:fs";
 
 /**
@@ -76,10 +77,18 @@ export function registerManageCompactThreshold(pi: ExtensionAPI): void {
     async handler(_args: string, ctx: ExtensionCommandContext): Promise<void> {
       return processWithLog({ operation: COMMAND_OPERATIONS.MANAGE_COMPACT_THRESHOLD }, async () => {
         const current = resolveSettingsForProject(ctx.cwd).runtime.contextCompactThresholdPercent;
-        const input = await ctx.ui.input(
-          `Auto-compaction triggers when context usage reaches ${current}% of the model's context window. Enter a new threshold (${COMPACT_THRESHOLD_MIN}-${COMPACT_THRESHOLD_MAX}, default ${COMPACT_THRESHOLD_DEFAULT}):`,
-          String(current),
-        );
+        const title = `Auto-compaction triggers when context usage reaches ${current}% of the model's context window. Enter a new threshold (${COMPACT_THRESHOLD_MIN}-${COMPACT_THRESHOLD_MAX}, default ${COMPACT_THRESHOLD_DEFAULT}):`;
+        const input = await ctx.ui.custom<string | undefined>((tui, theme, _keybindings, done) => {
+          return new CompactThresholdDialog({
+            tui,
+            theme: { fg: (color, text) => theme.fg(color as never, text) },
+            prefill: String(current),
+            title,
+            hint: "Current threshold is shown in the input; edit it or press enter to keep it.",
+            done,
+            signal: ctx.signal,
+          });
+        });
         if (input === undefined) {
           ctx.ui.notify("Compact-threshold management cancelled", "info");
           return;
