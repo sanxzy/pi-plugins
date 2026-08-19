@@ -15,6 +15,7 @@ import {
 } from "@xzy-ai/tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { getChildPool, scopeDescendants } from "@xzy-ai/runtime";
+import type { ChildLiveSnapshot } from "@xzy-ai/core";
 
 /** Debounce job-status and live-leaf repaints so bursty child activity coalesces. */
 const REPAINT_DEBOUNCE_MS = 250;
@@ -205,14 +206,16 @@ function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>
     root,
     ...descendants.map((row) => {
       const job = jobs.get(row.jobId);
+      const control = liveChildFor(pool, row.jobId);
+      const retained = retainedSnapshotFor(pool, row.jobId);
       return {
         rowId: row.rowId,
         status: row.status,
         depth: row.depth + 1,
         description: row.description,
         durationMs: row.durationMs,
-        leaf: latestLeaf(liveChildFor(pool, row.jobId)),
-        live: liveStats(job, liveChildFor(pool, row.jobId)),
+        leaf: latestLeaf(control ?? (retained ? ({ live: { snapshot: retained } } as unknown as typeof control) : undefined)),
+        live: liveStats(job, control, retained),
         subagentType: job?.subagentType,
         enterable: row.enterable,
         updatedAtMs: isTerminal(row.status) ? settledMs(job) : undefined,
@@ -225,8 +228,9 @@ function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>
 function liveStats(
   job: { subagentType?: string } | undefined,
   control: { live?: { snapshot: { counters: { toolUses: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } } } } | undefined,
+  retained?: ChildLiveSnapshot,
 ): FooterTreeLiveStats | undefined {
-  const counters = control?.live?.snapshot?.counters;
+  const counters = control?.live?.snapshot?.counters ?? retained?.counters;
   if (!counters) return undefined;
   const subagentType = job?.subagentType;
   if (!subagentType) return undefined;
@@ -240,6 +244,22 @@ function liveChildFor(
   jobId: string,
 ): ReturnType<typeof pool.liveChildren.get> {
   return pool.liveChildren.get(jobId) ?? pool.liveChildren.get(jobId.replace(/^job-/, "")) ?? [...pool.liveChildren.entries()].find(([id]) => id.replace(/^job-/, "") === jobId.replace(/^job-/, ""))?.[1];
+}
+
+function retainedSnapshotFor(
+  pool: ReturnType<typeof getChildPool>,
+  jobId: string,
+): ChildLiveSnapshot | undefined {
+  const retained = (pool as unknown as { retainedLiveSnapshots?: Map<string, ChildLiveSnapshot> }).retainedLiveSnapshots;
+  if (!retained) return undefined;
+  const direct = retained.get(jobId);
+  if (direct) return direct;
+  const withoutPrefix = retained.get(jobId.replace(/^job-/, ""));
+  if (withoutPrefix) return withoutPrefix;
+  for (const [id, snapshot] of retained.entries()) {
+    if (id.replace(/^job-/, "") === jobId.replace(/^job-/, "")) return snapshot;
+  }
+  return undefined;
 }
 
 function latestLeaf(

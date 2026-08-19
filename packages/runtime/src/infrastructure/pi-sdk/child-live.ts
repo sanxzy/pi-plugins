@@ -3,6 +3,7 @@ import {
   createChildLiveFeed,
   type ChildLiveEvent,
   type ChildLiveFeed,
+  type ChildLiveSnapshot,
   type ChildLiveStatus,
   type ChildLiveUsage,
 } from "@xzy-ai/core";
@@ -162,8 +163,9 @@ export function liveStatusForSession(session: AgentSession): Exclude<ChildLiveSt
 /** Subscribe a normalized feed to one SDK session; disposal is independent of abort. */
 export function attachAgentSessionLiveFeed(
   session: AgentSession,
+  seed?: ChildLiveSnapshot,
 ): { feed: ChildLiveFeed; unsubscribe: () => void } {
-  const feed = createChildLiveFeed();
+  const feed = createChildLiveFeed(seed);
   const unsubscribe = session.subscribe((event) => {
     const mapped = mapAgentSessionEvent(event);
     if (!mapped) return;

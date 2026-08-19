@@ -113,7 +113,7 @@ async function runBackgroundJobInner(
   deps.registry.updateJob(job.jobId, { status: terminalStatus });
   deps.manifest?.update({ status: terminalStatus, endedAt, sessionFile: result.sessionFile });
   deps.registry.updateJob(job.jobId, { sessionFile: result.sessionFile });
-  if (result.status === "failed") options.onChildFailed?.(result.output);
+  if (result.status === "failed" && result.output !== "(no output)" && result.output.trim() !== "") options.onChildFailed?.(result.output);
   // Delivery owns the delivered flag: it is set immediately only when the
   // parent sink accepts the result, or later when a durable pending result is
   // drained after the parent session registers again.

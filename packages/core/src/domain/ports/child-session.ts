@@ -122,11 +122,14 @@ function reduceCounters(
 }
 
 /** Create a feed whose snapshot remains available after all subscribers leave. */
-export function createChildLiveFeed(): ChildLiveFeed {
+export function createChildLiveFeed(seed?: ChildLiveSnapshot): ChildLiveFeed {
   const listeners = new Set<(event: ChildLiveEvent) => void>();
   const usageByMessage = new Map<string, ChildLiveUsage>();
-  let startedAtMs: number | undefined;
-  let snapshot: ChildLiveSnapshot = { status: "running", settled: false, transcript: [], counters: emptyCounters() };
+  let startedAtMs: number | undefined = seed?.startedAtMs;
+  const baseCounters: ChildLiveCounters = seed?.counters ?? emptyCounters();
+  let snapshot: ChildLiveSnapshot = seed
+    ? { status: "running", settled: false, transcript: [...seed.transcript], counters: seed.counters, startedAtMs }
+    : { status: "running", settled: false, transcript: [], counters: emptyCounters() };
 
   const replaceTranscript = (event: ChildLiveEvent): readonly ChildLiveTranscriptEntry[] => {
     if (event.type === "message") {
@@ -177,12 +180,20 @@ export function createChildLiveFeed(): ChildLiveFeed {
     emit(event) {
       if (snapshot.settled) return;
       if (startedAtMs === undefined) startedAtMs = Date.now();
+      const withBase = (raw: ChildLiveCounters): ChildLiveCounters => ({
+        toolUses: raw.toolUses,
+        inputTokens: baseCounters.inputTokens + raw.inputTokens,
+        outputTokens: baseCounters.outputTokens + raw.outputTokens,
+        cacheReadTokens: baseCounters.cacheReadTokens + raw.cacheReadTokens,
+        cacheWriteTokens: baseCounters.cacheWriteTokens + raw.cacheWriteTokens,
+      });
       if (event.type === "settled") {
+        const raw = reduceCounters(snapshot.transcript, usageByMessage);
         snapshot = {
           status: event.status,
           settled: true,
           transcript: snapshot.transcript,
-          counters: reduceCounters(snapshot.transcript, usageByMessage),
+          counters: withBase(raw),
           startedAtMs,
         };
       } else if (event.type === "message" && event.usage !== undefined) {
@@ -193,7 +204,7 @@ export function createChildLiveFeed(): ChildLiveFeed {
         snapshot = {
           ...snapshot,
           transcript,
-          counters: reduceCounters(transcript, usageByMessage),
+          counters: withBase(reduceCounters(transcript, usageByMessage)),
           startedAtMs,
         };
       } else {
@@ -201,7 +212,7 @@ export function createChildLiveFeed(): ChildLiveFeed {
         snapshot = {
           ...snapshot,
           transcript,
-          counters: reduceCounters(transcript, usageByMessage),
+          counters: withBase(reduceCounters(transcript, usageByMessage)),
           startedAtMs,
         };
       }

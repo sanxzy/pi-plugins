@@ -67,6 +67,20 @@ export async function spawnWithControl(
     }
     throw error;
   } finally {
+    // Preserve the final counters/transcript so the footer keeps showing
+    // final values after the child settles, and the next resume continues
+    // from that snapshot instead of restarting from zero.
+    const control = pool.liveChildren.get(job.jobId);
+    if (control?.live?.snapshot) {
+      try {
+        if (!pool.retainedLiveSnapshots) {
+          (pool as unknown as { retainedLiveSnapshots: Map<string, typeof control.live.snapshot> }).retainedLiveSnapshots = new Map();
+        }
+        pool.retainedLiveSnapshots!.set(job.jobId, control.live.snapshot);
+      } catch {
+        // Retaining is best-effort; never fail the job over a cache write.
+      }
+    }
     // The child has settled; a later steer or cancel must not find it.
     pool.liveChildren.delete(job.jobId);
     pool.jobAbortControllers?.delete(job.jobId);

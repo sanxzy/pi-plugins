@@ -24,6 +24,7 @@ import type {
 import { AGENT_OPERATIONS, MCP_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
+import { getChildPool } from "../pool/child-pool.ts";
 import { getChildExtensionFactories, getChildPonytailTools, type ChildPonytailTools } from "./child-extensions.ts";
 import { inheritedMcpRenderCall, inheritedMcpRenderResult } from "./render-safe.ts";
 
@@ -451,7 +452,36 @@ export function createChildSessionManager(options: {
 
 /** Extract the final assistant text, mirroring the reference `getFinalOutput`. */
 function getFinalOutput(session: AgentSession): string {
-  return session.getLastAssistantText() ?? "";
+  const lastAssistant = findLastAssistantMessage(session);
+  if (lastAssistant?.errorMessage) return lastAssistant.errorMessage;
+  const stateError = (session.agent.state as { errorMessage?: string }).errorMessage;
+  if (stateError) return stateError;
+  const viaSdk = session.getLastAssistantText();
+  if (viaSdk) return viaSdk;
+  // Fallback scan for compacted histories where the SDK helper filters the last message.
+  const messages = session.agent.state.messages as readonly { role?: string; content?: unknown }[];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role !== "assistant") continue;
+    const text = messageContentText(msg);
+    if (text) return text;
+  }
+  return "";
+}
+
+function messageContentText(message: { content?: unknown }): string {
+  if (typeof message.content === "string") return message.content.trim();
+  if (!Array.isArray(message.content)) return "";
+  return (message.content as unknown[])
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const value = part as { type?: unknown; text?: unknown; name?: unknown };
+      if (value.type === "text" && typeof value.text === "string") return value.text;
+      if (value.type === "toolCall" && typeof value.name === "string") return value.name;
+      return "";
+    })
+    .join("")
+    .trim();
 }
 
 /** Derive the child's terminal status from runtime and final assistant state. */
@@ -532,7 +562,8 @@ export const spawnChildSession: SpawnChildSession & {
         mcpEnabled: options.mcpEnabled,
         mcpBridge: options.mcpBridge,
       });
-      const live = attachAgentSessionLiveFeed(child.session);
+      const retained = getChildPool(options.cwd).retainedLiveSnapshots?.get(options.jobId);
+      const live = attachAgentSessionLiveFeed(child.session, retained);
       options.onControl?.({
         sessionFile: child.session.sessionFile,
         live: {
