@@ -11,7 +11,7 @@ index 4bcf0d4..778df7c 100644
      // Branch summarization state
      _branchSummaryAbortController = undefined;
      // Retry state
-@@ -396,8 +398,42 @@ export class AgentSession {
+@@ -396,8 +398,56 @@ export class AgentSession {
                      this._retryAttempt = 0;
                  }
              }
@@ -46,6 +46,20 @@ index 4bcf0d4..778df7c 100644
 +        const estimate = estimateContextTokens(this.agent.state.messages);
 +        if (estimate.tokens <= 0)
 +            return;
++        // pi-c2 fix: ignore stale usage from before the latest compaction.
++        // After a threshold compaction the kept window still contains
++        // pre-compaction assistants whose usage reflects the old larger
++        // context. Without this check the next message_end would see the
++        // stale 170k usage and abort again, but prepareCompaction returns
++        // undefined (last entry is already a compaction) so the abort never
++        // compacts and every subsequent operation stays aborted.
++        if (estimate.lastUsageIndex !== null) {
++            const usageMsg = this.agent.state.messages[estimate.lastUsageIndex];
++            const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
++            if (compactionEntry && usageMsg && typeof usageMsg.timestamp === "number" && usageMsg.timestamp <= new Date(compactionEntry.timestamp).getTime()) {
++                return;
++            }
++        }
 +        if (shouldCompact(estimate.tokens, contextWindow, settings)) {
 +            this._thresholdAbortPending = true;
 +            this.agent.abort();
@@ -54,7 +68,7 @@ index 4bcf0d4..778df7c 100644
      _willRetryAfterAgentEnd(event) {
          const settings = this.settingsManager.getRetrySettings();
          if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
-@@ -1366,7 +1402,12 @@ export class AgentSession {
+@@ -1366,7 +1415,12 @@ export class AgentSession {
       */
      async compact(customInstructions) {
          await this.abort();
@@ -68,7 +82,7 @@ index 4bcf0d4..778df7c 100644
          this._emit({ type: "compaction_start", reason: "manual" });
          try {
              if (!this.model) {
-@@ -1394,7 +1435,7 @@ export class AgentSession {
+@@ -1394,7 +1448,7 @@ export class AgentSession {
                      customInstructions,
                      reason: "manual",
                      willRetry: false,
@@ -77,7 +91,7 @@ index 4bcf0d4..778df7c 100644
                  }));
                  if (result?.cancel) {
                      throw new Error("Compaction cancelled");
-@@ -1419,14 +1460,14 @@ export class AgentSession {
+@@ -1419,14 +1473,14 @@ export class AgentSession {
              }
              else {
                  // Generate compaction result
@@ -94,7 +108,7 @@ index 4bcf0d4..778df7c 100644
                  throw new Error("Compaction cancelled");
              }
              this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-@@ -1479,7 +1520,9 @@ export class AgentSession {
+@@ -1479,7 +1533,9 @@ export class AgentSession {
              throw error;
          }
          finally {
@@ -105,7 +119,7 @@ index 4bcf0d4..778df7c 100644
          }
      }
      /**
-@@ -1511,8 +1554,13 @@ export class AgentSession {
+@@ -1511,8 +1567,13 @@ export class AgentSession {
          const settings = this.settingsManager.getCompactionSettings();
          if (!settings.enabled)
              return false;
@@ -120,7 +134,7 @@ index 4bcf0d4..778df7c 100644
              return false;
          const contextWindow = this.model?.contextWindow ?? 0;
          // Skip overflow check if the message came from a different model.
-@@ -1585,7 +1633,9 @@ export class AgentSession {
+@@ -1585,7 +1646,9 @@ export class AgentSession {
              contextTokens = directContextTokens;
          }
          if (shouldCompact(contextTokens, contextWindow, settings)) {
@@ -131,7 +145,7 @@ index 4bcf0d4..778df7c 100644
          }
          return false;
      }
-@@ -1595,6 +1645,13 @@ export class AgentSession {
+@@ -1595,6 +1658,13 @@ export class AgentSession {
      async _runAutoCompaction(reason, willRetry) {
          const settings = this.settingsManager.getCompactionSettings();
          let started = false;
@@ -145,7 +159,7 @@ index 4bcf0d4..778df7c 100644
          try {
              if (!this.model) {
                  return false;
-@@ -1606,7 +1663,8 @@ export class AgentSession {
+@@ -1606,7 +1676,8 @@ export class AgentSession {
                  return false;
              }
              this._emit({ type: "compaction_start", reason });
@@ -155,7 +169,7 @@ index 4bcf0d4..778df7c 100644
              started = true;
              let extensionCompaction;
              let fromExtension = false;
-@@ -1618,7 +1676,7 @@ export class AgentSession {
+@@ -1618,7 +1689,7 @@ export class AgentSession {
                      customInstructions: undefined,
                      reason,
                      willRetry,
@@ -164,7 +178,7 @@ index 4bcf0d4..778df7c 100644
                  }));
                  if (extensionResult?.cancel) {
                      this._emit({
-@@ -1650,14 +1708,14 @@ export class AgentSession {
+@@ -1650,14 +1721,14 @@ export class AgentSession {
              }
              else {
                  // Generate compaction result
@@ -181,7 +195,7 @@ index 4bcf0d4..778df7c 100644
                  this._emit({
                      type: "compaction_end",
                      reason,
-@@ -1699,7 +1757,10 @@ export class AgentSession {
+@@ -1699,7 +1770,10 @@ export class AgentSession {
                  // from agent state. Rebuilding state from the new compaction can restore that kept entry,
                  // leaving an assistant as the final message. agent.continue() rejects that state, so remove
                  // the retriable error or truncated-length response again before continuing the interrupted turn.
@@ -193,7 +207,7 @@ index 4bcf0d4..778df7c 100644
                      this.agent.state.messages = messages.slice(0, -1);
                  }
                  return true;
-@@ -1725,7 +1786,9 @@ export class AgentSession {
+@@ -1725,7 +1799,9 @@ export class AgentSession {
              return false;
          }
          finally {
@@ -204,7 +218,7 @@ index 4bcf0d4..778df7c 100644
          }
      }
      /**
-@@ -1908,6 +1971,7 @@ export class AgentSession {
+@@ -1908,6 +1984,7 @@ export class AgentSession {
                  this._extensionShutdownHandler?.();
              },
              getContextUsage: () => this.getContextUsage(),
