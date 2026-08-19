@@ -155,14 +155,19 @@ test("two root sessions keep isolated goal stores with their own scheduler deliv
   a.create({ cwd: root, prompt: "A", interval: "1m" });
   b.create({ cwd: root, prompt: "B", interval: "1m" });
   // Each pool delivers only its own goal's exact prompt to its own host.
+  // create() triggers an immediate delivery.
+  assert.equal(sentOnA.length, 1);
+  assert.match(sentOnA[0]!, /^A\n/);
+  assert.equal(sentOnB.length, 1);
+  assert.match(sentOnB[0]!, /^B\n/);
   assert.equal(a.get()?.prompt, "A");
   assert.equal(b.get()?.prompt, "B");
   assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-a")), true);
   assert.equal(existsSync(homeGoalFile(encodeProjectId(root), "root-b")), true);
   a.tick(root);
   b.tick(root);
-  assert.equal(sentOnA.length, 1);
-  assert.match(sentOnA[0]!, /^A\n/);
-  assert.equal(sentOnB.length, 1);
-  assert.match(sentOnB[0]!, /^B\n/);
+  assert.equal(sentOnA.length, 2);
+  assert.match(sentOnA[1]!, /^A\n/);
+  assert.equal(sentOnB.length, 2);
+  assert.match(sentOnB[1]!, /^B\n/);
 });

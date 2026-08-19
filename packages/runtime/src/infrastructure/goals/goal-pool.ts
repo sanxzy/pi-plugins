@@ -219,7 +219,12 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         }
         return store.create({ cwd, prompt: validation.value.prompt, intervalMs });
       });
-        if (result.ok) ensureScheduler(cwd);
+        if (result.ok) {
+          ensureScheduler(cwd);
+          // Fire an immediate tick so the goal prompt is delivered right away,
+          // not after the full interval elapses.
+          tick(cwd);
+        }
         return result;
       });
     },
@@ -235,7 +240,12 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
       const result = processWithLog({ operation: GOAL_OPERATIONS.RESUME, parameters: { rootSessionId } }, () => withCwdMutation(rootSessionId, () => store.resume()));
       if (result.ok) {
         const goal = store.get();
-        if (goal) ensureScheduler(goal.cwd);
+        if (goal) {
+          ensureScheduler(goal.cwd);
+          // Fire an immediate tick so the goal prompt is delivered right away
+          // after resuming, not after the full interval elapses.
+          tick(goal.cwd);
+        }
       }
       return result;
     },

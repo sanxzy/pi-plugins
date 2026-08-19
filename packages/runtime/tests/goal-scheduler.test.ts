@@ -40,7 +40,7 @@ test("goal tick telemetry binds to the pool's own logger, not the stale default 
   }
 });
 
-test("first active delivery occurs only after one complete interval", () => {
+test("first active delivery occurs immediately on goal creation", () => {
   const pool = createGoalPool(projectRoot());
   const sent: Array<{ content: string; deliverAs: string }> = [];
   pool.setScheduler(() => ({ clear() {} }));
@@ -49,7 +49,8 @@ test("first active delivery occurs only after one complete interval", () => {
   }));
   const created = pool.create({ cwd: "/project", prompt: "exact prompt", interval: "10s" });
   assert.equal(created.ok, true);
-  assert.equal(sent.length, 0);
+  assert.equal(sent.length, 1, "goal is delivered immediately on creation");
+  assert.equal(sent[0]?.deliverAs, "steer");
 });
 
 test("active ticks deliver exact prompt plus footer with steer even while busy", () => {
@@ -59,30 +60,40 @@ test("active ticks deliver exact prompt plus footer with steer even while busy",
   pool.setScheduler(() => ({ clear() {} }));
   pool.bind(binding({ sendUserMessage: (content) => sent.push(content), notify: (message) => notifications.push(message) }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  // create() triggers an immediate delivery
   pool.tick("/project");
   pool.tick("/project");
-  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`, `p\n${GOAL_DELIVERY_FOOTER}`]);
-  assert.deepEqual(notifications, ["Goal triggered and sent to the current session — this goal will be sent every 1m.", "Goal triggered and sent to the current session — this goal will be sent every 1m."]);
+  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`, `p\n${GOAL_DELIVERY_FOOTER}`, `p\n${GOAL_DELIVERY_FOOTER}`]);
+  assert.deepEqual(notifications, ["Goal triggered and sent to the current session — this goal will be sent every 1m.", "Goal triggered and sent to the current session — this goal will be sent every 1m.", "Goal triggered and sent to the current session — this goal will be sent every 1m."]);
 });
 
 test("paused ticks warn through UI only and no-UI ticks do nothing", () => {
   const pool = createGoalPool(projectRoot());
   const sent: string[] = [];
   const warnings: string[] = [];
+  const infos: string[] = [];
   pool.setScheduler(() => ({ clear() {} }));
   pool.bind(binding({
     sendUserMessage: (content) => sent.push(content),
-    notify: (message, type) => warnings.push(`${type}:${message}`),
+    notify: (message, type) => {
+      if (type === "warning") warnings.push(`${type}:${message}`);
+      if (type === "info") infos.push(`${type}:${message}`);
+    },
   }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  // create() triggers an immediate delivery
+  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`]);
   assert.equal(pool.pause("waiting").ok, true);
   pool.tick("/project");
-  assert.deepEqual(sent, []);
+  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`]);
   assert.deepEqual(warnings, ["warning:Goal paused: waiting"]);
 
-  pool.bind(binding({ hasUI: false }));
+  pool.bind(binding({ hasUI: false, notify: (message, type) => {
+    if (type === "warning") warnings.push(`${type}:${message}`);
+    if (type === "info") infos.push(`${type}:${message}`);
+  } }));
   pool.tick("/project");
-  assert.deepEqual(sent, []);
+  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`]);
   assert.deepEqual(warnings, ["warning:Goal paused: waiting"]);
 });
 
@@ -100,18 +111,27 @@ test("scheduler rereads persisted state and isolates cwd delivery failures", () 
       failed.push(content);
       throw new Error("failed A");
     },
+    notify: () => {},
   }));
-  poolB.bind(binding({ cwd: join(root, "b"), sendUserMessage: (content) => delivered.push(content) }));
+  poolB.bind(binding({ cwd: join(root, "b"), sendUserMessage: (content) => delivered.push(content), notify: () => {} }));
   assert.equal(poolA.create({ cwd: join(root, "a"), prompt: "A", interval: "1m" }).ok, true);
+  // create() triggers an immediate delivery that throws
+  assert.equal(failed.length, 1);
   assert.equal(poolB.create({ cwd: join(root, "b"), prompt: "B", interval: "1m" }).ok, true);
+  // create() triggers an immediate delivery
+  assert.deepEqual(delivered, [`B\n${GOAL_DELIVERY_FOOTER}`]);
   poolA.tick(join(root, "a"));
   poolB.tick(join(root, "b"));
-  assert.equal(failed.length, 1);
-  assert.deepEqual(delivered, [`B\n${GOAL_DELIVERY_FOOTER}`]);
+  assert.equal(failed.length, 2, "immediate tick + manual tick both deliver despite the throw");
+  assert.deepEqual(delivered, [`B\n${GOAL_DELIVERY_FOOTER}`, `B\n${GOAL_DELIVERY_FOOTER}`]);
 
   poolB.pause("paused");
   poolB.tick(join(root, "b"));
-  assert.deepEqual([...delivered, ...failed], [`B\n${GOAL_DELIVERY_FOOTER}`, "A\n" + GOAL_DELIVERY_FOOTER]);
+  assert.deepEqual(delivered, [`B\n${GOAL_DELIVERY_FOOTER}`, `B\n${GOAL_DELIVERY_FOOTER}`]);
+  assert.deepEqual(failed, [
+    "A\n" + GOAL_DELIVERY_FOOTER,
+    "A\n" + GOAL_DELIVERY_FOOTER,
+  ]);
 });
 
 test("an unbound cwd or a cleared goal stops delivery", () => {
@@ -120,13 +140,15 @@ test("an unbound cwd or a cleared goal stops delivery", () => {
   pool.setScheduler(() => ({ clear() {} }));
   pool.bind(binding({ cwd: "/other", sendUserMessage: (content) => sent.push(content) }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  // create() triggers an immediate delivery
+  assert.equal(sent.length, 1);
   pool.tick("/project");
   // No binding for /project: the current-host fallback is the only binding, which
   // is /other — delivery still routes to the current host.
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
   pool.clear();
   pool.tick("/project");
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2, "cleared goal stops delivery");
 });
 
 test("shutdown clears timers and bindings idempotently", () => {
@@ -151,12 +173,14 @@ test("session confirmation pauses delivery and continuation waits for a fresh in
   });
   pool.bind(binding({ sendUserMessage: (content) => sent.values.push(content) }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  // create() triggers an immediate delivery before session confirmation
+  assert.deepEqual(sent.values, [`p\n${GOAL_DELIVERY_FOOTER}`]);
   assert.equal(callbacks.length, 1);
 
   assert.equal(pool.beginSessionConfirmation(), true);
   assert.equal(clearCount, 1);
   callbacks[0]!();
-  assert.deepEqual(sent.values, []);
+  assert.deepEqual(sent.values, [`p\n${GOAL_DELIVERY_FOOTER}`], "suspended delivery blocks post-confirmation ticks");
 
   pool.shutdown();
   const send = (content: string): void => { sent.values.push(content); };
@@ -167,12 +191,12 @@ test("session confirmation pauses delivery and continuation waits for a fresh in
     notify: () => {},
   });
   pool.resumeDelivery();
-  assert.deepEqual(sent.values, []);
+  assert.deepEqual(sent.values, [`p\n${GOAL_DELIVERY_FOOTER}`], "resume does not replay prior ticks");
   assert.equal(callbacks.length, 2);
   callbacks[0]!();
-  assert.deepEqual(sent.values, []);
-  callbacks[1]!();
   assert.deepEqual(sent.values, [`p\n${GOAL_DELIVERY_FOOTER}`]);
+  callbacks[1]!();
+  assert.deepEqual(sent.values, [`p\n${GOAL_DELIVERY_FOOTER}`, `p\n${GOAL_DELIVERY_FOOTER}`]);
 });
 
 test("clearing confirmed active goals removes them and prevents stale callbacks", () => {
@@ -185,11 +209,13 @@ test("clearing confirmed active goals removes them and prevents stale callbacks"
   });
   pool.bind(binding({ sendUserMessage: (content) => sent.push(content) }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  // create() triggers an immediate delivery before session confirmation
+  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`]);
   assert.equal(pool.beginSessionConfirmation(), true);
   assert.equal(pool.clearActiveGoals(), 1);
   assert.equal(pool.get(), undefined);
   callbacks[0]!();
-  assert.deepEqual(sent, []);
+  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`], "cleared goal prevents further delivery");
 });
 
 test("pauseAllActive pauses persisted goals without removing them and stops delivery", () => {
@@ -204,12 +230,14 @@ test("pauseAllActive pauses persisted goals without removing them and stops deli
   });
   pool.bind(binding({ sendUserMessage: (content) => sent.push(content) }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
+  // create() triggers an immediate delivery
+  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`]);
   assert.equal(callbacks.length, 1);
 
   assert.equal(pool.pauseAllActive("session exited (quit)"), 1);
   // Delivery is suspended and the scheduler is stopped.
   callbacks[0]!();
-  assert.deepEqual(sent, []);
+  assert.deepEqual(sent, [`p\n${GOAL_DELIVERY_FOOTER}`], "paused delivery prevents further delivery");
   assert.equal(clearCount, 1);
 
   // The persisted record survives as paused and is restored on a fresh reader.
