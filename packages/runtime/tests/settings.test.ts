@@ -56,7 +56,7 @@ test("first-start bootstrap creates every settings key with resolver defaults", 
         channels: { maxRootSessions: 200, lockStaleMs: 10_000, lockUpdateMs: 5_000, lockAcquireRetries: 0, maxTextLength: 4_000, pairingPendingTtlMs: 3_600_000, pairingPendingMax: 3, mediaPhotoMaxBytes: 10 * 1024 * 1024, mediaDocumentMaxBytes: 50 * 1024 * 1024, mediaTimeoutMs: 30_000 },
         tools: { ponytailEnabled: false, writeEditTicketTtlMs: 600_000, web: { searchTimeoutMs: 30_000, fetchTimeoutSeconds: 30, maxResponseBytes: 5 * 1024 * 1024, defaultNumResults: 5, defaultSearchType: "auto", defaultLivecrawl: "fallback", exaApiKey: "" } },
         mcp: { startupTimeoutMs: 30_000, requestTimeoutMs: 30_000, reconnectMaxAttempts: 5, reconnectBaseDelayMs: 2_000, resultMaxText: 50_000, resultMaxAttachmentBytes: 5 * 1024 * 1024, oauthCallbackTimeoutMs: 5 * 60 * 1000 },
-        commands: { telegram: { reactionTimeoutMs: 2_500 }, goalMaxPromptLength: 4_000 },
+        commands: { telegram: { reactionTimeoutMs: 2_500 }, goalMaxPromptLength: 10_000 },
       });
       assert.equal(statSync(file).isFile(), true);
     });
@@ -194,7 +194,7 @@ test("resolved settings expose all six groups with defaults filled", () => {
       });
       assert.deepEqual(settings.commands, {
         telegram: { reactionTimeoutMs: 2_500 },
-        goalMaxPromptLength: 4_000,
+        goalMaxPromptLength: 10_000,
       });
     });
   } finally {

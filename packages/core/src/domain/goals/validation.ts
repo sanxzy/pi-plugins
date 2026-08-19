@@ -1,6 +1,6 @@
 export const DEFAULT_GOAL_INTERVAL_MS = 10 * 60 * 1_000;
 /** The default cap used when setting up a bound; a positive safe upper ceiling. */
-export const DEFAULT_MAX_GOAL_PROMPT_LENGTH = 4_000;
+export const DEFAULT_MAX_GOAL_PROMPT_LENGTH = 10_000;
 /** Backward-compatible name for the default goal prompt safety cap. */
 export const MAX_GOAL_PROMPT_LENGTH = DEFAULT_MAX_GOAL_PROMPT_LENGTH;
 

@@ -54,7 +54,7 @@ export {
 } from "./infrastructure/ponytail/state.ts";
 export { resolveTicketScopes, type ResolveTicketScopeError, type ResolveTicketScopesInput, type ResolvedTicketScope } from "./infrastructure/ponytail/scopes.ts";
 export { isWithinScope, isDescendantScope } from "./infrastructure/ponytail/containment.ts";
-export { clearSettingsCache, resolveSettings, resolveSettingsForProject, settingsConfigPath, bootstrapSettingsConfig, type AgentSettings, type ChannelSettings, type CommandSettings, type McpSettings, type PonytailSettings, type ResolvedSettings, type RuntimeSettings, type WebSettings } from "./shared/settings.ts";
+export { clearSettingsCache, migrateLegacyGoalLimit, resolveSettings, resolveSettingsForProject, settingsConfigPath, bootstrapSettingsConfig, type AgentSettings, type ChannelSettings, type CommandSettings, type McpSettings, type PonytailSettings, type ResolvedSettings, type RuntimeSettings, type WebSettings } from "./shared/settings.ts";
 export { getChildExtensionFactories, registerChildExtensionFactory, getChildPonytailTools, registerChildPonytailTools, type ChildPonytailTools } from "./infrastructure/pi-sdk/child-extensions.ts";
 export {
   attachAgentSessionLiveFeed,

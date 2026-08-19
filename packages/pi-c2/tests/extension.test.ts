@@ -47,7 +47,7 @@ test("extension startup bootstraps the canonical settings file on first start", 
       piC2Extension(pi);
       assert.equal(existsSync(settingsConfigPath()), true, "first start creates the canonical config");
       const parsed = JSON.parse(readFileSync(settingsConfigPath(), "utf8")) as { commands?: { goalMaxPromptLength?: number } };
-      assert.equal(parsed.commands?.goalMaxPromptLength, 4_000);
+      assert.equal(parsed.commands?.goalMaxPromptLength, 10_000);
       // A customized config is never overwritten by a later start.
       writeFileSync(settingsConfigPath(), JSON.stringify({ commands: { goalMaxPromptLength: 9 } }));
       piC2Extension(pi);

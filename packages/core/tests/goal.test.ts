@@ -34,7 +34,7 @@ test("goal validation preserves prompt and rejects empty or overlong input", () 
   const valid = validateGoalInput({ prompt: "  exact goal  ", interval: "5m" });
   assert.deepEqual(valid, { ok: true, value: { prompt: "  exact goal  ", intervalMs: 300_000 } });
   assert.equal(validateGoalInput({ prompt: "   " }).ok, false);
-  assert.equal(validateGoalInput({ prompt: "😀".repeat(4_001) }).ok, false);
+  assert.equal(validateGoalInput({ prompt: "😀".repeat(10_001) }).ok, false);
 });
 
 test("goal validation accepts a centralized prompt-length bound", () => {

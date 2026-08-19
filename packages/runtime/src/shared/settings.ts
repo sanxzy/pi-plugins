@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_MAX_AGENT_DEPTH, MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
@@ -187,7 +187,7 @@ export function defaultSettings(): ResolvedSettings {
     },
     commands: {
       telegram: { reactionTimeoutMs: 2_500 },
-      goalMaxPromptLength: 4_000,
+      goalMaxPromptLength: 10_000,
     },
   };
 }
@@ -236,6 +236,42 @@ export function bootstrapSettingsConfig(filePath?: string): boolean {
     if (temporaryPath) {
       try { unlinkSync(temporaryPath); } catch { /* another cleanup or failed create */ }
     }
+  }
+}
+
+/**
+ * Best-effort one-time migration for existing installs that still have the
+ * legacy goal prompt limit (4 000). New installs already bootstrap with
+ * 10 000; this rewrites an existing home config where
+ * `commands.goalMaxPromptLength === 4_000` to the new default so the user
+ * gets the increased limit without manual editing. It is idempotent and
+ * preserves every other key verbatim.
+ */
+export function migrateLegacyGoalLimit(filePath?: string): boolean {
+  const targetPath = filePath ?? settingsConfigPath();
+  try {
+    const raw = readFileSync(targetPath, "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (!isObject(parsed)) return false;
+    const commands = parsed.commands;
+    if (!isObject(commands)) return false;
+    if (commands.goalMaxPromptLength !== 4_000) return false;
+    const next = { ...parsed, commands: { ...commands, goalMaxPromptLength: 10_000 } };
+    const directory = dirname(targetPath);
+    mkdirSync(directory, { recursive: true });
+    const tmp = join(directory, `.${(targetPath.split(/[\\/]/).pop() ?? "config.json")}.${randomUUID()}.tmp`);
+    const fd = openSync(tmp, "wx", 0o600);
+    try {
+      writeFileSync(fd, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, targetPath);
+    clearSettingsCache();
+    return true;
+  } catch {
+    return false;
   }
 }
 
