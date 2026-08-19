@@ -20,6 +20,7 @@ export { registerGoalCommand, expandTelegramGoalCommand, GOAL_WORKFLOW_PROMPT } 
 export { registerTelegramSetup, type TelegramSetupRegistrationDeps } from "./registrations/telegram-setup.ts";
 export { registerReferencesSetup } from "./registrations/references-setup-command.ts";
 export { registerManageAgentModel } from "./registrations/manage-agent-model-command.ts";
+export { registerManageCompactThreshold, parseCompactThreshold, setCompactThreshold, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, COMPACT_THRESHOLD_DEFAULT } from "./registrations/manage-compact-threshold.ts";
 export { createManageAgentModelController } from "./registrations/manage-agent-model.ts";
 export type { ManageAgentModelControllerOptions } from "./registrations/manage-agent-model.ts";
 export { registerManageGoal } from "./registrations/manage-goal-command.ts";

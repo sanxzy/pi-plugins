@@ -125,6 +125,7 @@ export const COMMAND_OPERATIONS = {
   SETUP_REFERENCES: "command.setupReferences",
   MANAGE_AGENT_MODEL: "command.manageAgentModel",
   MANAGE_GOAL: "command.manageGoal",
+  MANAGE_COMPACT_THRESHOLD: "command.manageCompactThreshold",
   CONTROLS: "command.controls",
 } as const;
 
