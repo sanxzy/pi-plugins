@@ -93,3 +93,29 @@ export function registerChildPonytailTools(tools: ChildPonytailTools): void {
 export function getChildPonytailTools(): ChildPonytailTools | undefined {
   return ponytailToolsSlot().current;
 }
+
+/**
+ * Process-wide registry of thinking tool definition that child sessions must
+ * inject through their isolated custom-tools list.
+ */
+export interface ChildThinkingTool {
+  readonly deepThink: ToolDefinition<any, any, any>;
+}
+
+const CHILD_THINKING_TOOL_KEY = Symbol.for("@xzy-ai/pi-c2:child-thinking-tool");
+
+function thinkingToolSlot(): { current?: ChildThinkingTool } {
+  const root = globalThis as unknown as Record<symbol, { current?: ChildThinkingTool } | undefined>;
+  root[CHILD_THINKING_TOOL_KEY] ??= {};
+  return root[CHILD_THINKING_TOOL_KEY]!;
+}
+
+/** Publish the thinking tool definition isolated child loaders should inject. */
+export function registerChildThinkingTool(tool: ChildThinkingTool): void {
+  thinkingToolSlot().current = tool;
+}
+
+/** The current thinking tool definition for child custom-tools injection. */
+export function getChildThinkingTool(): ChildThinkingTool | undefined {
+  return thinkingToolSlot().current;
+}

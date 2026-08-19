@@ -39,6 +39,7 @@ export {
   type EditParams,
 } from "./registrations/edit.ts";
 export { registerAgentTool } from "./registrations/agent.ts";
+export { createDeepThinkTool, executeDeepThink, registerDeepThinkTool, deepThinkParams, type DeepThinkDetails, type DeepThinkParams } from "./registrations/deep-think.ts";
 export { registerCancelTool } from "./registrations/cancel.ts";
 export { registerStatusTool } from "./registrations/status.ts";
 export { registerJobsTool } from "./registrations/jobs.ts";

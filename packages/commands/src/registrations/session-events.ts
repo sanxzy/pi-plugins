@@ -10,7 +10,7 @@ import type {
 import { allMcpNames, sessionMcpActive, sessionMcpNames } from "@xzy-ai/core";
 import { canonicalProjectRoot, cleanupRootSessions } from "@xzy-ai/channels";
 import { SESSION_OPERATIONS, createSessionLogger, processWithLog, runWithLogContext, type SessionLogger } from "@xzy-ai/observability";
-import { currentProcessIdentity, clearAgentDiscoveryCache, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, loadPonytailState, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
+import { currentProcessIdentity, clearAgentDiscoveryCache, encodeProjectId, finishRootSession, getChildPool, getGoalPool, homeDailyErrorFile, homeDailyEventFile, homeSessionManifestFile, loadPonytailState, loadThinkingState, startRootSession, type GoalDeliveryBinding } from "@xzy-ai/runtime";
 import { createHostMessageGate, type HostMessageGate } from "./safe-host-delivery.ts";
 import { notifyHost } from "./notify-entry.ts";
 
@@ -37,21 +37,41 @@ function sessionReloadMarkers(): SessionReloadMarkers {
 }
 
 /** Mark the next fresh session_start for a project as a reload continuation. */
-export function markSessionReload(projectRoot: string): void {
-  sessionReloadMarkers().set(canonicalProjectRoot(projectRoot), true);
+export function markSessionReload(projectRoot: string, options?: { silent?: boolean }): void {
+  const notify = options?.silent !== true;
+  sessionReloadMarkers().set(canonicalProjectRoot(projectRoot), notify);
   // A reload may ship with a changed agent ecosystem (new/edited agent
   // markdown, changed precedence); drop discovery caches so the fresh runtime
   // rescans once instead of serving the pre-reload snapshot.
   clearAgentDiscoveryCache();
 }
 
-/** Consume the reload marker for a project. */
+/** Consume the reload marker for a project. Returns true only when a notifying reload is pending. */
 export function takeSessionReload(projectRoot: string): boolean {
   const markers = sessionReloadMarkers();
   const key = canonicalProjectRoot(projectRoot);
   const marked = markers.get(key) === true;
   markers.delete(key);
   return marked;
+}
+
+/** Check and consume a silent reload marker (no host notice). Returns true when a silent reload is pending. */
+export function takeSilentSessionReload(projectRoot: string): boolean {
+  const markers = sessionReloadMarkers();
+  const key = canonicalProjectRoot(projectRoot);
+  if (!markers.has(key)) return false;
+  const value = markers.get(key);
+  markers.delete(key);
+  return value === false;
+}
+
+/** Consume any reload marker, whether notifying or silent. Returns true if any reload was pending. */
+export function consumeSessionReload(projectRoot: string): boolean {
+  const markers = sessionReloadMarkers();
+  const key = canonicalProjectRoot(projectRoot);
+  const had = markers.has(key);
+  markers.delete(key);
+  return had;
 }
 
 /** Clear a marker when the reload operation fails before session_start. */
@@ -91,6 +111,13 @@ export interface SessionEventsOptions {
    * built-in tools remain.
    */
   readonly ponytailWriteEditTools?: () => { readonly write: ToolDefinition<any, any, any>; readonly edit: ToolDefinition<any, any, any> };
+  /**
+   * Thinking tool definition, supplied by the composition root. When the
+   * session's effective thinking state is enabled it is registered before
+   * the active-tool filter runs so the model sees the deliberate-reasoning
+   * surface; when disabled nothing is registered.
+   */
+  readonly thinkingTool?: () => ToolDefinition<any, any, any>;
 }
 
 /**
@@ -180,6 +207,7 @@ export function registerSessionEvents(pi: ExtensionAPI, options: SessionEventsOp
     const mcpActive = sessionMcpActive(ctx.cwd, sessionId);
     const mcpResourceTools = new Set(["mcp_resources_list", "mcp_resources_read"]);
     const ponytailActive = loadPonytailState(sessionId, Date.now())?.enabled === true;
+    const thinkingActive = loadThinkingState(sessionId, Date.now())?.enabled === true;
     // The Ponytail write/edit wrapper definitions are registered only for an
     // enabled session, before the active-tool filter computes the model-facing
     // surface. A disabled session never sees them; the host built-in write/edit
@@ -192,12 +220,20 @@ export function registerSessionEvents(pi: ExtensionAPI, options: SessionEventsOp
         pi.registerTool(ponytailTools.edit);
       }
     }
+    if (thinkingActive) {
+      const thinkingTool = options.thinkingTool?.();
+      if (thinkingTool) {
+        pi.registerTool(thinkingTool);
+      }
+    }
     const markdownTools = new Set(["write_markdown", "edit_markdown"]);
+    const thinkingTools = new Set(["deep_think"]);
     pi.setActiveTools(
       pi
         .getAllTools()
         .map((tool) => tool.name)
         .filter((name) => name !== "ls" && (ponytailActive || (!markdownTools.has(name) && name !== "create_write_edit_ticket")))
+        .filter((name) => thinkingActive || !thinkingTools.has(name))
         .filter((name) => (mcpActive || !mcpResourceTools.has(name)) && (!managedNames.has(name) || currentSessionNames.has(name))),
     );
 

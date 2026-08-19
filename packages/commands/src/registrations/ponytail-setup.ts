@@ -49,7 +49,7 @@ export function registerPonytailSetup(pi: ExtensionAPI): void {
           return;
         }
         ui.notify(`Ponytail ${enabled ? "enable" : "disable"} choice persisted successfully.`, "info");
-        markSessionReload(cwd);
+        markSessionReload(cwd, { silent: true });
         if (reloadFn === undefined) {
           clearSessionReload(cwd);
           ui.notify(`Session reload unavailable; the current runtime was not changed. The Ponytail ${enabled ? "enable" : "disable"} choice takes effect at the next successful reload or session start.`, "warning");

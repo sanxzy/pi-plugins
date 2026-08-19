@@ -9,6 +9,7 @@ export {
   type NotifyEntryData,
 } from "./registrations/notify-entry.ts";
 export { registerPonytailSetup } from "./registrations/ponytail-setup.ts";
+export { registerThinkingSetup } from "./registrations/thinking-setup.ts";
 export { registerSystemPrompt } from "./registrations/system-prompt.ts";
 export {
   clearSessionReload,

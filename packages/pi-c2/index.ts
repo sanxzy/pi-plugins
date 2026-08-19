@@ -8,6 +8,7 @@ import {
   registerWriteEditTicketTool,
   createPonytailWriteTool,
   createPonytailEditTool,
+  createDeepThinkTool,
   registerStatusTool,
   registerJobsTool,
   registerAgentListTool,
@@ -23,6 +24,7 @@ import {
   registerSystemPrompt,
   registerLifecycleGates,
   registerPonytailSetup,
+  registerThinkingSetup,
   registerTelegramSetup,
   registerReferencesSetup,
   registerManageAgentModel,
@@ -38,7 +40,7 @@ import {
   createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
-import { registerChildExtensionFactory, registerChildPonytailTools } from "@xzy-ai/runtime";
+import { registerChildExtensionFactory, registerChildPonytailTools, registerChildThinkingTool } from "@xzy-ai/runtime";
 import { bootstrapSettingsConfig, migrateLegacyGoalLimit } from "@xzy-ai/runtime";
 import { registerMcpLifecycle } from "@xzy-ai/mcp";
 import type {
@@ -82,6 +84,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
     write: createPonytailWriteTool(),
     edit: createPonytailEditTool(),
   });
+  registerChildThinkingTool({ deepThink: createDeepThinkTool() });
 
   // The Telegram bridge dispatches extension commands with explicit expanders
   // (goal) plus prompt/skill files discovered from the Pi command catalog, and
@@ -123,9 +126,11 @@ export default function piC2Extension(pi: ExtensionAPI): void {
       write: createPonytailWriteTool(),
       edit: createPonytailEditTool(),
     }),
+    thinkingTool: () => createDeepThinkTool(),
   });
   registerContextAutoCompact(pi);
   registerPonytailSetup(pi);
+  registerThinkingSetup(pi);
   registerSystemPrompt(pi);
   registerLifecycleGates(pi);
   registerGoalCommand(pi);

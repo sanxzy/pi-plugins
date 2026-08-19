@@ -52,10 +52,25 @@ export {
   type PonytailState,
   type PonytailTicket,
 } from "./infrastructure/ponytail/state.ts";
+export {
+  DEFAULT_THINKING_REQUIRED_TURNS,
+  THINKING_REQUIRED_TURNS_MAX,
+  THINKING_REQUIRED_TURNS_MIN,
+  initializeChildThinkingState,
+  loadThinkingState,
+  mutateThinkingState,
+  parseRequiredTurns,
+  thinkingStateExists,
+  serializeThinkingMutation,
+  writeThinkingState,
+  thinkingStatePath,
+  type ThinkingPersistence,
+  type ThinkingState,
+} from "./infrastructure/thinking/state.ts";
 export { resolveTicketScopes, type ResolveTicketScopeError, type ResolveTicketScopesInput, type ResolvedTicketScope } from "./infrastructure/ponytail/scopes.ts";
 export { isWithinScope, isDescendantScope } from "./infrastructure/ponytail/containment.ts";
 export { clearSettingsCache, migrateLegacyGoalLimit, resolveSettings, resolveSettingsForProject, settingsConfigPath, bootstrapSettingsConfig, type AgentSettings, type ChannelSettings, type CommandSettings, type McpSettings, type PonytailSettings, type ResolvedSettings, type RuntimeSettings, type WebSettings } from "./shared/settings.ts";
-export { getChildExtensionFactories, registerChildExtensionFactory, getChildPonytailTools, registerChildPonytailTools, type ChildPonytailTools } from "./infrastructure/pi-sdk/child-extensions.ts";
+export { getChildExtensionFactories, registerChildExtensionFactory, getChildPonytailTools, registerChildPonytailTools, type ChildPonytailTools, getChildThinkingTool, registerChildThinkingTool, type ChildThinkingTool } from "./infrastructure/pi-sdk/child-extensions.ts";
 export {
   attachAgentSessionLiveFeed,
   liveStatusForSession,
@@ -96,6 +111,8 @@ export {
   homeProjectDirFromRoot,
   homePonytailSessionDir,
   homePonytailStateFile,
+  homeThinkingSessionDir,
+  homeThinkingStateFile,
   homeProjectManifestFile,
   homeRoot,
   homeRootBase,
@@ -113,6 +130,9 @@ export {
   PONYTAIL_FILE_NAME,
   PONYTAIL_BACKUP_PREFIX,
   PONYTAIL_BACKUP_SUFFIX,
+  THINKING_FILE_NAME,
+  THINKING_BACKUP_PREFIX,
+  THINKING_BACKUP_SUFFIX,
   PENDING_DELIVERY_FILE_NAME,
   PROJECT_MANIFEST_FILE_NAME,
   SESSION_MANIFEST_FILE_NAME,

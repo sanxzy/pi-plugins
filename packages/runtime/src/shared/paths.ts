@@ -17,6 +17,9 @@ export const GOALS_FILE_NAME = "goals.jsonl";
 export const PONYTAIL_FILE_NAME = "ponytail.json";
 export const PONYTAIL_BACKUP_PREFIX = "ponytail.";
 export const PONYTAIL_BACKUP_SUFFIX = ".json.bak";
+export const THINKING_FILE_NAME = "thinking.json";
+export const THINKING_BACKUP_PREFIX = "thinking.";
+export const THINKING_BACKUP_SUFFIX = ".json.bak";
 export const EVENTS_FILE_NAME = "events.jsonl";
 export const ERRORS_FILE_NAME = "errors.jsonl";
 export const TRANSCRIPT_FILE_NAME = "transcript.jsonl";
@@ -187,6 +190,14 @@ export function homePonytailSessionDir(sessionId: string): string {
 
 export function homePonytailStateFile(sessionId: string): string {
   return join(homePonytailSessionDir(sessionId), PONYTAIL_FILE_NAME);
+}
+
+export function homeThinkingSessionDir(sessionId: string): string {
+  return join(homeRoot(), "sessions", validateId(sessionId, "session id"));
+}
+
+export function homeThinkingStateFile(sessionId: string): string {
+  return join(homeThinkingSessionDir(sessionId), THINKING_FILE_NAME);
 }
 
 export function homeSessionManifestFile(projectId: string, rootSessionId: string): string {

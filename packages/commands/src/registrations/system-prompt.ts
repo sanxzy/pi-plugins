@@ -7,7 +7,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-import { getChildPool } from "@xzy-ai/runtime";
+import { DEFAULT_THINKING_REQUIRED_TURNS, getChildPool, loadThinkingState } from "@xzy-ai/runtime";
 
 const SYSTEM_PROMPT_FILE = "SYSTEM.md";
 const SUBAGENT_SYSTEM_PROMPT_FILE = "subagent-system.md";
@@ -297,6 +297,30 @@ function promptSoul(customPrompt: string | undefined, cwd: string): string {
   return soul.replaceAll("<cwd>", cwd);
 }
 
+/** Build the thinking instruction when the session has the tool enabled. */
+export function thinkingInstructionForSession(sessionId: string): string | undefined {
+  try {
+    const state = loadThinkingState(sessionId, Date.now());
+    if (!state?.enabled) return undefined;
+    const n = state.requiredTurns ?? DEFAULT_THINKING_REQUIRED_TURNS;
+    return `Always use deep_think before taking action or answering. Use deep_think for at least ${n} turns to ensure your response is thoroughly validated.`;
+  } catch {
+    return undefined;
+  }
+}
+
+function thinkingSection(ctx: ExtensionContext): string | undefined {
+  try {
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    if (typeof sessionId !== "string" || sessionId.length === 0) return undefined;
+    const instruction = thinkingInstructionForSession(sessionId);
+    if (!instruction) return undefined;
+    return ["## Thinking", instruction].join("\n");
+  } catch {
+    return undefined;
+  }
+}
+
 /** Build the same five-section prompt anatomy for root and child sessions. */
 export function buildOperationalSystemPrompt(
   event: BeforeAgentStartEvent,
@@ -310,12 +334,14 @@ export function buildOperationalSystemPrompt(
     `Platform: ${process.platform} ${process.arch}`,
     `Node.js: ${process.version}`,
   ].join("\n");
+  const thinking = thinkingSection(ctx);
 
   return [
     OPERATIONAL_PROMPT_MARKER,
     "# Agent Persona",
     soul,
     "",
+    ...(thinking ? [thinking, ""] : []),
     formatContextFiles(options.contextFiles),
     "",
     "# Location",

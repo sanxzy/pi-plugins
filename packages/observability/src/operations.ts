@@ -123,6 +123,7 @@ export const PONYTAIL_OPERATIONS = {
 
 export const COMMAND_OPERATIONS = {
   SETUP_PONYTAIL: "command.setupPonytail",
+  SETUP_THINKING: "command.setupThinking",
   GOAL_COMMAND: "command.goal",
   SETUP_CHANNEL: "command.setupChannel",
   CLEAR_CHANNEL: "command.clearChannel",
@@ -182,6 +183,7 @@ export const TOOL_OPERATIONS = {
   WRITE_MARKDOWN_REJECT: "tool.writeMarkdownReject",
   EDIT_MARKDOWN_EXECUTE: "tool.editMarkdownExecute",
   EDIT_MARKDOWN_REJECT: "tool.editMarkdownReject",
+  DEEP_THINK_EXECUTE: "tool.deepThinkExecute",
 } as const;
 
 /**

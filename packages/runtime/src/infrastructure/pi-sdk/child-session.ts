@@ -2,6 +2,7 @@ import { join } from "node:path";
 import * as PiSdk from "@earendil-works/pi-coding-agent";
 import { maxAgentDepth } from "../../shared/pi-c2-config.ts";
 import { initializeChildPonytailState } from "../ponytail/state.ts";
+import { initializeChildThinkingState } from "../thinking/state.ts";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -25,7 +26,7 @@ import { AGENT_OPERATIONS, MCP_OPERATIONS, processWithLog } from "@xzy-ai/observ
 import { observeChildStatus, type ChildStatusInput } from "./child-status.ts";
 import { attachAgentSessionLiveFeed } from "./child-live.ts";
 import { getChildPool } from "../pool/child-pool.ts";
-import { getChildExtensionFactories, getChildPonytailTools, type ChildPonytailTools } from "./child-extensions.ts";
+import { getChildExtensionFactories, getChildPonytailTools, getChildThinkingTool, type ChildPonytailTools, type ChildThinkingTool } from "./child-extensions.ts";
 import { inheritedMcpRenderCall, inheritedMcpRenderResult } from "./render-safe.ts";
 
 /**
@@ -72,6 +73,7 @@ const AGENT_FAMILY_TOOLS = [
 ] as const;
 const WEB_FAMILY_TOOLS = ["web_search", "web_fetch", "knowledge_search"] as const;
 const PONYTAIL_TOOL = "create_write_edit_ticket";
+const THINKING_TOOL = "deep_think";
 /** Dedicated ticket-free Markdown/Text tools, appended only when Ponytail is enabled. */
 const MARKDOWN_TOOLS = ["write_markdown", "edit_markdown"] as const;
 const EXTENSION_TOOLS = [...AGENT_FAMILY_TOOLS, ...WEB_FAMILY_TOOLS] as const;
@@ -102,6 +104,8 @@ export function resolveChildCustomTools(options: {
   };
   ponytailEnabled: boolean;
   ponytailTools?: ChildPonytailTools;
+  thinkingEnabled?: boolean;
+  thinkingTool?: ChildThinkingTool;
 }): Array<{ name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> }> {
   const customTools: Array<{ name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> }> = [];
   if (options.mcpToolDefs?.length && options.mcpEnabled !== false && options.mcpBridge) {
@@ -124,6 +128,11 @@ export function resolveChildCustomTools(options: {
     customTools.push(
       options.ponytailTools.write as unknown as { name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> },
       options.ponytailTools.edit as unknown as { name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> },
+    );
+  }
+  if (options.thinkingEnabled && options.thinkingTool) {
+    customTools.push(
+      options.thinkingTool.deepThink as unknown as { name: string; label: string; description: string; parameters: unknown; execute: (id: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> },
     );
   }
   return customTools;
@@ -157,6 +166,7 @@ export function resolveChildTools(
   cwd?: string,
   mcpEnabled = true,
   ponytailEnabled = false,
+  thinkingEnabled = false,
 ): readonly string[] {
   const requested = agent.tools && agent.tools.length > 0 ? [...agent.tools] : [...ALL_BUILTIN_TOOLS];
   const extensionNames = EXTENSION_TOOLS as readonly string[];
@@ -178,6 +188,7 @@ export function resolveChildTools(
     ...(mcpEnabled ? MCP_RESOURCE_TOOLS : []),
     ...(mcpEnabled ? mcpToolNames : []),
     ...(ponytailEnabled ? [PONYTAIL_TOOL] : []),
+    ...(thinkingEnabled ? [THINKING_TOOL] : []),
     ...markdownNames,
   ])];
 }
@@ -331,6 +342,9 @@ async function createIsolatedChild(options: {
   const childPonytailEnabled = options.rootSessionId
     ? initializeChildPonytailState(options.rootSessionId, options.jobId)
     : false;
+  const childThinkingEnabled = options.rootSessionId
+    ? initializeChildThinkingState(options.rootSessionId, options.jobId)
+    : false;
   // Publish the inherited MCP catalog under this child session id so its own
   // foreground descendants can inherit it recursively.
   publishSessionMcpNames(childContext, options.mcpEnabled === false ? [] : options.mcpToolNames ?? []);
@@ -388,7 +402,7 @@ async function createIsolatedChild(options: {
   // Tool mapping: an explicit non-empty `tools` list becomes the child
   // allowlist; an absent/empty list enables the full built-in set (excluding
   // `ls`) plus the depth-aware extension/MCP policy.
-  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames, options.depth, options.cwd, options.mcpEnabled ?? true, childPonytailEnabled);
+  sessionOptions.tools = resolveChildTools(options.agent, options.mcpToolNames, options.depth, options.cwd, options.mcpEnabled ?? true, childPonytailEnabled, childThinkingEnabled);
   sessionOptions.mcpToolNames = options.mcpEnabled === false ? [] : options.mcpToolNames ?? [];
   // Dynamic MCP definitions are supplied by the parent composition root. The
   // child loader cannot discover the parent's MCP manager, so register the
@@ -404,6 +418,8 @@ async function createIsolatedChild(options: {
     mcpBridge: options.mcpBridge,
     ponytailEnabled: childPonytailEnabled,
     ponytailTools: getChildPonytailTools(),
+    thinkingEnabled: childThinkingEnabled,
+    thinkingTool: getChildThinkingTool(),
   });
   if (childCustomTools.length > 0) {
     sessionOptions.customTools = childCustomTools;
