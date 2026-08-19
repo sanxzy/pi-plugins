@@ -20,6 +20,8 @@ export const SESSION_OPERATIONS = {
   TURN_START: "session.turnStart",
   BEFORE_SWITCH: "session.beforeSwitch",
   COMPACT: "session.compact",
+  /** Apply the configured percentage-based auto-compaction threshold to a session's settings. */
+  COMPACT_THRESHOLD_APPLY: "session.compactThresholdApply",
   CLEANUP: "session.cleanup",
 } as const;
 

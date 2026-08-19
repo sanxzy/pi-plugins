@@ -31,7 +31,7 @@ import { SESSION_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 export function registerContextAutoCompact(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
     await processWithLog(
-      { operation: SESSION_OPERATIONS.COMPACT, parameters: { cwd: ctx.cwd } },
+      { operation: SESSION_OPERATIONS.COMPACT_THRESHOLD_APPLY, parameters: { cwd: ctx.cwd } },
       async () => {
         const config = resolveSettingsForProject(ctx.cwd);
         const thresholdPercent = config.runtime.contextCompactThresholdPercent;
