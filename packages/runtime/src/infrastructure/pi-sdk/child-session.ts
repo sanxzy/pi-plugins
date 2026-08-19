@@ -278,8 +278,16 @@ async function createIsolatedChild(options: {
   // The agent Markdown body is applied through a stable system-prompt override
   // on the child's own loader. `reload()` re-applies the override on every
   // rebuild, so the prompt survives a runtime resource reload (a one-time
-  // mutation would be reset).
-  const systemPromptOverride = discovered ? () => discovered.systemPrompt : undefined;
+  // mutation would be reset). The child's job id is appended as the final
+  // line so the subagent always sees `JOB ID: <job_id>`.
+  const systemPromptOverride = (() => {
+    const appendJobId = (prompt: string | undefined): string => {
+      const base = (prompt ?? "").trimEnd();
+      if (base.length === 0) return `JOB ID: ${options.jobId}`;
+      return `${base}\nJOB ID: ${options.jobId}`;
+    };
+    return (base: string | undefined): string => appendJobId(discovered?.systemPrompt ?? base);
+  })();
   const resourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir,

@@ -335,6 +335,16 @@ export function buildOperationalSystemPrompt(
     `Node.js: ${process.version}`,
   ].join("\n");
   const thinking = thinkingSection(ctx);
+  const jobIdLine = (() => {
+    try {
+      const sessionId = ctx.sessionManager?.getSessionId?.();
+      if (typeof sessionId !== "string" || sessionId.length === 0) return undefined;
+      if (isRootSession(ctx)) return undefined;
+      return `JOB ID: ${sessionId}`;
+    } catch {
+      return undefined;
+    }
+  })();
 
   return [
     OPERATIONAL_PROMPT_MARKER,
@@ -356,6 +366,7 @@ export function buildOperationalSystemPrompt(
     "",
     "# Information",
     environment,
+    ...(jobIdLine ? [jobIdLine] : []),
   ].join("\n");
 }
 
