@@ -45,6 +45,8 @@ export interface RuntimeSettings {
   gitLockStaleMs: number;
   gitLockAcquireTimeoutMs: number;
   gitMaxBufferBytes: number;
+  /** Percentage of the model's context window that triggers automatic compaction (1-100). */
+  contextCompactThresholdPercent: number;
 }
 
 export interface ChannelSettings {
@@ -148,6 +150,7 @@ export function defaultSettings(): ResolvedSettings {
       gitLockStaleMs: 30_000,
       gitLockAcquireTimeoutMs: 30_000,
       gitMaxBufferBytes: 16 * MIB,
+      contextCompactThresholdPercent: 80,
     },
     channels: {
       maxRootSessions: 200,
@@ -273,6 +276,7 @@ function applySource(source: Record<string, unknown>, target: ResolvedSettings, 
     if (isMs(runtime.gitLockStaleMs, 1_000, HOUR_MS)) target.runtime.gitLockStaleMs = runtime.gitLockStaleMs;
     if (isMs(runtime.gitLockAcquireTimeoutMs, 1_000, HOUR_MS)) target.runtime.gitLockAcquireTimeoutMs = runtime.gitLockAcquireTimeoutMs;
     if (isPosInt(runtime.gitMaxBufferBytes, 1024 * MIB)) target.runtime.gitMaxBufferBytes = runtime.gitMaxBufferBytes;
+    if (isUint(runtime.contextCompactThresholdPercent, 100) && runtime.contextCompactThresholdPercent >= 1) target.runtime.contextCompactThresholdPercent = runtime.contextCompactThresholdPercent;
   }
   const channels = source.channels;
   if (isObject(channels)) {

@@ -253,6 +253,13 @@ async function createIsolatedChild(options: {
 }): Promise<ChildSessionServices> {
   const agentDir = getAgentDir();
   const settingsManager = SettingsManager.create(options.cwd, agentDir);
+  // The percentage-based auto-compaction threshold from the pi-c2 home
+  // config.json applies to every child session at any depth. It is applied as
+  // an in-memory override on the child's own SettingsManager so the SDK-native
+  // `_checkCompaction` path (the only auto-compaction that runs inside child
+  // sessions, since children never emit extension events) uses the configured
+  // percentage instead of the default reserve-token math.
+  settingsManager.setCompactionThresholdPercent(resolveSettingsForProject(options.cwd).runtime.contextCompactThresholdPercent);
   // Every resolved agent comes from a valid agent file and carries its
   // frontmatter fields and Markdown body.
   const discovered = options.agent;

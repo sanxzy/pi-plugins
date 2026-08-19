@@ -1,4 +1,5 @@
 export { registerSessionEvents, type SessionEventsOptions } from "./registrations/session-events.ts";
+export { registerContextAutoCompact } from "./registrations/context-auto-compact.ts";
 export {
   notifyHost,
   registerNotifyEntry,

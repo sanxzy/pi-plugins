@@ -186,3 +186,156 @@ index 92e8070ce1c60e7780aba7a4a0ea8b1d1652156f..13a5e22c1159a80b8472b3ddbabb13b3
          }
      }
      _appendEntry(entry) {
+diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
+index e7ffee7a8566a7556f75e3f3edd228af3d93b141..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 100644
+--- a/dist/core/compaction/compaction.js
++++ b/dist/core/compaction/compaction.js
+@@ -160,6 +160,13 @@ export function shouldCompact(contextTokens, contextWindow, settings) {
+     if (!settings.enabled)
+         return false;
+-    return contextTokens > contextWindow - settings.reserveTokens;
++    // pi-c2 patch: percentage-based threshold. When the optional
++    // thresholdPercent is configured, compare usage against the configured
++    // percentage of the model's context window instead of the reserve-token
++    // math. Falls back to the stock behavior when absent.
++    if (typeof settings.thresholdPercent === "number" && settings.thresholdPercent > 0) {
++        return contextTokens >= (contextWindow * settings.thresholdPercent) / 100;
++    }
++    return contextTokens > contextWindow - settings.reserveTokens;
+ }
+ // ============================================================================
+ // Cut point detection
+diff --git a/dist/core/compaction/compaction.d.ts b/dist/core/compaction/compaction.d.ts
+index bf40e20fd7d26f38a17d9df790a7acbad42c3d4f..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 100644
+--- a/dist/core/compaction/compaction.d.ts
++++ b/dist/core/compaction/compaction.d.ts
+@@ -28,5 +28,7 @@ export interface CompactionSettings {
+     enabled: boolean;
+     reserveTokens: number;
+     keepRecentTokens: number;
++    /** pi-c2 patch: percentage of the context window that triggers compaction. */
++    thresholdPercent?: number;
+ }
+ export declare const DEFAULT_COMPACTION_SETTINGS: CompactionSettings;
+diff --git a/dist/core/settings-manager.js b/dist/core/settings-manager.js
+index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..cccccccccccccccccccccccccccccccccccccccc 100644
+--- a/dist/core/settings-manager.js
++++ b/dist/core/settings-manager.js
+@@ -131,5 +131,7 @@ export class SettingsManager {
+     globalSettingsLoadError = null; // Track if global settings file had parse errors
+     projectSettingsLoadError = null; // Track if project settings file had parse errors
+     writeQueue = Promise.resolve();
++    /** pi-c2 patch: in-memory percentage threshold that survives save() re-merges. */
++    thresholdPercentOverride;
+     errors;
+     constructor(storage, initialGlobal, initialProject, globalLoadError = null, projectLoadError = null, initialErrors = [], projectTrusted = true) {
+@@ -520,10 +522,22 @@ export class SettingsManager {
+     getCompactionKeepRecentTokens() {
+         return this.settings.compaction?.keepRecentTokens ?? 20000;
+     }
++    /** pi-c2 patch: set the percentage-based compaction threshold (in-memory only). */
++    setCompactionThresholdPercent(percent) {
++        this.thresholdPercentOverride = percent;
++    }
++    /** pi-c2 patch: the effective percentage threshold, when configured. */
++    getCompactionThresholdPercent() {
++        if (typeof this.thresholdPercentOverride === "number") {
++            return this.thresholdPercentOverride;
++        }
++        return this.settings.compaction?.thresholdPercent;
++    }
+     getCompactionSettings() {
+         return {
+             enabled: this.getCompactionEnabled(),
+             reserveTokens: this.getCompactionReserveTokens(),
+             keepRecentTokens: this.getCompactionKeepRecentTokens(),
++            thresholdPercent: this.getCompactionThresholdPercent(),
+         };
+     }
+diff --git a/dist/core/settings-manager.d.ts b/dist/core/settings-manager.d.ts
+index 494157a038b5fd6b4d9ccf30d331983d84755d2a..dddddddddddddddddddddddddddddddddddddddd 100644
+--- a/dist/core/settings-manager.d.ts
++++ b/dist/core/settings-manager.d.ts
+@@ -4,5 +4,7 @@ export interface CompactionSettings {
+     enabled?: boolean;
+     reserveTokens?: number;
+     keepRecentTokens?: number;
++    /** pi-c2 patch: percentage of the context window that triggers compaction. */
++    thresholdPercent?: number;
+ }
+ export interface BranchSummarySettings {
+@@ -206,9 +208,12 @@ export declare class SettingsManager {
+     getCompactionEnabled(): boolean;
+     setCompactionEnabled(enabled: boolean): void;
++    setCompactionThresholdPercent(percent: number): void;
++    getCompactionThresholdPercent(): number | undefined;
+     getCompactionReserveTokens(): number;
+     getCompactionKeepRecentTokens(): number;
+     getCompactionSettings(): {
+         enabled: boolean;
+         reserveTokens: number;
+         keepRecentTokens: number;
++        thresholdPercent?: number;
+     };
+diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
+index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee 100644
+--- a/dist/core/extensions/types.d.ts
++++ b/dist/core/extensions/types.d.ts
+@@ -24,5 +24,6 @@ import type { CustomMessage } from "../messages.ts";
+ import type { ModelRegistry } from "../model-registry.ts";
+ import type { ScopedModel } from "../model-resolver.ts";
+ import type { BranchSummaryEntry, CompactionEntry, CustomEntry, ReadonlySessionManager, SessionEntry, SessionManager } from "../session-manager.ts";
++import type { SettingsManager } from "../settings-manager.ts";
+ import type { SlashCommandInfo } from "../slash-commands.ts";
+ import type { SourceInfo } from "../source-info.ts";
+@@ -243,4 +244,6 @@ export interface ExtensionContext {
+     /** Get current context usage for the active model. */
+     getContextUsage(): ContextUsage | undefined;
++    /** pi-c2 patch: the session's settings manager (compaction policy, model defaults). */
++    getSettingsManager(): SettingsManager;
+     /** Trigger compaction without awaiting completion. */
+     compact(options?: CompactOptions): void;
+@@ -1227,4 +1230,5 @@ export interface ExtensionContextActions {
+     shutdown: () => void;
+     getContextUsage: () => ContextUsage | undefined;
++    getSettingsManager: () => SettingsManager;
+     compact: (options?: CompactOptions) => void;
+     getSystemPrompt: () => string;
+diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
+index 418865ad891951e3fb7e2a65f4dca4d7d87e3895..ffffffffffffffffffffffffffffffffffffffff 100644
+--- a/dist/core/extensions/runner.js
++++ b/dist/core/extensions/runner.js
+@@ -137,4 +137,5 @@ export class ExtensionRunner {
+     hasPendingMessagesFn = () => false;
+     getContextUsageFn = () => undefined;
++    getSettingsManagerFn = () => undefined;
+     compactFn = () => { };
+     getSystemPromptFn = () => "";
+@@ -187,4 +188,5 @@ export class ExtensionRunner {
+         this.shutdownHandler = contextActions.shutdown;
+         this.getContextUsageFn = contextActions.getContextUsage;
++        this.getSettingsManagerFn = contextActions.getSettingsManager;
+         this.compactFn = contextActions.compact;
+         this.getSystemPromptFn = contextActions.getSystemPrompt;
+@@ -528,7 +531,11 @@ export class ExtensionRunner {
+             getContextUsage: () => {
+                 runner.assertActive();
+                 return runner.getContextUsageFn();
+             },
++            getSettingsManager: () => {
++                runner.assertActive();
++                return runner.getSettingsManagerFn();
++            },
+             compact: (options) => {
+                 runner.assertActive();
+                 runner.compactFn(options);
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+index 9e2b0f53f2d8f7a5d38ea4b7b6c9d1e2f3a4b5c6..1111111111111111111111111111111111111111 100644
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -1910,4 +1910,5 @@ export class AgentSession {
+             },
+             getContextUsage: () => this.getContextUsage(),
++            getSettingsManager: () => this.settingsManager,
+             compact: (options) => {
+                 void (async () => {

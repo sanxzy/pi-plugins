@@ -32,6 +32,7 @@ import {
   registerGoalCommand,
   registerManageGoal,
   registerNotifyEntry,
+  registerContextAutoCompact,
   createDefaultTelegramCommandExpander,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
@@ -114,6 +115,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
       edit: createPonytailEditTool(),
     }),
   });
+  registerContextAutoCompact(pi);
   registerPonytailSetup(pi);
   registerSystemPrompt(pi);
   registerLifecycleGates(pi);

@@ -64,11 +64,11 @@ test("SettingsManager surfaces the configured thresholdPercent through getCompac
   }
 });
 
-test("SettingsManager applyOverrides thresholdPercent survives a settings save re-merge", async () => {
+test("SettingsManager setCompactionThresholdPercent survives a settings save re-merge", async () => {
   const cwd = tempDir();
   try {
     const settingsManager = SettingsManager.create(cwd, join(cwd, "agent"));
-    settingsManager.applyOverrides({ compaction: { thresholdPercent: 70 } });
+    settingsManager.setCompactionThresholdPercent(70);
     // A model change triggers save(), which re-merges from storage. The
     // thresholdPercent override must survive so the percentage policy is not
     // silently dropped mid-session.

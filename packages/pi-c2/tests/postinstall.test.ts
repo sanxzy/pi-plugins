@@ -14,6 +14,7 @@ const SDK_SOURCE = new URL("../node_modules/@earendil-works/pi-coding-agent", im
 const PATCH_MARKERS: Array<[string, string]> = [
   ["dist/core/extensions/loader.js", "createCommandContext"],
   ["dist/core/session-manager.js", "ensurePrivateSessionDir"],
+  ["dist/core/settings-manager.js", "thresholdPercentOverride"],
 ];
 
 /**

@@ -40,6 +40,7 @@ const MIN_VERSION = [0, 84, 2];
 const PATCH_MARKERS = [
   "dist/core/extensions/loader.js:createCommandContext",
   "dist/core/session-manager.js:ensurePrivateSessionDir",
+  "dist/core/settings-manager.js:thresholdPercentOverride",
 ];
 
 function log(message) {
