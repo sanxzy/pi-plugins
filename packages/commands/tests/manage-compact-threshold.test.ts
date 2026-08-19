@@ -103,10 +103,14 @@ test("command handler prompts, validates, and persists the threshold", async () 
       writeHomeConfig(h, { runtime: { contextCompactThresholdPercent: 80 } });
       const notifications: string[] = [];
       let inputAnswer: string | undefined = "75";
+      let inputPlaceholder = "";
       const ctx = {
         cwd: process.cwd(),
         ui: {
-          input: async () => inputAnswer,
+          input: async (_title: string, placeholder?: string) => {
+            inputPlaceholder = placeholder ?? "";
+            return inputAnswer;
+          },
           notify: (message: string) => { notifications.push(message); },
         },
       } as unknown as ExtensionCommandContext;
@@ -121,9 +125,14 @@ test("command handler prompts, validates, and persists the threshold", async () 
       const handler = commands.get("manage-compact-threshold")!.handler;
       await handler("", ctx);
 
+      assert.equal(inputPlaceholder, "80", "placeholder shows the current threshold (80) when config has 80");
       assert.equal(resolveSettingsForProject(undefined).runtime.contextCompactThresholdPercent, 75, "threshold persisted via command");
       assert.equal(notifications.length, 1);
       assert.match(notifications[0], /set to 75%/);
+
+      // A later invocation must pre-fill the NEW current threshold (75), not the default 80.
+      await handler("", ctx);
+      assert.equal(inputPlaceholder, "75", "placeholder reflects the updated current threshold");
 
       // Invalid input: no change, error notification.
       inputAnswer = "120";

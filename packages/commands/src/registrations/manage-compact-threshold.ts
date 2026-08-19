@@ -78,7 +78,7 @@ export function registerManageCompactThreshold(pi: ExtensionAPI): void {
         const current = resolveSettingsForProject(ctx.cwd).runtime.contextCompactThresholdPercent;
         const input = await ctx.ui.input(
           `Auto-compaction triggers when context usage reaches ${current}% of the model's context window. Enter a new threshold (${COMPACT_THRESHOLD_MIN}-${COMPACT_THRESHOLD_MAX}, default ${COMPACT_THRESHOLD_DEFAULT}):`,
-          String(COMPACT_THRESHOLD_DEFAULT),
+          String(current),
         );
         if (input === undefined) {
           ctx.ui.notify("Compact-threshold management cancelled", "info");
