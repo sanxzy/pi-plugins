@@ -116,7 +116,7 @@ test("does not add a spacer between main and its only child", () => {
 
   assert.deepEqual(renderRows(footer).slice(3), [
     "⏺ main 0s",
-    "└─ ◯ Run parallel recursive descendant 2m 56s",
+    "└─ ◯ child › Run parallel recursive descendant · 0 tool uses · 0 tokens · 2m 56s",
   ]);
   assert.match(renderRows(footer)[2]!, /1 queued/, "heading carries the live summary");
 });
@@ -142,15 +142,15 @@ test("renders every descendant on one uniformly spaced tree row", () => {
 
   assert.deepEqual(renderRows(footer).slice(3), [
     "⏺ main 0s",
-    "├─ ✓ post 2m 56s",
-    "└─ ◯ parallel 2m 56s",
-    "   ├─ ◯ branch A 2m 56s",
-    "   │  ├─ ◯ branch A1 2m 56s",
-    "   │  └─ ◯ branch A2 2m 56s",
-    "   └─ ◯ branch B 2m 56s",
-    "      ├─ ◯ branch B1 2m 56s",
-    "      │  └─ ◯ branch B1 child 2m 56s",
-    "      └─ ◯ branch B2 2m 56s",
+    "├─ ✓ post › post · 0 tool uses · 0 tokens · 2m 56s",
+    "└─ ◯ parallel › parallel · 0 tool uses · 0 tokens · 2m 56s",
+    "   ├─ ◯ branch-a › branch A · 0 tool uses · 0 tokens · 2m 56s",
+    "   │  ├─ ◯ branch-a1 › branch A1 · 0 tool uses · 0 tokens · 2m 56s",
+    "   │  └─ ◯ branch-a2 › branch A2 · 0 tool uses · 0 tokens · 2m 56s",
+    "   └─ ◯ branch-b › branch B · 0 tool uses · 0 tokens · 2m 56s",
+    "      ├─ ◯ branch-b1 › branch B1 · 0 tool uses · 0 tokens · 2m 56s",
+    "      │  └─ ◯ branch-b1-child › branch B1 child · 0 tool uses · 0 tokens · 2m 56s",
+    "      └─ ◯ branch-b2 › branch B2 · 0 tool uses · 0 tokens · 2m 56s",
   ]);
   assert.match(renderRows(footer)[2]!, /8 queued · 1 completed/, "heading carries the live summary");
   assert.equal(renderRows(footer).some((line) => line.trim() === "│"), false, "no depth-specific spacer rows");
@@ -222,8 +222,8 @@ test("running agents with live stats render as a compact stats line", () => {
   });
 
   const lines = renderRows(footer);
-  assert.ok(lines.some((line) => line.includes("explore:8f2a › Trace provider compatibility · 24 tool uses · 18.4k tokens · 2m 31s")), `compact line rendered: ${lines.join("\n")}`);
-  assert.ok(lines.some((line) => /[├└]─ explore:8f2a/.test(line)), "live rows stay connected to the agent tree");
+  assert.ok(lines.some((line) => line.includes("⏺ explore:8f2a › Trace provider compatibility · 24 tool uses · 18.4k tokens · 2m 31s")), `compact line rendered: ${lines.join("\n")}`);
+  assert.ok(lines.some((line) => /[├└]─ ⏺ .*explore:8f2a/.test(line)), "live rows have status glyph and stay connected to the agent tree");
   for (const line of lines) assert.ok(line.length <= 100, `line fits: ${line}`);
 });
 
@@ -234,7 +234,7 @@ test("live stats rows keep the tree layout for rows without counters", () => {
     getInfo: () => info(),
     getRows: () => [
       row({ rowId: "main", root: true, status: "active", description: "main", depth: 0, durationMs: 0, enterable: false }),
-      row({ rowId: "queued", status: "queued", depth: 1, description: "Wait for slot", enterable: false }),
+      row({ rowId: "queued", status: "queued", depth: 1, description: "Wait for slot", enterable: false, subagentType: "explore" }),
       row({ rowId: "done", status: "completed", depth: 1, description: "Summarize", durationMs: 94_000, enterable: false }),
     ],
   });
@@ -242,5 +242,7 @@ test("live stats rows keep the tree layout for rows without counters", () => {
   const output = renderRows(footer).join("\n");
   assert.match(output, /Wait for slot/, "queued rows keep the tree layout");
   assert.match(output, /Summarize/, "settled rows keep the tree layout");
-  assert.doesNotMatch(output, /tool uses/, "no live stats without counters");
+  // All rows now show the consistent format with tool uses and tokens
+  assert.match(output, /◯ explore:queued › Wait for slot · 0 tool uses · 0 tokens/, "queued rows show identity and zero metrics");
+  assert.match(output, /✓ done › Summarize · 0 tool uses · 0 tokens/, "completed rows show identity and zero metrics");
 });

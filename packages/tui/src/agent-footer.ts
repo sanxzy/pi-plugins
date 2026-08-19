@@ -60,6 +60,8 @@ export interface FooterTreeRow {
   readonly leaf?: string;
   /** Live counters shown in the compact running-agent line when present. */
   readonly live?: FooterTreeLiveStats;
+  /** Agent type label when available before the agent is running. */
+  readonly subagentType?: string;
   readonly enterable: boolean;
   readonly updatedAt?: string;
   /** Test and adapter seam when the caller already has a settled timestamp. */
@@ -290,26 +292,26 @@ function renderTreeRow(
   width: number,
   theme: AgentFooterTheme,
 ): string {
+  // The root row is the host session anchor; it renders a compact status line.
+  if (row.root) {
+    return truncateToWidth(`${statusGlyph(row.status, theme)} ${row.description} ${formatDuration(row.durationMs)}`, width, theme.fg("dim", "..."));
+  }
+
   // The compact live line keeps the tree connectors so running agents stay
   // visually part of the descendant tree; only the body text changes shape.
-  const prefix = row.root
-    ? ""
-    : row.depth === 0
-      ? "  "
-      : treePrefix(row.depth, lastByDepth, rows, index);
-  if (row.live) {
-    return truncateToWidth(`${prefix}${renderLiveRow(row)}`, width, theme.fg("dim", "..."));
-  }
+  const prefix = row.depth === 0
+    ? "  "
+    : treePrefix(row.depth, lastByDepth, rows, index);
   const status = statusGlyph(row.status, theme);
+  const live = row.live;
+  const subagentType = live?.subagentType ?? row.subagentType;
+  const toolUses = live?.toolUses ?? 0;
+  const tokens = live?.tokens ?? 0;
+  const uses = toolUses === 1 ? "1 tool use" : `${toolUses} tool uses`;
+  const identity = subagentType ? `${subagentType}:${row.rowId}` : row.rowId;
   const leaf = row.leaf ? ` · ${sanitizeLeaf(row.leaf)}` : "";
-  return truncateToWidth(`${prefix}${status} ${row.description} ${formatDuration(row.durationMs)}${leaf}`, width, theme.fg("dim", "..."));
-}
-
-/** Compact single-line format for a running agent: `type:id › title · uses · tokens · time`. */
-function renderLiveRow(row: FooterTreeRow): string {
-  const live = row.live!;
-  const uses = live.toolUses === 1 ? "1 tool use" : `${live.toolUses} tool uses`;
-  return `${live.subagentType}:${row.rowId} › ${row.description} · ${uses} · ${formatTokens(live.tokens)} tokens · ${formatDuration(row.durationMs)}`;
+  const body = `${status} ${identity} › ${row.description} · ${uses} · ${formatTokens(tokens)} tokens · ${formatDuration(row.durationMs)}${leaf}`;
+  return truncateToWidth(`${prefix}${body}`, width, theme.fg("dim", "..."));
 }
 
 function treePrefix(
@@ -339,7 +341,7 @@ function findAncestorIndex(rows: readonly FooterTreeRow[], index: number, depth:
 }
 
 function statusGlyph(status: FooterTreeStatus, theme: AgentFooterTheme): string {
-  if (status === "active") return theme.fg("text", "⏺");
+  if (status === "active" || status === "running") return theme.fg("text", "⏺");
   if (status === "completed") return theme.fg("success", "✓");
   if (status === "failed") return theme.fg("error", "✗");
   if (status === "cancelled" || status === "interrupted") return theme.fg("warning", "■");

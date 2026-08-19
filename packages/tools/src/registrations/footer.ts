@@ -213,6 +213,7 @@ function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>
         durationMs: row.durationMs,
         leaf: latestLeaf(liveChildFor(pool, row.jobId)),
         live: liveStats(job, liveChildFor(pool, row.jobId)),
+        subagentType: job?.subagentType,
         enterable: row.enterable,
         updatedAtMs: isTerminal(row.status) ? settledMs(job) : undefined,
       };

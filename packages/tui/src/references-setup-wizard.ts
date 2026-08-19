@@ -286,7 +286,7 @@ export class ReferencesSetupWizard implements Component {
 
   private promptText(prompt: string): string {
     return this.step.kind === "alias" || this.step.kind === "path" || this.step.kind === "repository" || this.step.kind === "branch" || this.step.kind === "description"
-      ? `${prompt} ${this.editor.getText()}`.trim()
+      ? `${prompt} ${this.editor.getExpandedText()}`.trim()
       : prompt;
   }
 
@@ -436,7 +436,7 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        this.alias = this.editor.getText();
+        this.alias = this.editor.getExpandedText();
         this.editor.setText("");
         this.step = this.step.form === "git" ? { kind: "repository" } : { kind: "path" };
         this.refresh();
@@ -454,7 +454,7 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        this.path = this.editor.getText();
+        this.path = this.editor.getExpandedText();
         this.editor.setText("");
         this.step = { kind: "description" };
         this.editor.setText(this.description);
@@ -473,7 +473,7 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        this.repository = this.editor.getText();
+        this.repository = this.editor.getExpandedText();
         this.editor.setText("");
         this.step = { kind: "branch" };
         this.editor.setText(this.branch);
@@ -492,7 +492,7 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        this.branch = this.editor.getText();
+        this.branch = this.editor.getExpandedText();
         this.editor.setText("");
         this.step = { kind: "description" };
         this.editor.setText(this.description);
@@ -511,7 +511,7 @@ export class ReferencesSetupWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        this.description = this.editor.getText();
+        this.description = this.editor.getExpandedText();
         this.editor.setText("");
         this.optionIndex = this.editing() ? 2 : 0;
         this.step = { kind: "hidden" };

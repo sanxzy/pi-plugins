@@ -253,3 +253,63 @@ test("escape on the menu cancels with a cancelled result", async () => {
   wizard.handleInput("\x1b");
   assert.deepEqual(await result.promise, { status: "cancelled" });
 });
+
+test("create flow preserves large pasted prompt content instead of keeping the paste marker", async () => {
+  // Simulate a large paste (> 10 lines) which the TUI Editor replaces with a
+  // paste marker like `[paste #1 +11 lines]`. The wizard must expand that
+  // marker back to the original content before submitting.
+  const largePrompt = Array.from({ length: 11 }, (_, i) => `Line ${i + 1} of my very long goal prompt`).join("\n");
+  let created: { prompt: string; interval: string } | undefined;
+  const ctl = controller({
+    get: async () => undefined,
+    create: async (input) => {
+      created = input;
+      return { ok: true, message: "Goal created." };
+    },
+  });
+  const wizard = new ManageGoalWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+
+  // Navigate to Create goal and start the prompt step.
+  wizard.handleInput("\r"); // Create goal
+  assert.ok(lines(wizard).some((line) => line.includes("goal prompt")));
+
+  // Simulate a bracketed paste of a large (> 10 lines) text block. The Editor
+  // detects large pastes and replaces them with a marker like
+  // `[paste #1 +11 lines]` while storing the original content internally.
+  // Bracketed paste format: ESC [ 200 ~ <content> ESC [ 201 ~
+  wizard.handleInput("\x1b[200~" + largePrompt + "\x1b[201~");
+
+  wizard.handleInput("\r"); // submit prompt
+  assert.ok(lines(wizard).some((line) => line.includes("Interval")));
+
+  wizard.handleInput("\r"); // empty interval
+  await flush();
+
+  // The full large prompt must be preserved, not the marker.
+  assert.equal(created?.prompt, largePrompt);
+});
+
+test("pause flow preserves large pasted reason content instead of keeping the paste marker", async () => {
+  const largeReason = Array.from({ length: 12 }, (_, i) => `Reason line ${i + 1} explaining the detailed blocker`).join("\n");
+  let reason: string | undefined;
+  const ctl = controller({
+    pause: async (r) => {
+      reason = r;
+      return { ok: true, message: "Goal paused." };
+    },
+  });
+  const wizard = new ManageGoalWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+
+  wizard.handleInput("\r"); // Pause goal
+  assert.ok(lines(wizard).some((line) => line.includes("pause reason")));
+
+  // Simulate a bracketed paste of a large (> 10 lines) reason.
+  wizard.handleInput("\x1b[200~" + largeReason + "\x1b[201~");
+
+  wizard.handleInput("\r"); // submit reason
+  await flush();
+
+  assert.equal(reason, largeReason);
+});

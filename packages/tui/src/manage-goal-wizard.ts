@@ -223,7 +223,7 @@ export class ManageGoalWizard implements Component {
 
   private promptText(prompt: string): string {
     return this.step.kind === "prompt" || this.step.kind === "interval" || this.step.kind === "reason"
-      ? `${prompt} ${this.editor.getText()}`.trim()
+      ? `${prompt} ${this.editor.getExpandedText()}`.trim()
       : prompt;
   }
 
@@ -312,7 +312,7 @@ export class ManageGoalWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        this.prompt = this.editor.getText();
+        this.prompt = this.editor.getExpandedText();
         this.editor.setText("");
         this.step = { kind: "interval" };
         this.refresh();
@@ -330,7 +330,7 @@ export class ManageGoalWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        this.interval = this.editor.getText();
+        this.interval = this.editor.getExpandedText();
         this.editor.setText("");
         void this.submitCreate();
         return;
@@ -347,7 +347,7 @@ export class ManageGoalWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.enter)) {
-        this.reason = this.editor.getText();
+        this.reason = this.editor.getExpandedText();
         this.editor.setText("");
         void this.submitPause();
         return;
