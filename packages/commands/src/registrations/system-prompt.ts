@@ -198,7 +198,10 @@ Verify continuously.
 
 Expand only when necessary.
 
-Finish only when the actual goal is satisfied.`;
+Finish only when the actual goal is satisfied.
+
+If you get stuck or need guidance, use \`knowledge_search\` for wikis type first. If that does not provide enough information, use \`knowledge_search\` for references type. If that is still insufficient, use \`web_search\` and \`web_fetch\`.
+`;
 
 interface ToolInfo {
   name: string;
