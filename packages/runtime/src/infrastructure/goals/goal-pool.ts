@@ -29,6 +29,13 @@ export interface GoalDeliveryBinding {
   readonly hasUI: boolean;
   readonly notify: (message: string, type?: "info" | "warning" | "error") => void;
   /**
+   * Whether the host already has pending messages queued for delivery.
+   * When true, an immediate goal tick is skipped to avoid stacking another
+   * message behind still-pending ones; the periodic scheduler will fire a
+   * fresh tick after the interval elapses.
+   */
+  readonly hasPendingMessages: () => boolean;
+  /**
    * Explicit telemetry owner for the pool's independent scheduler root. Goal
    * ticks fire from setInterval callbacks with no ambient session context;
    * without this binding the records would fall back to the process-wide
@@ -151,6 +158,9 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
 
         const target = bindings.get(goal.cwd) ?? currentBinding;
         if (!target) return;
+        // Skip this tick if the host already has pending goal messages queued
+        // for delivery. The periodic timer will retry after the interval.
+        if (target.hasPendingMessages()) return;
         try {
           if (goal.status === "active") {
             target.sendUserMessage(`${goal.prompt}\n${GOAL_DELIVERY_FOOTER}`, { deliverAs: "steer" });
@@ -167,18 +177,17 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     else execute();
   };
 
-  const ensureScheduler = (cwd: string): boolean => {
+  const ensureScheduler = (cwd: string): void => {
     const existing = schedulers.get(cwd);
-    if (existing) return false;
+    if (existing) return;
     const goal = store.get();
-    if (!goal) return false;
+    if (!goal) return;
     const generation = schedulerGeneration;
     const timer = schedule(() => {
       if (schedulerGeneration !== generation) return;
       tick(cwd);
     }, cwd, goal.intervalMs);
     schedulers.set(cwd, { timer, intervalMs: goal.intervalMs, generation });
-    return true;
   };
 
   const advanceSchedulerGeneration = (): void => {
@@ -221,13 +230,12 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         return store.create({ cwd, prompt: validation.value.prompt, intervalMs });
       });
         if (result.ok) {
-          const started = ensureScheduler(cwd);
-          // Fire an immediate tick only if we just started a new scheduler,
-          // and only when delivery is not suspended (i.e. there's no host
-          // binding ready or session confirmation is pending). When delivery
-          // is suspended, the message stays conceptually queued and will be
-          // delivered once resumeDelivery() starts a new scheduler tick.
-          if (started && !deliverySuspended) tick(cwd);
+          ensureScheduler(cwd);
+          // Fire an immediate tick so the goal prompt is delivered right away,
+          // not after the full interval elapses. The tick itself skips
+          // delivery when delivery is suspended or when the host binding has
+          // pending messages already queued.
+          tick(cwd);
         }
         return result;
       });
@@ -245,13 +253,12 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
       if (result.ok) {
         const goal = store.get();
         if (goal) {
-          const started = ensureScheduler(goal.cwd);
-          // Fire an immediate tick only if we just started a new scheduler,
-          // and only when delivery is not suspended (i.e. there's no host
-          // binding ready or session confirmation is pending). When delivery
-          // is suspended, the message stays conceptually queued and will be
-          // delivered once resumeDelivery() starts a new scheduler tick.
-          if (started && !deliverySuspended) tick(goal.cwd);
+          ensureScheduler(goal.cwd);
+          // Fire an immediate tick so the goal prompt is delivered right away
+          // after resuming, not after the full interval elapses. The tick
+          // itself skips delivery when delivery is suspended or when the host
+          // binding has pending messages already queued.
+          tick(goal.cwd);
         }
       }
       return result;

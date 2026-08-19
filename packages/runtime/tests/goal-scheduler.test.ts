@@ -17,6 +17,7 @@ function binding(overrides: Partial<GoalDeliveryBinding> = {}): GoalDeliveryBind
     sendUserMessage: () => {},
     hasUI: true,
     notify: (_message: string) => {},
+    hasPendingMessages: () => false,
   };
   return { ...base, ...overrides };
 }
@@ -29,7 +30,7 @@ test("goal tick telemetry binds to the pool's own logger, not the stale default 
   // A newer logger from an unrelated session becomes the global default; the
   // pool must ignore it for its own independent tick root.
   createSessionLogger({ projectId: "project-other", rootSessionId: "root-other", eventsPath: "/dev/stdout", errorsPath: "/dev/stdout", write: () => undefined });
-  pool.bind({ cwd: "/project", sendUserMessage: () => {}, hasUI: true, notify: () => {}, logger: own });
+  pool.bind({ cwd: "/project", sendUserMessage: () => {}, hasUI: true, notify: () => {}, hasPendingMessages: () => false, logger: own });
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
   pool.tick("/project");
   const tickRecords = lines.filter((record) => record.operation === GOAL_OPERATIONS.TICK);
@@ -189,6 +190,7 @@ test("session confirmation pauses delivery and continuation waits for a fresh in
     sendUserMessage: send,
     hasUI: true,
     notify: () => {},
+    hasPendingMessages: () => false,
   });
   pool.resumeDelivery();
   assert.deepEqual(sent.values, [`p\n${GOAL_DELIVERY_FOOTER}`], "resume does not replay prior ticks");

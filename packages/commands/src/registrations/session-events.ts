@@ -76,6 +76,7 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLog
     hasUI: ctx.hasUI,
     sendUserMessage: (content, options) => gate.sendHidden(content, options?.deliverAs ?? "steer"),
     notify: (message) => notifyHost(pi, ctx, message),
+    hasPendingMessages: () => !gate.ready(),
     logger,
   };
 }

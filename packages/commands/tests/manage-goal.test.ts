@@ -16,7 +16,7 @@ test("controller get returns undefined with no goal and the record with one", as
     assert.equal(await controller.get(), undefined);
     const pool = getGoalPool(cwd, "root");
     pool.setScheduler(() => ({ clear() {} }));
-    pool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {} });
+    pool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {}, hasPendingMessages: () => false });
     assert.equal(pool.create({ cwd, prompt: "ship it", interval: "2h" }).ok, true);
     const goal = await controller.get();
     assert.equal(goal?.prompt, "ship it");
@@ -33,7 +33,7 @@ test("controller create replaces an existing goal", async () => {
     const controller = createManageGoalController({ cwd, sessionId: "root" });
     const pool = getGoalPool(cwd, "root");
     pool.setScheduler(() => ({ clear() {} }));
-    pool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {} });
+    pool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {}, hasPendingMessages: () => false });
     assert.equal(pool.create({ cwd, prompt: "first", interval: "1m" }).ok, true);
 
     const result = await controller.create({ prompt: "second", interval: "2h" });
@@ -64,7 +64,7 @@ test("controller pause, resume, and clear round-trip the pool state", async () =
     const controller = createManageGoalController({ cwd, sessionId: "root" });
     const pool = getGoalPool(cwd, "root");
     pool.setScheduler(() => ({ clear() {} }));
-    pool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {} });
+    pool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {}, hasPendingMessages: () => false });
     assert.equal(pool.create({ cwd, prompt: "p", interval: "1m" }).ok, true);
 
     assert.deepEqual(await controller.pause("blocked"), { ok: true, message: "Goal paused." });
@@ -99,7 +99,7 @@ test("controller is unavailable in child sessions", async () => {
     startRootSession({ projectRoot: cwd, sessionId: "root" });
     const pool = getGoalPool(cwd, "root");
     pool.setScheduler(() => ({ clear() {} }));
-    pool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {} });
+    pool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {}, hasPendingMessages: () => false });
     assert.equal(pool.create({ cwd, prompt: "p", interval: "1m" }).ok, true);
     const childPool = getChildPool(cwd, "root");
     childPool.registry.createJob(createJob({

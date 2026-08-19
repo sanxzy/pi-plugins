@@ -50,6 +50,7 @@ function addActiveGoal(cwd: string, prompt = "p", sessionId = "root"): void {
     hasUI: true,
     sendUserMessage: () => {},
     notify: () => {},
+    hasPendingMessages: () => false,
   });
   assert.equal(pool.create({ cwd, prompt, interval: "1m" }).ok, true);
 }
@@ -175,7 +176,7 @@ test("startup with no session file does not offer another session's goal", async
   try {
     const goalPool = getGoalPool(cwd, "old");
     goalPool.setScheduler(() => ({ clear() {} }));
-    goalPool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {} });
+    goalPool.bind({ cwd, hasUI: true, sendUserMessage: () => {}, notify: () => {}, hasPendingMessages: () => false });
     assert.equal(goalPool.create({ cwd, prompt: "p", interval: "1m" }).ok, true);
     const d = registrations();
     registerLifecycleGates(d.pi);
@@ -207,7 +208,7 @@ test("no-UI /new does not offer or clear another session's goal", async () => {
       callbacks.push(callback);
       return { clear() {} };
     });
-    goalPool.bind({ cwd, hasUI: true, sendUserMessage: d.pi.sendUserMessage, notify: () => {} });
+    goalPool.bind({ cwd, hasUI: true, sendUserMessage: d.pi.sendUserMessage, notify: () => {}, hasPendingMessages: () => false });
     assert.equal(goalPool.create({ cwd, prompt: "p", interval: "1m" }).ok, true);
     registerLifecycleGates(d.pi);
     const result = await d.handlers.get("session_before_switch")!(

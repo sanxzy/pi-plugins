@@ -61,7 +61,7 @@ test("a new root session start never offers continuation of another session's go
   home();
   const root = projectRoot();
   const a = poolFor(root, "root-a");
-  a.bind({ cwd: root, hasUI: true, sendUserMessage: () => {}, notify: () => {} });
+  a.bind({ cwd: root, hasUI: true, sendUserMessage: () => {}, notify: () => {}, hasPendingMessages: () => false });
   a.setScheduler(() => ({ clear() {} }));
   assert.equal(a.create({ cwd: root, prompt: "P", interval: "1m" }).ok, true);
 
@@ -150,8 +150,8 @@ test("two root sessions keep isolated goal stores with their own scheduler deliv
   const sentOnB: string[] = [];
   a.setScheduler(() => ({ clear() {} }));
   b.setScheduler(() => ({ clear() {} }));
-  a.bind({ cwd: root, hasUI: true, sendUserMessage: (c) => sentOnA.push(c), notify: () => {} });
-  b.bind({ cwd: root, hasUI: true, sendUserMessage: (c) => sentOnB.push(c), notify: () => {} });
+  a.bind({ cwd: root, hasUI: true, sendUserMessage: (c) => sentOnA.push(c), notify: () => {}, hasPendingMessages: () => false });
+  b.bind({ cwd: root, hasUI: true, sendUserMessage: (c) => sentOnB.push(c), notify: () => {}, hasPendingMessages: () => false });
   a.create({ cwd: root, prompt: "A", interval: "1m" });
   b.create({ cwd: root, prompt: "B", interval: "1m" });
   // Each pool delivers only its own goal's exact prompt to its own host.
