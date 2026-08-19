@@ -27,6 +27,7 @@ import {
   registerReferencesSetup,
   registerManageAgentModel,
   registerManageCompactThreshold,
+  registerCompactionLogging,
   registerTelegramClear,
   registerTelegramLifecycle,
   registerTelegramInbound,
@@ -88,6 +89,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerReferencesSetup(pi);
   registerManageAgentModel(pi);
   registerManageCompactThreshold(pi);
+  registerCompactionLogging(pi);
   registerTelegramClear(pi);
   // Inbound registration precedes the connection lifecycle so its message
   // middleware is attached before the shared manager starts polling.

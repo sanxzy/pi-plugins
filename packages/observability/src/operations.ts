@@ -22,6 +22,10 @@ export const SESSION_OPERATIONS = {
   COMPACT: "session.compact",
   /** Apply the configured percentage-based auto-compaction threshold to a session's settings. */
   COMPACT_THRESHOLD_APPLY: "session.compactThresholdApply",
+  /** Compaction lifecycle event (session_compact: reason, willRetry, fromExtension, tokensBefore). */
+  COMPACT_LIFECYCLE: "session.compactLifecycle",
+  /** Per-message threshold crossing check (message_end: role, usage estimate, threshold, contextWindow). */
+  COMPACT_THRESHOLD_CHECK: "session.compactThresholdCheck",
   CLEANUP: "session.cleanup",
 } as const;
 
