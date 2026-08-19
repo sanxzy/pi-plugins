@@ -167,17 +167,18 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     else execute();
   };
 
-  const ensureScheduler = (cwd: string): void => {
+  const ensureScheduler = (cwd: string): boolean => {
     const existing = schedulers.get(cwd);
-    if (existing) return;
+    if (existing) return false;
     const goal = store.get();
-    if (!goal) return;
+    if (!goal) return false;
     const generation = schedulerGeneration;
     const timer = schedule(() => {
       if (schedulerGeneration !== generation) return;
       tick(cwd);
     }, cwd, goal.intervalMs);
     schedulers.set(cwd, { timer, intervalMs: goal.intervalMs, generation });
+    return true;
   };
 
   const advanceSchedulerGeneration = (): void => {
@@ -220,10 +221,13 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         return store.create({ cwd, prompt: validation.value.prompt, intervalMs });
       });
         if (result.ok) {
-          ensureScheduler(cwd);
-          // Fire an immediate tick so the goal prompt is delivered right away,
-          // not after the full interval elapses.
-          tick(cwd);
+          const started = ensureScheduler(cwd);
+          // Fire an immediate tick only if we just started a new scheduler,
+          // and only when delivery is not suspended (i.e. there's no host
+          // binding ready or session confirmation is pending). When delivery
+          // is suspended, the message stays conceptually queued and will be
+          // delivered once resumeDelivery() starts a new scheduler tick.
+          if (started && !deliverySuspended) tick(cwd);
         }
         return result;
       });
@@ -241,10 +245,13 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
       if (result.ok) {
         const goal = store.get();
         if (goal) {
-          ensureScheduler(goal.cwd);
-          // Fire an immediate tick so the goal prompt is delivered right away
-          // after resuming, not after the full interval elapses.
-          tick(goal.cwd);
+          const started = ensureScheduler(goal.cwd);
+          // Fire an immediate tick only if we just started a new scheduler,
+          // and only when delivery is not suspended (i.e. there's no host
+          // binding ready or session confirmation is pending). When delivery
+          // is suspended, the message stays conceptually queued and will be
+          // delivered once resumeDelivery() starts a new scheduler tick.
+          if (started && !deliverySuspended) tick(goal.cwd);
         }
       }
       return result;
