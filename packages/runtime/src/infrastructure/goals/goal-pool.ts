@@ -211,6 +211,8 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     create(input) {
       const cwd = normalizeGoalCwd(input.cwd);
       return processWithLog({ operation: GOAL_OPERATIONS.CREATE, parameters: { cwd, prompt: input.prompt, interval: input.interval ?? input.intervalMs } }, () => {
+        // A fresh creation must re-enable delivery if a prior shutdown had suspended it.
+        deliverySuspended = false;
         const result = withCwdMutation(cwd, () => {
         // A request such as "2m testing goal" carries interval metadata before
         // the exact prompt. Split that leading duration into the scheduling
@@ -251,8 +253,12 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
     resume() {
       const result = processWithLog({ operation: GOAL_OPERATIONS.RESUME, parameters: { rootSessionId } }, () => withCwdMutation(rootSessionId, () => store.resume()));
       if (result.ok) {
+        // Resuming must clear any prior shutdown suspension so ticks can deliver.
+        deliverySuspended = false;
         const goal = store.get();
         if (goal) {
+          // Re-create the scheduler if it was cleared by pauseAllActive, otherwise
+          // the existing interval (created while paused) continues.
           ensureScheduler(goal.cwd);
           // Fire an immediate tick so the goal prompt is delivered right away
           // after resuming, not after the full interval elapses. The tick
