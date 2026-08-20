@@ -537,8 +537,11 @@ export class ManageModelGroupsWizard implements Component {
             const group = filtered[i]!;
             const flag = i === this.groupIndex;
             const activeTag = group.active ? " ●" : "";
-            const modelsTag = group.models.map((m) => m.ref).join(", ");
-            add(selected(flag), this.theme.fg(flag ? "accent" : "text", `${i + 1}. ${group.name} [${group.mode}]${activeTag} · ${modelsTag}`));
+            const memberTag = (ref: string, thinking?: string): string => (thinking ? `${ref}·${thinking}` : ref);
+            const modelsTag = group.models
+              .map((m) => memberTag(m.ref, m.thinking) + (m.quarantinedForMs !== undefined ? ` ⏳${m.quarantinedForMs > 60_000 ? `${Math.ceil(m.quarantinedForMs / 60_000)}m` : `${Math.ceil(m.quarantinedForMs / 1000)}s`}` : ""))
+              .join(", ");
+            add(selected(flag), this.theme.fg(flag ? "accent" : "text", `${i + 1}. ${group.name} [${group.mode}] q${group.quarantineMinutes}m cw:${group.contextWindow ?? "?"}${activeTag} · ${modelsTag}`));
           }
           if (filtered.length > MAX_VISIBLE_ITEMS) {
             add(" ", this.theme.fg("dim", `${window.start + 1}–${Math.min(window.end, filtered.length)} of ${filtered.length}`));
