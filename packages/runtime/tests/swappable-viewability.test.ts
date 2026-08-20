@@ -43,7 +43,6 @@ test("running child with live handle is viewable", () => {
     ["job-a", newJob({ jobId: "job-a", status: "running" })],
   ]);
   const live = new Map<string, ChildSessionControl>([["job-a", liveControl()]]);
-  // @ts-expect-error - testing current signature without retained map
   const rows = scopeDescendants(() => jobs.get("job-a"), jobs, "root-session", live, new Date("2026-01-01T00:00:10.000Z"));
   assert.equal(rows[0]?.enterable, true);
 });
@@ -55,7 +54,6 @@ test("completed child with retained snapshot is viewable", () => {
   ]);
   const live = new Map<string, ChildSessionControl>();
   const retained = new Map<string, ChildLiveSnapshot>([["job-a", snapshot("completed")]]);
-  // @ts-expect-error - retained param not yet supported (should be viewable when implemented)
   const rows = (scopeDescendants as unknown as (
     getJob: (id: string) => any,
     jobs: Map<string, any>,

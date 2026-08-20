@@ -1,4 +1,4 @@
-import type { Job } from "@xzy-ai/core";
+import type { ChildLiveSnapshot, Job } from "@xzy-ai/core";
 import type { ChildSessionControl } from "@xzy-ai/core";
 import { isTerminal } from "@xzy-ai/core";
 import type { Registry } from "../registry/registry.ts";
@@ -60,6 +60,7 @@ export function scopeDescendants(
   rootSessionId: string,
   liveChildren: ReadonlyMap<string, ChildSessionControl>,
   now: Date,
+  retainedSnapshots?: ReadonlyMap<string, ChildLiveSnapshot>,
 ): ScopedSessionRow[] {
   const byParent = new Map<string, Job[]>();
   for (const job of jobs.values()) {
@@ -80,7 +81,7 @@ export function scopeDescendants(
   const visit = (focusSessionId: string, depth: number): void => {
     const children = ordered.get(focusSessionId) ?? [];
     for (const job of children) {
-      const row = toRow(job, depth, liveChildren, now);
+      const row = toRow(job, depth, liveChildren, now, retainedSnapshots);
       rows.push(row);
       const childSessionId = sessionIdOf(job, getJob);
       if (childSessionId) {
@@ -99,6 +100,7 @@ export function scopeRegistry(
   rootSessionId: string,
   liveChildren: ReadonlyMap<string, ChildSessionControl>,
   now?: Date,
+  retainedSnapshots?: ReadonlyMap<string, ChildLiveSnapshot>,
 ): ScopedSessionRow[] {
   return scopeDescendants(
     (jobId) => registry.get(jobId),
@@ -106,6 +108,7 @@ export function scopeRegistry(
     rootSessionId,
     liveChildren,
     now ?? new Date(),
+    retainedSnapshots,
   );
 }
 
@@ -123,16 +126,36 @@ function liveChildFor(
   return liveChildren.get(jobId) ?? liveChildren.get(jobId.replace(/^job-/, "")) ?? [...liveChildren.entries()].find(([id]) => id.replace(/^job-/, "") === jobId.replace(/^job-/, ""))?.[1];
 }
 
+function retainedFor(
+  retainedSnapshots: ReadonlyMap<string, ChildLiveSnapshot> | undefined,
+  jobId: string,
+): ChildLiveSnapshot | undefined {
+  if (!retainedSnapshots) return undefined;
+  const direct = retainedSnapshots.get(jobId);
+  if (direct) return direct;
+  const withoutPrefix = retainedSnapshots.get(jobId.replace(/^job-/, ""));
+  if (withoutPrefix) return withoutPrefix;
+  for (const [id, snapshot] of retainedSnapshots.entries()) {
+    if (id.replace(/^job-/, "") === jobId.replace(/^job-/, "")) return snapshot;
+  }
+  return undefined;
+}
+
 function toRow(
   job: Job,
   depth: number,
   liveChildren: ReadonlyMap<string, ChildSessionControl>,
   now: Date,
+  retainedSnapshots?: ReadonlyMap<string, ChildLiveSnapshot>,
 ): ScopedSessionRow {
   const start = new Date(job.createdAt).getTime();
   const endTime = isTerminal(job.status) ? new Date(job.updatedAt).getTime() : now.getTime();
   const durationMs = Math.max(0, endTime - start);
-  const enterable = job.status === "running" && liveChildFor(liveChildren, job.jobId) !== undefined;
+  const hasLive = liveChildFor(liveChildren, job.jobId) !== undefined;
+  const hasRetained = retainedFor(retainedSnapshots, job.jobId) !== undefined;
+  const enterable =
+    (job.status === "running" && hasLive) ||
+    ((job.status === "completed" || job.status === "failed") && hasRetained);
   return {
     jobId: job.jobId,
     sessionId: job.sessionId ?? job.jobId,

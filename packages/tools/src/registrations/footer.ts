@@ -184,12 +184,14 @@ function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>
   // footer repaint O(all logs). Lifecycle writes and explicit `refresh()`
   // publish a fresh snapshot reference, so this stays authoritative over time.
   const jobs = pool.registry.snapshot();
+  const retainedSnapshots = (pool as unknown as { retainedLiveSnapshots?: Map<string, ChildLiveSnapshot> }).retainedLiveSnapshots;
   const descendants = scopeDescendants(
     (jobId) => jobs.get(jobId),
     jobs,
     rootSessionId,
     pool.liveChildren,
     new Date(),
+    retainedSnapshots,
   );
   if (descendants.length === 0) return [];
 
@@ -289,30 +291,72 @@ function openChildLiveView(
   footer: AgentFooter,
   row: FooterTreeRow | undefined,
 ): void {
-  if (!row || row.root || !row.enterable || row.status !== "running") return;
-  const control = liveChildFor(pool, row.rowId);
-  if (!control?.live) {
-    footer.setHint("This session is no longer available.");
+  if (!row || row.root || !row.enterable) return;
+  if (row.status === "running") {
+    const control = liveChildFor(pool, row.rowId);
+    if (!control?.live) {
+      footer.setHint("This session is no longer available.");
+      return;
+    }
+    const live = control.live;
+    ctx.ui.custom(
+      (tui, theme, _keybindings, done) => new AgentLiveManager({
+        tui,
+        theme: footerTheme(theme),
+        live: {
+          get snapshot() {
+            return live.snapshot;
+          },
+          subscribe: (listener) => live.subscribe(() => listener()),
+          steer: (prompt) => live.steer(prompt),
+        },
+        abort: () => control.abort(),
+        confirm: (title, message) => ctx.ui.confirm(title, message),
+        done: () => done(undefined),
+      }),
+      { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
+    );
     return;
   }
-  const live = control.live;
-  ctx.ui.custom(
-    (tui, theme, _keybindings, done) => new AgentLiveManager({
-      tui,
-      theme: footerTheme(theme),
-      live: {
-        get snapshot() {
-          return live.snapshot;
-        },
-        subscribe: (listener) => live.subscribe(() => listener()),
-        steer: (prompt) => live.steer(prompt),
-      },
-      abort: () => control.abort(),
-      confirm: (title, message) => ctx.ui.confirm(title, message),
-      done: () => done(undefined),
-    }),
-    { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
-  );
+  if (row.status === "completed" || row.status === "failed") {
+    const retained = retainedSnapshotFor(pool, row.rowId);
+    if (!retained) {
+      footer.setHint("This session is no longer available.");
+      return;
+    }
+    ctx.ui.custom(
+      (tui, theme, _keybindings, done) => new AgentLiveManager({
+        tui,
+        theme: footerTheme(theme),
+        live: {
+          get snapshot() {
+            return {
+              status: retained.status,
+              settled: true as const,
+              transcript: retained.transcript as unknown as readonly {
+                readonly id: string;
+                readonly kind: "message" | "tool";
+                readonly role?: "user" | "assistant";
+                readonly text: string;
+                readonly complete: boolean;
+                readonly toolCallId?: string;
+                readonly toolName?: string;
+                readonly args?: unknown;
+                readonly isError?: boolean;
+              }[],
+            };
+          },
+          subscribe: () => () => {},
+          steer: async () => {
+            throw new Error("not steerable");
+          },
+        } as any,
+        done: () => done(undefined),
+      }),
+      { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
+    );
+    return;
+  }
 }
 
 function footerTheme(theme: Theme): { fg: (color: string, text: string) => string } {
