@@ -114,8 +114,27 @@ export class AgentFooter implements Component {
     const info = this.getInfo();
     const pathLine = formatPathLine(info, renderWidth, this.theme);
     const statsLine = formatStatsLine(info, renderWidth, this.theme);
-    const rows = filterFooterRows(this.getRows?.() ?? [], new Date());
-    if (rows.length === 0) return [pathLine, statsLine];
+    const rawRows = this.getRows?.() ?? [];
+    const rows = filterFooterRows(rawRows, new Date());
+    if (rows.length === 0) {
+      if (this.hint && rawRows.some((row) => row.root)) {
+        // When swapped to a leaf with no descendants, keep the root anchor visible
+        // so the user can return via parent/main, and show the swapped hint.
+        const lines = [pathLine, statsLine, footerHeading(rawRows, this.theme), this.theme.fg("warning", this.hint)];
+        for (let index = 0; index < rawRows.length; index++) {
+          const row = rawRows[index]!;
+          const available = this.management ? Math.max(1, renderWidth - 2) : renderWidth;
+          const bodyText = renderTreeRow(row, index, rawRows as FooterTreeRow[], computeLastByDepth(rawRows as FooterTreeRow[]), available, this.theme);
+          const selected = index === this.selectedIndex;
+          const cursor = selected && this.management ? this.theme.fg("accent", "❯ ") : "  ";
+          const rendered = this.management ? truncateToWidth(cursor + bodyText, renderWidth, this.theme.fg("dim", "...")) : bodyText;
+          lines.push(rendered);
+        }
+        return lines;
+      }
+      if (this.hint) return [pathLine, statsLine, this.theme.fg("warning", this.hint)];
+      return [pathLine, statsLine];
+    }
 
     if (this.selectedIndex >= rows.length) this.selectedIndex = Math.max(0, rows.length - 1);
 

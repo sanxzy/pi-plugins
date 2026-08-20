@@ -324,7 +324,22 @@ function footerRowsForFocus(ctx: ExtensionContext, pool: ReturnType<typeof getCh
     new Date(),
     retainedSnapshots,
   );
-  if (descendants.length === 0) return [];
+  const isSwapped = focusSessionId !== ctx.sessionManager.getSessionId();
+  if (descendants.length === 0) {
+    if (isSwapped) {
+      const root: FooterTreeRow = {
+        rowId: focusSessionId,
+        root: true,
+        status: "active",
+        depth: 0,
+        description: `main (${focusSessionId.slice(0, 8)})`,
+        durationMs: 0,
+        enterable: false,
+      };
+      return [root];
+    }
+    return [];
+  }
   const root: FooterTreeRow = {
     rowId: focusSessionId,
     root: true,
