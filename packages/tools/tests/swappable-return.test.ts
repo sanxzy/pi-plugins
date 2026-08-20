@@ -53,7 +53,7 @@ function piDouble(): { pi: ExtensionAPI; handlers: Map<string, any>; } {
   return { handlers, pi: { on(event: string, handler: any) { handlers.set(event, handler); } } as unknown as ExtensionAPI };
 }
 
-test("phase4: returning via Alt+Left scrolls to latest and restores composer state", () => {
+test("phase4: returning via Alt+Left requests render and re-projects footer to root", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-c2-return-"));
   try {
     capturedFooterFactory = undefined;
@@ -71,10 +71,6 @@ test("phase4: returning via Alt+Left scrolls to latest and restores composer sta
     const footerData = { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 };
     let footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, footerData) as any;
 
-    // Simulate parent composer draft before swap (we mock via a simple object)
-    // The host's composer draft is not directly exposed, but we can verify that
-    // after swap and return, the footer and TUI are correctly restored and
-    // requestRender was called (which would trigger scroll to latest and composer restore)
     footer.handleInput(ALT_DOWN);
     footer.handleInput(ALT_DOWN);
     footer.handleInput(ENTER);
@@ -83,15 +79,13 @@ test("phase4: returning via Alt+Left scrolls to latest and restores composer sta
     const swap = capturedCustomFactory!({ requestRender: () => {}, terminal: { rows: 24, columns: 100 } }, { fg: (_c: string, t: string) => t }, {}, () => { hostDoneCalls++; }) as any;
 
     const callsBeforeReturn = renderCalls;
-    // Alt+Left should pop and trigger scroll to latest (via requestRender)
     swap.handleInput(ALT_LEFT);
     assert.equal(hostDoneCalls, 1, "swap should close on Alt+Left");
-    // After return, footer should be at root and TUI should have requested render (scroll)
-    // Our mock tui.requestRender should have been called at least once after return
-    // The host would scroll to latest and restore composer draft on render
-    assert.ok(renderCalls > callsBeforeReturn || hostDoneCalls === 1, "return should trigger render for scroll/composer restore");
+    assert.ok(renderCalls > callsBeforeReturn, "return via Alt+Left should request render to re-pin scroll and restore composer");
     const rowsAtRoot = footer.render(100).join("\n");
     assert.ok(rowsAtRoot.includes("child A"), "after return, footer at root shows child A");
+    // Stack should be cleared — footer should be at root, not still showing child's hint
+    assert.ok(!rowsAtRoot.includes("Viewing job-a"), "stack should be cleared, no longer viewing hint");
 
     swap.dispose?.();
     footer.dispose();
@@ -103,7 +97,7 @@ test("phase4: returning via Alt+Left scrolls to latest and restores composer sta
   }
 });
 
-test("phase4: returning via parent/main restores composer and scrolls", () => {
+test("phase4: returning via parent/main requests render and clears stack", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-c2-return-"));
   try {
     capturedFooterFactory = undefined;
@@ -132,13 +126,67 @@ test("phase4: returning via parent/main restores composer and scrolls", () => {
     const swap = capturedCustomFactory!({ requestRender: () => {}, terminal: { rows: 24, columns: 100 } }, { fg: (_c: string, t: string) => t }, {}, () => { hostDoneCalls++; }) as any;
 
     const callsBefore = renderCalls;
-    // Select parent/main (root) to return
-    footer.handleInput(ALT_DOWN); // enter management, root at 0
-    footer.handleInput(ENTER); // select root
+    footer.handleInput(ALT_DOWN);
+    footer.handleInput(ENTER);
     assert.equal(hostDoneCalls, 1, "selecting root should close swap");
-    assert.ok(renderCalls > callsBefore || hostDoneCalls === 1, "return via parent/main should trigger render");
+    assert.ok(renderCalls > callsBefore, "return via parent/main should request render to scroll to newest and restore composer");
     const rowsAtRoot = footer.render(100).join("\n");
-    assert.ok(rowsAtRoot.includes("child A"));
+    assert.ok(rowsAtRoot.includes("child A"), "after return, footer at root shows child A");
+    assert.ok(!rowsAtRoot.includes("Viewing"), "hint should be cleared after return");
+
+    swap.dispose?.();
+    footer.dispose();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    capturedFooterFactory = undefined;
+    capturedCustomFactory = undefined;
+    terminalInputHandler = undefined;
+  }
+});
+
+test("phase4: swapping to a leaf with no descendants renders root anchor and parent/main returns to root", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-return-"));
+  try {
+    capturedFooterFactory = undefined;
+    capturedCustomFactory = undefined;
+    const d = piDouble();
+    registerAgentFooter(d.pi);
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd));
+    const pool = getChildPool(cwd, "root-session");
+    const feedA = createChildLiveFeed();
+    pool.liveChildren.set("job-a", { sessionFile: join(cwd, "sessions", "job-a.jsonl"), live: feedA, steer: async () => {}, abort: async () => {} });
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "child A", subagentType: "test-agent" }));
+
+    let renderCalls = 0;
+    const tui = { requestRender: () => { renderCalls++; }, terminal: { rows: 24, columns: 100 } };
+    const footerData = { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 };
+    let footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, footerData) as any;
+
+    // Enter leaf child A (no descendants)
+    footer.handleInput(ALT_DOWN);
+    footer.handleInput(ALT_DOWN);
+    footer.handleInput(ENTER);
+    assert.ok(capturedCustomFactory, "mounted job-a leaf");
+    let hostDoneCalls = 0;
+    const swap = capturedCustomFactory!({ requestRender: () => {}, terminal: { rows: 24, columns: 100 } }, { fg: (_c: string, t: string) => t }, {}, () => { hostDoneCalls++; }) as any;
+
+    // While viewing leaf, footer should show the root anchor and viewing hint (not empty)
+    const whileViewing = footer.render(100).join("\n");
+    assert.ok(whileViewing.includes("main (job-a)"), "leaf swapped footer should render root anchor main (job-a)");
+    assert.ok(whileViewing.includes("Viewing"), "leaf swapped footer should show viewing hint");
+    // Hint should contain the viewed job identifier (job-a or truncated a)
+    assert.ok(whileViewing.includes("job-a") || whileViewing.includes("Viewing a"), "hint should reference viewed job");
+    assert.equal(hostDoneCalls, 0, "should not have auto-returned");
+
+    // Selecting parent/main via footer should return to root (this was F1: previously no-op)
+    const callsBefore = renderCalls;
+    footer.handleInput(ALT_DOWN); // enter management on leaf's footer (root anchor at index 0)
+    footer.handleInput(ENTER); // select root anchor
+    assert.equal(hostDoneCalls, 1, "selecting parent/main at leaf should close swap and return to root");
+    assert.ok(renderCalls > callsBefore, "leaf return should request render");
+    const after = footer.render(100).join("\n");
+    assert.ok(after.includes("child A"), "after leaf return, footer at root shows child A");
+    assert.ok(!after.includes("Viewing job-a"), "hint cleared after leaf return");
 
     swap.dispose?.();
     footer.dispose();
@@ -157,20 +205,16 @@ test("phase4: non-TUI modes never show swap UI", () => {
     capturedCustomFactory = undefined;
     const d = piDouble();
     registerAgentFooter(d.pi);
-    // Try with mode = "headless" (non-TUI)
     d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd, "root-session", "headless", false));
     assert.equal(capturedFooterFactory, undefined, "non-TUI mode should not set footer");
-    // Also try with hasUI false
     capturedFooterFactory = undefined;
     d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd, "root-session", "tui", false));
     assert.equal(capturedFooterFactory, undefined, "hasUI false should not set footer");
 
-    // Even if we try to manually trigger, there should be no swap
     const pool = getChildPool(cwd, "root-session");
     const feed = createChildLiveFeed();
     pool.liveChildren.set("job-a", { sessionFile: join(cwd, "sessions", "job-a.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
     pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "child A", subagentType: "test-agent" }));
-    // No footer, so no swap can be mounted
     assert.equal(capturedCustomFactory, undefined, "non-TUI should not have mounted swap");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -203,24 +247,16 @@ test("phase4: while viewing child, background parent output does not auto-return
     assert.ok(capturedCustomFactory, "mounted job-a");
     let hostDoneCalls = 0;
     const swap = capturedCustomFactory!({ requestRender: () => {}, terminal: { rows: 24, columns: 100 } }, { fg: (_c: string, t: string) => t }, {}, () => { hostDoneCalls++; }) as any;
+    const beforeContent = swap.render(100).join("\n");
+    assert.ok(beforeContent.length > 0, "swap should render transcript content while viewing");
 
-    // Simulate background parent output: emit a new message on parent's session?
-    // The parent's output is not via child feed, but we can simulate by calling
-    // pool's internal or just verify that emitting on child's feed does not auto-close
-    // The swap should stay open even after parent would have new output
-    // We simulate by emitting a message on the child's feed (but swap is already viewing that child)
-    // Instead, we test that the swap remains open after a delay and no auto-close
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(hostDoneCalls, 0, "background output should not auto-close swap");
-    assert.ok(swap.render(100).join("\n").length >= 0, "swap still renders");
-
-    // Also verify footer still shows child's context (not root)
+    const afterContent = swap.render(100).join("\n");
+    assert.ok(afterContent.length > 0, "swap should still render after background delay");
     const rowsWhileViewing = footer.render(100).join("\n");
-    // While viewing child A with no grandchildren, footer should be at least showing main (job-a) or empty?
-    // At least it should not have auto-returned to root showing child A as sibling
-    // Since we are viewing A, the footer should be scoped to A's descendants (none), so it may be empty or show main (job-a)
-    // The key is that hostDone not called
-    assert.equal(hostDoneCalls, 0);
+    assert.ok(rowsWhileViewing.includes("Viewing"), "footer should still show viewing hint, not auto-returned");
+    assert.ok(rowsWhileViewing.includes("job-a") || rowsWhileViewing.includes("Viewing a"), "hint should reference job-a");
 
     swap.dispose?.();
     footer.dispose();

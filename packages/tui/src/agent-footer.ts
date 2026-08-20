@@ -118,8 +118,8 @@ export class AgentFooter implements Component {
     const rows = filterFooterRows(rawRows, new Date());
     if (rows.length === 0) {
       if (this.hint && rawRows.some((row) => row.root)) {
-        // When swapped to a leaf with no descendants, keep the root anchor visible
-        // so the user can return via parent/main, and show the swapped hint.
+        // Swapped to a leaf with no descendants: keep the root anchor visible so
+        // the user can return via parent/main, and show the swapped hint.
         const lines = [pathLine, statsLine, footerHeading(rawRows, this.theme), this.theme.fg("warning", this.hint)];
         for (let index = 0; index < rawRows.length; index++) {
           const row = rawRows[index]!;
@@ -212,10 +212,11 @@ export class AgentFooter implements Component {
   }
 
   private enterManagement(): void {
+    const wasViewingHint = this.hint?.startsWith("Viewing");
     this.management = true;
     this.selectedIndex = 0;
     this.scrollTop = 0;
-    this.hint = undefined;
+    if (!wasViewingHint) this.hint = undefined;
     this.refresh();
   }
 
@@ -225,8 +226,16 @@ export class AgentFooter implements Component {
     this.refresh();
   }
 
+  private effectiveRows(): FooterTreeRow[] {
+    const raw = this.getRows?.() ?? [];
+    const filtered = filterFooterRows(raw, new Date());
+    if (filtered.length > 0) return filtered;
+    if (this.hint && raw.some((row) => row.root)) return raw as FooterTreeRow[];
+    return filtered;
+  }
+
   private moveSelection(step: number): void {
-    const rows = filterFooterRows(this.getRows?.() ?? [], new Date());
+    const rows = this.effectiveRows();
     if (rows.length === 0) return;
     this.hint = undefined;
     const next = Math.max(0, Math.min(rows.length - 1, this.selectedIndex + step));
@@ -239,7 +248,7 @@ export class AgentFooter implements Component {
   }
 
   private selectedRow(): FooterTreeRow | undefined {
-    return filterFooterRows(this.getRows?.() ?? [], new Date())[this.selectedIndex];
+    return this.effectiveRows()[this.selectedIndex];
   }
 
   private refresh(): void {
