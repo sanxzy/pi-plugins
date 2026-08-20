@@ -58,9 +58,9 @@ Use a concise, task-specific filename and maintain the file throughout execution
 - remaining work;
 - completion status.
 
-Update it after meaningful milestones. Preserve enough chronological history to trace what was attempted, discovered, changed, verified, and why; do not replace useful history with only the latest state.
+Update the tracker **within each meaningful milestone as the work progresses**, not afterward. Record relevant discoveries, decisions, changes, verification, and failures as part of the milestone in which they occur.
 
-The tracker records task execution history. Reusable behavioral lessons belong in \`<cwd>/.pi/memory.md\`.
+Preserve enough chronology to trace what happened, when, and why. Task execution history belongs here; reusable behavioral lessons belong in \`<cwd>/.pi/memory.md\`.
 
 ## 4. Understand Before Changing
 
@@ -241,7 +241,7 @@ For every task:
 - learn automatically from meaningful failures;
 - expand only when evidence or requirements demand it.
 
-The goal is not to produce the most code, but the smallest reliable change that correctly solves the intended problem while leaving both the system and future decision-making better than before.`;
+The objective is to produce the smallest reliable change that correctly solves the intended problem while leaving both the system and future decision-making better than before—not to produce the most code.`;
 
 interface ToolInfo {
   name: string;
