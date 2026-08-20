@@ -88,6 +88,8 @@ export { createAgentEventRegistry, canonicalJobId, MAX_RETAINED_TERMINAL_AGENTS,
 export { prepareResumeSessionFile } from "./infrastructure/sessions/resume-file.ts";
 export { scopeDescendants, scopeRegistry, sessionTreeJobs, type ScopedSessionRow, type ScopeRegistry } from "./infrastructure/sessions/scope.ts";
 export { createHostSwapController, type HostSwapController, type HostSwapTarget, type BufferedOutput } from "./infrastructure/host-swap/host-swap.ts";
+export { homeModelGroupsFile, homeModelGroupsFilePath, getModelGroups, saveModelGroups, clearModelGroupsCache, resolveActiveModel, getActiveGroup, clearRoundRobinPointers, deriveGroupContextWindow, clearActiveGroup, type ModelGroup, type ModelGroupEntry, type ModelGroupsFile, type ModelGroupMode } from "./infrastructure/model-groups/store.ts";
+export { quarantineModel, isQuarantined, clearQuarantine, getQuarantineMap } from "./infrastructure/model-groups/quarantine.ts";
 export {
   assertSessionId,
   canonicalProjectRoot,
@@ -120,6 +122,7 @@ export {
   homeSessionDir,
   homeSessionDirFromRoot,
   homeSessionManifestFile,
+  MODEL_GROUPS_FILE_NAME,
   homeProjectsDir,
   readPrivateJson,
   writePrivateJson,

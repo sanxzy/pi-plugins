@@ -20,6 +20,7 @@ export const PONYTAIL_BACKUP_SUFFIX = ".json.bak";
 export const THINKING_FILE_NAME = "thinking.json";
 export const THINKING_BACKUP_PREFIX = "thinking.";
 export const THINKING_BACKUP_SUFFIX = ".json.bak";
+export const MODEL_GROUPS_FILE_NAME = "model-groups.json";
 export const EVENTS_FILE_NAME = "events.jsonl";
 export const ERRORS_FILE_NAME = "errors.jsonl";
 export const TRANSCRIPT_FILE_NAME = "transcript.jsonl";
@@ -254,6 +255,10 @@ export function childSessionPaths(options: {
 
 export function homeGoalFile(projectId: string, rootSessionId: string): string {
   return join(homeSessionDir(projectId, rootSessionId), GOALS_FILE_NAME);
+}
+
+export function homeModelGroupsFile(): string {
+  return join(homeRoot(), MODEL_GROUPS_FILE_NAME);
 }
 
 function dailyDir(projectId: string, rootSessionId: string, localDate: string): string {
