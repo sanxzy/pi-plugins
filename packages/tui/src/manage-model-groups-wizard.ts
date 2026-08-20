@@ -1,4 +1,4 @@
-import type { Component } from "@earendil-works/pi-tui";
+import { Key, matchesKey, type Component } from "@earendil-works/pi-tui";
 
 export interface ModelGroupsWizardGroup {
   id: string;
@@ -30,8 +30,8 @@ export class ManageModelGroupsWizard implements Component {
   }
   invalidate(): void {}
   handleInput(data: string): boolean {
-    if (data === "\u001b") { this.onClose(); return true; }
-    if (data === "\r" || data === "\n") {
+    if (matchesKey(data, Key.escape)) { this.onClose(); return true; }
+    if (matchesKey(data, Key.enter)) {
       const group = this.groups[this.selected];
       if (group) {
         this.onActivate(group.id);
@@ -39,8 +39,8 @@ export class ManageModelGroupsWizard implements Component {
       }
       return true;
     }
-    if (data === "\u001b[A") { this.selected = Math.max(0, this.selected - 1); return true; }
-    if (data === "\u001b[B") { this.selected = Math.min(this.groups.length - 1, this.selected + 1); return true; }
+    if (matchesKey(data, Key.up)) { this.selected = Math.max(0, this.selected - 1); return true; }
+    if (matchesKey(data, Key.down)) { this.selected = Math.min(this.groups.length - 1, this.selected + 1); return true; }
     return false;
   }
   render(_width: number): string[] {
