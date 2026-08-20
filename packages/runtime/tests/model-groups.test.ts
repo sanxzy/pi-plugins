@@ -114,6 +114,32 @@ test("derived contextWindow is min of members", async () => {
   assert.equal(cw, 64000);
 });
 
+test("group contextWindow is persisted and caps the derived member window", async () => {
+  const { saveModelGroups, getModelGroups, deriveGroupContextWindow, clearModelGroupsCache } = await import("../src/infrastructure/model-groups/store.ts");
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      clearModelGroupsCache();
+      const saved = saveModelGroups({
+        groups: [{
+          id: "g1",
+          name: "A",
+          mode: "fallback",
+          quarantineMinutes: 5,
+          contextWindow: 32000,
+          models: [{ ref: "openai/gpt-4o" }, { ref: "openai/gpt-4o-mini" }],
+        }],
+        activeGroupId: "g1",
+      } as any);
+      assert.equal(saved.ok, true);
+      const group = getModelGroups().groups[0]! as any;
+      assert.equal(group.contextWindow, 32000);
+      const catalog = [{ provider: "openai", id: "gpt-4o", contextWindow: 128000 }, { provider: "openai", id: "gpt-4o-mini", contextWindow: 64000 }];
+      assert.equal(deriveGroupContextWindow(group, catalog), 32000);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("round-robin rotates and skips quarantined", async () => {
   const { saveModelGroups, resolveActiveModel, clearModelGroupsCache, clearRoundRobinPointers } = await import("../src/infrastructure/model-groups/store.ts");
   const { quarantineModel, clearQuarantine } = await import("../src/infrastructure/model-groups/quarantine.ts");
