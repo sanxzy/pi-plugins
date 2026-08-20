@@ -40,7 +40,15 @@ export type {
 } from "./references-setup-wizard.ts";
 export { ManageAgentModelWizard } from "./manage-agent-model-wizard.ts";
 export { ManageModelGroupsWizard } from "./manage-model-groups-wizard.ts";
-export type { ManageModelGroupsWizardOptions } from "./manage-model-groups-wizard.ts";
+export type {
+  ManageModelGroupsApplyResult,
+  ManageModelGroupsController,
+  ManageModelGroupsGroupInput,
+  ManageModelGroupsGroupItem,
+  ManageModelGroupsModelItem,
+  ManageModelGroupsResult,
+  ManageModelGroupsWizardOptions,
+} from "./manage-model-groups-wizard.ts";
 export type {
   ManageAgentModelAgentItem,
   ManageAgentModelApplyResult,

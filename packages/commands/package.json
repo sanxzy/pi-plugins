@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/lifecycle-isolation.test.ts tests/session-events.test.ts tests/phase3-manifest-lifecycle.test.ts tests/goal-command.test.ts tests/goal-lifecycle.test.ts tests/context-auto-compact.test.ts tests/compaction-logging.test.ts tests/manage-compact-threshold.test.ts tests/telegram-setup.test.ts tests/telegram-lifecycle.test.ts tests/telegram-inbound.test.ts tests/telegram-commands.test.ts tests/telegram-controls.test.ts tests/references-setup.test.ts tests/ponytail-setup.test.ts tests/manage-agent-model.test.ts tests/manage-goal.test.ts"
+    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/lifecycle-isolation.test.ts tests/session-events.test.ts tests/phase3-manifest-lifecycle.test.ts tests/goal-command.test.ts tests/goal-lifecycle.test.ts tests/context-auto-compact.test.ts tests/compaction-logging.test.ts tests/manage-compact-threshold.test.ts tests/telegram-setup.test.ts tests/telegram-lifecycle.test.ts tests/telegram-inbound.test.ts tests/telegram-commands.test.ts tests/telegram-controls.test.ts tests/references-setup.test.ts tests/ponytail-setup.test.ts tests/manage-agent-model.test.ts tests/manage-goal.test.ts tests/manage-model-groups.test.ts"
   },
   "dependencies": {
     "@xzy-ai/channels": "workspace:*",

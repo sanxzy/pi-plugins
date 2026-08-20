@@ -38,6 +38,8 @@ function controller(overrides: Partial<ManageAgentModelController> = {}): Manage
     cancel: async () => {
       await undefined;
     },
+    listGroups: async () => [],
+    activateGroup: async () => ({ ok: true, message: "Activated." }),
     ...overrides,
   };
 }
@@ -291,4 +293,53 @@ test("global step back returns to the action menu", async () => {
   assert.ok(lines(wizard).some((line) => line.includes("global agent model")));
   wizard.handleInput("\x1b"); // escape → back to action
   assert.ok(lines(wizard).some((line) => line.includes("Set / replace agent model")));
+});
+
+test("the action menu shows the active model group and activation calls activateGroup", async () => {
+  let activated: string | undefined;
+  const ctl = controller({
+    listGroups: async () => [
+      { id: "work", name: "Work", mode: "fallback", models: [{ ref: "openai/gpt-5" }], active: true },
+      { id: "side", name: "Side", mode: "round-robin", models: [{ ref: "openai/gpt-5" }], active: false },
+    ],
+    activateGroup: async (id) => {
+      activated = id;
+      return { ok: true, message: `Active model group set to "${id}".` };
+    },
+  });
+  const result = resultPromise();
+  const wizard = new ManageAgentModelWizard({ tui: tui(), theme, controller: ctl, done: result.resolve });
+  await flush();
+  assert.ok(lines(wizard).some((line) => line.includes("Active model group: Work")));
+  assert.ok(lines(wizard).some((line) => line.includes("5. Activate model group")));
+
+  // Action menu: move to "Activate model group" (index 4).
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("activate model group")));
+  assert.ok(lines(wizard).some((line) => line.includes("1. Work [fallback] ●")));
+
+  // Move down to "Side" and activate it.
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  await flush();
+  assert.equal(activated, "side");
+  assert.ok(lines(wizard).some((line) => line.includes("Active model group set to \"side\".")));
+});
+
+test("escape from the group picker returns to the action menu", async () => {
+  const ctl = controller({ listGroups: async () => [{ id: "work", name: "Work", mode: "fallback", models: [{ ref: "openai/gpt-5" }], active: false }] });
+  const wizard = new ManageAgentModelWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
+  await flush();
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("activate model group")));
+  wizard.handleInput("\x1b");
+  assert.ok(lines(wizard).some((line) => line.includes("Manage agent model")));
 });

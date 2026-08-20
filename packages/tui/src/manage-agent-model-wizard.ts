@@ -26,6 +26,15 @@ export interface ManageAgentModelThinkingItem {
   readonly label: string;
 }
 
+/** A manageable model group selectable through the wizard's group action. */
+export interface ManageAgentModelGroupItem {
+  readonly id: string;
+  readonly name: string;
+  readonly mode: "fallback" | "round-robin";
+  readonly models: ReadonlyArray<{ readonly ref: string }>;
+  readonly active: boolean;
+}
+
 /** Outcome of applying a set/remove operation. */
 export type ManageAgentModelApplyResult =
   | { readonly ok: true; readonly message: string }
@@ -49,6 +58,10 @@ export interface ManageAgentModelController {
   setGlobalModel(reference: string, thinking?: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
   /** Remove the global agent model + thinking keys from the home-root `pi-c2/config.json`. */
   removeGlobalModel(signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
+  /** Every model group from the home-scoped `model-groups.json`, with the active one flagged. */
+  listGroups(): Promise<readonly ManageAgentModelGroupItem[]>;
+  /** Activate a model group: sets `activeGroupId` (the group overrides `agents.model` in memory). */
+  activateGroup(id: string, signal?: AbortSignal): Promise<ManageAgentModelApplyResult>;
   cancel(): Promise<void>;
 }
 
@@ -59,6 +72,7 @@ type WizardStep =
   | { kind: "model" }
   | { kind: "thinking" }
   | { kind: "global" }
+  | { kind: "group" }
   | { kind: "busy"; message: string }
   | { kind: "result"; ok: boolean; message: string };
 
@@ -101,15 +115,18 @@ export class ManageAgentModelWizard implements Component {
   private agentIndex = 0;
   private modelIndex = 0;
   private thinkingIndex = 0;
+  private groupIndex = 0;
   private query = "";
   private agents: readonly ManageAgentModelAgentItem[] = [];
   private models: readonly SelectableModel[] = [];
   private thinkings: readonly ManageAgentModelThinkingItem[] = [];
+  private groups: readonly ManageAgentModelGroupItem[] = [];
   private selectedAgent: ManageAgentModelAgentItem | undefined;
   private selectedModel: SelectableModel | undefined;
   private globalModel?: string;
   private globalThinking?: string;
   private globalConfigPath?: string;
+  private activeGroupName?: string;
   private cachedLines: string[] | undefined;
   private settled = false;
   private busy = false;
@@ -134,22 +151,27 @@ export class ManageAgentModelWizard implements Component {
 
   private async load(): Promise<void> {
     try {
-      const [agents, models, global] = await Promise.all([
+      const [agents, models, global, groups] = await Promise.all([
         this.controller.listAgents(),
         this.controller.listModels(),
         this.controller.getGlobalModel(),
+        this.controller.listGroups(),
       ]);
       this.agents = agents;
       this.models = models.map((model) => ({ ...model, label: model.reference }));
       this.globalModel = global.model;
       this.globalThinking = global.thinking;
       this.globalConfigPath = global.configPath;
+      this.groups = groups;
+      this.activeGroupName = groups.find((group) => group.active)?.name;
     } catch {
       this.agents = [];
       this.models = [];
       this.globalModel = undefined;
       this.globalThinking = undefined;
       this.globalConfigPath = undefined;
+      this.groups = [];
+      this.activeGroupName = undefined;
     }
     this.refresh();
   }
@@ -164,6 +186,12 @@ export class ManageAgentModelWizard implements Component {
     const q = this.query.trim().toLowerCase();
     if (!q) return this.models;
     return this.models.filter((model) => model.label.toLowerCase().includes(q));
+  }
+
+  private filteredGroups(): readonly ManageAgentModelGroupItem[] {
+    const q = this.query.trim().toLowerCase();
+    if (!q) return this.groups;
+    return this.groups.filter((group) => `${group.name} ${group.mode} ${group.models.map((m) => m.ref).join(" ")}`.toLowerCase().includes(q));
   }
 
   render(width: number): string[] {
@@ -185,6 +213,7 @@ export class ManageAgentModelWizard implements Component {
           "Remove agent model",
           "Set / replace global agent model",
           "Remove global agent model",
+          "Activate model group",
           "Done",
         ];
         for (let i = 0; i < options.length; i++) {
@@ -194,7 +223,31 @@ export class ManageAgentModelWizard implements Component {
         if (this.globalModel) {
           add(" ", this.theme.fg("dim", `Global agent model: ${this.globalModel}${this.globalThinking ? ` · thinking ${this.globalThinking}` : ""}`));
         }
+        if (this.activeGroupName) {
+          add(" ", this.theme.fg("dim", `Active model group: ${this.activeGroupName}`));
+        }
         add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc cancel"));
+        break;
+      }
+      case "group": {
+        add(" ", this.theme.fg("accent", "Manage agent model · activate model group"));
+        add(" ", this.theme.fg("muted", "Type to filter • ↑↓ navigate • Enter select • Esc back"));
+        add(" ", this.theme.fg("text", `Filter: ${this.search.getValue()}`));
+        const filtered = this.filteredGroups();
+        if (filtered.length === 0) {
+          add(" ", this.theme.fg("muted", "No groups are defined. Use /c2-manage-model-groups to create one."));
+        } else {
+          const window = scrollWindow(this.groupIndex, filtered.length);
+          for (let i = window.start; i < window.end; i++) {
+            const group = filtered[i]!;
+            const selected = i === this.groupIndex;
+            const activeTag = group.active ? " ●" : "";
+            add(selected ? this.theme.fg("accent", "> ") : "  ", this.theme.fg(selected ? "accent" : "text", `${i + 1}. ${group.name} [${group.mode}]${activeTag} · ${group.models.map((m) => m.ref).join(", ")}`));
+          }
+          if (filtered.length > MAX_VISIBLE_ITEMS) {
+            add(" ", this.theme.fg("dim", `${window.start + 1}–${window.end} of ${filtered.length}`));
+          }
+        }
         break;
       }
       case "agent": {
@@ -304,7 +357,7 @@ export class ManageAgentModelWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.down)) {
-        this.actionIndex = Math.min(4, this.actionIndex + 1);
+        this.actionIndex = Math.min(5, this.actionIndex + 1);
         this.refresh();
         return;
       }
@@ -319,10 +372,46 @@ export class ManageAgentModelWizard implements Component {
           this.globalActionIndex = 0;
           this.step = { kind: "global" };
           this.refresh();
+        } else if (this.actionIndex === 4) {
+          this.search.setValue("");
+          this.query = "";
+          this.groupIndex = 0;
+          this.step = { kind: "group" };
+          this.refresh();
         } else {
           this.finish({ status: "saved", message: "Done." });
         }
       }
+      return;
+    }
+    if (this.step.kind === "group") {
+      if (matchesKey(data, Key.up)) {
+        this.groupIndex = Math.max(0, this.groupIndex - 1);
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.down)) {
+        this.groupIndex = Math.min(Math.max(0, this.filteredGroups().length - 1), this.groupIndex + 1);
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.escape)) {
+        this.step = { kind: "action" };
+        this.search.setValue("");
+        this.query = "";
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.enter)) {
+        const filtered = this.filteredGroups();
+        const group = filtered[this.groupIndex];
+        if (group) {
+          void this.runActivateGroup(group);
+        }
+        return;
+      }
+      this.handleSearchInput(data);
+      this.groupIndex = 0;
       return;
     }
     if (this.step.kind === "global") {
@@ -553,6 +642,19 @@ export class ManageAgentModelWizard implements Component {
     const result = await this.controller.removeModel(name, this.signal);
     if (this.settled) return;
     this.busy = false;
+    this.step = { kind: "result", ok: result.ok, message: result.message };
+    this.refresh();
+  }
+
+  private async runActivateGroup(group: ManageAgentModelGroupItem): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.step = { kind: "busy", message: `Activating model group ${group.name}…` };
+    this.refresh();
+    const result = await this.controller.activateGroup(group.id, this.signal);
+    if (this.settled) return;
+    this.busy = false;
+    if (result.ok) this.activeGroupName = group.name;
     this.step = { kind: "result", ok: result.ok, message: result.message };
     this.refresh();
   }

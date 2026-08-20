@@ -20,7 +20,9 @@ import {
   clearAgentDiscoveryCache,
   clearSettingsCache,
   createCachedAgentDiscovery,
+  getModelGroups,
   resolveSettingsForProject,
+  saveModelGroups,
   settingsConfigPath,
 } from "@xzy-ai/runtime";
 
@@ -219,6 +221,25 @@ export function createManageAgentModelController(options: ManageAgentModelContro
       }
       clearSettingsCache();
       return { ok: true, message: "Global agent model removed." };
+    },
+    async listGroups() {
+      const file = getModelGroups();
+      return file.groups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        mode: group.mode,
+        models: group.models.map((model) => ({ ref: model.ref })),
+        active: group.id === file.activeGroupId,
+      }));
+    },
+    async activateGroup(id, _signal) {
+      const file = getModelGroups();
+      const existing = file.groups.find((group) => group.id === id);
+      if (!existing) return { ok: false, message: `Unknown model group: ${id}` };
+      const saved = saveModelGroups({ groups: file.groups, activeGroupId: id });
+      if (!saved.ok) return { ok: false, message: saved.error };
+      clearSettingsCache();
+      return { ok: true, message: `Active model group set to "${existing.name}".` };
     },
     async cancel() {
       await undefined;
