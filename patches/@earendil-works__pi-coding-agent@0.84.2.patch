@@ -573,7 +573,7 @@ index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..72ad0b1a8f554941818b496a22af8fc4
      }
      getBranchSummarySettings() {
 diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
-index 6a88679e03161d2c048e2abab0041e96d214e67b..73c3b24d8d0d0cf6bf8c637a294026f66d0358cc 100644
+index 6a88679e03161d2c048e2abab0041e96d214e67b..0f3860d8304c6c9f50214511f0154567e6b35746 100644
 --- a/dist/modes/interactive/interactive-mode.js
 +++ b/dist/modes/interactive/interactive-mode.js
 @@ -361,6 +361,10 @@ export class InteractiveMode {
@@ -587,46 +587,99 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..73c3b24d8d0d0cf6bf8c637a294026f6
          this.documentContainer = new Container();
          this.documentContainer.addChild(this.headerContainer);
          this.documentContainer.addChild(this.loadedResourcesContainer);
-@@ -3088,6 +3092,58 @@ export class InteractiveMode {
+@@ -3088,6 +3092,123 @@ export class InteractiveMode {
          this.chatContainer.clear();
          this.renderSessionEntries(this.sessionManager.buildContextEntries());
      }
-+    // pi-c2 host swap: reuse parent window for child transcript (no overlay)
-+    hostSwapToSnapshot(snapshot) {
++    // pi-c2 host swap: reuse parent window for child transcript (no overlay) — reuses all parent styles
++    hostSwapToSnapshot(liveSession) {
 +        if (!this._hostSwapStack) this._hostSwapStack = [];
-+        this._hostSwapStack.push([...this.chatContainer.children]);
++        const snapshot = liveSession?.snapshot ?? liveSession;
++        const steer = liveSession?.steer;
++        this._hostSwapStack.push({ children: [...this.chatContainer.children], onSubmit: this.editor?.onSubmit, editorText: this.editor?.getText ? this.editor.getText() : "" });
 +        this.chatContainer.clear();
 +        if (!snapshot || !snapshot.transcript || snapshot.transcript.length === 0) {
 +            this.chatContainer.addChild(new Text(theme.fg("muted", snapshot?.settled ? "No transcript recorded — this child finished without activity." : "No activity yet — waiting for the child to start. Type a prompt to steer it."), 1, 0));
 +        } else {
 +            for (const entry of snapshot.transcript) {
 +                if (entry.kind === "tool") {
-+                    const name = entry.toolName ?? "tool";
-+                    this.chatContainer.addChild(new Text(theme.fg(entry.isError ? "warning" : "muted", `╠ ${name}${entry.complete ? "" : " (running)"}${entry.isError ? " (failed)" : ""}`), 1, 0));
-+                } else {
-+                    const prefix = entry.role === "user" ? "›" : "·";
-+                    const text = entry.text || (entry.role === "user" ? "user activity" : "assistant activity");
-+                    this.chatContainer.addChild(new Text(theme.fg("dim", `${prefix} ${text}`), 1, 0));
++                    const component = new ToolExecutionComponent(entry.toolName, entry.toolCallId, entry.args ?? {}, { showImages: this.settingsManager.getShowImages(), imageWidthCells: this.settingsManager.getImageWidthCells() }, this.getRegisteredToolDefinition(entry.toolName), this.ui, this.sessionManager.getCwd());
++                    component.setExpanded(this.toolOutputExpanded);
++                    if (entry.complete) {
++                        const content = entry.text ? [{ type: "text", text: entry.text }] : [];
++                        component.updateResult({ content, isError: !!entry.isError }, false);
++                    }
++                    this.chatContainer.addChild(component);
++                } else if (entry.kind === "message") {
++                    if (entry.role === "user") {
++                        if (entry.text && entry.text.trim()) {
++                            if (this.chatContainer.children.length > 0) this.chatContainer.addChild(new Spacer(1));
++                            const comp = new UserMessageComponent(entry.text, this.getMarkdownThemeWithSettings(), this.outputPad, this.getMarkdownTransformers());
++                            this.chatContainer.addChild(comp);
++                        }
++                    } else {
++                        if (entry.text && entry.text.trim()) {
++                            const msg = { role: "assistant", content: [{ type: "text", text: entry.text }], timestamp: Date.now() };
++                            const comp = new AssistantMessageComponent(msg, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers());
++                            this.chatContainer.addChild(comp);
++                        }
++                    }
 +                }
 +            }
++        }
++        if (steer && this.editor) {
++            const prevSubmit = this.editor.onSubmit;
++            this.editor.onSubmit = async (text) => {
++                text = text.trim();
++                if (!text) return;
++                if (text.startsWith("/") || text.startsWith("!")) {
++                    if (prevSubmit) return prevSubmit.call(this.editor, text);
++                    return;
++                }
++                this.editor.setText("");
++                this.editor.addToHistory?.(text);
++                try {
++                    await steer(text);
++                } catch {}
++            };
++            if (this.defaultEditor && this.defaultEditor !== this.editor) {
++                this.defaultEditor.onSubmit = this.editor.onSubmit;
++            }
++            this.editor.setText("");
 +        }
 +        this.ui.requestRender();
 +        try { this.transcriptScrollView?.scrollToBottom?.(); } catch {}
 +    }
 +    hostSwapUpdateSnapshot(snapshot) {
 +        if (!this._hostSwapStack || this._hostSwapStack.length === 0) return;
++        const snap = snapshot?.snapshot ?? snapshot;
 +        this.chatContainer.clear();
-+        if (!snapshot || !snapshot.transcript || snapshot.transcript.length === 0) {
-+            this.chatContainer.addChild(new Text(theme.fg("muted", snapshot?.settled ? "No transcript recorded — this child finished without activity." : "No activity yet — waiting for the child to start."), 1, 0));
++        if (!snap || !snap.transcript || snap.transcript.length === 0) {
++            this.chatContainer.addChild(new Text(theme.fg("muted", snap?.settled ? "No transcript recorded — this child finished without activity." : "No activity yet — waiting for the child to start."), 1, 0));
 +        } else {
-+            for (const entry of snapshot.transcript) {
++            for (const entry of snap.transcript) {
 +                if (entry.kind === "tool") {
-+                    const name = entry.toolName ?? "tool";
-+                    this.chatContainer.addChild(new Text(theme.fg(entry.isError ? "warning" : "muted", `╠ ${name}${entry.complete ? "" : " (running)"}${entry.isError ? " (failed)" : ""}`), 1, 0));
-+                } else {
-+                    const prefix = entry.role === "user" ? "›" : "·";
-+                    const text = entry.text || (entry.role === "user" ? "user activity" : "assistant activity");
-+                    this.chatContainer.addChild(new Text(theme.fg("dim", `${prefix} ${text}`), 1, 0));
++                    const component = new ToolExecutionComponent(entry.toolName, entry.toolCallId, entry.args ?? {}, { showImages: this.settingsManager.getShowImages(), imageWidthCells: this.settingsManager.getImageWidthCells() }, this.getRegisteredToolDefinition(entry.toolName), this.ui, this.sessionManager.getCwd());
++                    component.setExpanded(this.toolOutputExpanded);
++                    if (entry.complete) {
++                        const content = entry.text ? [{ type: "text", text: entry.text }] : [];
++                        component.updateResult({ content, isError: !!entry.isError }, false);
++                    }
++                    this.chatContainer.addChild(component);
++                } else if (entry.kind === "message") {
++                    if (entry.role === "user") {
++                        if (entry.text && entry.text.trim()) {
++                            if (this.chatContainer.children.length > 0) this.chatContainer.addChild(new Spacer(1));
++                            const comp = new UserMessageComponent(entry.text, this.getMarkdownThemeWithSettings(), this.outputPad, this.getMarkdownTransformers());
++                            this.chatContainer.addChild(comp);
++                        }
++                    } else {
++                        if (entry.text && entry.text.trim()) {
++                            const msg = { role: "assistant", content: [{ type: "text", text: entry.text }], timestamp: Date.now() };
++                            const comp = new AssistantMessageComponent(msg, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers());
++                            this.chatContainer.addChild(comp);
++                        }
++                    }
 +                }
 +            }
 +        }
@@ -637,7 +690,19 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..73c3b24d8d0d0cf6bf8c637a294026f6
 +        if (!this._hostSwapStack || this._hostSwapStack.length === 0) return;
 +        const prev = this._hostSwapStack.pop();
 +        this.chatContainer.clear();
-+        for (const c of prev) this.chatContainer.addChild(c);
++        const children = Array.isArray(prev) ? prev : prev.children;
++        for (const c of children) this.chatContainer.addChild(c);
++        if (prev && typeof prev === "object" && "onSubmit" in prev) {
++            if (this.editor) {
++                this.editor.onSubmit = prev.onSubmit;
++                if (prev.editorText !== undefined) {
++                    try { this.editor.setText(prev.editorText); } catch {}
++                }
++            }
++            if (this.defaultEditor && this.defaultEditor !== this.editor) {
++                this.defaultEditor.onSubmit = prev.onSubmit;
++            }
++        }
 +        this.ui.requestRender();
 +    }
 +    hostSwapDepth() {

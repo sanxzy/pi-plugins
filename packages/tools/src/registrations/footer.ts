@@ -212,13 +212,13 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         let liveUnsub: (() => void) | undefined;
         if (hostMode) {
           try {
-            hostMode.hostSwapToSnapshot((liveSession as unknown as { snapshot: unknown }).snapshot);
+            hostMode.hostSwapToSnapshot(liveSession as unknown as { snapshot: unknown });
           } catch {}
           // Keep parent window in sync with live updates while viewing a running child
           if (isRunning && liveSession.subscribe) {
             try {
               liveUnsub = liveSession.subscribe(() => {
-                try { hostMode.hostSwapUpdateSnapshot((liveSession as unknown as { snapshot: unknown }).snapshot); } catch {}
+                try { hostMode.hostSwapUpdateSnapshot(liveSession as unknown as { snapshot: unknown }); } catch {}
               });
             } catch {}
           }
