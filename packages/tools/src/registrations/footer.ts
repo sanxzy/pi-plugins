@@ -14,6 +14,7 @@ import {
   type FooterTreeRow,
 } from "@xzy-ai/tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
+import { Key, matchesKey } from "@earendil-works/pi-tui";
 import { createHostSwapController, getChildPool, scopeDescendants } from "@xzy-ai/runtime";
 import type { ChildLiveSnapshot } from "@xzy-ai/core";
 
@@ -309,7 +310,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         // correctly (pop+hint), so we must not intercept it here; otherwise we would
         // only close the overlay without popping the stack. For running, the host
         // swap primitive handles the pop.
-        if (viewStack.length > 0 && typeof data === "string" && data.includes("\x1bb")) {
+        if (viewStack.length > 0 && typeof data === "string" && matchesKey(data, Key.alt(Key.left))) {
           const top = viewStack[viewStack.length - 1]!;
           const isSettledTop = top.status === "completed" || top.status === "failed";
           if (isSettledTop) {
