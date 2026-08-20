@@ -26,6 +26,7 @@ export { registerManageCompactThreshold, parseCompactThreshold, setCompactThresh
 export { createManageAgentModelController } from "./registrations/manage-agent-model.ts";
 export type { ManageAgentModelControllerOptions } from "./registrations/manage-agent-model.ts";
 export { registerManageGoal } from "./registrations/manage-goal-command.ts";
+export { registerManageModelGroupsCommand } from "./registrations/manage-model-groups.ts";
 export { createManageGoalController } from "./registrations/manage-goal.ts";
 export type { ManageGoalControllerOptions } from "./registrations/manage-goal.ts";
 export {

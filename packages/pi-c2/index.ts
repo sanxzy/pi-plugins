@@ -38,6 +38,7 @@ import {
   registerNotifyEntry,
   registerContextAutoCompact,
   createDefaultTelegramCommandExpander,
+  registerManageModelGroupsCommand,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import { registerChildExtensionFactory, registerChildPonytailTools, registerChildThinkingTool } from "@xzy-ai/runtime";
@@ -96,6 +97,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerTelegramSetup(pi, { getCommands: getMenuCommands });
   registerReferencesSetup(pi);
   registerManageAgentModel(pi);
+  registerManageModelGroupsCommand(pi);
   registerManageCompactThreshold(pi);
   registerCompactionLogging(pi);
   registerTelegramClear(pi);
