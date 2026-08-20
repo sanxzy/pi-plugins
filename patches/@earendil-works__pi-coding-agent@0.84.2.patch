@@ -573,7 +573,7 @@ index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..72ad0b1a8f554941818b496a22af8fc4
      }
      getBranchSummarySettings() {
 diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
-index 6a88679e03161d2c048e2abab0041e96d214e67b..0f3860d8304c6c9f50214511f0154567e6b35746 100644
+index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff998f4055 100644
 --- a/dist/modes/interactive/interactive-mode.js
 +++ b/dist/modes/interactive/interactive-mode.js
 @@ -361,6 +361,10 @@ export class InteractiveMode {
@@ -587,7 +587,23 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0f3860d8304c6c9f50214511f0154567
          this.documentContainer = new Container();
          this.documentContainer.addChild(this.headerContainer);
          this.documentContainer.addChild(this.loadedResourcesContainer);
-@@ -3088,6 +3092,123 @@ export class InteractiveMode {
+@@ -2518,6 +2522,15 @@ export class InteractiveMode {
+         if (!this.isInitialized) {
+             await this.init();
+         }
++        // pi-c2: while host-swapped (viewing child), suppress parent transcript mutations
++        if (this._hostSwapStack && this._hostSwapStack.length > 0) {
++            const chatEvents = new Set(["message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end", "agent_start", "agent_end", "entry_appended"]);
++            if (chatEvents.has(event.type)) {
++                this.footer.invalidate();
++                try { this.ui.requestRender(); } catch {}
++                return;
++            }
++        }
+         this.footer.invalidate();
+         switch (event.type) {
+             case "agent_start":
+@@ -3088,6 +3101,139 @@ export class InteractiveMode {
          this.chatContainer.clear();
          this.renderSessionEntries(this.sessionManager.buildContextEntries());
      }
@@ -689,9 +705,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0f3860d8304c6c9f50214511f0154567
 +    hostSwapRestore() {
 +        if (!this._hostSwapStack || this._hostSwapStack.length === 0) return;
 +        const prev = this._hostSwapStack.pop();
-+        this.chatContainer.clear();
-+        const children = Array.isArray(prev) ? prev : prev.children;
-+        for (const c of children) this.chatContainer.addChild(c);
++        // Restore editor state first
 +        if (prev && typeof prev === "object" && "onSubmit" in prev) {
 +            if (this.editor) {
 +                this.editor.onSubmit = prev.onSubmit;
@@ -703,7 +717,25 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0f3860d8304c6c9f50214511f0154567
 +                this.defaultEditor.onSubmit = prev.onSubmit;
 +            }
 +        }
++        // Re-render parent from its sessionManager so background output that arrived
++        // while viewing a child is not lost. Fall back to restoring saved children
++        // only if sessionManager is unavailable (tests).
++        try {
++            if (this.sessionManager?.buildContextEntries && this.renderSessionEntries) {
++                this.chatContainer.clear();
++                this.renderSessionEntries(this.sessionManager.buildContextEntries());
++            } else {
++                this.chatContainer.clear();
++                const children = Array.isArray(prev) ? prev : prev.children;
++                for (const c of children) this.chatContainer.addChild(c);
++            }
++        } catch {
++            this.chatContainer.clear();
++            const children = Array.isArray(prev) ? prev : prev.children;
++            for (const c of children) this.chatContainer.addChild(c);
++        }
 +        this.ui.requestRender();
++        try { this.transcriptScrollView?.scrollToBottom?.(); } catch {}
 +    }
 +    hostSwapDepth() {
 +        return this._hostSwapStack ? this._hostSwapStack.length : 0;
