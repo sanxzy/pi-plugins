@@ -16,6 +16,7 @@ import type {
   ManageAgentModelThinkingItem,
 } from "@xzy-ai/tui";
 import {
+  clearActiveGroup,
   clearAgentDiscoveryCache,
   clearSettingsCache,
   createCachedAgentDiscovery,
@@ -186,6 +187,7 @@ export function createManageAgentModelController(options: ManageAgentModelContro
         const sameModel = agents.model === reference;
         const sameThinking = agents.thinking === thinking;
         if (sameModel && sameThinking) {
+          clearActiveGroup();
           return { ok: true, message: `Global agent model already set to ${reference}${thinking ? `, thinking ${thinking}` : ""}; no change was needed.` };
         }
         agents.model = reference;
@@ -196,6 +198,7 @@ export function createManageAgentModelController(options: ManageAgentModelContro
         return { ok: false, message: `Could not write ${configPath}: ${error instanceof Error ? error.message : String(error)}` };
       }
       clearSettingsCache();
+      clearActiveGroup();
       return { ok: true, message: `Global agent model set to ${reference}${thinking ? `, thinking ${thinking}` : ""}.` };
     },
     async removeGlobalModel(_signal) {

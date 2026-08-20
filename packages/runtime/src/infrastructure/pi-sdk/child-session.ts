@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { resolveChildModelMapping, resolveChildThinkingMapping } from "./child-model.ts";
 import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
+import { resolveActiveModel } from "../model-groups/store.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
 import { publishSessionMcpActive, publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
@@ -361,16 +362,17 @@ async function createIsolatedChild(options: {
   if (options.mcpBridge) publishSessionMcpBridge(childContext, options.mcpBridge);
 
   // Model mapping, in resolution priority: frontmatter `model` (exact
-  // contract) > `agents.model` in the home-root `pi-c2/config.json` (exact
-  // contract) > parent model. When a configured value is present it is
-  // accepted exactly as-is and must resolve against the child catalog — an
-  // unresolvable reference fails the child with a clear message instead of
-  // silently falling back to the parent model. Only an absent value at both
-  // levels inherits the parent model.
+  // contract) > active model group (in-memory override) > `agents.model` in
+  // the home-root `pi-c2/config.json` (exact contract) > parent model.
+  // An active group, when set, overrides the global config without touching
+  // disk; quarantine is skipped via resolveActiveModel.
   let model = options.model;
+  const activeEntry = resolveActiveModel();
+  const effectiveGlobalModel = activeEntry?.ref ?? resolveSettingsForProject(options.cwd).agents.model;
+  const effectiveGlobalThinking = activeEntry?.thinking ?? resolveSettingsForProject(options.cwd).agents.thinking;
   const mapping = resolveChildModelMapping({
     frontmatterModel: discovered?.model,
-    globalModel: resolveSettingsForProject(options.cwd).agents.model,
+    globalModel: effectiveGlobalModel,
     agentName: discovered?.name ?? "",
     modelRuntime,
     globalConfigPath: settingsConfigPath(),
@@ -398,7 +400,7 @@ async function createIsolatedChild(options: {
   // SDK clamps unsupported levels to the model's range.
   const thinking = resolveChildThinkingMapping({
     frontmatterThinking: discovered?.thinking,
-    globalThinking: resolveSettingsForProject(options.cwd).agents.thinking,
+    globalThinking: effectiveGlobalThinking,
     globalConfigPath: settingsConfigPath(),
   });
   if (thinking.error) {
