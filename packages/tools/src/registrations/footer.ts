@@ -8,7 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentFooter,
-  AgentLiveManager,
+  SwapSessionView,
   type AgentFooterInfo,
   type FooterTreeLiveStats,
   type FooterTreeRow,
@@ -299,22 +299,26 @@ function openChildLiveView(
       return;
     }
     const live = control.live;
+    footer.setHint(`Viewing ${row.rowId} — Esc or ← to return`);
     ctx.ui.custom(
-      (tui, theme, _keybindings, done) => new AgentLiveManager({
+      (tui, theme, _keybindings, done) => new SwapSessionView({
         tui,
         theme: footerTheme(theme),
         live: {
           get snapshot() {
-            return live.snapshot;
+            return live.snapshot as unknown as any;
           },
           subscribe: (listener) => live.subscribe(() => listener()),
           steer: (prompt) => live.steer(prompt),
         },
         abort: () => control.abort(),
         confirm: (title, message) => ctx.ui.confirm(title, message),
-        done: () => done(undefined),
+        done: () => {
+          footer.setHint(undefined);
+          done(undefined);
+        },
       }),
-      { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
+      { overlay: true, overlayOptions: { width: "100%" } },
     );
     return;
   }
@@ -324,8 +328,9 @@ function openChildLiveView(
       footer.setHint("This session is no longer available.");
       return;
     }
+    footer.setHint(`Viewing ${row.rowId} (read-only) — Esc or ← to return`);
     ctx.ui.custom(
-      (tui, theme, _keybindings, done) => new AgentLiveManager({
+      (tui, theme, _keybindings, done) => new SwapSessionView({
         tui,
         theme: footerTheme(theme),
         live: {
@@ -351,9 +356,12 @@ function openChildLiveView(
             throw new Error("not steerable");
           },
         } as any,
-        done: () => done(undefined),
+        done: () => {
+          footer.setHint(undefined);
+          done(undefined);
+        },
       }),
-      { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
+      { overlay: true, overlayOptions: { width: "100%" } },
     );
     return;
   }

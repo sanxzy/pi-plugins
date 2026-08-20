@@ -16,6 +16,13 @@ export type {
   AgentLiveSession,
   LiveViewReason,
 } from "./agent-manager-live.ts";
+export { SwapSessionView } from "./swap-session-view.ts";
+export type {
+  SwapLiveSession,
+  SwapSessionViewOptions,
+  SwapSessionViewTheme,
+  SwapViewReason,
+} from "./swap-session-view.ts";
 export { TelegramSetupWizard } from "./telegram-setup-wizard.ts";
 export type {
   TelegramSetupWizardOptions,
