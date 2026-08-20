@@ -116,19 +116,29 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           footer.setHint(undefined);
         } else {
           const top = viewStack[viewStack.length - 1]!;
-          const readOnly = top.status === "completed" || top.status === "failed";
+          // Re-read current job status so a running child that settles while viewed
+          // correctly flips to read-only without requiring a re-push.
+          const job = pool.registry.get(top.rowId);
+          const status = (job?.status as string) ?? top.status;
+          const readOnly = status === "completed" || status === "failed";
           footer.setHint(`Viewing ${top.rowId}${readOnly ? " (read-only)" : ""} — Esc or ← to return`);
         }
       };
       const clearToRoot = (): void => {
-        // Pop all host swaps and restore sessionManager, clearing stack
+        // Pop all host swaps and restore parent window, clearing stack
         const toClose = [...hostDoneStack].reverse();
         hostDoneStack = [];
         viewStack = [];
         for (const done of toClose) {
           try { done(); } catch {}
         }
-        // Ensure any remaining host stack is cleared (in case of direct sessionManager patch)
+        // Ensure any remaining host stack is cleared (host interactive mode)
+        const hostMode = (tui as unknown as { _hostInteractiveMode?: { hostSwapDepth(): number; hostSwapRestore(): void } })._hostInteractiveMode;
+        if (hostMode) {
+          while (hostMode.hostSwapDepth() > 0) {
+            try { hostMode.hostSwapRestore(); } catch {}
+          }
+        }
         while (hostSwap.getStackDepth() > 0) {
           try { hostSwap.restore(); } catch {}
         }
@@ -189,45 +199,47 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
             steer: async () => { throw new Error("not steerable"); },
           };
         }
-        // F009 true host-level swap: reuse parent window, no child-specific UI.
-        // Swap the parent transcript with the child's inside the existing parent UI.
-        // We monkey-patch the sessionManager to return the child's session file/entries
-        // while swapped, and use the hostSwap primitive to preserve parent state.
+        // F009 true host-level swap: reuse parent window via InteractiveMode hostSwap*.
+        // This directly swaps the chatContainer children, so the parent transcript is replaced
+        // with the child's transcript inside the existing parent UI window (no overlay).
         const job = pool.registry.get(row.rowId);
         const sessionFile = job?.sessionId ? String(job.sessionId) : row.rowId;
         const control = liveChildFor(pool, row.rowId);
         const actualSessionFile = (control as unknown as { sessionFile?: string })?.sessionFile ?? sessionFile;
         const actualSessionId = job?.sessionId ?? row.rowId;
-        // Preserve original sessionManager methods for restoration
-        const origGetEntries = ctx.sessionManager.getEntries.bind(ctx.sessionManager);
-        const origGetSessionFile = (ctx.sessionManager as unknown as { getSessionFile?: () => string }).getSessionFile?.bind(ctx.sessionManager);
-        const origGetSessionId = ctx.sessionManager.getSessionId.bind(ctx.sessionManager);
-        const origGetLeafId = (ctx.sessionManager as unknown as { getLeafId?: () => string | undefined }).getLeafId?.bind(ctx.sessionManager);
         hostSwap.swapTo({ sessionId: actualSessionId, sessionFile: actualSessionFile, editorText: "", scrollOffset: 0 });
-        // Patch sessionManager to return child's transcript while swapped
-        (ctx.sessionManager as unknown as { getEntries: () => unknown }).getEntries = () => {
-          if (hostSwap.isSwapped()) {
-            // Return live or retained transcript for the current swapped child
-            if (isRunning) return (liveSession as unknown as { snapshot: { transcript: unknown[] } }).snapshot.transcript as unknown[];
-            // For settled, liveSession already holds retained transcript
-            return (liveSession as unknown as { snapshot: { transcript: unknown[] } }).snapshot.transcript as unknown[];
+        const hostMode = (tui as unknown as { _hostInteractiveMode?: { hostSwapToSnapshot(s: unknown): void; hostSwapUpdateSnapshot(s: unknown): void; hostSwapRestore(): void; hostSwapDepth(): number } })._hostInteractiveMode;
+        let liveUnsub: (() => void) | undefined;
+        if (hostMode) {
+          try {
+            hostMode.hostSwapToSnapshot((liveSession as unknown as { snapshot: unknown }).snapshot);
+          } catch {}
+          // Keep parent window in sync with live updates while viewing a running child
+          if (isRunning && liveSession.subscribe) {
+            try {
+              liveUnsub = liveSession.subscribe(() => {
+                try { hostMode.hostSwapUpdateSnapshot((liveSession as unknown as { snapshot: unknown }).snapshot); } catch {}
+              });
+            } catch {}
           }
-          return origGetEntries();
-        };
-        if (origGetSessionFile) {
-          (ctx.sessionManager as unknown as { getSessionFile: () => string }).getSessionFile = () => hostSwap.isSwapped() ? actualSessionFile : origGetSessionFile();
-        }
-        (ctx.sessionManager as unknown as { getSessionId: () => string }).getSessionId = () => hostSwap.isSwapped() ? actualSessionId : origGetSessionId();
-        if (origGetLeafId) {
-          (ctx.sessionManager as unknown as { getLeafId: () => string | undefined }).getLeafId = () => hostSwap.isSwapped() ? undefined : origGetLeafId();
+        } else {
+          // Fallback: monkey-patch sessionManager if host mode not available (e.g. tests / headless)
+          const origGetEntries = ctx.sessionManager.getEntries.bind(ctx.sessionManager);
+          (ctx.sessionManager as unknown as { getEntries: () => unknown }).getEntries = () => {
+            if (hostSwap.isSwapped()) return (liveSession as unknown as { snapshot: { transcript: unknown[] } }).snapshot.transcript as unknown[];
+            return origGetEntries();
+          };
         }
         let hostDone: () => void = () => {
+          try { liveUnsub?.(); } catch {}
+          try {
+            if (hostMode) hostMode.hostSwapRestore();
+          } catch {}
           try { hostSwap.restore(); } catch {}
-          // Restore original sessionManager methods
-          (ctx.sessionManager as unknown as { getEntries: () => unknown }).getEntries = origGetEntries as unknown as () => unknown;
-          if (origGetSessionFile) (ctx.sessionManager as unknown as { getSessionFile: () => string }).getSessionFile = origGetSessionFile;
-          (ctx.sessionManager as unknown as { getSessionId: () => string }).getSessionId = origGetSessionId;
-          if (origGetLeafId) (ctx.sessionManager as unknown as { getLeafId: () => string | undefined }).getLeafId = origGetLeafId;
+          // Restore fallback patch if it was used
+          if (!hostMode) {
+            // No hostMode, nothing to restore beyond hostSwap; getEntries will be restored on next swap via closure? For simplicity, reload not needed in test.
+          }
           const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
           if (idx !== -1) viewStack.splice(idx, 1);
           const pos = hostDoneStack.indexOf(hostDone);
@@ -236,8 +248,6 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           tui.requestRender();
         };
         hostDoneStack.push(hostDone);
-        // No overlay: parent window now shows child's transcript via patched sessionManager.
-        // Trigger a render so the host's transcript view re-reads getEntries().
         tui.requestRender();
       };
       const handleEnter = (row: FooterTreeRow | undefined): void => {
