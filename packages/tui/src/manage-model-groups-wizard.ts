@@ -1,24 +1,32 @@
 import type { Component } from "@earendil-works/pi-tui";
-import { getModelGroups, saveModelGroups, type ModelGroup, deriveGroupContextWindow } from "@xzy-ai/runtime";
+
+export interface ModelGroupsWizardGroup {
+  id: string;
+  name: string;
+  mode: string;
+  quarantineMinutes: number;
+  models: Array<{ ref: string; thinking?: string; reasoning?: boolean }>;
+  contextWindow?: number;
+}
 
 export interface ManageModelGroupsWizardOptions {
-  theme?: unknown;
+  groups: ModelGroupsWizardGroup[];
+  activeGroupId?: string;
+  onActivate: (id: string) => void;
   onClose: () => void;
-  modelRegistry?: { getAvailable(): Array<{ provider: string; id: string; contextWindow?: number }> };
 }
 
 export class ManageModelGroupsWizard implements Component {
-  private groups: ModelGroup[];
+  private groups: ModelGroupsWizardGroup[];
   private activeGroupId?: string;
   private selected = 0;
+  private onActivate: (id: string) => void;
   private onClose: () => void;
-  private modelRegistry?: { getAvailable(): Array<{ provider: string; id: string; contextWindow?: number }> };
   constructor(options: ManageModelGroupsWizardOptions) {
+    this.groups = options.groups;
+    this.activeGroupId = options.activeGroupId;
+    this.onActivate = options.onActivate;
     this.onClose = options.onClose;
-    this.modelRegistry = options.modelRegistry;
-    const file = getModelGroups();
-    this.groups = file.groups;
-    this.activeGroupId = file.activeGroupId;
   }
   invalidate(): void {}
   handleInput(data: string): boolean {
@@ -26,7 +34,7 @@ export class ManageModelGroupsWizard implements Component {
     if (data === "\r" || data === "\n") {
       const group = this.groups[this.selected];
       if (group) {
-        saveModelGroups({ groups: this.groups, activeGroupId: group.id });
+        this.onActivate(group.id);
         this.activeGroupId = group.id;
       }
       return true;
@@ -35,7 +43,7 @@ export class ManageModelGroupsWizard implements Component {
     if (data === "\u001b[B") { this.selected = Math.min(this.groups.length - 1, this.selected + 1); return true; }
     return false;
   }
-  render(width: number): string[] {
+  render(_width: number): string[] {
     const lines: string[] = [];
     lines.push("Model Groups (Enter to activate, Esc to close)");
     if (this.groups.length === 0) {
@@ -47,11 +55,7 @@ export class ManageModelGroupsWizard implements Component {
       const isActive = g.id === this.activeGroupId;
       const prefix = i === this.selected ? "› " : "  ";
       const activeMark = isActive ? "● " : "○ ";
-      let cw = "";
-      if (this.modelRegistry) {
-        const derived = deriveGroupContextWindow(g, this.modelRegistry.getAvailable());
-        if (derived) cw = ` cw:${derived}`;
-      }
+      const cw = g.contextWindow ? ` cw:${g.contextWindow}` : "";
       lines.push(`${prefix}${activeMark}${g.name} [${g.mode}] ${g.models.map((m)=>m.ref).join(", ")}${cw}`);
     }
     return lines;
