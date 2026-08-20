@@ -305,13 +305,21 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       const stopInput = ctx.ui.onTerminalInput((data) => {
         if (footer.handleInput(data)) return { consume: true };
         // F009 host swap: Alt+Left while viewing child pops one level via host primitive.
-        // Footer handleInput returns false when not in management, so we handle host swap here.
+        // For settled (completed/failed) the SwapSessionView already handles Alt+Left
+        // correctly (pop+hint), so we must not intercept it here; otherwise we would
+        // only close the overlay without popping the stack. For running, the host
+        // swap primitive handles the pop.
         if (viewStack.length > 0 && typeof data === "string" && data.includes("\x1bb")) {
+          const top = viewStack[viewStack.length - 1]!;
+          const isSettledTop = top.status === "completed" || top.status === "failed";
+          if (isSettledTop) {
+            // Let SwapSessionView handle Alt+Left for settled (it pops viewStack correctly)
+            return { consume: false, data };
+          }
           const topDone = hostDoneStack[hostDoneStack.length - 1];
           if (topDone) {
             try { topDone(); } catch {}
           } else {
-            // Fallback: restore host swap directly if no overlay done
             try { hostSwap.restore(); } catch {}
             viewStack.pop();
             updateFooterHint();
