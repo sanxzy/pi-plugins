@@ -14,7 +14,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { resolveChildModelMapping, resolveChildThinkingMapping } from "./child-model.ts";
 import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
-import { resolveActiveModel } from "../model-groups/store.ts";
+import { getActiveGroup, resolveActiveModel } from "../model-groups/store.ts";
+import { quarantineModel } from "../model-groups/quarantine.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
 import { publishSessionMcpActive, publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
