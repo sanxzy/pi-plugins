@@ -8,7 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentFooter,
-  AgentLiveManager,
+  SwapSessionView,
   type AgentFooterInfo,
   type FooterTreeLiveStats,
   type FooterTreeRow,
@@ -90,12 +90,143 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         return info;
       };
       const subscribeTree = subscribeFooterTree(pool, requestRepaint);
-      const footer = new AgentFooter({
+      let footer: AgentFooter;
+      // Stack for swappable parent session: each entry is a viewable row that is currently focused.
+      // The footer is re-projected to the top of the stack; an empty stack means the root parent.
+      let viewStack: FooterTreeRow[] = [];
+      let hostDoneStack: Array<() => void> = [];
+      const currentFocusId = (): string => {
+        if (viewStack.length === 0) return ctx.sessionManager.getSessionId();
+        const topRow = viewStack[viewStack.length - 1]!;
+        // Row id is the job id; the descendant projection is keyed by session id.
+        const job = pool.registry.get(topRow.rowId);
+        return job?.sessionId ?? topRow.rowId;
+      };
+      const updateFooterHint = (): void => {
+        if (viewStack.length === 0) {
+          footer.setHint(undefined);
+        } else {
+          const top = viewStack[viewStack.length - 1]!;
+          const readOnly = top.status === "completed" || top.status === "failed";
+          footer.setHint(`Viewing ${top.rowId}${readOnly ? " (read-only)" : ""} — Esc or ← to return`);
+        }
+      };
+      const clearToRoot = (): void => {
+        // Close all swap overlays from top to bottom
+        const toClose = [...hostDoneStack];
+        hostDoneStack = [];
+        viewStack = [];
+        for (const done of toClose) {
+          try { done(); } catch {}
+        }
+        footer.setHint(undefined);
+        tui.requestRender();
+      };
+      const pushSwap = (row: FooterTreeRow): void => {
+        // Guard: only viewable rows are pushed; caller ensures enterable
+        viewStack.push(row);
+        updateFooterHint();
+        tui.requestRender();
+        const isRunning = row.status === "running";
+        let liveSession: any;
+        let abort: (() => Promise<void>) | undefined;
+        if (isRunning) {
+          const control = liveChildFor(pool, row.rowId);
+          if (!control?.live) {
+            footer.setHint("This session is no longer available.");
+            viewStack.pop();
+            updateFooterHint();
+            tui.requestRender();
+            return;
+          }
+          liveSession = {
+            get snapshot() { return (control.live as any).snapshot as any; },
+            subscribe: (listener: () => void) => (control.live as any).subscribe(() => listener()),
+            steer: (prompt: string) => (control.live as any).steer(prompt),
+          };
+          abort = () => control.abort();
+        } else {
+          const retained = retainedSnapshotFor(pool, row.rowId);
+          if (!retained) {
+            footer.setHint("This session is no longer available.");
+            viewStack.pop();
+            updateFooterHint();
+            tui.requestRender();
+            return;
+          }
+          liveSession = {
+            get snapshot() {
+              return {
+                status: retained.status,
+                settled: true as const,
+                transcript: retained.transcript as unknown as readonly {
+                  readonly id: string;
+                  readonly kind: "message" | "tool";
+                  readonly role?: "user" | "assistant";
+                  readonly text: string;
+                  readonly complete: boolean;
+                  readonly toolCallId?: string;
+                  readonly toolName?: string;
+                  readonly args?: unknown;
+                  readonly isError?: boolean;
+                }[],
+              };
+            },
+            subscribe: () => () => {},
+            steer: async () => { throw new Error("not steerable"); },
+          };
+        }
+        let hostDone: () => void = () => {};
+        ctx.ui.custom(
+          (tui2, theme2, _keybindings, done) => {
+            hostDone = () => done(undefined);
+            hostDoneStack.push(hostDone);
+            return new SwapSessionView({
+              tui: tui2,
+              theme: footerTheme(theme2 as Theme),
+              live: liveSession,
+              abort,
+              confirm: (title, message) => ctx.ui.confirm(title, message),
+              done: (reason) => {
+                // Swap view requested close (Esc, ←, Alt+Left). Pop one level.
+                // If this swap is still the top of the stack, pop it; otherwise clear stale entry.
+                const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
+                if (idx !== -1) {
+                  // Remove this row and any rows above it (should be top)
+                  viewStack.splice(idx, 1);
+                  const pos = hostDoneStack.indexOf(hostDone);
+                  if (pos !== -1) hostDoneStack.splice(pos, 1);
+                }
+                // If reason is from Alt+Left or back/escape, we already popped this level.
+                // Update hint to new top or clear.
+                updateFooterHint();
+                tui.requestRender();
+                // Close the host overlay for this level
+                try { hostDone(); } catch {}
+              },
+            });
+          },
+          { overlay: true, overlayOptions: { width: "100%" } },
+        );
+      };
+      const handleEnter = (row: FooterTreeRow | undefined): void => {
+        if (!row) return;
+        if (row.root) {
+          clearToRoot();
+          return;
+        }
+        if (!row.enterable) {
+          footer.setHint("This session is not enterable right now.");
+          return;
+        }
+        pushSwap(row);
+      };
+      footer = new AgentFooter({
         tui,
         theme: footerTheme(theme),
         getInfo: () => getCachedInfo(),
-        getRows: () => footerRows(ctx, pool),
-        onEnter: (row) => openChildLiveView(ctx, pool, footer, row),
+        getRows: () => footerRowsForFocus(ctx, pool, currentFocusId()),
+        onEnter: handleEnter,
         dispose: () => {
           if (repaintTimer !== undefined) {
             clearTimeout(repaintTimer);
@@ -109,6 +240,11 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // keys are consumed here (never reaching the composer); all other input
       // passes through unchanged.
       const stopInput = ctx.ui.onTerminalInput((data) => {
+        // When a swap is active, Alt+Left should pop one level via the swap view's own handler.
+        // However if the footer is in management mode, its Alt+Left exits management and should not also pop.
+        // Let the swap view handle Alt+Left first when not in management; footer input listener runs before focused component,
+        // but our SwapSessionView also handles Alt+Left. To avoid double handling, we let footer consume Alt+Left only when in management.
+        // The footer.handleInput already checks management; outside management it returns false, so swap will receive it.
         if (footer.handleInput(data)) return { consume: true };
         return { consume: false, data };
       });
@@ -177,28 +313,39 @@ function subscribeFooterTree(
 }
 
 /** Project the root session's descendant scope into footer tree rows. */
-function footerRows(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>): FooterTreeRow[] {
-  const rootSessionId = ctx.sessionManager.getSessionId();
-  // Consume the in-memory registry snapshot: `pool.registry.all()`/`get()`
-  // rescan and re-parse every home event log synchronously, which made every
-  // footer repaint O(all logs). Lifecycle writes and explicit `refresh()`
-  // publish a fresh snapshot reference, so this stays authoritative over time.
+function footerRowsForFocus(ctx: ExtensionContext, pool: ReturnType<typeof getChildPool>, focusSessionId: string): FooterTreeRow[] {
   const jobs = pool.registry.snapshot();
+  const retainedSnapshots = (pool as unknown as { retainedLiveSnapshots?: Map<string, ChildLiveSnapshot> }).retainedLiveSnapshots;
   const descendants = scopeDescendants(
     (jobId) => jobs.get(jobId),
     jobs,
-    rootSessionId,
+    focusSessionId,
     pool.liveChildren,
     new Date(),
+    retainedSnapshots,
   );
-  if (descendants.length === 0) return [];
-
+  const isSwapped = focusSessionId !== ctx.sessionManager.getSessionId();
+  if (descendants.length === 0) {
+    if (isSwapped) {
+      const root: FooterTreeRow = {
+        rowId: focusSessionId,
+        root: true,
+        status: "active",
+        depth: 0,
+        description: `main (${focusSessionId.slice(0, 8)})`,
+        durationMs: 0,
+        enterable: false,
+      };
+      return [root];
+    }
+    return [];
+  }
   const root: FooterTreeRow = {
-    rowId: rootSessionId,
+    rowId: focusSessionId,
     root: true,
     status: "active",
     depth: 0,
-    description: "main",
+    description: focusSessionId === ctx.sessionManager.getSessionId() ? "main" : `main (${focusSessionId.slice(0, 8)})`,
     durationMs: 0,
     enterable: false,
   };
@@ -280,39 +427,6 @@ function settledMs(job: { updatedAt: string } | undefined): number | undefined {
 
 function isTerminal(status: string): boolean {
   return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted";
-}
-
-/** Mount a focused live child view without changing the host session. */
-function openChildLiveView(
-  ctx: ExtensionContext,
-  pool: ReturnType<typeof getChildPool>,
-  footer: AgentFooter,
-  row: FooterTreeRow | undefined,
-): void {
-  if (!row || row.root || !row.enterable || row.status !== "running") return;
-  const control = liveChildFor(pool, row.rowId);
-  if (!control?.live) {
-    footer.setHint("This session is no longer available.");
-    return;
-  }
-  const live = control.live;
-  ctx.ui.custom(
-    (tui, theme, _keybindings, done) => new AgentLiveManager({
-      tui,
-      theme: footerTheme(theme),
-      live: {
-        get snapshot() {
-          return live.snapshot;
-        },
-        subscribe: (listener) => live.subscribe(() => listener()),
-        steer: (prompt) => live.steer(prompt),
-      },
-      abort: () => control.abort(),
-      confirm: (title, message) => ctx.ui.confirm(title, message),
-      done: () => done(undefined),
-    }),
-    { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
-  );
 }
 
 function footerTheme(theme: Theme): { fg: (color: string, text: string) => string } {

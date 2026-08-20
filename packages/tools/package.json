@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/question.test.ts tests/question-render.test.ts tests/tool-render.test.ts tests/background-gate.test.ts tests/footer.test.ts tests/registrations-isolation.test.ts tests/telegram.test.ts tests/telegram-hardening.test.ts tests/goal-tools.test.ts tests/web-fetch.test.ts tests/web-search.test.ts tests/web-settings.test.ts tests/wiki.test.ts tests/knowledge-search.test.ts tests/bm25.test.ts tests/wiki-history.test.ts tests/wiki-discovery-history.test.ts tests/agent-list.test.ts tests/ponytail-ticket.test.ts tests/ponytail-write-edit.test.ts tests/write-markdown.test.ts tests/edit-markdown.test.ts tests/markdown-matrix.test.ts"
+    "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/question.test.ts tests/question-render.test.ts tests/tool-render.test.ts tests/background-gate.test.ts tests/footer.test.ts tests/registrations-isolation.test.ts tests/telegram.test.ts tests/telegram-hardening.test.ts tests/goal-tools.test.ts tests/web-fetch.test.ts tests/web-search.test.ts tests/web-settings.test.ts tests/wiki.test.ts tests/knowledge-search.test.ts tests/bm25.test.ts tests/wiki-history.test.ts tests/wiki-discovery-history.test.ts tests/agent-list.test.ts tests/ponytail-ticket.test.ts tests/ponytail-write-edit.test.ts tests/write-markdown.test.ts tests/edit-markdown.test.ts tests/markdown-matrix.test.ts tests/swappable-swap.test.ts tests/swappable-stack.test.ts tests/swappable-return.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.2",
