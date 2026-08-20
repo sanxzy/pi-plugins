@@ -8,7 +8,6 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentFooter,
-  SwapSessionView,
   type AgentFooterInfo,
   type FooterTreeLiveStats,
   type FooterTreeRow,
@@ -98,14 +97,15 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       let hostDoneStack: Array<() => void> = [];
       // F009 host swap primitive: rebinds main transcript/composer to child session file+live handle.
       // Preserves parent editor/scroll in memory and buffers background output while swapped.
+      const rootSessionId = ctx.sessionManager.getSessionId();
       const hostSwap = createHostSwapController({
-        sessionId: ctx.sessionManager.getSessionId(),
+        sessionId: rootSessionId,
         sessionFile: (ctx.sessionManager as unknown as { getSessionFile?: () => string }).getSessionFile?.() ?? "",
         editorText: "",
         scrollOffset: 0,
       });
       const currentFocusId = (): string => {
-        if (viewStack.length === 0) return ctx.sessionManager.getSessionId();
+        if (viewStack.length === 0) return rootSessionId;
         const topRow = viewStack[viewStack.length - 1]!;
         // Row id is the job id; the descendant projection is keyed by session id.
         const job = pool.registry.get(topRow.rowId);
@@ -121,16 +121,16 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         }
       };
       const clearToRoot = (): void => {
-        // Close all swap overlays from top to bottom and restore host swap stack to root
-        const toClose = [...hostDoneStack];
+        // Pop all host swaps and restore sessionManager, clearing stack
+        const toClose = [...hostDoneStack].reverse();
         hostDoneStack = [];
-        // Restore host swap stack fully to root (pop until empty)
-        while (hostSwap.getStackDepth() > 0) {
-          try { hostSwap.restore(); } catch {}
-        }
         viewStack = [];
         for (const done of toClose) {
           try { done(); } catch {}
+        }
+        // Ensure any remaining host stack is cleared (in case of direct sessionManager patch)
+        while (hostSwap.getStackDepth() > 0) {
+          try { hostSwap.restore(); } catch {}
         }
         footer.setHint(undefined);
         tui.requestRender();
@@ -189,89 +189,56 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
             steer: async () => { throw new Error("not steerable"); },
           };
         }
-        // F009 host-level swap for running child: rebind host main window via primitive.
-        // For compatibility with existing overlay tests, also mount the SwapSessionView overlay
-        // with full width so the swappable-swap tests still see a 100% overlay. The host
-        // swap is the true primitive; the overlay is a visual confirmation for F008.
-        if (isRunning) {
-          const job = pool.registry.get(row.rowId);
-          const sessionFile = job?.sessionId ? String(job.sessionId) : row.rowId;
-          const control = liveChildFor(pool, row.rowId);
-          const actualSessionFile = (control as unknown as { sessionFile?: string })?.sessionFile ?? sessionFile;
-          const actualSessionId = job?.sessionId ?? row.rowId;
-          hostSwap.swapTo({ sessionId: actualSessionId, sessionFile: actualSessionFile, editorText: "", scrollOffset: 0 });
-          let hostDone: () => void = () => {
-            try { hostSwap.restore(); } catch {}
-            const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
-            if (idx !== -1) viewStack.splice(idx, 1);
-            const pos = hostDoneStack.indexOf(hostDone);
-            if (pos !== -1) hostDoneStack.splice(pos, 1);
-            updateFooterHint();
-            tui.requestRender();
-          };
-          hostDoneStack.push(hostDone);
-          // Mount overlay as well for F008 test compatibility (full window).
-          // This will be removed once F009 tests are updated to check host swap only.
-          let overlayDone: () => void = () => {};
-          ctx.ui.custom(
-            (tui2, theme2, _keybindings, done) => {
-              overlayDone = () => done(undefined);
-              // Host done and overlay done are linked: closing overlay also restores host swap.
-              const originalHostDone = hostDone;
-              hostDone = () => {
-                try { originalHostDone(); } catch {}
-                try { overlayDone(); } catch {}
-              };
-              hostDoneStack[hostDoneStack.length - 1] = hostDone;
-              return new SwapSessionView({
-                tui: tui2,
-                theme: footerTheme(theme2 as Theme),
-                live: liveSession,
-                abort,
-                confirm: (title, message) => ctx.ui.confirm(title, message),
-                done: (reason) => {
-                  const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
-                  if (idx !== -1) {
-                    viewStack.splice(idx, 1);
-                    const pos = hostDoneStack.indexOf(hostDone);
-                    if (pos !== -1) hostDoneStack.splice(pos, 1);
-                  }
-                  updateFooterHint();
-                  tui.requestRender();
-                  try { hostDone(); } catch {}
-                },
-              });
-            },
-            { overlay: true, overlayOptions: { width: "100%" } },
-          );
-        } else {
-          let hostDone: () => void = () => {};
-          ctx.ui.custom(
-            (tui2, theme2, _keybindings, done) => {
-              hostDone = () => done(undefined);
-              hostDoneStack.push(hostDone);
-              return new SwapSessionView({
-                tui: tui2,
-                theme: footerTheme(theme2 as Theme),
-                live: liveSession,
-                abort,
-                confirm: (title, message) => ctx.ui.confirm(title, message),
-                done: (reason) => {
-                  const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
-                  if (idx !== -1) {
-                    viewStack.splice(idx, 1);
-                    const pos = hostDoneStack.indexOf(hostDone);
-                    if (pos !== -1) hostDoneStack.splice(pos, 1);
-                  }
-                  updateFooterHint();
-                  tui.requestRender();
-                  try { hostDone(); } catch {}
-                },
-              });
-            },
-            { overlay: true, overlayOptions: { width: "100%" } },
-          );
+        // F009 true host-level swap: reuse parent window, no child-specific UI.
+        // Swap the parent transcript with the child's inside the existing parent UI.
+        // We monkey-patch the sessionManager to return the child's session file/entries
+        // while swapped, and use the hostSwap primitive to preserve parent state.
+        const job = pool.registry.get(row.rowId);
+        const sessionFile = job?.sessionId ? String(job.sessionId) : row.rowId;
+        const control = liveChildFor(pool, row.rowId);
+        const actualSessionFile = (control as unknown as { sessionFile?: string })?.sessionFile ?? sessionFile;
+        const actualSessionId = job?.sessionId ?? row.rowId;
+        // Preserve original sessionManager methods for restoration
+        const origGetEntries = ctx.sessionManager.getEntries.bind(ctx.sessionManager);
+        const origGetSessionFile = (ctx.sessionManager as unknown as { getSessionFile?: () => string }).getSessionFile?.bind(ctx.sessionManager);
+        const origGetSessionId = ctx.sessionManager.getSessionId.bind(ctx.sessionManager);
+        const origGetLeafId = (ctx.sessionManager as unknown as { getLeafId?: () => string | undefined }).getLeafId?.bind(ctx.sessionManager);
+        hostSwap.swapTo({ sessionId: actualSessionId, sessionFile: actualSessionFile, editorText: "", scrollOffset: 0 });
+        // Patch sessionManager to return child's transcript while swapped
+        (ctx.sessionManager as unknown as { getEntries: () => unknown }).getEntries = () => {
+          if (hostSwap.isSwapped()) {
+            // Return live or retained transcript for the current swapped child
+            if (isRunning) return (liveSession as unknown as { snapshot: { transcript: unknown[] } }).snapshot.transcript as unknown[];
+            // For settled, liveSession already holds retained transcript
+            return (liveSession as unknown as { snapshot: { transcript: unknown[] } }).snapshot.transcript as unknown[];
+          }
+          return origGetEntries();
+        };
+        if (origGetSessionFile) {
+          (ctx.sessionManager as unknown as { getSessionFile: () => string }).getSessionFile = () => hostSwap.isSwapped() ? actualSessionFile : origGetSessionFile();
         }
+        (ctx.sessionManager as unknown as { getSessionId: () => string }).getSessionId = () => hostSwap.isSwapped() ? actualSessionId : origGetSessionId();
+        if (origGetLeafId) {
+          (ctx.sessionManager as unknown as { getLeafId: () => string | undefined }).getLeafId = () => hostSwap.isSwapped() ? undefined : origGetLeafId();
+        }
+        let hostDone: () => void = () => {
+          try { hostSwap.restore(); } catch {}
+          // Restore original sessionManager methods
+          (ctx.sessionManager as unknown as { getEntries: () => unknown }).getEntries = origGetEntries as unknown as () => unknown;
+          if (origGetSessionFile) (ctx.sessionManager as unknown as { getSessionFile: () => string }).getSessionFile = origGetSessionFile;
+          (ctx.sessionManager as unknown as { getSessionId: () => string }).getSessionId = origGetSessionId;
+          if (origGetLeafId) (ctx.sessionManager as unknown as { getLeafId: () => string | undefined }).getLeafId = origGetLeafId;
+          const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
+          if (idx !== -1) viewStack.splice(idx, 1);
+          const pos = hostDoneStack.indexOf(hostDone);
+          if (pos !== -1) hostDoneStack.splice(pos, 1);
+          updateFooterHint();
+          tui.requestRender();
+        };
+        hostDoneStack.push(hostDone);
+        // No overlay: parent window now shows child's transcript via patched sessionManager.
+        // Trigger a render so the host's transcript view re-reads getEntries().
+        tui.requestRender();
       };
       const handleEnter = (row: FooterTreeRow | undefined): void => {
         if (!row) return;
@@ -305,28 +272,35 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // passes through unchanged.
       const stopInput = ctx.ui.onTerminalInput((data) => {
         if (footer.handleInput(data)) return { consume: true };
-        // F009 host swap: Alt+Left while viewing child pops one level via host primitive.
-        // For settled (completed/failed) the SwapSessionView already handles Alt+Left
-        // correctly (pop+hint), so we must not intercept it here; otherwise we would
-        // only close the overlay without popping the stack. For running, the host
-        // swap primitive handles the pop.
-        if (viewStack.length > 0 && typeof data === "string" && matchesKey(data, Key.alt(Key.left))) {
-          const top = viewStack[viewStack.length - 1]!;
-          const isSettledTop = top.status === "completed" || top.status === "failed";
-          if (isSettledTop) {
-            // Let SwapSessionView handle Alt+Left for settled (it pops viewStack correctly)
-            return { consume: false, data };
+        // F009 true host-level swap: parent window is reused, no overlay.
+        // Handle close/abort keys directly when viewing via host swap.
+        if (viewStack.length > 0 && typeof data === "string") {
+          if (matchesKey(data, Key.alt(Key.left)) || matchesKey(data, Key.escape) || matchesKey(data, Key.left)) {
+            const topDone = hostDoneStack[hostDoneStack.length - 1];
+            if (topDone) {
+              try { topDone(); } catch {}
+            } else {
+              try { hostSwap.restore(); } catch {}
+              viewStack.pop();
+              updateFooterHint();
+              tui.requestRender();
+            }
+            return { consume: true };
           }
-          const topDone = hostDoneStack[hostDoneStack.length - 1];
-          if (topDone) {
-            try { topDone(); } catch {}
-          } else {
-            try { hostSwap.restore(); } catch {}
-            viewStack.pop();
-            updateFooterHint();
-            tui.requestRender();
+          if (matchesKey(data, Key.alt("x"))) {
+            const top = viewStack[viewStack.length - 1];
+            if (top?.status === "running") {
+              const control = liveChildFor(pool, top.rowId);
+              void ctx.ui.confirm("Cancel child", "Abort this child agent? Its work is discarded.").then((accepted) => {
+                if (!accepted || !control?.abort) return;
+                void control.abort().then(() => {
+                  // Keep viewing; child will settle and footer will update. No auto-close.
+                  tui.requestRender();
+                });
+              });
+            }
+            return { consume: true };
           }
-          return { consume: true };
         }
         return { consume: false, data };
       });
@@ -406,7 +380,10 @@ function footerRowsForFocus(ctx: ExtensionContext, pool: ReturnType<typeof getCh
     new Date(),
     retainedSnapshots,
   );
-  const isSwapped = focusSessionId !== ctx.sessionManager.getSessionId();
+  // Use rootSessionId stored at registration time (or pool.rootSessionId) instead of
+  // ctx.sessionManager.getSessionId() which is patched to child's id while swapped.
+  const rootSessionId = (pool as unknown as { rootSessionId?: string }).rootSessionId ?? ctx.sessionManager.getSessionId();
+  const isSwapped = focusSessionId !== rootSessionId;
   if (descendants.length === 0) {
     if (isSwapped) {
       const root: FooterTreeRow = {

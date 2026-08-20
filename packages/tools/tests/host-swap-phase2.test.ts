@@ -46,7 +46,7 @@ test("phase2: Alt+Left via terminal pops running host-swapped child and clears h
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test("phase2: Alt+Left on settled child pops via overlay and clears hint (F1)", () => {
+test("phase2: Alt+Left on settled child pops via host swap and clears hint (F1)", () => {
   const cwd = mkdtempSync(join(tmpdir(), "probe-"));
   let capturedFooterFactory, capturedCustomFactory, terminalInputHandler;
   function recordedCustom(factory, options) { capturedCustomFactory = factory; return Promise.resolve(undefined); }
@@ -66,13 +66,10 @@ test("phase2: Alt+Left on settled child pops via overlay and clears hint (F1)", 
   const footerData = { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 };
   const footer = capturedFooterFactory(tui, { fg: (_c, t) => t }, footerData);
   footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
-  const overlay = capturedCustomFactory({ requestRender: () => {}, terminal: { rows: 24, columns: 100 } }, { fg: (_c, t) => t }, {}, () => {});
+  assert.equal(capturedCustomFactory, undefined, "settled should not mount overlay; parent window reused");
   assert.ok(footer.render(100).join("\n").includes("Viewing"), "should be viewing settled");
-  // Terminal handler should NOT consume for settled (let overlay handle)
   const res = terminalInputHandler(ALT_LEFT);
-  assert.equal(res.consume, false, "settled Alt+Left should not be consumed by footer (let overlay handle)");
-  // Now simulate overlay handling Alt+Left
-  overlay.handleInput(ALT_LEFT);
-  assert.equal(footer.render(100).join("\n").includes("Viewing"), false, "hint cleared after overlay Alt+Left pop");
+  assert.equal(res.consume, true, "settled Alt+Left should be consumed via host swap (parent window)");
+  assert.equal(footer.render(100).join("\n").includes("Viewing"), false, "hint cleared after Alt+Left pop");
   rmSync(cwd, { recursive: true, force: true });
 });
