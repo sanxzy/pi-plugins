@@ -87,6 +87,7 @@ export { createScopedRegistry, scopedRegistryForSession, type ScopedRegistry } f
 export { createAgentEventRegistry, canonicalJobId, MAX_RETAINED_TERMINAL_AGENTS, type AgentEventRegistry } from "./infrastructure/registry/agent-event-registry.ts";
 export { prepareResumeSessionFile } from "./infrastructure/sessions/resume-file.ts";
 export { scopeDescendants, scopeRegistry, sessionTreeJobs, type ScopedSessionRow, type ScopeRegistry } from "./infrastructure/sessions/scope.ts";
+export { createHostSwapController, type HostSwapController, type HostSwapTarget, type BufferedOutput } from "./infrastructure/host-swap/host-swap.ts";
 export {
   assertSessionId,
   canonicalProjectRoot,

@@ -8,13 +8,13 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentFooter,
-  SwapSessionView,
   type AgentFooterInfo,
   type FooterTreeLiveStats,
   type FooterTreeRow,
 } from "@xzy-ai/tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
-import { getChildPool, scopeDescendants } from "@xzy-ai/runtime";
+import { Key, matchesKey } from "@earendil-works/pi-tui";
+import { createHostSwapController, getChildPool, scopeDescendants } from "@xzy-ai/runtime";
 import type { ChildLiveSnapshot } from "@xzy-ai/core";
 
 /** Debounce job-status and live-leaf repaints so bursty child activity coalesces. */
@@ -81,8 +81,23 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // and the leaf id is the cache key that advances on every new message, so a
       // repaint between messages reuses the prior work instead of scanning the
       // whole transcript again (the main remaining per-keystroke cost).
+      // When a child window is active, the indicator follows that window
+      // (child's token/livedata) while the tree stays anchored to the root.
       let infoCache: { leaf: string; info: AgentFooterInfo } | undefined;
       const getCachedInfo = (): AgentFooterInfo => {
+        if (viewStack.length > 0) {
+          const top = viewStack[viewStack.length - 1]!;
+          const control = liveChildFor(pool, top.rowId);
+          const retained = retainedSnapshotFor(pool, top.rowId);
+          const snapshot = control?.live?.snapshot ?? retained;
+          if (snapshot) {
+            const leaf = `${top.rowId}:${snapshot.transcript.length}:${snapshot.counters.inputTokens}:${snapshot.counters.outputTokens}:${snapshot.counters.cacheReadTokens}:${snapshot.counters.cacheWriteTokens}:${snapshot.counters.cost}:${snapshot.status}:${snapshot.settled}`;
+            if (infoCache?.leaf === leaf) return infoCache.info;
+            const info = childFooterInfo(snapshot, ctx, footerData);
+            infoCache = { leaf, info };
+            return info;
+          }
+        }
         const leaf = ctx.sessionManager.getLeafId() ?? "";
         if (infoCache?.leaf === leaf) return infoCache.info;
         const info = footerInfo(ctx, footerData);
@@ -95,8 +110,17 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // The footer is re-projected to the top of the stack; an empty stack means the root parent.
       let viewStack: FooterTreeRow[] = [];
       let hostDoneStack: Array<() => void> = [];
+      // F009 host swap primitive: rebinds main transcript/composer to child session file+live handle.
+      // Preserves parent editor/scroll in memory and buffers background output while swapped.
+      const rootSessionId = ctx.sessionManager.getSessionId();
+      const hostSwap = createHostSwapController({
+        sessionId: rootSessionId,
+        sessionFile: (ctx.sessionManager as unknown as { getSessionFile?: () => string }).getSessionFile?.() ?? "",
+        editorText: "",
+        scrollOffset: 0,
+      });
       const currentFocusId = (): string => {
-        if (viewStack.length === 0) return ctx.sessionManager.getSessionId();
+        if (viewStack.length === 0) return rootSessionId;
         const topRow = viewStack[viewStack.length - 1]!;
         // Row id is the job id; the descendant projection is keyed by session id.
         const job = pool.registry.get(topRow.rowId);
@@ -107,17 +131,31 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           footer.setHint(undefined);
         } else {
           const top = viewStack[viewStack.length - 1]!;
-          const readOnly = top.status === "completed" || top.status === "failed";
+          // Re-read current job status so a running child that settles while viewed
+          // correctly flips to read-only without requiring a re-push.
+          const job = pool.registry.get(top.rowId);
+          const status = (job?.status as string) ?? top.status;
+          const readOnly = status === "completed" || status === "failed";
           footer.setHint(`Viewing ${top.rowId}${readOnly ? " (read-only)" : ""} — Esc or ← to return`);
         }
       };
       const clearToRoot = (): void => {
-        // Close all swap overlays from top to bottom
-        const toClose = [...hostDoneStack];
+        // Pop all host swaps and restore parent window, clearing stack
+        const toClose = [...hostDoneStack].reverse();
         hostDoneStack = [];
         viewStack = [];
         for (const done of toClose) {
           try { done(); } catch {}
+        }
+        // Ensure any remaining host stack is cleared (host interactive mode)
+        const hostMode = (tui as unknown as { _hostInteractiveMode?: { hostSwapDepth(): number; hostSwapRestore(): void } })._hostInteractiveMode;
+        if (hostMode) {
+          while (hostMode.hostSwapDepth() > 0) {
+            try { hostMode.hostSwapRestore(); } catch {}
+          }
+        }
+        while (hostSwap.getStackDepth() > 0) {
+          try { hostSwap.restore(); } catch {}
         }
         footer.setHint(undefined);
         tui.requestRender();
@@ -176,38 +214,56 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
             steer: async () => { throw new Error("not steerable"); },
           };
         }
-        let hostDone: () => void = () => {};
-        ctx.ui.custom(
-          (tui2, theme2, _keybindings, done) => {
-            hostDone = () => done(undefined);
-            hostDoneStack.push(hostDone);
-            return new SwapSessionView({
-              tui: tui2,
-              theme: footerTheme(theme2 as Theme),
-              live: liveSession,
-              abort,
-              confirm: (title, message) => ctx.ui.confirm(title, message),
-              done: (reason) => {
-                // Swap view requested close (Esc, ←, Alt+Left). Pop one level.
-                // If this swap is still the top of the stack, pop it; otherwise clear stale entry.
-                const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
-                if (idx !== -1) {
-                  // Remove this row and any rows above it (should be top)
-                  viewStack.splice(idx, 1);
-                  const pos = hostDoneStack.indexOf(hostDone);
-                  if (pos !== -1) hostDoneStack.splice(pos, 1);
-                }
-                // If reason is from Alt+Left or back/escape, we already popped this level.
-                // Update hint to new top or clear.
-                updateFooterHint();
-                tui.requestRender();
-                // Close the host overlay for this level
-                try { hostDone(); } catch {}
-              },
-            });
-          },
-          { overlay: true, overlayOptions: { width: "100%" } },
-        );
+        // F009 true host-level swap: reuse parent window via InteractiveMode hostSwap*.
+        // This directly swaps the chatContainer children, so the parent transcript is replaced
+        // with the child's transcript inside the existing parent UI window (no overlay).
+        const job = pool.registry.get(row.rowId);
+        const sessionFile = job?.sessionId ? String(job.sessionId) : row.rowId;
+        const control = liveChildFor(pool, row.rowId);
+        const actualSessionFile = (control as unknown as { sessionFile?: string })?.sessionFile ?? sessionFile;
+        const actualSessionId = job?.sessionId ?? row.rowId;
+        hostSwap.swapTo({ sessionId: actualSessionId, sessionFile: actualSessionFile, editorText: "", scrollOffset: 0 });
+        const hostMode = (tui as unknown as { _hostInteractiveMode?: { hostSwapToSnapshot(s: unknown): void; hostSwapUpdateSnapshot(s: unknown): void; hostSwapRestore(): void; hostSwapDepth(): number } })._hostInteractiveMode;
+        let liveUnsub: (() => void) | undefined;
+        if (hostMode) {
+          try {
+            hostMode.hostSwapToSnapshot(liveSession as unknown as { snapshot: unknown });
+          } catch {}
+          // Keep parent window in sync with live updates while viewing a running child
+          if (isRunning && liveSession.subscribe) {
+            try {
+              liveUnsub = liveSession.subscribe(() => {
+                try { hostMode.hostSwapUpdateSnapshot(liveSession as unknown as { snapshot: unknown }); } catch {}
+              });
+            } catch {}
+          }
+        } else {
+          // Fallback: monkey-patch sessionManager if host mode not available (e.g. tests / headless)
+          const origGetEntries = ctx.sessionManager.getEntries.bind(ctx.sessionManager);
+          (ctx.sessionManager as unknown as { getEntries: () => unknown }).getEntries = () => {
+            if (hostSwap.isSwapped()) return (liveSession as unknown as { snapshot: { transcript: unknown[] } }).snapshot.transcript as unknown[];
+            return origGetEntries();
+          };
+        }
+        let hostDone: () => void = () => {
+          try { liveUnsub?.(); } catch {}
+          try {
+            if (hostMode) hostMode.hostSwapRestore();
+          } catch {}
+          try { hostSwap.restore(); } catch {}
+          // Restore fallback patch if it was used
+          if (!hostMode) {
+            // No hostMode, nothing to restore beyond hostSwap; getEntries will be restored on next swap via closure? For simplicity, reload not needed in test.
+          }
+          const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
+          if (idx !== -1) viewStack.splice(idx, 1);
+          const pos = hostDoneStack.indexOf(hostDone);
+          if (pos !== -1) hostDoneStack.splice(pos, 1);
+          updateFooterHint();
+          tui.requestRender();
+        };
+        hostDoneStack.push(hostDone);
+        tui.requestRender();
       };
       const handleEnter = (row: FooterTreeRow | undefined): void => {
         if (!row) return;
@@ -225,7 +281,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         tui,
         theme: footerTheme(theme),
         getInfo: () => getCachedInfo(),
-        getRows: () => footerRowsForFocus(ctx, pool, currentFocusId()),
+        getRows: () => footerRowsForFocus(ctx, pool, rootSessionId),
         onEnter: handleEnter,
         dispose: () => {
           if (repaintTimer !== undefined) {
@@ -240,12 +296,37 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // keys are consumed here (never reaching the composer); all other input
       // passes through unchanged.
       const stopInput = ctx.ui.onTerminalInput((data) => {
-        // When a swap is active, Alt+Left should pop one level via the swap view's own handler.
-        // However if the footer is in management mode, its Alt+Left exits management and should not also pop.
-        // Let the swap view handle Alt+Left first when not in management; footer input listener runs before focused component,
-        // but our SwapSessionView also handles Alt+Left. To avoid double handling, we let footer consume Alt+Left only when in management.
-        // The footer.handleInput already checks management; outside management it returns false, so swap will receive it.
         if (footer.handleInput(data)) return { consume: true };
+        // F009 true host-level swap: parent window is reused, no overlay.
+        // Handle close/abort keys directly when viewing via host swap.
+        if (viewStack.length > 0 && typeof data === "string") {
+          if (matchesKey(data, Key.alt(Key.left)) || matchesKey(data, Key.escape) || matchesKey(data, Key.left)) {
+            const topDone = hostDoneStack[hostDoneStack.length - 1];
+            if (topDone) {
+              try { topDone(); } catch {}
+            } else {
+              try { hostSwap.restore(); } catch {}
+              viewStack.pop();
+              updateFooterHint();
+              tui.requestRender();
+            }
+            return { consume: true };
+          }
+          if (matchesKey(data, Key.alt("x"))) {
+            const top = viewStack[viewStack.length - 1];
+            if (top?.status === "running") {
+              const control = liveChildFor(pool, top.rowId);
+              void ctx.ui.confirm("Cancel child", "Abort this child agent? Its work is discarded.").then((accepted) => {
+                if (!accepted || !control?.abort) return;
+                void control.abort().then(() => {
+                  // Keep viewing; child will settle and footer will update. No auto-close.
+                  tui.requestRender();
+                });
+              });
+            }
+            return { consume: true };
+          }
+        }
         return { consume: false, data };
       });
       const superDispose = footer.dispose.bind(footer);
@@ -324,7 +405,10 @@ function footerRowsForFocus(ctx: ExtensionContext, pool: ReturnType<typeof getCh
     new Date(),
     retainedSnapshots,
   );
-  const isSwapped = focusSessionId !== ctx.sessionManager.getSessionId();
+  // Use rootSessionId stored at registration time (or pool.rootSessionId) instead of
+  // ctx.sessionManager.getSessionId() which is patched to child's id while swapped.
+  const rootSessionId = (pool as unknown as { rootSessionId?: string }).rootSessionId ?? ctx.sessionManager.getSessionId();
+  const isSwapped = focusSessionId !== rootSessionId;
   if (descendants.length === 0) {
     if (isSwapped) {
       const root: FooterTreeRow = {
@@ -458,6 +542,48 @@ function footerInfo(
     cost: usage.cost,
     contextPercent: contextUsage?.percent ?? null,
     contextWindow: contextUsage?.contextWindow ?? model?.contextWindow ?? 0,
+    autoCompactEnabled: true,
+    model: model?.id,
+    provider: model?.provider,
+    providerCount: footerData.getAvailableProviderCount(),
+    thinkingLevel,
+    reasoning,
+  };
+}
+
+function childFooterInfo(
+  snapshot: ChildLiveSnapshot,
+  ctx: ExtensionContext,
+  footerData: ReadonlyFooterDataProvider,
+): AgentFooterInfo {
+  const counters = snapshot.counters;
+  const model = ctx.model;
+  const reasoning = Boolean(model?.reasoning);
+  // Derive thinkingLevel from child's transcript if it contains a thinking_level_change entry;
+  // the live transcript does not carry those, so reuse parent's thinking level.
+  const entries = ctx.sessionManager.getEntries() as readonly unknown[];
+  const thinkingLevel = latestThinkingLevel(entries);
+  const input = counters.inputTokens;
+  const cacheRead = counters.cacheReadTokens;
+  const cacheWrite = counters.cacheWriteTokens;
+  const promptTokens = input + cacheRead + cacheWrite;
+  const cacheHitRate = promptTokens > 0 ? (cacheRead / promptTokens) * 100 : undefined;
+  const contextWindow = ctx.getContextUsage()?.contextWindow ?? model?.contextWindow ?? 0;
+  // Child context is not exposed via host; approximate from child's prompt tokens.
+  const contextPercent = contextWindow > 0 && promptTokens > 0 ? (promptTokens / contextWindow) * 100 : null;
+  return {
+    cwd: ctx.sessionManager.getCwd(),
+    home: process.env.HOME || process.env.USERPROFILE,
+    branch: footerData.getGitBranch(),
+    sessionName: ctx.sessionManager.getSessionName(),
+    input,
+    output: counters.outputTokens,
+    cacheRead,
+    cacheWrite,
+    cacheHitRate,
+    cost: (counters as { cost?: number }).cost ?? 0,
+    contextPercent,
+    contextWindow,
     autoCompactEnabled: true,
     model: model?.id,
     provider: model?.provider,

@@ -64,6 +64,7 @@ export interface ChildLiveCounters {
   readonly outputTokens: number;
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
+  readonly cost: number;
 }
 
 /** Snapshot retained after a live child leaves the pool. */
@@ -90,7 +91,7 @@ export interface ChildLiveFeed extends ChildLiveControl {
 }
 
 function emptyCounters(): ChildLiveCounters {
-  return { toolUses: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  return { toolUses: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 };
 }
 
 /** Recompute cumulative counters from the current transcript and usage map. */
@@ -103,6 +104,7 @@ function reduceCounters(
   let output = 0;
   let cacheRead = 0;
   let cacheWrite = 0;
+  let cost = 0;
   for (const entry of transcript) {
     if (entry.kind === "tool") toolIds.add(entry.toolCallId);
   }
@@ -111,6 +113,7 @@ function reduceCounters(
     output += usage.output;
     cacheRead += usage.cacheRead;
     cacheWrite += usage.cacheWrite;
+    cost += usage.cost;
   }
   return {
     toolUses: toolIds.size,
@@ -118,6 +121,7 @@ function reduceCounters(
     outputTokens: output,
     cacheReadTokens: cacheRead,
     cacheWriteTokens: cacheWrite,
+    cost,
   };
 }
 
@@ -186,6 +190,7 @@ export function createChildLiveFeed(seed?: ChildLiveSnapshot): ChildLiveFeed {
         outputTokens: baseCounters.outputTokens + raw.outputTokens,
         cacheReadTokens: baseCounters.cacheReadTokens + raw.cacheReadTokens,
         cacheWriteTokens: baseCounters.cacheWriteTokens + raw.cacheWriteTokens,
+        cost: (baseCounters.cost ?? 0) + raw.cost,
       });
       if (event.type === "settled") {
         const raw = reduceCounters(snapshot.transcript, usageByMessage);

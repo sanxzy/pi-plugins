@@ -33,12 +33,26 @@ const EXPLICIT_EXTERNAL = ["@earendil-works/*", "diff"];
 const pkg = JSON.parse(readFileSync(join(pkgRoot, "package.json"), "utf8"));
 
 /** Locate esbuild from the workspace root's .bin (not on PATH when invoked
- * directly with `node scripts/build.mjs`). */
+ * directly with `node scripts/build.mjs`). pnpm isolated store puts the bin
+ * under .pnpm/node_modules/.bin, so check there as well. */
 function findEsbuild() {
   const candidates = [
     join(workspaceRoot, "node_modules", ".bin", "esbuild"),
+    join(workspaceRoot, "node_modules", ".pnpm", "node_modules", ".bin", "esbuild"),
     join(pkgRoot, "node_modules", ".bin", "esbuild"),
   ];
+  // Also probe pnpm store layout: .pnpm/esbuild@*/node_modules/esbuild/bin/esbuild
+  try {
+    const store = join(workspaceRoot, "node_modules", ".pnpm");
+    if (existsSync(store)) {
+      for (const e of readdirSync(store)) {
+        if (e.startsWith("esbuild@")) {
+          const p = join(store, e, "node_modules", "esbuild", "bin", "esbuild");
+          if (existsSync(p)) candidates.push(p);
+        }
+      }
+    }
+  } catch {}
   for (const c of candidates) {
     try {
       execFileSync(c, ["--version"], { stdio: "ignore" });

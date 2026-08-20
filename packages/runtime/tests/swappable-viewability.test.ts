@@ -16,7 +16,7 @@ function snapshot(status: ChildLiveSnapshot["status"] = "completed"): ChildLiveS
     status,
     settled: true,
     transcript: [{ id: "m1", kind: "message", role: "assistant", text: "hello", complete: true }],
-    counters: { toolUses: 1, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    counters: { toolUses: 1, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 },
   } as ChildLiveSnapshot;
 }
 
