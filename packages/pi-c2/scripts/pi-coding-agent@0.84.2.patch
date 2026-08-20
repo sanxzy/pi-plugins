@@ -2,12 +2,16 @@ diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
 index 4bcf0d4..778df7c 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -97,6 +97,8 @@ export class AgentSession {
+@@ -97,6 +97,12 @@ export class AgentSession {
      _compactionAbortController = undefined;
      _autoCompactionAbortController = undefined;
      _overflowRecoveryAttempted = false;
 +    /** Set when a mid-turn message_end crossed the percentage threshold and aborted the run. */
 +    _thresholdAbortPending = false;
++    /** pi-c2 host swap: stack of preserved parent states while viewing child sessions. */
++    _hostSwapStack = [];
++    /** pi-c2 host swap: buffered parent output while viewing child. */
++    _hostSwapBuffer = [];
      // Branch summarization state
      _branchSummaryAbortController = undefined;
      // Retry state
