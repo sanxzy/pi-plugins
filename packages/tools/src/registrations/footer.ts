@@ -81,8 +81,23 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // and the leaf id is the cache key that advances on every new message, so a
       // repaint between messages reuses the prior work instead of scanning the
       // whole transcript again (the main remaining per-keystroke cost).
+      // When a child window is active, the indicator follows that window
+      // (child's token/livedata) while the tree stays anchored to the root.
       let infoCache: { leaf: string; info: AgentFooterInfo } | undefined;
       const getCachedInfo = (): AgentFooterInfo => {
+        if (viewStack.length > 0) {
+          const top = viewStack[viewStack.length - 1]!;
+          const control = liveChildFor(pool, top.rowId);
+          const retained = retainedSnapshotFor(pool, top.rowId);
+          const snapshot = control?.live?.snapshot ?? retained;
+          if (snapshot) {
+            const leaf = `${top.rowId}:${snapshot.transcript.length}:${snapshot.counters.inputTokens}:${snapshot.counters.outputTokens}:${snapshot.counters.cacheReadTokens}:${snapshot.counters.cacheWriteTokens}:${snapshot.counters.cost}:${snapshot.status}:${snapshot.settled}`;
+            if (infoCache?.leaf === leaf) return infoCache.info;
+            const info = childFooterInfo(snapshot, ctx, footerData);
+            infoCache = { leaf, info };
+            return info;
+          }
+        }
         const leaf = ctx.sessionManager.getLeafId() ?? "";
         if (infoCache?.leaf === leaf) return infoCache.info;
         const info = footerInfo(ctx, footerData);
@@ -266,7 +281,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         tui,
         theme: footerTheme(theme),
         getInfo: () => getCachedInfo(),
-        getRows: () => footerRowsForFocus(ctx, pool, currentFocusId()),
+        getRows: () => footerRowsForFocus(ctx, pool, rootSessionId),
         onEnter: handleEnter,
         dispose: () => {
           if (repaintTimer !== undefined) {
@@ -527,6 +542,48 @@ function footerInfo(
     cost: usage.cost,
     contextPercent: contextUsage?.percent ?? null,
     contextWindow: contextUsage?.contextWindow ?? model?.contextWindow ?? 0,
+    autoCompactEnabled: true,
+    model: model?.id,
+    provider: model?.provider,
+    providerCount: footerData.getAvailableProviderCount(),
+    thinkingLevel,
+    reasoning,
+  };
+}
+
+function childFooterInfo(
+  snapshot: ChildLiveSnapshot,
+  ctx: ExtensionContext,
+  footerData: ReadonlyFooterDataProvider,
+): AgentFooterInfo {
+  const counters = snapshot.counters;
+  const model = ctx.model;
+  const reasoning = Boolean(model?.reasoning);
+  // Derive thinkingLevel from child's transcript if it contains a thinking_level_change entry;
+  // the live transcript does not carry those, so reuse parent's thinking level.
+  const entries = ctx.sessionManager.getEntries() as readonly unknown[];
+  const thinkingLevel = latestThinkingLevel(entries);
+  const input = counters.inputTokens;
+  const cacheRead = counters.cacheReadTokens;
+  const cacheWrite = counters.cacheWriteTokens;
+  const promptTokens = input + cacheRead + cacheWrite;
+  const cacheHitRate = promptTokens > 0 ? (cacheRead / promptTokens) * 100 : undefined;
+  const contextWindow = ctx.getContextUsage()?.contextWindow ?? model?.contextWindow ?? 0;
+  // Child context is not exposed via host; approximate from child's prompt tokens.
+  const contextPercent = contextWindow > 0 && promptTokens > 0 ? (promptTokens / contextWindow) * 100 : null;
+  return {
+    cwd: ctx.sessionManager.getCwd(),
+    home: process.env.HOME || process.env.USERPROFILE,
+    branch: footerData.getGitBranch(),
+    sessionName: ctx.sessionManager.getSessionName(),
+    input,
+    output: counters.outputTokens,
+    cacheRead,
+    cacheWrite,
+    cacheHitRate,
+    cost: (counters as { cost?: number }).cost ?? 0,
+    contextPercent,
+    contextWindow,
     autoCompactEnabled: true,
     model: model?.id,
     provider: model?.provider,

@@ -90,7 +90,7 @@ test("phase3: while viewing child, footer shows child's descendants not parent s
     const rowsAfter = footer.render(100).join("\n");
     const hasSibling = rowsAfter.includes("sibling B");
     const hasGrandchild = rowsAfter.includes("grandchild C");
-    assert.equal(hasSibling, false, "while viewing child A, footer must hide sibling B. Got rows:\n" + rowsAfter);
+    assert.equal(hasSibling, true, "while viewing child A, footer still shows sibling B (tree always on). Got rows:\n" + rowsAfter);
     assert.equal(hasGrandchild, true, "while viewing child A, footer must show grandchild C. Got rows:\n" + rowsAfter);
     footer.dispose();
   } finally {
