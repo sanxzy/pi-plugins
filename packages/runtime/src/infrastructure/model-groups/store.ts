@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { homeModelGroupsFile as sharedHomeModelGroupsFile } from "../../shared/paths.ts";
-import { isQuarantined } from "./quarantine.ts";
+import { isQuarantined, quarantineModel } from "./quarantine.ts";
 
 export const homeModelGroupsFile = sharedHomeModelGroupsFile;
 export function homeModelGroupsFilePath(): string { return homeModelGroupsFile(); }
@@ -224,6 +224,8 @@ export interface ModelGroupHostApi {
   readonly activate: (id: string) => ModelGroupHostActivation;
   /** Resolve and advance the active group's current member (per request). */
   readonly resolveActive: () => { ref: string; thinking?: string; contextWindow?: number } | undefined;
+  /** Quarantine a failed member of the active group and return the next available one. */
+  readonly reportFailure: (failedRef: string) => { ref: string; thinking?: string; contextWindow?: number } | undefined;
   readonly clearActiveGroup: () => void;
 }
 
@@ -270,6 +272,25 @@ export function installModelGroupHostApi(): void {
       return {
         ref: model.ref,
         ...(model.thinking === undefined ? {} : { thinking: model.thinking }),
+        ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
+      };
+    },
+    /**
+     * Quarantine a failed member of the active group and return the next
+     * available member so the host can continue with a replacement model.
+     * Non-members are ignored; undefined means no replacement is available.
+     */
+    reportFailure: (failedRef) => {
+      const file = getModelGroups();
+      const group = file.groups.find((item) => item.id === file.activeGroupId);
+      if (!group) return undefined;
+      if (!group.models.some((model) => model.ref === failedRef)) return undefined;
+      quarantineModel(failedRef, group.quarantineMinutes);
+      const next = resolveActiveModel();
+      if (!next) return undefined;
+      return {
+        ref: next.ref,
+        ...(next.thinking === undefined ? {} : { thinking: next.thinking }),
         ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
       };
     },

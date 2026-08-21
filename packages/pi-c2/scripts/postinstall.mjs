@@ -44,6 +44,7 @@ const PATCH_MARKERS = [
   "dist/core/settings-manager.js:thresholdPercentOverride",
   "dist/core/agent-session.js:_maybeAbortForThreshold",
   "dist/core/agent-session.js:rotate round-robin model groups once per user request",
+  "dist/core/agent-session.js:quarantine group members on HTTP 4xx/5xx",
   "dist/modes/interactive/components/model-selector.js:pi-c2: the extension publishes a host-neutral model-group bridge",
   "dist/modes/interactive/interactive-mode.js:__pi_c2_group__",
   "dist/modes/interactive/interactive-mode.js:hostSwapApplyChildEvent",

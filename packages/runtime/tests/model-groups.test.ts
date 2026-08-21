@@ -245,3 +245,47 @@ test("host api resolveActive rotates round-robin members per call in configured 
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("reportFailure quarantines the failed member and returns the next available model", async () => {
+  const { installModelGroupHostApi, saveModelGroups, clearModelGroupsCache, clearRoundRobinPointers, clearActiveGroup } = await import("../src/infrastructure/model-groups/store.ts");
+  const { clearQuarantine, quarantineModel: _q, getQuarantineMap } = await import("../src/infrastructure/model-groups/quarantine.ts");
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      clearModelGroupsCache();
+      clearRoundRobinPointers();
+      clearQuarantine();
+      installModelGroupHostApi();
+      const api = (globalThis as Record<symbol, unknown>)[Symbol.for("pi-c2.model-groups")] as {
+        activate(id: string): { ok: boolean };
+        reportFailure?(failedRef: string): { ref: string } | undefined;
+      };
+      assert.equal(typeof api.reportFailure, "function", "host api must expose reportFailure");
+
+      // Round-robin: failing member is quarantined and the next member is returned.
+      saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }] });
+      assert.equal(api.activate("g1").ok, true);
+      const next = api.reportFailure!("openai/gpt-a");
+      assert.equal(next?.ref, "openai/gpt-b");
+      assert.ok(getQuarantineMap().has("openai/gpt-a"), "failed member must be quarantined");
+
+      // Fallback: failures walk the configured order and exhaust deterministically.
+      saveModelGroups({ groups: [{ id: "g2", name: "B", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }], activeGroupId: "g2" });
+      clearQuarantine();
+      assert.equal(api.reportFailure!("openai/gpt-a")?.ref, "openai/gpt-b");
+      assert.equal(api.reportFailure!("openai/gpt-b")?.ref, "openai/gpt-c");
+      assert.equal(api.reportFailure!("openai/gpt-c"), undefined);
+
+      // Non-members are ignored entirely.
+      clearQuarantine();
+      assert.equal(api.reportFailure!("other/model"), undefined);
+      assert.equal(getQuarantineMap().has("other/model"), false);
+
+      // No active group: undefined.
+      clearActiveGroup();
+      assert.equal(api.reportFailure!("openai/gpt-a"), undefined);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
