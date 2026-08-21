@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { preparePublishManifest, validateReleaseVersion } from "../scripts/prepare-publish.mjs";
+import { preparePublishManifest, validateReleaseVersion } from "../scripts/prepare-publish.ts";
 
 const VALID_VERSION = "0.84.2-1.821.2026";
 

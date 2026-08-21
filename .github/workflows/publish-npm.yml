@@ -1,0 +1,78 @@
+name: Publish pi-c2 to npm
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ github.ref_name }}
+      PACKAGE_NAME: "@xzy-ai/pi-c2"
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: plugins/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: plugins
+
+      - name: Run deterministic verification
+        run: pnpm test:all
+        working-directory: plugins
+
+      - name: Build the publish-ready package
+        run: pnpm build:pi-c2
+        working-directory: plugins
+
+      - name: Stamp and validate the exact tag version
+        run: pnpm --filter @xzy-ai/pi-c2 exec tsx scripts/prepare-publish.ts --dist dist --version "$RELEASE_VERSION"
+        working-directory: plugins
+
+      - name: Verify npm package version without normalization
+        run: |
+          npm pack packages/pi-c2/dist --dry-run --json > /tmp/pi-c2-pack.json
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          const expected = process.env.RELEASE_VERSION;
+          const metadata = JSON.parse(readFileSync("/tmp/pi-c2-pack.json", "utf8"));
+          const actual = metadata[0]?.version;
+          if (actual !== expected) {
+            throw new Error(`npm normalized ${expected} to ${actual ?? "an unknown version"}`);
+          }
+          console.log(`Verified @xzy-ai/pi-c2@${actual}`);
+          NODE
+        working-directory: plugins
+
+      - name: Publish to npm
+        run: npm publish packages/pi-c2/dist --access public --tag latest
+        working-directory: plugins
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify the published version
+        run: test "$(npm view "$PACKAGE_NAME@$RELEASE_VERSION" version)" = "$RELEASE_VERSION"
+        working-directory: plugins
