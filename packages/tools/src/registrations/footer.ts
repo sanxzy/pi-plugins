@@ -297,6 +297,9 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
             hostMode.hostSwapToSnapshot(liveSession as unknown as { snapshot: unknown });
             hostSnapshotApplied = true;
           } catch {
+            // The host rebuilds the parent transcript while its frames unwind,
+            // so the parent theme must be restored before that rebuild.
+            try { themeFrame?.restore(); } catch {}
             try {
               while (typeof hostMode.hostSwapDepth === "function" && hostMode.hostSwapDepth() > hostDepthBefore) {
                 hostMode.hostSwapRestore();
