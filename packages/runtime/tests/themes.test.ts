@@ -14,6 +14,7 @@ import {
   homeThemesFile,
   loadThemeLibrary,
   readThemeLibrary,
+  validateThemeLibrary,
   type ThemeLibrary,
   type ThemeLibraryPersistence,
 } from "@xzy-ai/runtime";
@@ -172,6 +173,14 @@ test("theme library", async (t) => {
     assert.equal(renameCount, 2);
     assert.equal(readFileSync(file, "utf8"), original);
     assert.equal(existsSync(backupPath(1)), false);
+  }));
+
+  await t.test("optional host export tokens validate without weakening the complete UI-token contract", () => withHome(() => {
+    const library = mutableBuiltins();
+    library.profiles[0]!.export = { pageBg: "#111111" };
+    assert.ok(validateThemeLibrary(library));
+    Object.assign(library.profiles[0]!.colors, { unknownToken: "#ffffff" });
+    assert.equal(validateThemeLibrary(library), undefined);
   }));
 
   await t.test("lookup returns a defensive profile and deterministic built-in fallback", () => withHome(() => {

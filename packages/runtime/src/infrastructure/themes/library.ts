@@ -10,7 +10,6 @@ import {
 } from "../../shared/paths.ts";
 import { BUILTIN_THEME_PROFILES, DEFAULT_THEME_ID } from "./builtins.ts";
 import {
-  THEME_BACKGROUND_TOKENS,
   THEME_COLOR_TOKENS,
   THEME_EXPORT_TOKENS,
   THEME_FOREGROUND_TOKENS,
@@ -104,18 +103,17 @@ function validateColorMap(
   raw: unknown,
   tokens: readonly string[],
   vars: Record<string, ThemeColorValue>,
-  label: string,
+  requireAll: boolean,
 ): Record<string, ThemeColorValue> | undefined {
   if (!isRecord(raw)) return undefined;
   const tokenSet = new Set(tokens);
   if (Object.keys(raw).some((key) => !tokenSet.has(key))) return undefined;
   const result: Record<string, ThemeColorValue> = {};
-  for (const token of tokens) {
-    if (!Object.prototype.hasOwnProperty.call(raw, token)) return undefined;
-    const value = raw[token];
+  for (const [token, value] of Object.entries(raw)) {
     if (!isValidColorValue(value) || !resolveColorValue(value, vars, new Set())) return undefined;
     result[token] = value;
   }
+  if (requireAll && tokens.some((token) => !Object.prototype.hasOwnProperty.call(raw, token))) return undefined;
   return result;
 }
 
@@ -149,11 +147,11 @@ function validateProfile(raw: unknown): ThemeProfile | undefined {
   if (colorMode !== "truecolor" && colorMode !== "256color") return undefined;
   const vars = validateVars(raw.vars);
   if (!vars) return undefined;
-  const colors = validateColorMap(raw.colors, THEME_COLOR_TOKENS, vars, "colors");
+  const colors = validateColorMap(raw.colors, THEME_COLOR_TOKENS, vars, true);
   if (!colors) return undefined;
   let exportColors: Record<string, ThemeColorValue> | undefined;
   if (raw.export !== undefined) {
-    exportColors = validateColorMap(raw.export, THEME_EXPORT_TOKENS, vars, "export");
+    exportColors = validateColorMap(raw.export, THEME_EXPORT_TOKENS, vars, false);
     if (!exportColors) return undefined;
   }
   return {
@@ -285,8 +283,8 @@ export function readThemeLibraryBackup(filePath: string, persistence: ThemeLibra
   }
 }
 
-function finishLoad(library: ThemeLibrary, filePath: string, cacheable: boolean): ThemeLibrary {
-  if (cacheable) cache = { filePath, fingerprint: fileFingerprint(filePath), library: cloneThemeLibrary(library) };
+function finishLoad(library: ThemeLibrary, filePath: string, cacheable: boolean, persisted: boolean): ThemeLibrary {
+  if (cacheable && persisted) cache = { filePath, fingerprint: fileFingerprint(filePath), library: cloneThemeLibrary(library) };
   return cloneThemeLibrary(library);
 }
 
@@ -304,42 +302,44 @@ export function loadThemeLibrary(persistence: ThemeLibraryPersistence = defaultP
   }
 
   if (!tryExists(filePath, persistence)) {
+    let persisted = false;
     try {
       publishBuiltins(filePath, persistence);
+      persisted = tryExists(filePath, persistence);
     } catch {
       // Optional visual state may remain memory-only when home storage is unavailable.
     }
-    return finishLoad(builtinLibrary(), filePath, cacheable);
+    return finishLoad(builtinLibrary(), filePath, cacheable, persisted);
   }
 
   try {
     const parsed = readThemeLibrary(filePath, persistence);
     try { persistence.chmod(filePath, 0o600); } catch { /* keep valid in-memory edits usable */ }
-    return finishLoad(parsed, filePath, cacheable);
+    return finishLoad(parsed, filePath, cacheable, true);
   } catch {
     // Continue to recovery below. The original primary has not been written.
   }
 
   const backupPath = nextBackupPath(filePath, persistence);
-  if (!backupPath) return finishLoad(builtinLibrary(), filePath, cacheable);
+  if (!backupPath) return finishLoad(builtinLibrary(), filePath, cacheable, false);
   try {
     persistence.rename(filePath, backupPath);
   } catch {
-    return finishLoad(builtinLibrary(), filePath, cacheable);
+    return finishLoad(builtinLibrary(), filePath, cacheable, false);
   }
   try {
     persistence.chmod(backupPath, 0o600);
   } catch {
     restoreOriginal(filePath, backupPath, persistence);
-    return finishLoad(builtinLibrary(), filePath, cacheable);
+    return finishLoad(builtinLibrary(), filePath, cacheable, false);
   }
   try {
     publishBuiltins(filePath, persistence);
   } catch {
     restoreOriginal(filePath, backupPath, persistence);
-    return finishLoad(builtinLibrary(), filePath, cacheable);
+    return finishLoad(builtinLibrary(), filePath, cacheable, false);
   }
-  return finishLoad(builtinLibrary(), filePath, cacheable);
+  return finishLoad(builtinLibrary(), filePath, cacheable, true);
 }
 
 export function clearThemeLibraryCache(): void {
