@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, renameSync, statSync, chmodSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   THEMES_BACKUP_PREFIX,
@@ -52,6 +52,8 @@ export interface ThemeLibraryPersistence {
   readonly readJson: (filePath: string) => unknown;
   readonly writeJson: (filePath: string, value: unknown) => void;
   readonly rename: (from: string, to: string) => void;
+  /** Reserve a non-existent backup destination and move the primary into it. */
+  readonly moveToBackup?: (from: string, to: string) => void;
   readonly list: (directory: string) => string[];
   readonly exists: (filePath: string) => boolean;
   readonly chmod: (filePath: string, mode: number) => void;
@@ -61,6 +63,12 @@ const defaultPersistence: ThemeLibraryPersistence = {
   readJson: (filePath) => readPrivateJson<unknown>(filePath),
   writeJson: (filePath, value) => writePrivateJson(filePath, value),
   rename: (from, to) => renameSync(from, to),
+  moveToBackup: (from, to) => {
+    // Node's COPYFILE_EXCL flag is 1; the explicit exclusive copy prevents
+    // a concurrent writer from replacing an existing backup slot.
+    copyFileSync(from, to, 1);
+    unlinkSync(from);
+  },
   list: (directory) => readdirSync(directory),
   exists: (filePath) => existsSync(filePath),
   chmod: (filePath, mode) => chmodSync(filePath, mode),
@@ -225,18 +233,30 @@ function fileFingerprint(filePath: string): string {
   }
 }
 
-function listBackups(filePath: string, persistence: ThemeLibraryPersistence): string[] {
+type FilePresence = "missing" | "present" | "unknown";
+
+function probeExists(filePath: string, persistence: ThemeLibraryPersistence): FilePresence {
+  try {
+    return persistence.exists(filePath) ? "present" : "missing";
+  } catch {
+    return "unknown";
+  }
+}
+
+function listBackups(filePath: string, persistence: ThemeLibraryPersistence): string[] | undefined {
   let entries: string[];
   try {
     entries = persistence.list(dirname(filePath));
   } catch {
-    return [];
+    return undefined;
   }
   return entries.filter((entry) => BACKUP_PATTERN.test(entry)).sort().map((entry) => join(dirname(filePath), entry));
 }
 
 function nextBackupPath(filePath: string, persistence: ThemeLibraryPersistence): string | undefined {
-  const existing = new Set(listBackups(filePath, persistence).map((path) => path.slice(dirname(filePath).length + 1)));
+  const backups = listBackups(filePath, persistence);
+  if (backups === undefined) return undefined;
+  const existing = new Set(backups.map((path) => path.slice(dirname(filePath).length + 1)));
   for (let number = 1; number < 1_000; number += 1) {
     const name = `${THEMES_BACKUP_PREFIX}${String(number).padStart(3, "0")}${THEMES_BACKUP_SUFFIX}`;
     if (!existing.has(name)) return join(dirname(filePath), name);
@@ -244,12 +264,14 @@ function nextBackupPath(filePath: string, persistence: ThemeLibraryPersistence):
   return undefined;
 }
 
-function tryExists(filePath: string, persistence: ThemeLibraryPersistence): boolean {
-  try {
-    return persistence.exists(filePath);
-  } catch {
-    return false;
+function movePrimaryToBackup(filePath: string, backupPath: string, persistence: ThemeLibraryPersistence): void {
+  if (persistence.moveToBackup) {
+    persistence.moveToBackup(filePath, backupPath);
+    return;
   }
+  // A custom persistence implementation that does not provide an exclusive
+  // mover cannot prove that rename() will not overwrite a newly-created slot.
+  throw new Error("Theme persistence cannot reserve a backup slot safely");
 }
 
 function restoreOriginal(filePath: string, backupPath: string, persistence: ThemeLibraryPersistence): void {
@@ -271,7 +293,7 @@ export function readThemeLibrary(filePath = homeThemesFile(), persistence: Theme
 
 /** List numbered backup paths without modifying or validating them. */
 export function listThemeLibraryBackups(filePath = homeThemesFile(), persistence: ThemeLibraryPersistence = defaultPersistence): string[] {
-  return listBackups(filePath, persistence);
+  return listBackups(filePath, persistence) ?? [];
 }
 
 /** Read a numbered backup only when it is a complete valid theme library. */
@@ -301,11 +323,15 @@ export function loadThemeLibrary(persistence: ThemeLibraryPersistence = defaultP
     if (cache?.filePath === filePath && cache.fingerprint === fingerprint) return cloneThemeLibrary(cache.library);
   }
 
-  if (!tryExists(filePath, persistence)) {
+  const primaryPresence = probeExists(filePath, persistence);
+  if (primaryPresence === "unknown") {
+    return finishLoad(builtinLibrary(), filePath, cacheable, false);
+  }
+  if (primaryPresence === "missing") {
     let persisted = false;
     try {
       publishBuiltins(filePath, persistence);
-      persisted = tryExists(filePath, persistence);
+      persisted = probeExists(filePath, persistence) === "present";
     } catch {
       // Optional visual state may remain memory-only when home storage is unavailable.
     }
@@ -322,9 +348,15 @@ export function loadThemeLibrary(persistence: ThemeLibraryPersistence = defaultP
 
   const backupPath = nextBackupPath(filePath, persistence);
   if (!backupPath) return finishLoad(builtinLibrary(), filePath, cacheable, false);
+  if (probeExists(backupPath, persistence) !== "missing") {
+    return finishLoad(builtinLibrary(), filePath, cacheable, false);
+  }
   try {
-    persistence.rename(filePath, backupPath);
+    movePrimaryToBackup(filePath, backupPath, persistence);
   } catch {
+    return finishLoad(builtinLibrary(), filePath, cacheable, false);
+  }
+  if (probeExists(filePath, persistence) !== "missing") {
     return finishLoad(builtinLibrary(), filePath, cacheable, false);
   }
   try {
@@ -339,7 +371,7 @@ export function loadThemeLibrary(persistence: ThemeLibraryPersistence = defaultP
     restoreOriginal(filePath, backupPath, persistence);
     return finishLoad(builtinLibrary(), filePath, cacheable, false);
   }
-  return finishLoad(builtinLibrary(), filePath, cacheable, true);
+  return finishLoad(builtinLibrary(), filePath, cacheable, probeExists(filePath, persistence) === "present");
 }
 
 export function clearThemeLibraryCache(): void {
