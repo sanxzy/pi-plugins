@@ -14,8 +14,9 @@ import {
 } from "@xzy-ai/tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { isKeyRelease, Key, matchesKey } from "@earendil-works/pi-tui";
-import { createHostSwapController, getChildPool, scopeDescendants } from "@xzy-ai/runtime";
+import { createHostSwapController, getChildPool, resolveJobTheme, scopeDescendants } from "@xzy-ai/runtime";
 import type { ChildLiveSnapshot } from "@xzy-ai/core";
+import { createThemeFrame, type ThemeHostUI, type ThemeFrame } from "../theme-bridge.ts";
 
 /** Debounce job-status and live-leaf repaints so bursty child activity coalesces. */
 const REPAINT_DEBOUNCE_MS = 250;
@@ -84,9 +85,20 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // When a child window is active, the indicator follows that window
       // (child's token/livedata) while the tree stays anchored to the root.
       let infoCache: { leaf: string; info: AgentFooterInfo } | undefined;
+      let activeThemeFrame: ThemeFrame | undefined;
+      let activeThemeJobId: string | undefined;
+      let activeThemeLiveSession: unknown;
+      let activeThemeHostMode: { hostSwapUpdateSnapshot?(session: unknown): void } | undefined;
+      // The session currently rendered by the host. A themed frame owner and the
+      // visible session can differ (themed parent with a nested legacy child),
+      // so refreshes must rebuild whatever is on screen, not the frame owner.
+      let displayedLiveSession: unknown;
+      let refreshingTheme = false;
+      let refreshActiveTheme = (): void => {};
       const getCachedInfo = (): AgentFooterInfo => {
         const identity = footerModelIdentity(ctx);
         if (viewStack.length > 0) {
+          refreshActiveTheme();
           const top = viewStack[viewStack.length - 1]!;
           const control = liveChildFor(pool, top.rowId);
           const retained = retainedSnapshotFor(pool, top.rowId);
@@ -126,6 +138,23 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         // Row id is the job id; the descendant projection is keyed by session id.
         const job = pool.registry.get(topRow.rowId);
         return job?.sessionId ?? topRow.rowId;
+      };
+      refreshActiveTheme = (): void => {
+        if (!activeThemeFrame || !activeThemeJobId || refreshingTheme) return;
+        const job = pool.registry.get(activeThemeJobId);
+        const profile = job ? resolveJobTheme(job, pool.registry) : undefined;
+        if (!profile) return;
+        refreshingTheme = true;
+        try {
+          if (activeThemeFrame.refresh(profile)) {
+            activeThemeHostMode?.hostSwapUpdateSnapshot?.(displayedLiveSession ?? activeThemeLiveSession);
+            tui.requestRender();
+          }
+        } catch {
+          // Theme refresh is best effort; the already-rendered child remains visible.
+        } finally {
+          refreshingTheme = false;
+        }
       };
       const updateFooterHint = (): void => {
         if (viewStack.length === 0) {
@@ -219,19 +248,63 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         // This directly swaps the chatContainer children, so the parent transcript is replaced
         // with the child's transcript inside the existing parent UI window (no overlay).
         const job = pool.registry.get(row.rowId);
-        const sessionFile = job?.sessionId ? String(job.sessionId) : row.rowId;
+        const sessionFile = job?.sessionFile ? String(job.sessionFile) : job?.sessionId ? String(job.sessionId) : row.rowId;
         const control = liveChildFor(pool, row.rowId);
         const actualSessionFile = (control as unknown as { sessionFile?: string })?.sessionFile ?? sessionFile;
         const actualSessionId = job?.sessionId ?? row.rowId;
-        hostSwap.swapTo({ sessionId: actualSessionId, sessionFile: actualSessionFile, editorText: "", scrollOffset: 0 });
         const hostMode = (tui as unknown as { _hostInteractiveMode?: { hostSwapToSnapshot(s: unknown): void; hostSwapUpdateSnapshot(s: unknown): void; hostSwapApplyChildEvent?(event: unknown): void; hostSwapRestore(): void; hostSwapDepth(): number } })._hostInteractiveMode;
+        const previousThemeFrame = activeThemeFrame;
+        const previousThemeJobId = activeThemeJobId;
+        const previousThemeLiveSession = activeThemeLiveSession;
+        const previousThemeHostMode = activeThemeHostMode;
+        const previousDisplayedSession = displayedLiveSession;
+        const profile = job ? resolveJobTheme(job, pool.registry) : undefined;
+        let themeFrame: ThemeFrame | undefined;
+        if (hostMode && profile) {
+          // The footer factory receives the host TUI instance. The extension UI
+          // context is a separate object, so host-only capabilities must be
+          // read from `tui`, while setTheme remains the public extension seam.
+          const hostUi = tui as unknown as ThemeHostUI;
+          themeFrame = createThemeFrame({
+            _hostGetThemeInstance: hostUi._hostGetThemeInstance,
+            getTheme: hostUi.getTheme,
+            getThemeSetting: () => {
+              try {
+                return (ctx as unknown as { getSettingsManager?: () => { getThemeSetting?: () => string | undefined } }).getSettingsManager?.()?.getThemeSetting?.();
+              } catch {
+                return undefined;
+              }
+            },
+            setTheme: (next) => ctx.ui.setTheme(next),
+          }, profile);
+          if (themeFrame) {
+            activeThemeFrame = themeFrame;
+            activeThemeJobId = row.rowId;
+            activeThemeLiveSession = liveSession;
+            activeThemeHostMode = hostMode;
+          }
+        }
+        hostSwap.swapTo({ sessionId: actualSessionId, sessionFile: actualSessionFile, editorText: "", scrollOffset: 0 });
+        displayedLiveSession = liveSession;
+        let hostSnapshotApplied = false;
         let liveUnsub: (() => void) | undefined;
         if (hostMode) {
+          // The host pushes its swap frame before rendering the snapshot, so a
+          // render exception can leave native frames stranded. Record the depth
+          // first and unwind exactly the frames pushed by this call.
+          const hostDepthBefore = typeof hostMode.hostSwapDepth === "function" ? hostMode.hostSwapDepth() : 0;
           try {
             hostMode.hostSwapToSnapshot(liveSession as unknown as { snapshot: unknown });
-          } catch {}
+            hostSnapshotApplied = true;
+          } catch {
+            try {
+              while (typeof hostMode.hostSwapDepth === "function" && hostMode.hostSwapDepth() > hostDepthBefore) {
+                hostMode.hostSwapRestore();
+              }
+            } catch {}
+          }
           // Keep parent window in sync with live updates while viewing a running child
-          if (isRunning && liveSession.subscribe) {
+          if (hostSnapshotApplied && isRunning && liveSession.subscribe) {
             try {
               liveUnsub = liveSession.subscribe((event: unknown) => {
                 try {
@@ -249,16 +322,24 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
             return origGetEntries();
           };
         }
+        let finished = false;
         let hostDone: () => void = () => {
+          if (finished) return;
+          finished = true;
           try { liveUnsub?.(); } catch {}
+          // Restore the exact theme frame before reconstructing the parent window.
+          try { themeFrame?.restore(); } catch {}
+          if (activeThemeFrame === themeFrame) {
+            activeThemeFrame = previousThemeFrame;
+            activeThemeJobId = previousThemeJobId;
+            activeThemeLiveSession = previousThemeLiveSession;
+            activeThemeHostMode = previousThemeHostMode;
+          }
+          if (displayedLiveSession === liveSession) displayedLiveSession = previousDisplayedSession;
           try {
-            if (hostMode) hostMode.hostSwapRestore();
+            if (hostMode && hostSnapshotApplied) hostMode.hostSwapRestore();
           } catch {}
           try { hostSwap.restore(); } catch {}
-          // Restore fallback patch if it was used
-          if (!hostMode) {
-            // No hostMode, nothing to restore beyond hostSwap; getEntries will be restored on next swap via closure? For simplicity, reload not needed in test.
-          }
           const idx = viewStack.findIndex((r) => r.rowId === row.rowId);
           if (idx !== -1) viewStack.splice(idx, 1);
           const pos = hostDoneStack.indexOf(hostDone);
@@ -267,6 +348,10 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           tui.requestRender();
         };
         hostDoneStack.push(hostDone);
+        if (hostMode && !hostSnapshotApplied) {
+          hostDone();
+          return;
+        }
         tui.requestRender();
       };
       const handleEnter = (row: FooterTreeRow | undefined): void => {
@@ -292,6 +377,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
             clearTimeout(repaintTimer);
             repaintTimer = undefined;
           }
+          if (hostDoneStack.length > 0 || viewStack.length > 0) clearToRoot();
           branchUnsubscribe();
           subscribeTree();
         },
