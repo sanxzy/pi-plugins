@@ -7,8 +7,7 @@ const NON_NUMERIC_IDENTIFIER = "(?:\\d*[A-Za-z-][0-9A-Za-z-]*)";
 const IDENTIFIER = `(?:${NUMERIC_IDENTIFIER}|${NON_NUMERIC_IDENTIFIER})`;
 const RELEASE_VERSION_PATTERN = new RegExp(
   `^${NUMERIC_IDENTIFIER}\\.${NUMERIC_IDENTIFIER}\\.${NUMERIC_IDENTIFIER}` +
-    `(?:-(?:${IDENTIFIER})(?:\\.${IDENTIFIER})*)?` +
-    `(?:\\+(?:${IDENTIFIER})(?:\\.${IDENTIFIER})*)?$`,
+    `(?:-(?:${IDENTIFIER})(?:\\.${IDENTIFIER})*)?$`,
 );
 
 export interface PublishManifest {

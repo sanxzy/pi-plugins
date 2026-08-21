@@ -20,6 +20,10 @@ test("rejects prerelease numeric identifiers with leading zeroes", () => {
     () => validateReleaseVersion("0.84.2-1.0821.2026"),
     /valid semver release tag/,
   );
+  assert.throws(
+    () => validateReleaseVersion("0.84.2-1.821.2026+build.1"),
+    /valid semver release tag/,
+  );
 });
 
 test("writes the validated tag version into the publish manifest", () => {
