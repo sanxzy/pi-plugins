@@ -19,7 +19,8 @@ import type { ChildLiveSnapshot } from "@xzy-ai/core";
 import { createThemeFrame, type ThemeHostUI, type ThemeFrame } from "../theme-bridge.ts";
 
 /** Debounce job-status and live-leaf repaints so bursty child activity coalesces. */
-const REPAINT_DEBOUNCE_MS = 250;
+/** Debounce window shared with tests that wait out a scheduled repaint. */
+export const REPAINT_DEBOUNCE_MS = 250;
 
 /**
  * Heartbeat cadence that advances running child timers while a long quiet tool
@@ -55,8 +56,17 @@ export function createFooterHeartbeat(
   return () => clearInterval(heartbeat);
 }
 
+/** Active footer repainters; notified when the host rotates the active model. */
+const modelChangeRepainters = new Set<() => void>();
+
 /** Install the permanent native-information footer for TUI sessions. */
 export function registerAgentFooter(pi: ExtensionAPI): void {
+  // Round-robin rotations swap the model in memory and the host emits
+  // model_select after each one; repaint so the status line always reflects
+  // the model currently handling the request.
+  pi.on("model_select", () => {
+    for (const notify of modelChangeRepainters) notify();
+  });
   pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
     // The footer is a TUI-only surface; any other mode must stay telemetry-silent.
     if (ctx.mode !== "tui" || !ctx.hasUI) return;
@@ -77,6 +87,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         );
       };
       const branchUnsubscribe = footerData.onBranchChange(() => tui.requestRender());
+      modelChangeRepainters.add(requestRepaint);
       // Footer info is re-derived lazily from `ctx.sessionManager.getEntries()`
       // on every repaint. Memoize it per leaf id: the entries list is append-only
       // and the leaf id is the cache key that advances on every new message, so a
@@ -381,6 +392,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
             repaintTimer = undefined;
           }
           if (hostDoneStack.length > 0 || viewStack.length > 0) clearToRoot();
+          modelChangeRepainters.delete(requestRepaint);
           branchUnsubscribe();
           subscribeTree();
         },

@@ -8,7 +8,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { createChildLiveFeed, createJob } from "@xzy-ai/core";
 import { getChildPool } from "@xzy-ai/runtime";
 import { TOOL_OPERATIONS, createSessionLogger, runWithLogContext } from "@xzy-ai/observability";
-import { registerAgentFooter, createFooterHeartbeat } from "../src/registrations/footer.ts";
+import { registerAgentFooter, createFooterHeartbeat, REPAINT_DEBOUNCE_MS } from "../src/registrations/footer.ts";
 
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";
@@ -498,6 +498,41 @@ test("the footer factory is re-installed after a host UI reset", () => {
     d.handlers.get("session_start")!({ type: "session_start", reason: "reload" }, ctx(cwd));
     assert.equal(typeof capturedFooterFactory, "function", "footer is re-installed after host UI reset");
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+test("model_select events repaint the footer with the rotated model", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-rotate-"));
+  const d = piDouble();
+  try {
+    let currentModel: unknown = { provider: "openai", id: "gpt-a", reasoning: true, contextWindow: 128_000 };
+    registerAgentFooter(d.pi);
+    const testCtx = ctx(cwd, "root-session", { model: currentModel });
+    // ctx.model is a live getter in the real host; mirror that here.
+    (testCtx as unknown as { model: unknown }).model = new Proxy({}, {
+      get: (_target, prop) => (currentModel as Record<PropertyKey, unknown>)[prop],
+    });
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, testCtx);
+    let renders = 0;
+    const footer = capturedFooterFactory!({ requestRender: () => { renders += 1; }, terminal: { rows: 24, columns: 100 } }, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+    }) as { render(width: number): string[] };
+    assert.ok(footer.render(100).map(stripVTControlCharacters).some((line) => line.includes("gpt-a")));
+
+    // The host emits model_select after an in-memory round-robin rotation.
+    currentModel = { provider: "openai", id: "gpt-b", reasoning: true, contextWindow: 128_000 };
+    const handler = d.handlers.get("model_select");
+    assert.ok(handler, "footer registration must listen for model_select");
+    handler({ type: "model_select", model: currentModel, previousModel: { provider: "openai", id: "gpt-a" }, source: "set" }, testCtx);
+    await new Promise((resolve) => setTimeout(resolve, REPAINT_DEBOUNCE_MS + 50));
+    assert.ok(renders > 0, "model_select must trigger a footer repaint");
+    const rotated = footer.render(100).map(stripVTControlCharacters);
+    assert.ok(rotated.some((line) => line.includes("gpt-b")), rotated.join("\n"));
+    assert.equal(rotated.some((line) => line.includes("gpt-a")), false);
+  } finally {
+    d.handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, ctx(cwd));
     rmSync(cwd, { recursive: true, force: true });
   }
 });
