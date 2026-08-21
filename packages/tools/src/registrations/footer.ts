@@ -85,20 +85,21 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // (child's token/livedata) while the tree stays anchored to the root.
       let infoCache: { leaf: string; info: AgentFooterInfo } | undefined;
       const getCachedInfo = (): AgentFooterInfo => {
+        const identity = footerModelIdentity(ctx);
         if (viewStack.length > 0) {
           const top = viewStack[viewStack.length - 1]!;
           const control = liveChildFor(pool, top.rowId);
           const retained = retainedSnapshotFor(pool, top.rowId);
           const snapshot = control?.live?.snapshot ?? retained;
           if (snapshot) {
-            const leaf = `${top.rowId}:${snapshot.transcript.length}:${snapshot.counters.inputTokens}:${snapshot.counters.outputTokens}:${snapshot.counters.cacheReadTokens}:${snapshot.counters.cacheWriteTokens}:${snapshot.counters.cost}:${snapshot.status}:${snapshot.settled}`;
+            const leaf = `${top.rowId}:${snapshot.transcript.length}:${snapshot.counters.inputTokens}:${snapshot.counters.outputTokens}:${snapshot.counters.cacheReadTokens}:${snapshot.counters.cacheWriteTokens}:${snapshot.counters.cost}:${snapshot.status}:${snapshot.settled}:${identity}`;
             if (infoCache?.leaf === leaf) return infoCache.info;
             const info = childFooterInfo(snapshot, ctx, footerData);
             infoCache = { leaf, info };
             return info;
           }
         }
-        const leaf = ctx.sessionManager.getLeafId() ?? "";
+        const leaf = `${ctx.sessionManager.getLeafId() ?? ""}:${identity}`;
         if (infoCache?.leaf === leaf) return infoCache.info;
         const info = footerInfo(ctx, footerData);
         infoCache = { leaf, info };
@@ -519,6 +520,39 @@ function footerTheme(theme: Theme): { fg: (color: string, text: string) => strin
   };
 }
 
+interface FooterModelGroup {
+  readonly id?: string;
+  readonly name?: string;
+  readonly active?: boolean;
+}
+
+interface FooterModelGroupApi {
+  readonly list?: () => readonly FooterModelGroup[];
+}
+
+function activeModelGroup(): FooterModelGroup | undefined {
+  const api = (globalThis as typeof globalThis & { [key: symbol]: unknown })[Symbol.for("pi-c2.model-groups")] as FooterModelGroupApi | undefined;
+  if (typeof api?.list !== "function") return undefined;
+  try {
+    return api.list().find((group) => group.active);
+  } catch {
+    return undefined;
+  }
+}
+
+function footerModelIdentity(ctx: ExtensionContext): string {
+  const model = ctx.model;
+  const group = activeModelGroup();
+  const entries = ctx.sessionManager.getEntries() as readonly unknown[];
+  return [
+    model?.provider ?? "",
+    model?.id ?? "",
+    latestThinkingLevel(entries),
+    group?.id ?? "",
+    group?.name ?? "",
+  ].join(":");
+}
+
 function footerInfo(
   ctx: ExtensionContext,
   footerData: ReadonlyFooterDataProvider,
@@ -529,6 +563,7 @@ function footerInfo(
   const model = ctx.model;
   const reasoning = Boolean(model?.reasoning);
   const thinkingLevel = latestThinkingLevel(entries);
+  const modelGroupName = activeModelGroup()?.name;
   return {
     cwd: ctx.sessionManager.getCwd(),
     home: process.env.HOME || process.env.USERPROFILE,
@@ -545,6 +580,7 @@ function footerInfo(
     autoCompactEnabled: true,
     model: model?.id,
     provider: model?.provider,
+    modelGroupName,
     providerCount: footerData.getAvailableProviderCount(),
     thinkingLevel,
     reasoning,
@@ -559,6 +595,7 @@ function childFooterInfo(
   const counters = snapshot.counters;
   const model = ctx.model;
   const reasoning = Boolean(model?.reasoning);
+  const modelGroupName = activeModelGroup()?.name;
   // Derive thinkingLevel from child's transcript if it contains a thinking_level_change entry;
   // the live transcript does not carry those, so reuse parent's thinking level.
   const entries = ctx.sessionManager.getEntries() as readonly unknown[];
@@ -587,6 +624,7 @@ function childFooterInfo(
     autoCompactEnabled: true,
     model: model?.id,
     provider: model?.provider,
+    modelGroupName,
     providerCount: footerData.getAvailableProviderCount(),
     thinkingLevel,
     reasoning,

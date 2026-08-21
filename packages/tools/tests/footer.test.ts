@@ -26,12 +26,16 @@ function recordedConfirm(_title: string, _message: string): Promise<boolean> {
 }
 
 /** ExtensionContext double exposing the UI surfaces the footer registration uses. */
-function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
+function ctx(
+  cwd: string,
+  sessionId = "root-session",
+  options: { model?: unknown; entries?: readonly unknown[] } = {},
+): ExtensionContext {
   return {
     mode: "tui",
     hasUI: true,
     cwd,
-    model: undefined,
+    model: options.model,
     getContextUsage: () => undefined,
     ui: {
       setFooter: recordedSetFooter,
@@ -45,7 +49,7 @@ function ctx(cwd: string, sessionId = "root-session"): ExtensionContext {
       getLeafId: () => undefined,
       getSessionName: () => undefined,
       getCwd: () => cwd,
-      getEntries: () => [],
+      getEntries: () => options.entries ?? [],
     } as unknown as ExtensionContext["sessionManager"],
   } as unknown as ExtensionContext;
 }
@@ -147,6 +151,37 @@ test("the custom footer is installed for TUI sessions and restored on root shutd
     d.handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "reload" }, ctx(cwd));
     assert.equal(restoredToNative, true, "root shutdown restores the native footer");
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("the footer shows group, provider/model, and thinking after group selection", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-group-"));
+  const symbol = Symbol.for("pi-c2.model-groups");
+  const previous = (globalThis as typeof globalThis & { [key: symbol]: unknown })[symbol];
+  const d = piDouble();
+  try {
+    (globalThis as typeof globalThis & { [key: symbol]: unknown })[symbol] = {
+      list: () => [{ id: "work", name: "Work", active: true }],
+    };
+    registerAgentFooter(d.pi);
+    const testCtx = ctx(cwd, "root-session", {
+      model: { provider: "openai", id: "gpt-5", reasoning: true, contextWindow: 128_000 },
+      entries: [{ type: "thinking_level_change", thinkingLevel: "high" }],
+    });
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, testCtx);
+    assert.ok(capturedFooterFactory);
+    const footer = capturedFooterFactory!({ requestRender: () => {}, terminal: { rows: 24, columns: 100 } }, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+    }) as { render(width: number): string[] };
+    const lines = footer.render(100).map(stripVTControlCharacters);
+    assert.match(lines[1]!, /Work • openai\/gpt-5 • high$/);
+  } finally {
+    d.handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, ctx(cwd));
+    if (previous === undefined) delete (globalThis as typeof globalThis & { [key: symbol]: unknown })[symbol];
+    else (globalThis as typeof globalThis & { [key: symbol]: unknown })[symbol] = previous;
     rmSync(cwd, { recursive: true, force: true });
   }
 });

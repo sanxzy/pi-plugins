@@ -54,6 +54,23 @@ test("renders native-style path and usage rows within the requested width", () =
   assert.ok(lines.every((line) => line.length <= 100));
 });
 
+test("renders the active model group with provider, model, and thinking level", () => {
+  const footer = new AgentFooter({
+    tui: fakeTUI(),
+    theme,
+    getInfo: () => info({
+      model: "gpt-5",
+      provider: "openai",
+      modelGroupName: "Work",
+      thinkingLevel: "high",
+      reasoning: true,
+    }),
+  });
+
+  const lines = footer.render(100).map(stripVTControlCharacters);
+  assert.match(lines[1]!, /Work • openai\/gpt-5 • high$/);
+});
+
 test("renders provider, session name, unknown context, and narrow widths safely", () => {
   const footer = new AgentFooter({
     tui: fakeTUI(),

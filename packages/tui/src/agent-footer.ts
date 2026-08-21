@@ -23,6 +23,8 @@ export interface AgentFooterInfo {
   readonly autoCompactEnabled: boolean;
   readonly model?: string;
   readonly provider?: string;
+  /** Group label shown when the current model was selected through /model. */
+  readonly modelGroupName?: string;
   readonly providerCount: number;
   readonly thinkingLevel?: string;
   readonly reasoning: boolean;
@@ -429,9 +431,12 @@ function formatStatsLine(info: AgentFooterInfo, width: number, theme: AgentFoote
 
   const left = stats.join(" ");
   const model = info.model ?? "no-model";
-  let right = model;
-  if (info.reasoning) right += ` • ${info.thinkingLevel === "off" ? "thinking off" : info.thinkingLevel ?? "off"}`;
-  if (info.providerCount > 1 && info.provider) right = `(${info.provider}) ${right}`;
+  const modelReference = info.provider && info.model ? `${info.provider}/${info.model}` : model;
+  let right = info.modelGroupName
+    ? `${info.modelGroupName} • ${modelReference} • ${info.thinkingLevel ?? "off"}`
+    : model;
+  if (!info.modelGroupName && info.reasoning) right += ` • ${info.thinkingLevel === "off" ? "thinking off" : info.thinkingLevel ?? "off"}`;
+  if (!info.modelGroupName && info.providerCount > 1 && info.provider) right = `(${info.provider}) ${right}`;
 
   const leftText = theme.fg("dim", left);
   const rightText = theme.fg("dim", right);
