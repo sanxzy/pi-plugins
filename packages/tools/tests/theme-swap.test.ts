@@ -51,11 +51,15 @@ function hostMode(currentTheme, calls, options = {}) {
   let depth = 0;
   return {
     hostSwapToSnapshot(session) {
+      if (options.failSnapshotAfterPush) {
+        depth += 1;
+        throw new Error("host render failed after push");
+      }
       calls.push({ type: "snapshot", theme: currentTheme.value, snapshot: session?.snapshot });
       depth += 1;
     },
-    hostSwapUpdateSnapshot() {
-      calls.push({ type: "update", theme: currentTheme.value });
+    hostSwapUpdateSnapshot(session) {
+      calls.push({ type: "update", theme: currentTheme.value, snapshot: session?.snapshot });
     },
     hostSwapRestore() {
       calls.push({ type: "restore", theme: currentTheme.value });
@@ -240,6 +244,74 @@ test("a host footer reset disposes the old theme frame before reinstalling", () 
     footer2.dispose();
     assert.equal(current.value, parent);
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a host snapshot failure unwinds the pushed host frame and restores the parent theme", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-theme-fail-"));
+  try {
+    const parent = createNativeTheme(BUILTIN_THEME_PROFILES[0]);
+    const current = { value: parent };
+    const calls = [];
+    const d = piDouble();
+    const { ctx, getFooterFactory } = context(cwd, current, calls);
+    register(d, ctx);
+    const pool = getChildPool(cwd, "root-session");
+    const feed = { snapshot: { status: "running", settled: false, transcript: [], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
+    pool.liveChildren.set("fail-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
+    pool.registry.createJob(createJob({ jobId: "fail-child", parentSessionId: "root-session", sessionId: "fail-child", status: "running", description: "fail", subagentType: "test-agent", themeId: "light" }));
+    const mode = hostMode(current, calls, { failSnapshotAfterPush: true });
+    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
+    const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
+    footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
+    assert.equal(mode.hostSwapDepth(), 0);
+    assert.equal(current.value, parent);
+    footer.dispose();
+    assert.equal(mode.hostSwapDepth(), 0);
+    assert.equal(current.value, parent);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("profile refresh while viewing a nested legacy child rebuilds the visible transcript", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-theme-nested-refresh-"));
+  const original = loadThemeLibrary();
+  try {
+    const parent = createNativeTheme(BUILTIN_THEME_PROFILES[0]);
+    const current = { value: parent };
+    const calls = [];
+    const d = piDouble();
+    const { ctx, getFooterFactory } = context(cwd, current, calls);
+    register(d, ctx);
+    const pool = getChildPool(cwd, "root-session");
+    const outerFeed = { snapshot: { status: "running", settled: false, transcript: [{ id: "outer", kind: "message", role: "assistant", text: "outer-text", complete: true }], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
+    const innerFeed = { snapshot: { status: "running", settled: false, transcript: [{ id: "inner", kind: "message", role: "assistant", text: "inner-text", complete: true }], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
+    pool.liveChildren.set("outer-child", { sessionFile: join(cwd, "outer.jsonl"), live: outerFeed, steer: async () => {}, abort: async () => {} });
+    pool.liveChildren.set("inner-child", { sessionFile: join(cwd, "inner.jsonl"), live: innerFeed, steer: async () => {}, abort: async () => {} });
+    pool.registry.createJob(createJob({ jobId: "outer-child", parentSessionId: "root-session", sessionId: "outer-child", status: "running", description: "outer", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "inner-child", parentSessionId: "outer-child", sessionId: "inner-child", status: "running", description: "inner", subagentType: "test-agent" }));
+    const mode = hostMode(current, calls);
+    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
+    const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
+    footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
+    footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
+    assert.equal(mode.hostSwapDepth(), 2);
+    const library = JSON.parse(JSON.stringify(original));
+    const light = library.profiles.find((profile) => profile.themeId === "light");
+    light.colors.accent = "#654321";
+    writeFileSync(homeThemesFile(), JSON.stringify(library));
+    clearThemeLibraryCache();
+    footer.render(100);
+    const updates = calls.filter((entry) => entry.type === "update");
+    assert.equal(updates.length > 0, true);
+    assert.equal(updates.at(-1)?.snapshot?.transcript?.[0]?.text, "inner-text");
+    footer.dispose();
+    assert.equal(current.value, parent);
+  } finally {
+    writeFileSync(homeThemesFile(), JSON.stringify(original));
+    clearThemeLibraryCache();
     rmSync(cwd, { recursive: true, force: true });
   }
 });
