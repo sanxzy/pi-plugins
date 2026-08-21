@@ -19,6 +19,7 @@ const PATCH_MARKERS: Array<[string, string]> = [
   ["dist/modes/interactive/components/model-selector.js", "pi-c2: the extension publishes a host-neutral model-group bridge"],
   ["dist/modes/interactive/interactive-mode.js", "__pi_c2_group__"],
   ["dist/modes/interactive/interactive-mode.js", "hostSwapApplyChildEvent"],
+  ["dist/modes/interactive/interactive-mode.js", "_hostGetThemeInstance"],
 ];
 
 /**
