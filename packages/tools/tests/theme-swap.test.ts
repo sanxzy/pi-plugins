@@ -261,12 +261,20 @@ test("a host snapshot failure unwinds the pushed host frame and restores the par
     const feed = { snapshot: { status: "running", settled: false, transcript: [], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
     pool.liveChildren.set("fail-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
     pool.registry.createJob(createJob({ jobId: "fail-child", parentSessionId: "root-session", sessionId: "fail-child", status: "running", description: "fail", subagentType: "test-agent", themeId: "light" }));
-    const mode = hostMode(current, calls, { failSnapshotAfterPush: true });
+    const mode = hostMode(current, calls, { failSnapshotAfterPush: true, recordParentRebuild: true });
     const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
     const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
     footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
     assert.equal(mode.hostSwapDepth(), 0);
     assert.equal(current.value, parent);
+    // The host rebuilds the parent transcript during frame unwinding, so the
+    // parent theme must be restored before that rebuild, not after.
+    const themeRestoreIdx = calls.findIndex((entry) => entry.type === "theme" && entry.theme === parent);
+    const rebuildIdx = calls.findIndex((entry) => entry.type === "parent-rebuild");
+    assert.ok(themeRestoreIdx !== -1, "error path must restore the parent theme");
+    assert.ok(rebuildIdx !== -1, "host unwind must rebuild the parent");
+    assert.ok(themeRestoreIdx < rebuildIdx, "theme restoration must precede the parent rebuild");
+    assert.equal(rebuildIdx >= 0 ? calls[rebuildIdx]?.theme : undefined, parent);
     footer.dispose();
     assert.equal(mode.hostSwapDepth(), 0);
     assert.equal(current.value, parent);
