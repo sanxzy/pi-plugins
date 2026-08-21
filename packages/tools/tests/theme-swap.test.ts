@@ -359,6 +359,35 @@ test("active child refresh applies valid profile updates through the native host
   }
 });
 
+test("an unpatched host never mutates themes while native child viewing still works", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-theme-degraded-"));
+  try {
+    const parent = createNativeTheme(BUILTIN_THEME_PROFILES[0]);
+    const current = { value: parent };
+    const calls = [];
+    const d = piDouble();
+    const { ctx, getFooterFactory } = context(cwd, current, calls);
+    register(d, ctx);
+    const pool = getChildPool(cwd, "root-session");
+    const feed = { snapshot: { status: "running", settled: false, transcript: [{ id: "m", kind: "message", role: "assistant", text: "child", complete: true }], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
+    pool.liveChildren.set("degraded-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
+    pool.registry.createJob(createJob({ jobId: "degraded-child", parentSessionId: "root-session", sessionId: "degraded-child", status: "running", description: "degraded", subagentType: "test-agent", themeId: "light" }));
+    const mode = hostMode(current, calls);
+    // A stock/unpatched host TUI exposes neither _hostGetThemeInstance nor getTheme.
+    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode };
+    const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
+    footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
+    assert.equal(calls.some((entry) => entry.type === "theme"), false);
+    assert.equal(current.value, parent);
+    assert.equal(mode.hostSwapDepth(), 1);
+    footer.dispose();
+    assert.equal(mode.hostSwapDepth(), 0);
+    assert.equal(current.value, parent);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("legacy child views do not mutate the parent theme", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-c2-theme-legacy-"));
   try {
