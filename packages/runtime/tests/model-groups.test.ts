@@ -190,3 +190,23 @@ test("round-robin rotates and skips quarantined", async () => {
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test("derived contextWindow resolves ids that contain slashes", async () => {
+  const { deriveGroupContextWindow } = await import("../src/infrastructure/model-groups/store.ts");
+  const group = { id: "g1", name: "A", mode: "fallback" as const, quarantineMinutes: 5, models: [{ ref: "openrouter/stealth/ox-alpha" }] };
+  const catalog = [{ provider: "openrouter", id: "stealth/ox-alpha", contextWindow: 200000 }];
+  assert.equal(deriveGroupContextWindow(group, catalog), 200000);
+});
+
+test("model group persistence accepts provider-scoped slashed ids", async () => {
+  const { saveModelGroups, getModelGroups, clearModelGroupsCache } = await import("../src/infrastructure/model-groups/store.ts");
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      clearModelGroupsCache();
+      const saved = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineMinutes: 5, models: [{ ref: "openrouter/stealth/ox-alpha" }] }] });
+      assert.equal(saved.ok, true);
+      assert.equal(getModelGroups().groups[0]!.models[0]!.ref, "openrouter/stealth/ox-alpha");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

@@ -100,7 +100,10 @@ function validateGroupInput(input: ManageModelGroupsGroupInput): string | undefi
   }
   if (input.models.length === 0) return "A group needs at least one model.";
   for (const model of input.models) {
-    if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(model.ref)) return `Invalid model reference: ${model.ref}`;
+    // Provider-scoped references may carry slashes inside the model id
+    // (for example openrouter/stealth/ox-alpha): only the first "/" separates
+    // provider from id, so extra segments are allowed but must be non-empty.
+    if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(model.ref)) return `Invalid model reference: ${model.ref}`;
   }
   return undefined;
 }

@@ -46,7 +46,10 @@ function isValidRef(ref: unknown): boolean {
   if (typeof ref !== "string") return false;
   const trimmed = ref.trim();
   if (trimmed.length === 0) return false;
-  return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(trimmed);
+  // Provider-scoped references may carry slashes inside the model id
+  // (for example openrouter/stealth/ox-alpha): only the first "/" separates
+  // provider from id, so extra segments are allowed but must be non-empty.
+  return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(trimmed);
 }
 function normalizeEntry(raw: unknown): ModelGroupEntry | undefined {
   if (!raw || typeof raw !== "object") return undefined;
@@ -181,7 +184,11 @@ export function clearRoundRobinPointers(): void { roundRobinPointers.clear(); }
 export function deriveGroupContextWindow(group: ModelGroup, catalog: Array<{ id: string; provider: string; contextWindow?: number }>): number | undefined {
   let min: number | undefined;
   for (const m of group.models) {
-    const [provider, id] = m.ref.split("/");
+    // Model ids may contain slashes (openrouter/stealth/ox-alpha): only the
+    // first "/" separates provider from id.
+    const separator = m.ref.indexOf("/");
+    const provider = separator === -1 ? m.ref : m.ref.slice(0, separator);
+    const id = separator === -1 ? undefined : m.ref.slice(separator + 1);
     const found = catalog.find((c) => c.provider === provider && c.id === id);
     const cw = found?.contextWindow;
     if (typeof cw !== "number" || cw <= 0) continue;

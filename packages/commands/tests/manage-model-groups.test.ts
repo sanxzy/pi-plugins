@@ -192,3 +192,16 @@ test("quarantined members show a remaining timer in the group list", async () =>
     rmSync(home, { recursive: true, force: true });
   }
 });
+test("group validation accepts provider-scoped ids that contain slashes", async () => {
+  const { _test } = await import("../src/registrations/manage-model-groups.ts");
+  const base = { name: "G", mode: "round-robin" as const, quarantineMinutes: 5, models: [] as Array<{ ref: string }> };
+  assert.equal(_test.validateGroupInput({ ...base, models: [{ ref: "openrouter/stealth/ox-alpha" }] }), undefined);
+  assert.equal(_test.validateGroupInput({ ...base, models: [{ ref: "openai/gpt-a" }] }), undefined);
+  for (const bad of ["noslash", "/leading", "trailing/", "sp ace/x", "x//y", "x/ y"]) {
+    assert.match(
+      _test.validateGroupInput({ ...base, models: [{ ref: bad }] }) ?? "",
+      /Invalid model reference/,
+      `expected rejection for ${bad}`,
+    );
+  }
+});
