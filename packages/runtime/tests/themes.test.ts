@@ -69,6 +69,33 @@ test("theme library", async (t) => {
     }
   }));
 
+  await t.test("built-in accents never render near-white outside text roles", () => {
+    const textRoles = new Set(["text", "searchMatchText", "userMessageText", "customMessageText", "toolTitle"]);
+    const luminance = (hex: string): number => {
+      const channel = (index: number): number => Number.parseInt(hex.replace("#", "").slice(index, index + 2), 16) / 255;
+      const adjust = (channelValue: number): number => (channelValue <= 0.03928 ? channelValue / 12.92 : ((channelValue + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * adjust(channel(0)) + 0.7152 * adjust(channel(2)) + 0.0722 * adjust(channel(4));
+    };
+    const resolve = (value: unknown, vars: Record<string, unknown>, seen = new Set<string>()): unknown => {
+      if (typeof value !== "string" || value === "" || value.startsWith("#")) return value;
+      if (seen.has(value)) return undefined;
+      seen.add(value);
+      const next = vars[value];
+      return next === undefined ? undefined : resolve(next, vars, seen);
+    };
+    const offenders: string[] = [];
+    for (const profile of BUILTIN_THEME_PROFILES) {
+      for (const [token, raw] of Object.entries(profile.colors)) {
+        if (textRoles.has(token)) continue;
+        const resolved = resolve(raw, profile.vars);
+        if (typeof resolved === "string" && resolved.startsWith("#") && luminance(resolved) >= 0.78) {
+          offenders.push(`${profile.themeId}.${token} -> ${resolved}`);
+        }
+      }
+    }
+    assert.deepEqual(offenders, []);
+  });
+
   await t.test("first use publishes the complete built-in library privately", () => withHome(() => {
     const library = loadThemeLibrary();
     assert.equal(library.version, 1);

@@ -88,6 +88,17 @@ test("profile conversion creates a native Theme with resolved variables", () => 
   assert.notEqual(theme.bg("selectedBg", "hello"), "hello");
 });
 
+test("native themes adapt to the terminal color capability", () => {
+  const profile = BUILTIN_THEME_PROFILES[2]!;
+  const capped = createNativeTheme(profile, { trueColor: false });
+  assert.equal(capped.getColorMode(), "256color");
+  assert.ok(capped.bg("toolPendingBg", "x").includes("48;5;"));
+  assert.ok(capped.fg("text", "x").includes("38;5;"));
+  const trueColor = createNativeTheme(profile, { trueColor: true });
+  assert.equal(trueColor.getColorMode(), "truecolor");
+  assert.ok(trueColor.bg("toolPendingBg", "x").includes("48;2;"));
+});
+
 test("theme frames capture the parent, refresh updated profiles, and restore without persistence", () => {
   const parent = createNativeTheme(BUILTIN_THEME_PROFILES[0]);
   const current = { value: parent };

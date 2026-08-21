@@ -1,4 +1,5 @@
 import { Theme } from "@earendil-works/pi-coding-agent";
+import { getCapabilities } from "@earendil-works/pi-tui";
 import {
   THEME_BACKGROUND_TOKENS,
   THEME_FOREGROUND_TOKENS,
@@ -41,10 +42,15 @@ function resolveColors(profile: ThemeProfile, tokens: readonly string[]): HostCo
 }
 
 /** Construct the host SDK's native Theme without changing host settings. */
-export function createNativeTheme(profile: ThemeProfile): Theme {
+export function createNativeTheme(profile: ThemeProfile, capabilities: { trueColor?: boolean } = getCapabilities()): Theme {
   const foreground = resolveColors(profile, THEME_FOREGROUND_TOKENS);
   const background = resolveColors(profile, THEME_BACKGROUND_TOKENS);
-  return new Theme(foreground as ConstructorParameters<typeof Theme>[0], background as ConstructorParameters<typeof Theme>[1], profile.colorMode, {
+  // The host downgrades to the 256-color cube when the terminal lacks
+  // truecolor support; emitting raw 48;2 sequences there renders as garbage.
+  const mode = profile.colorMode === "truecolor" && capabilities.trueColor === false
+    ? "256color"
+    : profile.colorMode;
+  return new Theme(foreground as ConstructorParameters<typeof Theme>[0], background as ConstructorParameters<typeof Theme>[1], mode, {
     name: profile.name,
   });
 }
