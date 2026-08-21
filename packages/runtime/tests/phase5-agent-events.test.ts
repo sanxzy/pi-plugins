@@ -15,6 +15,8 @@ import {
   getChildPool,
   childSessionPaths,
   finishRootSession,
+  getBuiltinThemeFallback,
+  resolveJobTheme,
 } from "@xzy-ai/runtime";
 import { makeJobId } from "@xzy-ai/tools";
 import { registerSessionEvents } from "../../commands/src/registrations/session-events.ts";
@@ -35,6 +37,7 @@ function job(input: {
   parentJobId?: string;
   status?: "created" | "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
   createdAt?: string;
+  themeId?: string;
 }) {
   return createJob({
     jobId: input.id,
@@ -43,6 +46,7 @@ function job(input: {
     status: input.status ?? "queued",
     description: input.id,
     subagentType: "test-agent",
+    themeId: input.themeId,
     createdAt: input.createdAt,
   });
 }
@@ -51,7 +55,7 @@ test("scoped registry uses each agent event log and snapshot as its durable read
   setupHome();
   const root = project();
   const registry = createAgentEventRegistry(root, "root-session");
-  const child = job({ id: "agent-a", parentSessionId: "root-session" });
+  const child = job({ id: "agent-a", parentSessionId: "root-session", themeId: "light" });
   registry.createJob(child);
   registry.updateJob(child.jobId, { status: "running" });
   registry.updateJob(child.jobId, { status: "completed", sessionFile: "/private/transcript.jsonl" });
@@ -71,6 +75,9 @@ test("scoped registry uses each agent event log and snapshot as its durable read
   assert.equal(restored?.sessionFile, "/private/transcript.jsonl");
   assert.equal(restored?.delivered, true);
   assert.equal(restored?.parentSessionId, "root-session");
+  assert.equal(restored?.themeId, "light");
+  const persisted = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  assert.equal(persisted.themeId, "light");
 });
 
 test("nested agent lineage and recursive visibility survive a fresh event-log read", () => {
@@ -270,6 +277,27 @@ test("stale snapshot delivery and transcript fields are rebuilt from events", ()
   const repaired = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
   assert.equal(repaired.delivered, false);
   assert.equal(repaired.sessionFile, undefined);
+});
+
+test("unknown theme metadata falls back and repairs through a fresh registry read", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(job({ id: "missing-theme", parentSessionId: "root-session", themeId: "removed-profile" }));
+  const resolved = resolveJobTheme(registry.get("missing-theme")!, registry);
+  assert.equal(resolved?.themeId, getBuiltinThemeFallback().themeId);
+  assert.equal(registry.get("missing-theme")?.themeId, getBuiltinThemeFallback().themeId);
+  const fresh = createAgentEventRegistry(root, "root-session");
+  assert.equal(fresh.get("missing-theme")?.themeId, getBuiltinThemeFallback().themeId);
+});
+
+test("legacy jobs without theme metadata remain readable without a theme repair", () => {
+  setupHome();
+  const root = project();
+  const registry = createAgentEventRegistry(root, "root-session");
+  registry.createJob(job({ id: "legacy-theme", parentSessionId: "root-session" }));
+  assert.equal(resolveJobTheme(registry.get("legacy-theme")!, registry), undefined);
+  assert.equal(registry.get("legacy-theme")?.themeId, undefined);
 });
 
 test("new canonical job IDs are unprefixed", () => {

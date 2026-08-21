@@ -63,6 +63,15 @@ test("updateJob is immutable and preserves the session identity", () => {
   assert.equal(running.updatedAt, "2026-01-01T00:00:00.000Z");
 });
 
+test("job theme metadata is optional, immutable, and updateable for repair", () => {
+  const legacy = createJob({ jobId: "legacy-theme", status: "created", description: "d", subagentType: "g" });
+  assert.equal(legacy.themeId, undefined);
+  const assigned = createJob({ jobId: "assigned-theme", status: "created", description: "d", subagentType: "g", themeId: "light" });
+  const repaired = updateJob(assigned, { themeId: "dark", updatedAt: "2026-01-01T00:00:00.000Z" });
+  assert.equal(assigned.themeId, "light");
+  assert.equal(repaired.themeId, "dark");
+});
+
 test("a fresh child job's session id equals its job id", () => {
   const job: Job = createJob({
     jobId: "job-1",

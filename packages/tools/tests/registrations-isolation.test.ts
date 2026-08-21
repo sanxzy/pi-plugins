@@ -284,6 +284,7 @@ test("a child agent foreground spawn derives parent lineage from the actual call
     const child = pool.registry.get(result.details.jobId as string);
     assert.equal(child?.parentJobId, "parent");
     assert.equal(child?.rootJobId, "parent");
+    assert.equal(child?.themeId, "dark");
     assert.equal(child?.depth, 1);
     assert.deepEqual(child?.parentAgentIds, ["parent"]);
     assert.equal(child?.status, "failed");
@@ -318,6 +319,7 @@ test("agent resumes a terminal job in place with the same id and transcript", as
     description: "old work",
     subagentType: "test-agent",
     sessionFile,
+    themeId: "light",
   }));
   const held = Array.from({ length: MAX_CONCURRENCY }, () => deferred<void>());
   const holdRuns = held.map((slot) => pool.concurrency.run(() => slot.promise));
@@ -342,6 +344,7 @@ test("agent resumes a terminal job in place with the same id and transcript", as
     assert.equal(resumeJobId, "original");
     assert.equal(resumed?.status, "queued");
     assert.equal(resumed?.sessionFile, sessionFile);
+    assert.equal(resumed?.themeId, "light");
     assert.equal(existsSync(sessionFile), true);
     assert.equal(
       result.content[0]?.text,

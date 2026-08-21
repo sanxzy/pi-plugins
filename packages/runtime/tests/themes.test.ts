@@ -9,6 +9,7 @@ import {
   THEMES_BACKUP_SUFFIX,
   THEMES_FILE_NAME,
   clearThemeLibraryCache,
+  createThemeAssignmentCursor,
   getBuiltinThemeFallback,
   getThemeProfile,
   homeThemesFile,
@@ -238,6 +239,15 @@ test("theme library", async (t) => {
     assert.ok(validateThemeLibrary(library));
     Object.assign(library.profiles[0]!.colors, { unknownToken: "#ffffff" });
     assert.equal(validateThemeLibrary(library), undefined);
+  }));
+
+  await t.test("round-robin assignment reuses profiles and resets with a new cursor", () => withHome(() => {
+    const cursor = createThemeAssignmentCursor();
+    assert.equal(cursor.nextThemeId(), BUILTIN_THEME_PROFILES[0]!.themeId);
+    assert.equal(cursor.nextThemeId(), BUILTIN_THEME_PROFILES[1]!.themeId);
+    assert.equal(cursor.nextThemeId(), BUILTIN_THEME_PROFILES[0]!.themeId);
+    const restarted = createThemeAssignmentCursor();
+    assert.equal(restarted.nextThemeId(), BUILTIN_THEME_PROFILES[0]!.themeId);
   }));
 
   await t.test("lookup returns a defensive profile and deterministic built-in fallback", () => withHome(() => {
