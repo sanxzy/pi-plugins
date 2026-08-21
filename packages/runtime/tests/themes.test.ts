@@ -118,13 +118,14 @@ test("backup numbering never overwrites invalid or valid recovery evidence", () 
   const existingValid = mutableBuiltins();
   existingValid.profiles[0]!.name = "recoverable backup";
   writeFileSync(backupPath(2), JSON.stringify(existingValid), "utf8");
-  writeRaw("{broken primary");
+  const malformedPrimary = "{broken primary";
+  writeRaw(malformedPrimary);
 
   loadThemeLibrary();
   assert.equal(readFileSync(backupPath(1), "utf8"), existingInvalid);
   assert.deepEqual(JSON.parse(readFileSync(backupPath(2), "utf8")), existingValid);
   assert.equal(existsSync(backupPath(3)), true);
-  assert.deepEqual(JSON.parse(readFileSync(backupPath(3), "utf8")), { malformed: true });
+  assert.equal(readFileSync(backupPath(3), "utf8"), malformedPrimary);
 }));
 
 test("recovery failures leave the original primary available and return in-memory built-ins", () => withHome(() => {
