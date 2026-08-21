@@ -334,6 +334,22 @@ test("theme library", async (t) => {
     assert.equal(readThemeLibrary(homeThemesFile()).profiles.length, 1);
   }));
 
+  await t.test("profiles for removed built-ins are retired from persisted libraries on load", () => withHome(() => {
+    // Libraries published before the light theme was removed keep carrying it;
+    // loading must retire it so children can never be assigned white surfaces.
+    const staleLight = structuredClone(BUILTIN_THEME_PROFILES[0]!);
+    staleLight.themeId = "light";
+    staleLight.name = "Light";
+    writeRaw({ version: 1, profiles: [staleLight, structuredClone(BUILTIN_THEME_PROFILES[0]!)] });
+    clearThemeLibraryCache();
+    const loaded = loadThemeLibrary();
+    assert.equal(loaded.profiles.some((profile) => profile.themeId === "light"), false);
+    assert.ok(loaded.profiles.some((profile) => profile.themeId === "dark"));
+    assert.ok(loaded.profiles.some((profile) => profile.themeId === "dracula"));
+    // Resolution of an already-assigned legacy job falls back deterministically.
+    assert.equal(getThemeProfile("light", loaded).themeId, getBuiltinThemeFallback().themeId);
+  }));
+
   await t.test("lookup returns a defensive profile and deterministic built-in fallback", () => withHome(() => {
     const library = loadThemeLibrary();
     const dark = getThemeProfile("dark", library);

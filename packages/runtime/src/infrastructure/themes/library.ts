@@ -9,6 +9,9 @@ import {
   writePrivateJson,
 } from "../../shared/paths.ts";
 import { BUILTIN_THEME_PROFILES, DEFAULT_THEME_ID } from "./builtins.ts";
+
+/** Built-ins that no longer ship; persisted copies are retired on load. */
+const REMOVED_BUILTIN_THEME_IDS: ReadonlySet<string> = new Set(["light"]);
 import {
   THEME_COLOR_TOKENS,
   THEME_EXPORT_TOKENS,
@@ -317,10 +320,13 @@ function finishLoad(library: ThemeLibrary, filePath: string, cacheable: boolean,
  * pure; merging happens only on load.
  */
 function withEmbeddedBuiltins(library: ThemeLibrary): ThemeLibrary {
-  const known = new Set(library.profiles.map((profile) => profile.themeId));
+  // Removed built-ins are retired on load so stale publications (for example a
+  // pre-existing light theme) can never be assigned to fresh children again.
+  const profiles = library.profiles.filter((profile) => !REMOVED_BUILTIN_THEME_IDS.has(profile.themeId));
+  const known = new Set(profiles.map((profile) => profile.themeId));
   const missing = BUILTIN_THEME_PROFILES.filter((profile) => !known.has(profile.themeId)).map(cloneThemeProfile);
-  if (missing.length === 0) return library;
-  return { version: 1, profiles: [...library.profiles, ...missing] };
+  if (missing.length === 0 && profiles.length === library.profiles.length) return library;
+  return { version: 1, profiles: [...profiles, ...missing] };
 }
 
 /**
