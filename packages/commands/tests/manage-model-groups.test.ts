@@ -52,7 +52,7 @@ test("controller create → list → delete", async () => {
       const created = await controller.createGroup({
         name: "  Work  ",
         mode: "fallback",
-        quarantineMinutes: 7,
+        quarantineTurns: 7,
         contextWindow: 32000,
         models: [{ ref: "openai/gpt-a", thinking: "high" }, { ref: "openai/gpt-b" }],
       });
@@ -63,7 +63,7 @@ test("controller create → list → delete", async () => {
       const group = listed[0]!;
       assert.equal(group.name, "Work");
       assert.equal(group.mode, "fallback");
-      assert.equal(group.quarantineMinutes, 7);
+      assert.equal(group.quarantineTurns, 7);
       assert.equal(group.contextWindow, 32000);
       assert.equal(group.active, false);
       assert.equal(group.models.length, 2);
@@ -74,7 +74,7 @@ test("controller create → list → delete", async () => {
       const duplicate = await controller.createGroup({
         name: "work",
         mode: "round-robin",
-        quarantineMinutes: 5,
+        quarantineTurns: 5,
         models: [{ ref: "openai/gpt-a" }],
       });
       assert.equal(duplicate.ok, false);
@@ -100,25 +100,25 @@ test("controller rejects invalid inputs with clear messages", async () => {
       clearModelGroupsCache();
       const controller = createManageModelGroupsController({ modelRegistry: registry() as never });
 
-      const emptyName = await controller.createGroup({ name: "  ", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }] });
+      const emptyName = await controller.createGroup({ name: "  ", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/gpt-a" }] });
       assert.equal(emptyName.ok, false);
 
-      const badQuarantine = await controller.createGroup({ name: "A", mode: "fallback", quarantineMinutes: 0, models: [{ ref: "openai/gpt-a" }] });
+      const badQuarantine = await controller.createGroup({ name: "A", mode: "fallback", quarantineTurns: 0, models: [{ ref: "openai/gpt-a" }] });
       assert.equal(badQuarantine.ok, false);
 
-      const badQuarantineHigh = await controller.createGroup({ name: "A", mode: "fallback", quarantineMinutes: 61, models: [{ ref: "openai/gpt-a" }] });
+      const badQuarantineHigh = await controller.createGroup({ name: "A", mode: "fallback", quarantineTurns: 61, models: [{ ref: "openai/gpt-a" }] });
       assert.equal(badQuarantineHigh.ok, false);
 
-      const badContextWindow = await controller.createGroup({ name: "A", mode: "fallback", quarantineMinutes: 5, contextWindow: 0, models: [{ ref: "openai/gpt-a" }] });
+      const badContextWindow = await controller.createGroup({ name: "A", mode: "fallback", quarantineTurns: 5, contextWindow: 0, models: [{ ref: "openai/gpt-a" }] });
       assert.equal(badContextWindow.ok, false);
 
-      const noModels = await controller.createGroup({ name: "A", mode: "fallback", quarantineMinutes: 5, models: [] });
+      const noModels = await controller.createGroup({ name: "A", mode: "fallback", quarantineTurns: 5, models: [] });
       assert.equal(noModels.ok, false);
 
-      const badRef = await controller.createGroup({ name: "A", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "noslash" }] });
+      const badRef = await controller.createGroup({ name: "A", mode: "fallback", quarantineTurns: 5, models: [{ ref: "noslash" }] });
       assert.equal(badRef.ok, false);
 
-      const badMode = await controller.createGroup({ name: "A", mode: "rotating" as never, quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }] });
+      const badMode = await controller.createGroup({ name: "A", mode: "rotating" as never, quarantineTurns: 5, models: [{ ref: "openai/gpt-a" }] });
       assert.equal(badMode.ok, false);
     });
   } finally {
@@ -133,14 +133,14 @@ test("controller update changes mode/quarantine/models and preserves the id", as
       clearModelGroupsCache();
       const controller = createManageModelGroupsController({ modelRegistry: registry() as never });
 
-      const created = await controller.createGroup({ name: "RR", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }] });
+      const created = await controller.createGroup({ name: "RR", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/gpt-a" }] });
       assert.equal(created.ok, true);
       const id = (await controller.listGroups())[0]!.id;
 
       const updated = await controller.updateGroup(id, {
         name: "RR",
         mode: "round-robin",
-        quarantineMinutes: 15,
+        quarantineTurns: 15,
         contextWindow: 48000,
         models: [{ ref: "openai/gpt-a", thinking: "off" }, { ref: "openai/gpt-b" }],
       });
@@ -148,7 +148,7 @@ test("controller update changes mode/quarantine/models and preserves the id", as
       const group = (await controller.listGroups())[0]!;
       assert.equal(group.id, id, "update keeps the group id");
       assert.equal(group.mode, "round-robin");
-      assert.equal(group.quarantineMinutes, 15);
+      assert.equal(group.quarantineTurns, 15);
       assert.equal(group.contextWindow, 48000);
       assert.equal(group.models.length, 2);
     });
@@ -181,12 +181,12 @@ test("quarantined members show a remaining timer in the group list", async () =>
       clearModelGroupsCache();
       clearQuarantine();
       const controller = createManageModelGroupsController({ modelRegistry: registry() as never });
-      await controller.createGroup({ name: "Work", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }] });
+      await controller.createGroup({ name: "Work", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }] });
       quarantineModel("openai/gpt-a", 5);
       const listed = await controller.listGroups();
       const models = listed[0]!.models;
-      assert.ok(models[0]!.quarantinedForMs !== undefined && models[0]!.quarantinedForMs > 0);
-      assert.equal(models[1]!.quarantinedForMs, undefined);
+      assert.ok(models[0]!.quarantinedForTurns !== undefined && models[0]!.quarantinedForTurns > 0);
+      assert.equal(models[1]!.quarantinedForTurns, undefined);
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -194,7 +194,7 @@ test("quarantined members show a remaining timer in the group list", async () =>
 });
 test("group validation accepts provider-scoped ids that contain slashes", async () => {
   const { _test } = await import("../src/registrations/manage-model-groups.ts");
-  const base = { name: "G", mode: "round-robin" as const, quarantineMinutes: 5, models: [] as Array<{ ref: string }> };
+  const base = { name: "G", mode: "round-robin" as const, quarantineTurns: 5, models: [] as Array<{ ref: string }> };
   assert.equal(_test.validateGroupInput({ ...base, models: [{ ref: "openrouter/stealth/ox-alpha" }] }), undefined);
   assert.equal(_test.validateGroupInput({ ...base, models: [{ ref: "openai/gpt-a" }] }), undefined);
   for (const bad of ["noslash", "/leading", "trailing/", "sp ace/x", "x//y", "x/ y"]) {

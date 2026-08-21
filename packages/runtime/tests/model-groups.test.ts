@@ -23,7 +23,7 @@ test("model-groups.json is created with 0600 and fingerprint cache handles exter
       clearModelGroupsCache();
       const file = homeModelGroupsFile();
       assert.equal(existsSync(file), false);
-      const res = saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/gpt-4o", thinking: "off" }] }], activeGroupId: "g1" });
+      const res = saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/gpt-4o", thinking: "off" }] }], activeGroupId: "g1" });
       assert.equal(res.ok, true);
       assert.equal(existsSync(file), true);
       const mode = statSync(file).mode & 0o777;
@@ -59,13 +59,13 @@ test("validation rejects invalid fields", async () => {
   try {
     withHome(home, () => {
       clearModelGroupsCache();
-      const resEmpty = saveModelGroups({ groups: [{ id: "g1", name: "", mode: "fallback", quarantineMinutes: 5, models: [] }], activeGroupId: "g1" });
+      const resEmpty = saveModelGroups({ groups: [{ id: "g1", name: "", mode: "fallback", quarantineTurns: 5, models: [] }], activeGroupId: "g1" });
       assert.equal(resEmpty.ok, false);
-      const resBadMode = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "invalid" as any, quarantineMinutes: 5, models: [{ ref: "openai/gpt-4o" }] }], activeGroupId: undefined });
+      const resBadMode = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "invalid" as any, quarantineTurns: 5, models: [{ ref: "openai/gpt-4o" }] }], activeGroupId: undefined });
       assert.equal(resBadMode.ok, false);
-      const resBadQuarantine = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "fallback", quarantineMinutes: 0, models: [{ ref: "openai/gpt-4o" }] }], activeGroupId: undefined });
+      const resBadQuarantine = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "fallback", quarantineTurns: 0, models: [{ ref: "openai/gpt-4o" }] }], activeGroupId: undefined });
       assert.equal(resBadQuarantine.ok, false);
-      const resBadRef = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "bad-ref" }] }], activeGroupId: undefined });
+      const resBadRef = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "fallback", quarantineTurns: 5, models: [{ ref: "bad-ref" }] }], activeGroupId: undefined });
       assert.equal(resBadRef.ok, false);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
@@ -78,7 +78,7 @@ test("activeGroupId resolves to non-quarantined model per mode", async () => {
   try {
     withHome(home, () => {
       clearModelGroupsCache(); clearQuarantine();
-      saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/gpt-4o" }, { ref: "openai/gpt-4o-mini" }] }], activeGroupId: "g1" });
+      saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/gpt-4o" }, { ref: "openai/gpt-4o-mini" }] }], activeGroupId: "g1" });
       const first = resolveActiveModel();
       assert.equal(first?.ref, "openai/gpt-4o");
       quarantineModel("openai/gpt-4o", 5);
@@ -97,7 +97,7 @@ test("deleting active group clears active pointer", async () => {
   try {
     withHome(home, () => {
       clearModelGroupsCache();
-      saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/gpt-4o" }] }], activeGroupId: "g1" });
+      saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/gpt-4o" }] }], activeGroupId: "g1" });
       const saved = saveModelGroups({ groups: [], activeGroupId: "g1" });
       assert.equal(saved.ok, true);
       const after = getModelGroups();
@@ -108,7 +108,7 @@ test("deleting active group clears active pointer", async () => {
 
 test("derived contextWindow is min of members", async () => {
   const { deriveGroupContextWindow } = await import("../src/infrastructure/model-groups/store.ts");
-  const group = { id: "g1", name: "A", mode: "fallback" as const, quarantineMinutes: 5, models: [{ ref: "openai/gpt-4o" }, { ref: "openai/gpt-4o-mini" }] };
+  const group = { id: "g1", name: "A", mode: "fallback" as const, quarantineTurns: 5, models: [{ ref: "openai/gpt-4o" }, { ref: "openai/gpt-4o-mini" }] };
   const catalog = [{ provider: "openai", id: "gpt-4o", contextWindow: 128000 }, { provider: "openai", id: "gpt-4o-mini", contextWindow: 64000 }];
   const cw = deriveGroupContextWindow(group, catalog);
   assert.equal(cw, 64000);
@@ -125,7 +125,7 @@ test("group contextWindow is persisted and caps the derived member window", asyn
           id: "g1",
           name: "A",
           mode: "fallback",
-          quarantineMinutes: 5,
+          quarantineTurns: 5,
           contextWindow: 32000,
           models: [{ ref: "openai/gpt-4o" }, { ref: "openai/gpt-4o-mini" }],
         }],
@@ -151,7 +151,7 @@ test("host bridge lists and activates groups with the configured context cap", a
           id: "helper-models",
           name: "helper-models",
           mode: "round-robin",
-          quarantineMinutes: 5,
+          quarantineTurns: 5,
           contextWindow: 32000,
           models: [{ ref: "openai/gpt-a", thinking: "high" }, { ref: "openai/gpt-b" }],
         }],
@@ -179,7 +179,7 @@ test("round-robin rotates and skips quarantined", async () => {
   try {
     withHome(home, () => {
       clearModelGroupsCache(); clearQuarantine(); clearRoundRobinPointers();
-      saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "round-robin", quarantineMinutes: 5, models: [{ ref: "openai/a" }, { ref: "openai/b" }, { ref: "openai/c" }] }], activeGroupId: "g1" });
+      saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "round-robin", quarantineTurns: 5, models: [{ ref: "openai/a" }, { ref: "openai/b" }, { ref: "openai/c" }] }], activeGroupId: "g1" });
       assert.equal(resolveActiveModel()?.ref, "openai/a");
       assert.equal(resolveActiveModel()?.ref, "openai/b");
       assert.equal(resolveActiveModel()?.ref, "openai/c");
@@ -193,7 +193,7 @@ test("round-robin rotates and skips quarantined", async () => {
 
 test("derived contextWindow resolves ids that contain slashes", async () => {
   const { deriveGroupContextWindow } = await import("../src/infrastructure/model-groups/store.ts");
-  const group = { id: "g1", name: "A", mode: "fallback" as const, quarantineMinutes: 5, models: [{ ref: "openrouter/stealth/ox-alpha" }] };
+  const group = { id: "g1", name: "A", mode: "fallback" as const, quarantineTurns: 5, models: [{ ref: "openrouter/stealth/ox-alpha" }] };
   const catalog = [{ provider: "openrouter", id: "stealth/ox-alpha", contextWindow: 200000 }];
   assert.equal(deriveGroupContextWindow(group, catalog), 200000);
 });
@@ -204,7 +204,7 @@ test("model group persistence accepts provider-scoped slashed ids", async () => 
   try {
     withHome(home, () => {
       clearModelGroupsCache();
-      const saved = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineMinutes: 5, models: [{ ref: "openrouter/stealth/ox-alpha" }] }] });
+      const saved = saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineTurns: 5, models: [{ ref: "openrouter/stealth/ox-alpha" }] }] });
       assert.equal(saved.ok, true);
       assert.equal(getModelGroups().groups[0]!.models[0]!.ref, "openrouter/stealth/ox-alpha");
     });
@@ -227,7 +227,7 @@ test("host api resolveActive rotates round-robin members per call in configured 
       };
       assert.equal(typeof api.resolveActive, "function", "host api must expose resolveActive");
       const saved = saveModelGroups({
-        groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }],
+        groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineTurns: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }],
       });
       assert.equal(saved.ok, true);
       assert.equal(api.activate("g1").ok, true);
@@ -263,14 +263,14 @@ test("reportFailure quarantines the failed member and returns the next available
       assert.equal(typeof api.reportFailure, "function", "host api must expose reportFailure");
 
       // Round-robin: failing member is quarantined and the next member is returned.
-      saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }] });
+      saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineTurns: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }] });
       assert.equal(api.activate("g1").ok, true);
       const next = api.reportFailure!("openai/gpt-a");
       assert.equal(next?.ref, "openai/gpt-b");
       assert.ok(getQuarantineMap().has("openai/gpt-a"), "failed member must be quarantined");
 
       // Fallback: failures walk the configured order and exhaust deterministically.
-      saveModelGroups({ groups: [{ id: "g2", name: "B", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }], activeGroupId: "g2" });
+      saveModelGroups({ groups: [{ id: "g2", name: "B", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }], activeGroupId: "g2" });
       clearQuarantine();
       assert.equal(api.reportFailure!("openai/gpt-a")?.ref, "openai/gpt-b");
       assert.equal(api.reportFailure!("openai/gpt-b")?.ref, "openai/gpt-c");
@@ -288,4 +288,26 @@ test("reportFailure quarantines the failed member and returns the next available
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("quarantine releases a member after the configured number of turns", async () => {
+  const { saveModelGroups, resolveActiveModel, clearModelGroupsCache, clearRoundRobinPointers } = await import("../src/infrastructure/model-groups/store.ts");
+  const { clearQuarantine, quarantineModel, getQuarantineMap } = await import("../src/infrastructure/model-groups/quarantine.ts");
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      clearModelGroupsCache(); clearRoundRobinPointers(); clearQuarantine();
+      saveModelGroups({ groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineTurns: 2, models: [{ ref: "openai/a" }, { ref: "openai/b" }] }], activeGroupId: "g1" });
+      // Simulate a failure: 'a' is quarantined for 2 turns.
+      clearRoundRobinPointers();
+      quarantineModel("openai/a", 2);
+      assert.equal(getQuarantineMap().get("openai/a"), 2);
+      // Hit 1: tick consumes one turn, 'a' stays out; rotation hands out b.
+      assert.equal(resolveActiveModel()?.ref, "openai/b");
+      assert.equal(getQuarantineMap().get("openai/a"), 1);
+      // Hit 2: second turn consumed, 'a' is released and rotates back in.
+      assert.equal(resolveActiveModel()?.ref, "openai/a");
+      assert.equal(getQuarantineMap().has("openai/a"), false);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

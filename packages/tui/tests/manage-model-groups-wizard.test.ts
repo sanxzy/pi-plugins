@@ -20,7 +20,7 @@ const GROUPS: ManageModelGroupsGroupItem[] = [
     id: "work",
     name: "Work",
     mode: "fallback",
-    quarantineMinutes: 5,
+    quarantineTurns: 5,
     models: [{ ref: "openai/a", thinking: "high", reasoning: true }],
     contextWindow: 200000,
     active: false,
@@ -29,7 +29,7 @@ const GROUPS: ManageModelGroupsGroupItem[] = [
     id: "side",
     name: "Side",
     mode: "round-robin",
-    quarantineMinutes: 10,
+    quarantineTurns: 10,
     models: [{ ref: "openai/b" }, { ref: "openai/c" }],
     active: true,
   },
@@ -127,7 +127,7 @@ test("create flow: name → mode → quarantine → models → context window �
   wizard.handleInput("\r"); // next → mode
   assert.ok(lines(wizard).some((line) => line.includes("Group mode")));
   wizard.handleInput("\r"); // fallback → quarantine
-  assert.ok(lines(wizard).some((line) => line.includes("Quarantine minutes")));
+  assert.ok(lines(wizard).some((line) => line.includes("Quarantine turns")));
   // Clear the default "5" and set 12
   wizard.handleInput("\x7f");
   for (const char of "12") wizard.handleInput(char);
@@ -151,7 +151,7 @@ test("create flow: name → mode → quarantine → models → context window �
   assert.deepEqual(created, {
     name: "nightly",
     mode: "fallback",
-    quarantineMinutes: 12,
+    quarantineTurns: 12,
     contextWindow: 32000,
     models: [{ ref: "openai/a", thinking: "high" }],
   });

@@ -19,7 +19,7 @@ test("fallback quarantines 4xx and retries next model in same turn", async () =>
   try {
     withHome(home, () => {
       clearModelGroupsCache(); clearQuarantine(); clearRoundRobinPointers();
-      saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/a" }, { ref: "openai/b" }] }], activeGroupId: "g1" });
+      saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/a" }, { ref: "openai/b" }] }], activeGroupId: "g1" });
       let call = 0;
       const result = runWithModelGroupFallback({
         attempt: (ref) => {
@@ -38,7 +38,7 @@ test("fallback quarantines 4xx and retries next model in same turn", async () =>
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test("all quarantined fails with nextRetryAt", async () => {
+test("all quarantined fails with retryInTurns", async () => {
   const { saveModelGroups, clearModelGroupsCache } = await import("../src/infrastructure/model-groups/store.ts");
   const { clearQuarantine, quarantineModel } = await import("../src/infrastructure/model-groups/quarantine.ts");
   const { runWithModelGroupFallback } = await import("../src/infrastructure/model-groups/fallback.ts");
@@ -46,7 +46,7 @@ test("all quarantined fails with nextRetryAt", async () => {
   try {
     withHome(home, () => {
       clearModelGroupsCache(); clearQuarantine();
-      saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "fallback", quarantineMinutes: 5, models: [{ ref: "openai/a" }, { ref: "openai/b" }] }], activeGroupId: "g1" });
+      saveModelGroups({ groups: [{ id: "g1", name: "Work", mode: "fallback", quarantineTurns: 5, models: [{ ref: "openai/a" }, { ref: "openai/b" }] }], activeGroupId: "g1" });
       quarantineModel("openai/a", 5);
       quarantineModel("openai/b", 5);
       const result = runWithModelGroupFallback({
@@ -54,7 +54,7 @@ test("all quarantined fails with nextRetryAt", async () => {
         now: Date.now(),
       });
       assert.equal(result.ok, false);
-      assert.ok((result as any).nextRetryAt !== undefined);
+      assert.ok((result as any).retryInTurns !== undefined);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -67,7 +67,7 @@ test("round-robin advances per turn and skips quarantined", async () => {
   try {
     withHome(home, () => {
       clearModelGroupsCache(); clearQuarantine(); clearRoundRobinPointers();
-      saveModelGroups({ groups: [{ id: "g1", name: "RR", mode: "round-robin", quarantineMinutes: 5, models: [{ ref: "openai/a" }, { ref: "openai/b" }, { ref: "openai/c" }] }], activeGroupId: "g1" });
+      saveModelGroups({ groups: [{ id: "g1", name: "RR", mode: "round-robin", quarantineTurns: 5, models: [{ ref: "openai/a" }, { ref: "openai/b" }, { ref: "openai/c" }] }], activeGroupId: "g1" });
       const r1 = runWithModelGroupFallback({ attempt: (ref) => ({ ok: true, value: ref }), now: Date.now() });
       assert.equal((r1 as any).usedRef, "openai/a");
       const r2 = runWithModelGroupFallback({ attempt: (ref) => ({ ok: true, value: ref }), now: Date.now() });

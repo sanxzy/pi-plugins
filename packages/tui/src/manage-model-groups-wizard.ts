@@ -8,14 +8,14 @@ export interface ManageModelGroupsGroupItem {
   readonly id: string;
   readonly name: string;
   readonly mode: "fallback" | "round-robin";
-  readonly quarantineMinutes: number;
+  readonly quarantineTurns: number;
   readonly contextWindow?: number;
   readonly models: ReadonlyArray<{
     readonly ref: string;
     readonly thinking?: string;
     readonly reasoning?: boolean;
     /** Remaining quarantine milliseconds at snapshot time; absent when healthy. */
-    readonly quarantinedForMs?: number;
+    readonly quarantinedForTurns?: number;
   }>;
   readonly active: boolean;
 }
@@ -44,7 +44,7 @@ export type ManageModelGroupsResult =
 export interface ManageModelGroupsGroupInput {
   readonly name: string;
   readonly mode: "fallback" | "round-robin";
-  readonly quarantineMinutes: number;
+  readonly quarantineTurns: number;
   /** Optional group cap; blank means the minimum catalog window. */
   readonly contextWindow?: number;
   readonly models: ReadonlyArray<{ readonly ref: string; readonly thinking?: string }>;
@@ -208,7 +208,7 @@ export class ManageModelGroupsWizard implements Component {
       const result = await this.controller.createGroup({
         name: this.pendingName.trim(),
         mode: this.pendingMode,
-        quarantineMinutes: Number.parseInt(this.pendingQuarantine, 10),
+        quarantineTurns: Number.parseInt(this.pendingQuarantine, 10),
         ...(contextWindow === undefined ? {} : { contextWindow }),
         models: this.pendingModels,
       });
@@ -230,7 +230,7 @@ export class ManageModelGroupsWizard implements Component {
       const result = await this.controller.updateGroup(this.editingId, {
         name: this.pendingName.trim(),
         mode: this.pendingMode,
-        quarantineMinutes: Number.parseInt(this.pendingQuarantine, 10),
+        quarantineTurns: Number.parseInt(this.pendingQuarantine, 10),
         ...(contextWindow === undefined ? {} : { contextWindow }),
         models: this.pendingModels,
       });
@@ -301,7 +301,7 @@ export class ManageModelGroupsWizard implements Component {
     this.editingActive = group.active;
     this.pendingName = group.name;
     this.pendingMode = group.mode;
-    this.pendingQuarantine = String(group.quarantineMinutes);
+    this.pendingQuarantine = String(group.quarantineTurns);
     this.pendingContextWindow = group.contextWindow === undefined ? "" : String(group.contextWindow);
     this.pendingModels = group.models.map((m) => ({ ref: m.ref, thinking: m.thinking }));
     this.search.setValue("");
@@ -546,9 +546,9 @@ export class ManageModelGroupsWizard implements Component {
             const activeTag = group.active ? " ●" : "";
             const memberTag = (ref: string, thinking?: string): string => (thinking ? `${ref}·${thinking}` : ref);
             const modelsTag = group.models
-              .map((m) => memberTag(m.ref, m.thinking) + (m.quarantinedForMs !== undefined ? ` ⏳${m.quarantinedForMs > 60_000 ? `${Math.ceil(m.quarantinedForMs / 60_000)}m` : `${Math.ceil(m.quarantinedForMs / 1000)}s`}` : ""))
+              .map((m) => memberTag(m.ref, m.thinking) + (m.quarantinedForTurns !== undefined ? ` ⏳${m.quarantinedForTurns}t` : ""))
               .join(", ");
-            add(selected(flag), this.theme.fg(flag ? "accent" : "text", `${i + 1}. ${group.name} [${group.mode}] q${group.quarantineMinutes}m cw:${group.contextWindow ?? "?"}${activeTag} · ${modelsTag}`));
+            add(selected(flag), this.theme.fg(flag ? "accent" : "text", `${i + 1}. ${group.name} [${group.mode}] q${group.quarantineTurns}t cw:${group.contextWindow ?? "?"}${activeTag} · ${modelsTag}`));
           }
           if (filtered.length > MAX_VISIBLE_ITEMS) {
             add(" ", this.theme.fg("dim", `${window.start + 1}–${Math.min(window.end, filtered.length)} of ${filtered.length}`));
@@ -575,7 +575,7 @@ export class ManageModelGroupsWizard implements Component {
       }
       case "createQuarantine":
       case "editQuarantine": {
-        add(" ", this.theme.fg("accent", "Quarantine minutes (1-60)"));
+        add(" ", this.theme.fg("accent", "Quarantine turns (1-100)"));
         add(" ", this.theme.fg("text", `Minutes: ${this.pendingQuarantine}▌`));
         add(" ", this.theme.fg("dim", "Type a number • Enter next • Esc back"));
         break;

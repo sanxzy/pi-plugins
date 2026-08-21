@@ -29,7 +29,7 @@ interface RegistryModel extends ThinkingCapableModel {
 }
 
 const QUARANTINE_MIN = 1;
-const QUARANTINE_MAX = 60;
+const QUARANTINE_MAX = 100;
 
 /** Group display id: deterministic first 8 characters of the group name, lower-cased. */
 function groupIdFor(name: string, groups: readonly ModelGroup[]): string {
@@ -74,14 +74,14 @@ function toGroupItem(
     id: group.id,
     name: group.name,
     mode: group.mode,
-    quarantineMinutes: group.quarantineMinutes,
+    quarantineTurns: group.quarantineTurns,
     models: group.models.map((entry) => {
       const expiry = getQuarantineMap().get(entry.ref);
       return {
         ref: entry.ref,
         thinking: entry.thinking,
         reasoning: entry.reasoning,
-        ...(expiry !== undefined && expiry > now ? { quarantinedForMs: expiry - now } : {}),
+        ...(expiry !== undefined && expiry > 0 ? { quarantinedForTurns: expiry } : {}),
       };
     }),
     contextWindow,
@@ -92,8 +92,8 @@ function toGroupItem(
 function validateGroupInput(input: ManageModelGroupsGroupInput): string | undefined {
   if (!input.name || input.name.trim().length === 0) return "Group name must not be empty.";
   if (input.mode !== "fallback" && input.mode !== "round-robin") return "Mode must be fallback or round-robin.";
-  if (!Number.isInteger(input.quarantineMinutes) || input.quarantineMinutes < QUARANTINE_MIN || input.quarantineMinutes > QUARANTINE_MAX) {
-    return `Quarantine minutes must be between ${QUARANTINE_MIN} and ${QUARANTINE_MAX}.`;
+  if (!Number.isInteger(input.quarantineTurns) || input.quarantineTurns < QUARANTINE_MIN || input.quarantineTurns > QUARANTINE_MAX) {
+    return `Quarantine turns must be between ${QUARANTINE_MIN} and ${QUARANTINE_MAX}.`;
   }
   if (input.contextWindow !== undefined && (!Number.isInteger(input.contextWindow) || input.contextWindow < 1)) {
     return "Context window must be a positive whole number of tokens, or blank for the automatic minimum.";
@@ -160,7 +160,7 @@ export function createManageModelGroupsController(options: ManageModelGroupsCont
         id: groupIdFor(input.name.trim(), file.groups),
         name: input.name.trim(),
         mode: input.mode,
-        quarantineMinutes: input.quarantineMinutes,
+        quarantineTurns: input.quarantineTurns,
         ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
         models: entriesFor(input),
       };
@@ -180,7 +180,7 @@ export function createManageModelGroupsController(options: ManageModelGroupsCont
         id,
         name: input.name.trim(),
         mode: input.mode,
-        quarantineMinutes: input.quarantineMinutes,
+        quarantineTurns: input.quarantineTurns,
         ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
         models: entriesFor(input),
       };

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { homeModelGroupsFile as sharedHomeModelGroupsFile } from "../../shared/paths.ts";
-import { isQuarantined, quarantineModel } from "./quarantine.ts";
+import { isQuarantined, quarantineModel, tickQuarantineTurns } from "./quarantine.ts";
 
 export const homeModelGroupsFile = sharedHomeModelGroupsFile;
 export function homeModelGroupsFilePath(): string { return homeModelGroupsFile(); }
@@ -17,7 +17,7 @@ export interface ModelGroup {
   id: string;
   name: string;
   mode: ModelGroupMode;
-  quarantineMinutes: number;
+  quarantineTurns: number;
   /** Optional user-selected cap for every model in the group. */
   contextWindow?: number;
   models: ModelGroupEntry[];
@@ -70,9 +70,14 @@ function validateGroup(raw: unknown): ModelGroup | undefined {
   if (name.length === 0) return undefined;
   if (mode !== "fallback" && mode !== "round-robin") return undefined;
   let q = DEFAULT_QUARANTINE;
-  if (obj.quarantineMinutes !== undefined) {
-    if (typeof obj.quarantineMinutes !== "number" || !Number.isInteger(obj.quarantineMinutes) || obj.quarantineMinutes < 1 || obj.quarantineMinutes > 60) return undefined;
-    q = obj.quarantineMinutes;
+  // Legacy files carry `quarantineMinutes`; the numeric value is reused as a
+  // bounded turn count so existing groups keep working without migration.
+  if (obj.quarantineTurns !== undefined) {
+    if (typeof obj.quarantineTurns !== "number" || !Number.isInteger(obj.quarantineTurns) || obj.quarantineTurns < 1 || obj.quarantineTurns > 100) return undefined;
+    q = obj.quarantineTurns;
+  } else if (obj.quarantineMinutes !== undefined) {
+    if (typeof obj.quarantineMinutes !== "number" || !Number.isInteger(obj.quarantineMinutes)) return undefined;
+    q = Math.min(100, Math.max(1, obj.quarantineMinutes));
   }
   let contextWindow: number | undefined;
   if (obj.contextWindow !== undefined) {
@@ -87,7 +92,7 @@ function validateGroup(raw: unknown): ModelGroup | undefined {
     models.push(e);
   }
   if (models.length === 0) return undefined;
-  return { id, name, mode, quarantineMinutes: q, ...(contextWindow === undefined ? {} : { contextWindow }), models };
+  return { id, name, mode, quarantineTurns: q, ...(contextWindow === undefined ? {} : { contextWindow }), models };
 }
 function parseFile(raw: unknown): ModelGroupsFile {
   if (!raw || typeof raw !== "object") return { groups: [], activeGroupId: undefined };
@@ -155,6 +160,8 @@ export function saveModelGroups(next: ModelGroupsFile): { ok: true } | { ok: fal
 export function clearModelGroupsCache(): void { cached = undefined; cachedFingerprint = ""; }
 
 export function resolveActiveModel(options?: { readonly advance?: boolean }): ModelGroupEntry | undefined {
+  // Every individual model hit consumes one turn of each active quarantine.
+  tickQuarantineTurns();
   const advance = options?.advance ?? true;
   const { groups, activeGroupId } = getModelGroups();
   if (!activeGroupId) return undefined;
@@ -285,7 +292,7 @@ export function installModelGroupHostApi(): void {
       const group = file.groups.find((item) => item.id === file.activeGroupId);
       if (!group) return undefined;
       if (!group.models.some((model) => model.ref === failedRef)) return undefined;
-      quarantineModel(failedRef, group.quarantineMinutes);
+      quarantineModel(failedRef, group.quarantineTurns);
       const next = resolveActiveModel();
       if (!next) return undefined;
       return {

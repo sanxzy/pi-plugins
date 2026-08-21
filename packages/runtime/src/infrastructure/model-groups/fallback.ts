@@ -2,7 +2,7 @@ import { getActiveGroup, resolveActiveModel } from "./store.ts";
 import { quarantineModel, isQuarantined, getQuarantineMap } from "./quarantine.ts";
 
 export type AttemptResult = { ok: true; value: unknown } | { ok: false; status: number; error: string };
-export type FallbackResult = { ok: true; value: unknown; usedRef: string } | { ok: false; error: string; nextRetryAt?: number; lastStatus?: number };
+export type FallbackResult = { ok: true; value: unknown; usedRef: string } | { ok: false; error: string; retryInTurns?: number; lastStatus?: number };
 
 export function runWithModelGroupFallback(options: {
   attempt: (ref: string) => AttemptResult;
@@ -10,7 +10,7 @@ export function runWithModelGroupFallback(options: {
 }): FallbackResult {
   const group = getActiveGroup();
   if (!group) return { ok: false, error: "No active group" };
-  const quarantineMinutes = group.quarantineMinutes;
+  const quarantineTurns = group.quarantineTurns;
   const tried = new Set<string>();
   let lastError = "";
   let lastStatus: number | undefined;
@@ -37,15 +37,24 @@ export function runWithModelGroupFallback(options: {
     }
   }
 
+  const maxRemaining = (): number | undefined => {
+    let max: number | undefined;
+    for (const m of group.models) {
+      const remaining = getQuarantineMap().get(m.ref);
+      if (remaining !== undefined && (max === undefined || remaining > max)) max = remaining;
+    }
+    return max;
+  };
+
   while (true) {
     const ref = nextCandidate();
     if (!ref) {
-      let nextRetryAt: number | undefined;
+      let retryInTurns: number | undefined;
       for (const m of group.models) {
         const exp = getQuarantineMap().get(m.ref);
-        if (exp !== undefined && (nextRetryAt === undefined || exp < nextRetryAt)) nextRetryAt = exp;
+        if (exp !== undefined && (retryInTurns === undefined || exp < retryInTurns)) retryInTurns = exp;
       }
-      return { ok: false, error: lastError || `All models in group '${group.name}' are quarantined`, nextRetryAt, lastStatus };
+      return { ok: false, error: lastError || `All models in group '${group.name}' are quarantined`, retryInTurns, lastStatus };
     }
     tried.add(ref);
     const result = options.attempt(ref);
@@ -53,17 +62,17 @@ export function runWithModelGroupFallback(options: {
       return { ok: true, value: result.value, usedRef: ref };
     }
     if (result.status >= 400 && result.status < 600) {
-      quarantineModel(ref, quarantineMinutes);
+      quarantineModel(ref, quarantineTurns);
       lastError = result.error;
       lastStatus = result.status;
       const remaining = group.models.some((m) => !isQuarantined(m.ref) && !tried.has(m.ref));
       if (!remaining) {
-        let nextRetryAt: number | undefined;
+        let retryInTurns: number | undefined;
         for (const m of group.models) {
           const exp = getQuarantineMap().get(m.ref);
-          if (exp !== undefined && (nextRetryAt === undefined || exp < nextRetryAt)) nextRetryAt = exp;
+          if (exp !== undefined && (retryInTurns === undefined || exp < retryInTurns)) retryInTurns = exp;
         }
-        return { ok: false, error: lastError, nextRetryAt, lastStatus };
+        return { ok: false, error: lastError, retryInTurns, lastStatus };
       }
       continue;
     } else {
