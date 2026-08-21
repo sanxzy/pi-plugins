@@ -573,7 +573,7 @@ index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..72ad0b1a8f554941818b496a22af8fc4
      }
      getBranchSummarySettings() {
 diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
-index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff998f4055 100644
+index 6a88679..63958b9 100644
 --- a/dist/modes/interactive/interactive-mode.js
 +++ b/dist/modes/interactive/interactive-mode.js
 @@ -361,6 +361,10 @@ export class InteractiveMode {
@@ -603,46 +603,17 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff
          this.footer.invalidate();
          switch (event.type) {
              case "agent_start":
-@@ -3088,6 +3101,139 @@ export class InteractiveMode {
+@@ -3088,6 +3101,226 @@ export class InteractiveMode {
          this.chatContainer.clear();
          this.renderSessionEntries(this.sessionManager.buildContextEntries());
      }
-+    // pi-c2 host swap: reuse parent window for child transcript (no overlay) — reuses all parent styles
++    // pi-c2 host swap: reuse the parent's own component/event rendering path for child transcripts.
 +    hostSwapToSnapshot(liveSession) {
 +        if (!this._hostSwapStack) this._hostSwapStack = [];
 +        const snapshot = liveSession?.snapshot ?? liveSession;
 +        const steer = liveSession?.steer;
 +        this._hostSwapStack.push({ children: [...this.chatContainer.children], onSubmit: this.editor?.onSubmit, editorText: this.editor?.getText ? this.editor.getText() : "" });
-+        this.chatContainer.clear();
-+        if (!snapshot || !snapshot.transcript || snapshot.transcript.length === 0) {
-+            this.chatContainer.addChild(new Text(theme.fg("muted", snapshot?.settled ? "No transcript recorded — this child finished without activity." : "No activity yet — waiting for the child to start. Type a prompt to steer it."), 1, 0));
-+        } else {
-+            for (const entry of snapshot.transcript) {
-+                if (entry.kind === "tool") {
-+                    const component = new ToolExecutionComponent(entry.toolName, entry.toolCallId, entry.args ?? {}, { showImages: this.settingsManager.getShowImages(), imageWidthCells: this.settingsManager.getImageWidthCells() }, this.getRegisteredToolDefinition(entry.toolName), this.ui, this.sessionManager.getCwd());
-+                    component.setExpanded(this.toolOutputExpanded);
-+                    if (entry.complete) {
-+                        const content = entry.text ? [{ type: "text", text: entry.text }] : [];
-+                        component.updateResult({ content, isError: !!entry.isError }, false);
-+                    }
-+                    this.chatContainer.addChild(component);
-+                } else if (entry.kind === "message") {
-+                    if (entry.role === "user") {
-+                        if (entry.text && entry.text.trim()) {
-+                            if (this.chatContainer.children.length > 0) this.chatContainer.addChild(new Spacer(1));
-+                            const comp = new UserMessageComponent(entry.text, this.getMarkdownThemeWithSettings(), this.outputPad, this.getMarkdownTransformers());
-+                            this.chatContainer.addChild(comp);
-+                        }
-+                    } else {
-+                        if (entry.text && entry.text.trim()) {
-+                            const msg = { role: "assistant", content: [{ type: "text", text: entry.text }], timestamp: Date.now() };
-+                            const comp = new AssistantMessageComponent(msg, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers());
-+                            this.chatContainer.addChild(comp);
-+                        }
-+                    }
-+                }
-+            }
-+        }
++        this.hostSwapRenderChildSnapshot(snapshot);
 +        if (steer && this.editor) {
 +            const prevSubmit = this.editor.onSubmit;
 +            this.editor.onSubmit = async (text) => {
@@ -663,44 +634,160 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff
 +            }
 +            this.editor.setText("");
 +        }
-+        this.ui.requestRender();
 +        try { this.transcriptScrollView?.scrollToBottom?.(); } catch {}
 +    }
 +    hostSwapUpdateSnapshot(snapshot) {
 +        if (!this._hostSwapStack || this._hostSwapStack.length === 0) return;
-+        const snap = snapshot?.snapshot ?? snapshot;
-+        this.chatContainer.clear();
-+        if (!snap || !snap.transcript || snap.transcript.length === 0) {
-+            this.chatContainer.addChild(new Text(theme.fg("muted", snap?.settled ? "No transcript recorded — this child finished without activity." : "No activity yet — waiting for the child to start."), 1, 0));
++        this.hostSwapRenderChildSnapshot(snapshot?.snapshot ?? snapshot);
++    }
++    hostSwapApplyChildEvent(event) {
++        if (!this._hostSwapStack || this._hostSwapStack.length === 0 || !event) return;
++        this.hostSwapApplyChildEventInternal(event);
++        this.ui.requestRender();
++    }
++    hostSwapMessage(event) {
++        const rawContent = Array.isArray(event.content)
++            ? event.content
++            : typeof event.content === "string"
++                ? event.content
++                : event.text
++                    ? [{ type: "text", text: event.text }]
++                    : [];
++        const content = event.role === "assistant" && !Array.isArray(rawContent)
++            ? [{ type: "text", text: String(rawContent ?? "") }]
++            : rawContent;
++        return {
++            role: event.role,
++            content,
++            ...(event.stopReason ? { stopReason: event.stopReason } : {}),
++            ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}),
++            timestamp: Date.now(),
++        };
++    }
++    hostSwapToolResult(event, partial) {
++        const result = event.result;
++        const content = Array.isArray(result?.content)
++            ? result.content
++            : event.text
++                ? [{ type: "text", text: event.text }]
++                : [];
++        return {
++            content,
++            ...(result?.details !== undefined ? { details: result.details } : {}),
++            isError: partial ? false : (event.isError ?? result?.isError ?? false),
++        };
++    }
++    hostSwapEnsureToolComponent(content) {
++        let component = this.pendingTools.get(content.id);
++        if (!component) {
++            component = new ToolExecutionComponent(
++                content.name,
++                content.id,
++                content.arguments,
++                { showImages: this.settingsManager.getShowImages(), imageWidthCells: this.settingsManager.getImageWidthCells() },
++                this.getRegisteredToolDefinition(content.name),
++                this.ui,
++                this.sessionManager.getCwd(),
++            );
++            component.setExpanded(this.toolOutputExpanded);
++            this.chatContainer.addChild(component);
++            this.pendingTools.set(content.id, component);
 +        } else {
-+            for (const entry of snap.transcript) {
-+                if (entry.kind === "tool") {
-+                    const component = new ToolExecutionComponent(entry.toolName, entry.toolCallId, entry.args ?? {}, { showImages: this.settingsManager.getShowImages(), imageWidthCells: this.settingsManager.getImageWidthCells() }, this.getRegisteredToolDefinition(entry.toolName), this.ui, this.sessionManager.getCwd());
-+                    component.setExpanded(this.toolOutputExpanded);
-+                    if (entry.complete) {
-+                        const content = entry.text ? [{ type: "text", text: entry.text }] : [];
-+                        component.updateResult({ content, isError: !!entry.isError }, false);
++            component.updateArgs(content.arguments);
++        }
++        return component;
++    }
++    hostSwapApplyAssistantUpdate(message) {
++        if (!this.streamingComponent) return;
++        this.streamingMessage = message;
++        this.streamingComponent.updateContent(this.streamingMessage, true);
++        for (const content of Array.isArray(this.streamingMessage.content) ? this.streamingMessage.content : []) {
++            if (content.type === "toolCall" && content.id && content.name) this.hostSwapEnsureToolComponent(content);
++        }
++    }
++    hostSwapApplyChildEventInternal(event) {
++        if (event.type === "message") {
++            const message = this.hostSwapMessage(event);
++            if (event.role === "user") {
++                if (event.phase === "start") this.addMessageToChat(message);
++                return;
++            }
++            if (event.phase === "start") {
++                this.streamingComponent = new AssistantMessageComponent(undefined, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers());
++                this.streamingMessage = message;
++                this.chatContainer.addChild(this.streamingComponent);
++                this.streamingComponent.updateContent(this.streamingMessage, true);
++                return;
++            }
++            if (event.phase === "update") {
++                this.hostSwapApplyAssistantUpdate(message);
++                return;
++            }
++            if (this.streamingComponent) {
++                this.streamingMessage = message;
++                this.streamingComponent.updateContent(this.streamingMessage, false);
++                if (event.stopReason === "aborted" || event.stopReason === "error") {
++                    const errorMessage = event.errorMessage || (event.stopReason === "aborted" ? "Operation aborted" : "Error");
++                    for (const [, component] of this.pendingTools.entries()) component.updateResult({ content: [{ type: "text", text: errorMessage }], isError: true });
++                    this.pendingTools.clear();
++                } else {
++                    for (const [, component] of this.pendingTools.entries()) component.setArgsComplete();
++                }
++                this.streamingComponent = undefined;
++                this.streamingMessage = undefined;
++            }
++            return;
++        }
++        if (event.type === "tool") {
++            let component = this.pendingTools.get(event.toolCallId);
++            if (!component) {
++                component = new ToolExecutionComponent(event.toolName, event.toolCallId, event.args ?? {}, { showImages: this.settingsManager.getShowImages(), imageWidthCells: this.settingsManager.getImageWidthCells() }, this.getRegisteredToolDefinition(event.toolName), this.ui, this.sessionManager.getCwd());
++                component.setExpanded(this.toolOutputExpanded);
++                this.chatContainer.addChild(component);
++                this.pendingTools.set(event.toolCallId, component);
++            }
++            if (event.phase === "start") {
++                component.markExecutionStarted();
++            } else if (event.phase === "update") {
++                component.updateResult(this.hostSwapToolResult(event, true), true);
++            } else {
++                component.updateResult(this.hostSwapToolResult(event, false), false);
++                this.pendingTools.delete(event.toolCallId);
++            }
++            return;
++        }
++        if (event.type === "agent_end" || event.type === "settled") {
++            if (this.streamingComponent) this.chatContainer.removeChild(this.streamingComponent);
++            this.streamingComponent = undefined;
++            this.streamingMessage = undefined;
++            this.pendingTools.clear();
++        }
++    }
++    hostSwapRenderChildSnapshot(snapshot) {
++        this.chatContainer.clear();
++        this.pendingTools.clear();
++        this.streamingComponent = undefined;
++        this.streamingMessage = undefined;
++        const transcript = Array.isArray(snapshot?.transcript) ? snapshot.transcript : [];
++        if (transcript.length === 0) {
++            this.chatContainer.addChild(new Text(theme.fg("muted", snapshot?.settled ? "No transcript recorded — this child finished without activity." : "No activity yet — waiting for the child to start. Type a prompt to steer it."), 1, 0));
++        } else {
++            for (const entry of transcript) {
++                if (entry.kind === "message") {
++                    const event = { ...entry, type: "message", phase: "start" };
++                    this.hostSwapApplyChildEventInternal(event);
++                    if (entry.role === "assistant") {
++                        this.hostSwapApplyChildEventInternal({ ...entry, type: "message", phase: "update" });
++                        if (entry.complete) this.hostSwapApplyChildEventInternal({ ...entry, type: "message", phase: "end" });
 +                    }
-+                    this.chatContainer.addChild(component);
-+                } else if (entry.kind === "message") {
-+                    if (entry.role === "user") {
-+                        if (entry.text && entry.text.trim()) {
-+                            if (this.chatContainer.children.length > 0) this.chatContainer.addChild(new Spacer(1));
-+                            const comp = new UserMessageComponent(entry.text, this.getMarkdownThemeWithSettings(), this.outputPad, this.getMarkdownTransformers());
-+                            this.chatContainer.addChild(comp);
-+                        }
-+                    } else {
-+                        if (entry.text && entry.text.trim()) {
-+                            const msg = { role: "assistant", content: [{ type: "text", text: entry.text }], timestamp: Date.now() };
-+                            const comp = new AssistantMessageComponent(msg, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers());
-+                            this.chatContainer.addChild(comp);
-+                        }
-+                    }
++                } else {
++                    this.hostSwapApplyChildEventInternal({ ...entry, type: "tool", phase: "start" });
++                    if (entry.result || entry.text) this.hostSwapApplyChildEventInternal({ ...entry, type: "tool", phase: "update" });
++                    if (entry.complete) this.hostSwapApplyChildEventInternal({ ...entry, type: "tool", phase: "end" });
 +                }
 +            }
 +        }
 +        this.ui.requestRender();
-+        try { this.transcriptScrollView?.scrollToBottom?.(); } catch {}
 +    }
 +    hostSwapRestore() {
 +        if (!this._hostSwapStack || this._hostSwapStack.length === 0) return;
@@ -743,3 +830,109 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff
      // =========================================================================
      // Key handlers
      // =========================================================================
+@@ -3999,6 +4232,38 @@ export class InteractiveMode {
+         this.showSelector((done) => {
+             const selector = new ModelSelectorComponent(this.ui, this.session.model, this.settingsManager, this.session.modelRuntime, this.session.scopedModels, async (model) => {
+                 try {
++                    // pi-c2: selecting a synthetic group keeps agents.model untouched,
++                    // activates the persisted group, and applies its current member to
++                    // the root turn so the group is immediately usable.
++                    if (model.provider === "__pi_c2_group__") {
++                        const api = globalThis[Symbol.for("pi-c2.model-groups")];
++                        const groupId = model.id.startsWith("group:") ? model.id.slice("group:".length) : model.id;
++                        const activation = typeof api?.activate === "function" ? api.activate(groupId) : { ok: false, error: "Model-group integration is unavailable." };
++                        if (!activation.ok) {
++                            done();
++                            this.showError(activation.error);
++                            return;
++                        }
++                        const [provider, id] = activation.modelRef.split("/");
++                        const resolved = provider && id ? this.session.modelRuntime.getModel(provider, id) : undefined;
++                        if (!resolved) {
++                            done();
++                            this.showError(`Model group "${activation.groupName}" resolved unavailable model ${activation.modelRef}`);
++                            return;
++                        }
++                        const groupModel = activation.contextWindow !== undefined && resolved.contextWindow > activation.contextWindow
++                            ? { ...resolved, contextWindow: activation.contextWindow }
++                            : resolved;
++                        await this.session.setModel(groupModel);
++                        if (activation.thinking) this.session.setThinkingLevel(activation.thinking);
++                        this.footer.invalidate();
++                        this.updateEditorBorderColor();
++                        done();
++                        this.showStatus(`Model group: ${activation.groupName} → ${activation.modelRef}`);
++                        return;
++                    }
++                    const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
++                    if (typeof groupApi?.clearActiveGroup === "function") groupApi.clearActiveGroup();
+                     await this.session.setModel(model);
+                     this.footer.invalidate();
+                     this.updateEditorBorderColor();
+diff --git a/dist/modes/interactive/components/model-selector.js b/dist/modes/interactive/components/model-selector.js
+index de1ebc1..3fba3a1 100644
+--- a/dist/modes/interactive/components/model-selector.js
++++ b/dist/modes/interactive/components/model-selector.js
+@@ -51,6 +51,8 @@ export class ModelSelectorComponent extends Container {
+         this.scope = scopedModels.length > 0 ? "scoped" : "all";
+         this.onSelectCallback = onSelect;
+         this.onCancelCallback = onCancel;
++        // pi-c2: the extension publishes a host-neutral model-group bridge.
++        this.modelGroupApi = globalThis[Symbol.for("pi-c2.model-groups")];
+         // Add top border
+         this.addChild(new DynamicBorder());
+         this.addChild(new Spacer(1));
+@@ -101,6 +103,24 @@ export class ModelSelectorComponent extends Container {
+             model,
+         }));
+         this.allModels = this.sortModels(models);
++        // pi-c2: model groups appear in the normal /model selector as synthetic
++        // entries. They are handled by interactive-mode's group activation path.
++        const groups = typeof this.modelGroupApi?.list === "function" ? this.modelGroupApi.list() : [];
++        const groupItems = groups.map((group) => ({
++            provider: "__pi_c2_group__",
++            id: `group:${group.id}`,
++            model: {
++                provider: "__pi_c2_group__",
++                id: `group:${group.id}`,
++                name: `group: ${group.name}`,
++                contextWindow: group.contextWindow ?? 0,
++                reasoning: false,
++            },
++            groupName: group.name,
++            groupMode: group.mode,
++            groupActive: group.active,
++        }));
++        this.allModels = [...this.allModels, ...groupItems];
+         this.scopedModels = this.scopedModels.map((scoped) => {
+             const refreshed = this.modelRuntime.getModel(scoped.model.provider, scoped.model.id);
+             return refreshed ? { ...scoped, model: refreshed } : scoped;
+@@ -226,19 +246,21 @@ export class ModelSelectorComponent extends Container {
+             if (!item)
+                 continue;
+             const isSelected = i === this.selectedIndex;
+-            const isCurrent = modelsAreEqual(this.currentModel, item.model);
++            const isGroup = item.provider === "__pi_c2_group__";
++            const isCurrent = !isGroup && modelsAreEqual(this.currentModel, item.model);
++            const groupCheckmark = isGroup && item.groupActive ? theme.fg("success", " ✓") : "";
+             let line = "";
+             if (isSelected) {
+                 const prefix = theme.fg("accent", "→ ");
+-                const modelText = `${item.id}`;
+-                const providerBadge = theme.fg("muted", `[${item.provider}]`);
+-                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
++                const modelText = isGroup ? `group: ${item.groupName}` : `${item.id}`;
++                const providerBadge = theme.fg("muted", isGroup ? `[${item.groupMode}]` : `[${item.provider}]`);
++                const checkmark = isGroup ? groupCheckmark : (isCurrent ? theme.fg("success", " ✓") : "");
+                 line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
+             }
+             else {
+-                const modelText = `  ${item.id}`;
+-                const providerBadge = theme.fg("muted", `[${item.provider}]`);
+-                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
++                const modelText = isGroup ? `  group: ${item.groupName}` : `  ${item.id}`;
++                const providerBadge = theme.fg("muted", isGroup ? `[${item.groupMode}]` : `[${item.provider}]`);
++                const checkmark = isGroup ? groupCheckmark : (isCurrent ? theme.fg("success", " ✓") : "");
+                 line = `${modelText} ${providerBadge}${checkmark}`;
+             }
+             this.listContainer.addChild(new Text(line, 0, 0));

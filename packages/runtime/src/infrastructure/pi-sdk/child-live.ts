@@ -6,6 +6,7 @@ import {
   type ChildLiveSnapshot,
   type ChildLiveStatus,
   type ChildLiveUsage,
+  type ChildLiveToolResult,
 } from "@xzy-ai/core";
 
 /** Extract display text from SDK message content without exposing SDK types. */
@@ -15,13 +16,23 @@ function messageText(message: { content?: unknown }): string {
   return message.content
     .map((part) => {
       if (!part || typeof part !== "object") return "";
-      const value = part as { type?: unknown; text?: unknown; name?: unknown };
-      if (value.type === "text" && typeof value.text === "string") return value.text;
-      if (value.type === "toolCall" && typeof value.name === "string") return value.name;
-      return "";
+      const value = part as { type?: unknown; text?: unknown };
+      return value.type === "text" && typeof value.text === "string" ? value.text : "";
     })
     .filter(Boolean)
     .join("");
+}
+
+function messageDetails(message: { content?: unknown; stopReason?: unknown; errorMessage?: unknown }): {
+  content?: unknown;
+  stopReason?: string;
+  errorMessage?: string;
+} {
+  return {
+    ...(message.content !== undefined ? { content: message.content } : {}),
+    ...(typeof message.stopReason === "string" ? { stopReason: message.stopReason } : {}),
+    ...(typeof message.errorMessage === "string" ? { errorMessage: message.errorMessage } : {}),
+  };
 }
 
 /** Extract token usage from a finalized assistant message, if reported. */
@@ -76,6 +87,21 @@ function resultText(result: unknown): string {
     .join("");
 }
 
+function toolResult(result: unknown, isError?: boolean): ChildLiveToolResult | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const value = result as { content?: unknown; details?: unknown };
+  const content = Array.isArray(value.content)
+    ? value.content
+    : typeof value.content === "string"
+      ? [{ type: "text", text: value.content }]
+      : [];
+  return {
+    content,
+    ...(value.details !== undefined ? { details: value.details } : {}),
+    ...(isError !== undefined ? { isError } : {}),
+  };
+}
+
 /** Normalize the SDK event subset consumed by the manager. */
 export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent | undefined {
   switch (event.type) {
@@ -86,6 +112,7 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         id: messageId(event.message),
         phase: "start",
         role: event.message.role,
+        ...messageDetails(event.message),
         text: messageText(event.message),
       };
     case "message_update":
@@ -95,6 +122,7 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         id: messageId(event.message),
         phase: "update",
         role: event.message.role,
+        ...messageDetails(event.message),
         text: messageText(event.message),
       };
     case "message_end":
@@ -104,6 +132,7 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         id: messageId(event.message),
         phase: "end",
         role: event.message.role,
+        ...messageDetails(event.message),
         text: messageText(event.message),
         usage: messageUsage(event.message),
       };
@@ -126,6 +155,7 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         toolName: event.toolName,
         args: event.args,
         text: resultText(event.partialResult),
+        ...(toolResult(event.partialResult) ? { result: toolResult(event.partialResult) } : {}),
       };
     case "tool_execution_end":
       return {
@@ -136,6 +166,7 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         toolName: event.toolName,
         text: resultText(event.result),
         isError: event.isError,
+        ...(toolResult(event.result, event.isError) ? { result: toolResult(event.result, event.isError) } : {}),
       };
     case "agent_end":
       return { type: "agent_end", willRetry: event.willRetry };

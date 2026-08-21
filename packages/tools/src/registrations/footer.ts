@@ -180,7 +180,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           }
           liveSession = {
             get snapshot() { return (control.live as any).snapshot as any; },
-            subscribe: (listener: () => void) => (control.live as any).subscribe(() => listener()),
+            subscribe: (listener: (event?: unknown) => void) => (control.live as any).subscribe((event: unknown) => listener(event)),
             steer: (prompt: string) => (control.live as any).steer(prompt),
           };
           abort = () => control.abort();
@@ -224,7 +224,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         const actualSessionFile = (control as unknown as { sessionFile?: string })?.sessionFile ?? sessionFile;
         const actualSessionId = job?.sessionId ?? row.rowId;
         hostSwap.swapTo({ sessionId: actualSessionId, sessionFile: actualSessionFile, editorText: "", scrollOffset: 0 });
-        const hostMode = (tui as unknown as { _hostInteractiveMode?: { hostSwapToSnapshot(s: unknown): void; hostSwapUpdateSnapshot(s: unknown): void; hostSwapRestore(): void; hostSwapDepth(): number } })._hostInteractiveMode;
+        const hostMode = (tui as unknown as { _hostInteractiveMode?: { hostSwapToSnapshot(s: unknown): void; hostSwapUpdateSnapshot(s: unknown): void; hostSwapApplyChildEvent?(event: unknown): void; hostSwapRestore(): void; hostSwapDepth(): number } })._hostInteractiveMode;
         let liveUnsub: (() => void) | undefined;
         if (hostMode) {
           try {
@@ -233,8 +233,11 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           // Keep parent window in sync with live updates while viewing a running child
           if (isRunning && liveSession.subscribe) {
             try {
-              liveUnsub = liveSession.subscribe(() => {
-                try { hostMode.hostSwapUpdateSnapshot(liveSession as unknown as { snapshot: unknown }); } catch {}
+              liveUnsub = liveSession.subscribe((event: unknown) => {
+                try {
+                  if (typeof hostMode.hostSwapApplyChildEvent === "function") hostMode.hostSwapApplyChildEvent(event);
+                  else hostMode.hostSwapUpdateSnapshot(liveSession as unknown as { snapshot: unknown });
+                } catch {}
               });
             } catch {}
           }
@@ -282,7 +285,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         tui,
         theme: footerTheme(theme),
         getInfo: () => getCachedInfo(),
-        getRows: () => footerRowsForFocus(ctx, pool, rootSessionId),
+        getRows: () => footerRowsForFocus(ctx, pool, currentFocusId()),
         onEnter: handleEnter,
         dispose: () => {
           if (repaintTimer !== undefined) {
