@@ -21,6 +21,9 @@ export const THINKING_FILE_NAME = "thinking.json";
 export const THINKING_BACKUP_PREFIX = "thinking.";
 export const THINKING_BACKUP_SUFFIX = ".json.bak";
 export const MODEL_GROUPS_FILE_NAME = "model-groups.json";
+export const THEMES_FILE_NAME = "themes.json";
+export const THEMES_BACKUP_PREFIX = "themes.";
+export const THEMES_BACKUP_SUFFIX = ".json.bak";
 export const EVENTS_FILE_NAME = "events.jsonl";
 export const ERRORS_FILE_NAME = "errors.jsonl";
 export const TRANSCRIPT_FILE_NAME = "transcript.jsonl";
@@ -259,6 +262,10 @@ export function homeGoalFile(projectId: string, rootSessionId: string): string {
 
 export function homeModelGroupsFile(): string {
   return join(homeRoot(), MODEL_GROUPS_FILE_NAME);
+}
+
+export function homeThemesFile(): string {
+  return join(homeRoot(), THEMES_FILE_NAME);
 }
 
 function dailyDir(projectId: string, rootSessionId: string, localDate: string): string {
