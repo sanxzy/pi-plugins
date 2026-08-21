@@ -1,5 +1,5 @@
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6155eae63 100644
+index 4bcf0d4..4c4c979 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
 @@ -97,6 +97,8 @@ export class AgentSession {
@@ -68,7 +68,35 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
      _willRetryAfterAgentEnd(event) {
          const settings = this.settingsManager.getRetrySettings();
          if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
-@@ -1366,7 +1416,12 @@ export class AgentSession {
+@@ -790,6 +840,27 @@ export class AgentSession {
+      * @throws Error if no model selected or no API key available (when not streaming)
+      */
+     async prompt(text, options) {
++        // pi-c2: rotate round-robin model groups once per user request. The
++        // swap is in-memory only so settings and the transcript stay clean;
++        // selecting a concrete model clears the active group and stops rotation.
++        try {
++            const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
++            if (typeof groupApi?.resolveActive === "function" && !this.isStreaming) {
++                const resolved = groupApi.resolveActive();
++                if (resolved) {
++                    const separator = resolved.ref.indexOf("/");
++                    const provider = separator === -1 ? "" : resolved.ref.slice(0, separator);
++                    const id = separator === -1 ? "" : resolved.ref.slice(separator + 1);
++                    const found = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
++                    if (found && (!this.model || this.model.provider !== found.provider || this.model.id !== found.id)) {
++                        this.agent.state.model = resolved.contextWindow !== undefined && found.contextWindow > resolved.contextWindow
++                            ? { ...found, contextWindow: resolved.contextWindow }
++                            : found;
++                        if (resolved.thinking) this.setThinkingLevel(resolved.thinking);
++                    }
++                }
++            }
++        } catch {}
+         const expandPromptTemplates = options?.expandPromptTemplates ?? true;
+         const preflightResult = options?.preflightResult;
+         let messages;
+@@ -1366,7 +1437,12 @@ export class AgentSession {
       */
      async compact(customInstructions) {
          await this.abort();
@@ -82,7 +110,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
          this._emit({ type: "compaction_start", reason: "manual" });
          try {
              if (!this.model) {
-@@ -1394,7 +1449,7 @@ export class AgentSession {
+@@ -1394,7 +1470,7 @@ export class AgentSession {
                      customInstructions,
                      reason: "manual",
                      willRetry: false,
@@ -91,7 +119,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
                  }));
                  if (result?.cancel) {
                      throw new Error("Compaction cancelled");
-@@ -1419,14 +1474,14 @@ export class AgentSession {
+@@ -1419,14 +1495,14 @@ export class AgentSession {
              }
              else {
                  // Generate compaction result
@@ -108,7 +136,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
                  throw new Error("Compaction cancelled");
              }
              this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-@@ -1479,7 +1534,9 @@ export class AgentSession {
+@@ -1479,7 +1555,9 @@ export class AgentSession {
              throw error;
          }
          finally {
@@ -119,7 +147,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
          }
      }
      /**
-@@ -1511,8 +1568,13 @@ export class AgentSession {
+@@ -1511,8 +1589,13 @@ export class AgentSession {
          const settings = this.settingsManager.getCompactionSettings();
          if (!settings.enabled)
              return false;
@@ -134,7 +162,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
              return false;
          const contextWindow = this.model?.contextWindow ?? 0;
          // Skip overflow check if the message came from a different model.
-@@ -1585,7 +1647,9 @@ export class AgentSession {
+@@ -1585,7 +1668,9 @@ export class AgentSession {
              contextTokens = directContextTokens;
          }
          if (shouldCompact(contextTokens, contextWindow, settings)) {
@@ -145,7 +173,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
          }
          return false;
      }
-@@ -1595,6 +1659,13 @@ export class AgentSession {
+@@ -1595,6 +1680,13 @@ export class AgentSession {
      async _runAutoCompaction(reason, willRetry) {
          const settings = this.settingsManager.getCompactionSettings();
          let started = false;
@@ -159,7 +187,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
          try {
              if (!this.model) {
                  return false;
-@@ -1606,7 +1677,8 @@ export class AgentSession {
+@@ -1606,7 +1698,8 @@ export class AgentSession {
                  return false;
              }
              this._emit({ type: "compaction_start", reason });
@@ -169,7 +197,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
              started = true;
              let extensionCompaction;
              let fromExtension = false;
-@@ -1618,7 +1690,7 @@ export class AgentSession {
+@@ -1618,7 +1711,7 @@ export class AgentSession {
                      customInstructions: undefined,
                      reason,
                      willRetry,
@@ -178,7 +206,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
                  }));
                  if (extensionResult?.cancel) {
                      this._emit({
-@@ -1650,14 +1722,14 @@ export class AgentSession {
+@@ -1650,14 +1743,14 @@ export class AgentSession {
              }
              else {
                  // Generate compaction result
@@ -195,7 +223,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
                  this._emit({
                      type: "compaction_end",
                      reason,
-@@ -1699,9 +1771,19 @@ export class AgentSession {
+@@ -1699,9 +1792,19 @@ export class AgentSession {
                  // from agent state. Rebuilding state from the new compaction can restore that kept entry,
                  // leaving an assistant as the final message. agent.continue() rejects that state, so remove
                  // the retriable error or truncated-length response again before continuing the interrupted turn.
@@ -216,7 +244,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
                  return true;
              }
              // Auto-compaction can complete while follow-up/steering/custom messages are waiting.
-@@ -1725,7 +1807,9 @@ export class AgentSession {
+@@ -1725,7 +1828,9 @@ export class AgentSession {
              return false;
          }
          finally {
@@ -227,7 +255,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
          }
      }
      /**
-@@ -1908,6 +1992,7 @@ export class AgentSession {
+@@ -1908,6 +2013,7 @@ export class AgentSession {
                  this._extensionShutdownHandler?.();
              },
              getContextUsage: () => this.getContextUsage(),
@@ -236,7 +264,7 @@ index 4bcf0d4b823d1cc847d1fa26a86a850761758194..5c1c111e77ab75b941574ab07eb1c9c6
                  void (async () => {
                      try {
 diff --git a/dist/core/compaction/compaction.d.ts b/dist/core/compaction/compaction.d.ts
-index bf40e20fd7d26f38a17d9df790a7acbad42c3d4f..e084ce10250e55a7dbce7cd6b66b8fa52e0180a4 100644
+index bf40e20..e084ce1 100644
 --- a/dist/core/compaction/compaction.d.ts
 +++ b/dist/core/compaction/compaction.d.ts
 @@ -29,6 +29,8 @@ export interface CompactionSettings {
@@ -249,7 +277,7 @@ index bf40e20fd7d26f38a17d9df790a7acbad42c3d4f..e084ce10250e55a7dbce7cd6b66b8fa5
  export declare const DEFAULT_COMPACTION_SETTINGS: CompactionSettings;
  /**
 diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
-index e7ffee7a8566a7556f75e3f3edd228af3d93b141..deff35532e8975dfbab7817cc7e157aec0fe663d 100644
+index e7ffee7..deff355 100644
 --- a/dist/core/compaction/compaction.js
 +++ b/dist/core/compaction/compaction.js
 @@ -160,6 +160,13 @@ export function estimateContextTokens(messages) {
@@ -267,7 +295,7 @@ index e7ffee7a8566a7556f75e3f3edd228af3d93b141..deff35532e8975dfbab7817cc7e157ae
  }
  // ============================================================================
 diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
-index 324d30ad5708b842f1a536f8d14950469a5ed707..50a312a8e8362769945054c99c628a800ab69d63 100644
+index 324d30a..50a312a 100644
 --- a/dist/core/extensions/loader.js
 +++ b/dist/core/extensions/loader.js
 @@ -157,6 +157,8 @@ export function createExtensionRuntime() {
@@ -293,7 +321,7 @@ index 324d30ad5708b842f1a536f8d14950469a5ed707..50a312a8e8362769945054c99c628a80
              runtime.assertActive();
              if (typeof providerOrName === "string") {
 diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
-index 418865ad891951e3fb7e2a65f4dca4d7d87e3895..8b7a333664d470612d07b668a28e156a96c721aa 100644
+index 418865a..8b7a333 100644
 --- a/dist/core/extensions/runner.js
 +++ b/dist/core/extensions/runner.js
 @@ -135,6 +135,7 @@ export class ExtensionRunner {
@@ -335,7 +363,7 @@ index 418865ad891951e3fb7e2a65f4dca4d7d87e3895..8b7a333664d470612d07b668a28e156a
                  runner.assertActive();
                  runner.compactFn(options);
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
-index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..773d9c3d9c469f7586ea0422bacda14513a6c482 100644
+index 556623b..773d9c3 100644
 --- a/dist/core/extensions/types.d.ts
 +++ b/dist/core/extensions/types.d.ts
 @@ -22,6 +22,7 @@ import type { CustomMessage } from "../messages.ts";
@@ -385,7 +413,7 @@ index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..773d9c3d9c469f7586ea0422bacda145
      getSystemPrompt: () => string;
      getSystemPromptOptions?: () => BuildSystemPromptOptions;
 diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index 8cdfbdec42f696b8cd6b762a92180a81ec142433..ad315766add63f2fe9f9ecc393ef1ff1b200df7e 100644
+index 8cdfbde..ad31576 100644
 --- a/dist/core/session-manager.d.ts
 +++ b/dist/core/session-manager.d.ts
 @@ -13,6 +13,10 @@ export interface SessionHeader {
@@ -400,7 +428,7 @@ index 8cdfbdec42f696b8cd6b762a92180a81ec142433..ad315766add63f2fe9f9ecc393ef1ff1
  export interface SessionEntryBase {
      type: string;
 diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index 92e8070ce1c60e7780aba7a4a0ea8b1d1652156f..13a5e22c1159a80b8472b3ddbabb13b30bde7718 100644
+index 92e8070..13a5e22 100644
 --- a/dist/core/session-manager.js
 +++ b/dist/core/session-manager.js
 @@ -1,14 +1,34 @@
@@ -507,7 +535,7 @@ index 92e8070ce1c60e7780aba7a4a0ea8b1d1652156f..13a5e22c1159a80b8472b3ddbabb13b3
      }
      _appendEntry(entry) {
 diff --git a/dist/core/settings-manager.d.ts b/dist/core/settings-manager.d.ts
-index 494157a038b5fd6b4d9ccf30d331983d84755d2a..9763ae40d0fb5099360fb1500784b001533f6c20 100644
+index 494157a..9763ae4 100644
 --- a/dist/core/settings-manager.d.ts
 +++ b/dist/core/settings-manager.d.ts
 @@ -5,6 +5,8 @@ export interface CompactionSettings {
@@ -536,7 +564,7 @@ index 494157a038b5fd6b4d9ccf30d331983d84755d2a..9763ae40d0fb5099360fb1500784b001
      getBranchSummarySettings(): {
          reserveTokens: number;
 diff --git a/dist/core/settings-manager.js b/dist/core/settings-manager.js
-index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..72ad0b1a8f554941818b496a22af8fc42d48e59b 100644
+index d7fc89c..72ad0b1 100644
 --- a/dist/core/settings-manager.js
 +++ b/dist/core/settings-manager.js
 @@ -129,6 +129,8 @@ export class SettingsManager {
@@ -572,11 +600,78 @@ index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..72ad0b1a8f554941818b496a22af8fc4
          };
      }
      getBranchSummarySettings() {
+diff --git a/dist/modes/interactive/components/model-selector.js b/dist/modes/interactive/components/model-selector.js
+index de1ebc1..3fba3a1 100644
+--- a/dist/modes/interactive/components/model-selector.js
++++ b/dist/modes/interactive/components/model-selector.js
+@@ -51,6 +51,8 @@ export class ModelSelectorComponent extends Container {
+         this.scope = scopedModels.length > 0 ? "scoped" : "all";
+         this.onSelectCallback = onSelect;
+         this.onCancelCallback = onCancel;
++        // pi-c2: the extension publishes a host-neutral model-group bridge.
++        this.modelGroupApi = globalThis[Symbol.for("pi-c2.model-groups")];
+         // Add top border
+         this.addChild(new DynamicBorder());
+         this.addChild(new Spacer(1));
+@@ -101,6 +103,24 @@ export class ModelSelectorComponent extends Container {
+             model,
+         }));
+         this.allModels = this.sortModels(models);
++        // pi-c2: model groups appear in the normal /model selector as synthetic
++        // entries. They are handled by interactive-mode's group activation path.
++        const groups = typeof this.modelGroupApi?.list === "function" ? this.modelGroupApi.list() : [];
++        const groupItems = groups.map((group) => ({
++            provider: "__pi_c2_group__",
++            id: `group:${group.id}`,
++            model: {
++                provider: "__pi_c2_group__",
++                id: `group:${group.id}`,
++                name: `group: ${group.name}`,
++                contextWindow: group.contextWindow ?? 0,
++                reasoning: false,
++            },
++            groupName: group.name,
++            groupMode: group.mode,
++            groupActive: group.active,
++        }));
++        this.allModels = [...this.allModels, ...groupItems];
+         this.scopedModels = this.scopedModels.map((scoped) => {
+             const refreshed = this.modelRuntime.getModel(scoped.model.provider, scoped.model.id);
+             return refreshed ? { ...scoped, model: refreshed } : scoped;
+@@ -226,19 +246,21 @@ export class ModelSelectorComponent extends Container {
+             if (!item)
+                 continue;
+             const isSelected = i === this.selectedIndex;
+-            const isCurrent = modelsAreEqual(this.currentModel, item.model);
++            const isGroup = item.provider === "__pi_c2_group__";
++            const isCurrent = !isGroup && modelsAreEqual(this.currentModel, item.model);
++            const groupCheckmark = isGroup && item.groupActive ? theme.fg("success", " ✓") : "";
+             let line = "";
+             if (isSelected) {
+                 const prefix = theme.fg("accent", "→ ");
+-                const modelText = `${item.id}`;
+-                const providerBadge = theme.fg("muted", `[${item.provider}]`);
+-                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
++                const modelText = isGroup ? `group: ${item.groupName}` : `${item.id}`;
++                const providerBadge = theme.fg("muted", isGroup ? `[${item.groupMode}]` : `[${item.provider}]`);
++                const checkmark = isGroup ? groupCheckmark : (isCurrent ? theme.fg("success", " ✓") : "");
+                 line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
+             }
+             else {
+-                const modelText = `  ${item.id}`;
+-                const providerBadge = theme.fg("muted", `[${item.provider}]`);
+-                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
++                const modelText = isGroup ? `  group: ${item.groupName}` : `  ${item.id}`;
++                const providerBadge = theme.fg("muted", isGroup ? `[${item.groupMode}]` : `[${item.provider}]`);
++                const checkmark = isGroup ? groupCheckmark : (isCurrent ? theme.fg("success", " ✓") : "");
+                 line = `${modelText} ${providerBadge}${checkmark}`;
+             }
+             this.listContainer.addChild(new Text(line, 0, 0));
 diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
-index 0000000..1111111 100644
+index 6a88679..f6cba16 100644
 --- a/dist/modes/interactive/interactive-mode.js
 +++ b/dist/modes/interactive/interactive-mode.js
-@@ -361,6 +361,11 @@
+@@ -361,6 +361,11 @@ export class InteractiveMode {
          this.headerContainer = new Container();
          this.loadedResourcesContainer = new Container();
          this.chatContainer = new Container();
@@ -588,7 +683,7 @@ index 0000000..1111111 100644
          this.documentContainer = new Container();
          this.documentContainer.addChild(this.headerContainer);
          this.documentContainer.addChild(this.loadedResourcesContainer);
-@@ -2518,6 +2522,15 @@
+@@ -2518,6 +2523,15 @@ export class InteractiveMode {
          if (!this.isInitialized) {
              await this.init();
          }
@@ -604,7 +699,7 @@ index 0000000..1111111 100644
          this.footer.invalidate();
          switch (event.type) {
              case "agent_start":
-@@ -3088,6 +3101,226 @@
+@@ -3088,6 +3102,226 @@ export class InteractiveMode {
          this.chatContainer.clear();
          this.renderSessionEntries(this.sessionManager.buildContextEntries());
      }
@@ -831,7 +926,7 @@ index 0000000..1111111 100644
      // =========================================================================
      // Key handlers
      // =========================================================================
-@@ -3999,6 +4145,38 @@
+@@ -3999,6 +4233,38 @@ export class InteractiveMode {
          this.showSelector((done) => {
              const selector = new ModelSelectorComponent(this.ui, this.session.model, this.settingsManager, this.session.modelRuntime, this.session.scopedModels, async (model) => {
                  try {
@@ -870,71 +965,3 @@ index 0000000..1111111 100644
                      await this.session.setModel(model);
                      this.footer.invalidate();
                      this.updateEditorBorderColor();
-
-diff --git a/dist/modes/interactive/components/model-selector.js b/dist/modes/interactive/components/model-selector.js
-index 0000000..1111111 100644
---- a/dist/modes/interactive/components/model-selector.js
-+++ b/dist/modes/interactive/components/model-selector.js
-@@ -51,6 +51,8 @@
-         this.scope = scopedModels.length > 0 ? "scoped" : "all";
-         this.onSelectCallback = onSelect;
-         this.onCancelCallback = onCancel;
-+        // pi-c2: the extension publishes a host-neutral model-group bridge.
-+        this.modelGroupApi = globalThis[Symbol.for("pi-c2.model-groups")];
-         // Add top border
-         this.addChild(new DynamicBorder());
-         this.addChild(new Spacer(1));
-@@ -101,6 +103,24 @@
-             model,
-         }));
-         this.allModels = this.sortModels(models);
-+        // pi-c2: model groups appear in the normal /model selector as synthetic
-+        // entries. They are handled by interactive-mode's group activation path.
-+        const groups = typeof this.modelGroupApi?.list === "function" ? this.modelGroupApi.list() : [];
-+        const groupItems = groups.map((group) => ({
-+            provider: "__pi_c2_group__",
-+            id: `group:${group.id}`,
-+            model: {
-+                provider: "__pi_c2_group__",
-+                id: `group:${group.id}`,
-+                name: `group: ${group.name}`,
-+                contextWindow: group.contextWindow ?? 0,
-+                reasoning: false,
-+            },
-+            groupName: group.name,
-+            groupMode: group.mode,
-+            groupActive: group.active,
-+        }));
-+        this.allModels = [...this.allModels, ...groupItems];
-         this.scopedModels = this.scopedModels.map((scoped) => {
-             const refreshed = this.modelRuntime.getModel(scoped.model.provider, scoped.model.id);
-             return refreshed ? { ...scoped, model: refreshed } : scoped;
-@@ -226,19 +246,21 @@
-             if (!item)
-                 continue;
-             const isSelected = i === this.selectedIndex;
--            const isCurrent = modelsAreEqual(this.currentModel, item.model);
-+            const isGroup = item.provider === "__pi_c2_group__";
-+            const isCurrent = !isGroup && modelsAreEqual(this.currentModel, item.model);
-+            const groupCheckmark = isGroup && item.groupActive ? theme.fg("success", " ✓") : "";
-             let line = "";
-             if (isSelected) {
-                 const prefix = theme.fg("accent", "→ ");
--                const modelText = `${item.id}`;
--                const providerBadge = theme.fg("muted", `[${item.provider}]`);
--                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-+                const modelText = isGroup ? `group: ${item.groupName}` : `${item.id}`;
-+                const providerBadge = theme.fg("muted", isGroup ? `[${item.groupMode}]` : `[${item.provider}]`);
-+                const checkmark = isGroup ? groupCheckmark : (isCurrent ? theme.fg("success", " ✓") : "");
-                 line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
-             }
-             else {
--                const modelText = `  ${item.id}`;
--                const providerBadge = theme.fg("muted", `[${item.provider}]`);
--                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-+                const modelText = isGroup ? `  group: ${item.groupName}` : `  ${item.id}`;
-+                const providerBadge = theme.fg("muted", isGroup ? `[${item.groupMode}]` : `[${item.provider}]`);
-+                const checkmark = isGroup ? groupCheckmark : (isCurrent ? theme.fg("success", " ✓") : "");
-                 line = `${modelText} ${providerBadge}${checkmark}`;
-             }
-             this.listContainer.addChild(new Text(line, 0, 0));

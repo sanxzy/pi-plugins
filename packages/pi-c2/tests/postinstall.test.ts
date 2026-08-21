@@ -16,6 +16,7 @@ const PATCH_MARKERS: Array<[string, string]> = [
   ["dist/core/session-manager.js", "ensurePrivateSessionDir"],
   ["dist/core/settings-manager.js", "thresholdPercentOverride"],
   ["dist/core/agent-session.js", "_maybeAbortForThreshold"],
+  ["dist/core/agent-session.js", "rotate round-robin model groups once per user request"],
   ["dist/modes/interactive/components/model-selector.js", "pi-c2: the extension publishes a host-neutral model-group bridge"],
   ["dist/modes/interactive/interactive-mode.js", "__pi_c2_group__"],
   ["dist/modes/interactive/interactive-mode.js", "hostSwapApplyChildEvent"],

@@ -154,7 +154,8 @@ export function saveModelGroups(next: ModelGroupsFile): { ok: true } | { ok: fal
 
 export function clearModelGroupsCache(): void { cached = undefined; cachedFingerprint = ""; }
 
-export function resolveActiveModel(): ModelGroupEntry | undefined {
+export function resolveActiveModel(options?: { readonly advance?: boolean }): ModelGroupEntry | undefined {
+  const advance = options?.advance ?? true;
   const { groups, activeGroupId } = getModelGroups();
   if (!activeGroupId) return undefined;
   const group = groups.find((g) => g.id === activeGroupId);
@@ -166,7 +167,8 @@ export function resolveActiveModel(): ModelGroupEntry | undefined {
   for (let i = 0; i < group.models.length; i++) {
     const candidate = group.models[(idx + i) % group.models.length]!;
     if (!isQuarantined(candidate.ref)) {
-      roundRobinPointers.set(group.id, (idx + i + 1) % group.models.length);
+      // Activation peeks at the current member; per-request resolution advances.
+      if (advance) roundRobinPointers.set(group.id, (idx + i + 1) % group.models.length);
       return candidate;
     }
   }
@@ -220,6 +222,8 @@ export type ModelGroupHostActivation =
 export interface ModelGroupHostApi {
   readonly list: () => readonly ModelGroupHostItem[];
   readonly activate: (id: string) => ModelGroupHostActivation;
+  /** Resolve and advance the active group's current member (per request). */
+  readonly resolveActive: () => { ref: string; thinking?: string; contextWindow?: number } | undefined;
   readonly clearActiveGroup: () => void;
 }
 
@@ -242,13 +246,29 @@ export function installModelGroupHostApi(): void {
       if (!group) return { ok: false, error: `Unknown model group: ${id}` };
       const saved = saveModelGroups({ groups: file.groups, activeGroupId: id });
       if (!saved.ok) return { ok: false, error: saved.error };
-      const model = resolveActiveModel();
+      const model = resolveActiveModel({ advance: false });
       if (!model) return { ok: false, error: `All models in group '${group.name}' are quarantined.` };
       return {
         ok: true,
         groupId: group.id,
         groupName: group.name,
         modelRef: model.ref,
+        ...(model.thinking === undefined ? {} : { thinking: model.thinking }),
+        ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
+      };
+    },
+    /**
+     * Resolve (and advance) the active group's current member. Called once per
+     * user request by the host patch so round-robin groups rotate per turn.
+     */
+    resolveActive: () => {
+      const file = getModelGroups();
+      const group = file.groups.find((item) => item.id === file.activeGroupId);
+      if (!group) return undefined;
+      const model = resolveActiveModel();
+      if (!model) return undefined;
+      return {
+        ref: model.ref,
         ...(model.thinking === undefined ? {} : { thinking: model.thinking }),
         ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
       };

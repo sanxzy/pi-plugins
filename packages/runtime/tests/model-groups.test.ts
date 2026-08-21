@@ -210,3 +210,38 @@ test("model group persistence accepts provider-scoped slashed ids", async () => 
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test("host api resolveActive rotates round-robin members per call in configured order", async () => {
+  const { installModelGroupHostApi, saveModelGroups, clearModelGroupsCache, clearRoundRobinPointers, clearActiveGroup } = await import("../src/infrastructure/model-groups/store.ts");
+  const { clearQuarantine, quarantineModel } = await import("../src/infrastructure/model-groups/quarantine.ts");
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      clearModelGroupsCache();
+      clearRoundRobinPointers();
+      clearQuarantine();
+      installModelGroupHostApi();
+      const api = (globalThis as Record<symbol, unknown>)[Symbol.for("pi-c2.model-groups")] as {
+        activate(id: string): { ok: boolean; error?: string };
+        resolveActive?(): { ref: string; thinking?: string; contextWindow?: number } | undefined;
+      };
+      assert.equal(typeof api.resolveActive, "function", "host api must expose resolveActive");
+      const saved = saveModelGroups({
+        groups: [{ id: "g1", name: "A", mode: "round-robin", quarantineMinutes: 5, models: [{ ref: "openai/gpt-a" }, { ref: "openai/gpt-b" }, { ref: "openai/gpt-c" }] }],
+      });
+      assert.equal(saved.ok, true);
+      assert.equal(api.activate("g1").ok, true);
+      const refs = [api.resolveActive!(), api.resolveActive!(), api.resolveActive!(), api.resolveActive!()].map((entry) => entry?.ref);
+      assert.deepEqual(refs, ["openai/gpt-a", "openai/gpt-b", "openai/gpt-c", "openai/gpt-a"]);
+      // Quarantined members are skipped without stalling the rotation.
+      quarantineModel("openai/gpt-b", 5);
+      const next = [api.resolveActive!(), api.resolveActive!()].map((entry) => entry?.ref);
+      assert.deepEqual(next, ["openai/gpt-c", "openai/gpt-a"]);
+      // No active group resolves to undefined.
+      clearActiveGroup();
+      assert.equal(api.resolveActive!(), undefined);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
