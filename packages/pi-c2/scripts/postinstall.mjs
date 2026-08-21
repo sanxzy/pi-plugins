@@ -42,6 +42,8 @@ const PATCH_MARKERS = [
   "dist/core/session-manager.js:ensurePrivateSessionDir",
   "dist/core/settings-manager.js:thresholdPercentOverride",
   "dist/core/agent-session.js:_maybeAbortForThreshold",
+  "dist/modes/interactive/components/model-selector.js:pi-c2: the extension publishes a host-neutral model-group bridge",
+  "dist/modes/interactive/interactive-mode.js:__pi_c2_group__",
 ];
 
 function log(message) {

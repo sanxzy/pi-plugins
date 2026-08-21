@@ -41,7 +41,7 @@ import {
   registerManageModelGroupsCommand,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
-import { registerChildExtensionFactory, registerChildPonytailTools, registerChildThinkingTool } from "@xzy-ai/runtime";
+import { registerChildExtensionFactory, registerChildPonytailTools, registerChildThinkingTool, installModelGroupHostApi } from "@xzy-ai/runtime";
 import { bootstrapSettingsConfig, migrateLegacyGoalLimit } from "@xzy-ai/runtime";
 import { registerMcpLifecycle } from "@xzy-ai/mcp";
 import type {
@@ -67,6 +67,9 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   // idempotent and never overwrites an existing user-owned or malformed file;
   // a failure is non-fatal and startup continues on resolver defaults.
   bootstrapSettingsConfig();
+  // Publish the synchronous model-group bridge consumed by the patched host
+  // `/model` selector. The host remains decoupled from workspace packages.
+  installModelGroupHostApi();
   // One-time best-effort migration: existing installs bootstrapped with the
   // legacy 4 000 goal limit get bumped to the new 10 000 default without
   // manual file editing. New installs are unaffected (bootstrap already

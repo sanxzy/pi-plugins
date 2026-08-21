@@ -153,7 +153,10 @@ test("create flow: name → mode → quarantine → model → thinking → menu 
   // Clear the default "5" and set 12
   wizard.handleInput("\x7f");
   for (const char of "12") wizard.handleInput(char);
-  wizard.handleInput("\r"); // → add model
+  wizard.handleInput("\r"); // → context window
+  assert.ok(lines(wizard).some((line) => line.includes("Group context window")));
+  for (const char of "32000") wizard.handleInput(char);
+  wizard.handleInput("\r"); // explicit cap, then add model
   assert.ok(lines(wizard).some((line) => line.includes("Add model to group")));
   wizard.handleInput("\r"); // first model (openai/a, reasoning → thinking)
   await flush();
@@ -171,6 +174,7 @@ test("create flow: name → mode → quarantine → model → thinking → menu 
     name: "nightly",
     mode: "fallback",
     quarantineMinutes: 12,
+    contextWindow: 32000,
     models: [{ ref: "openai/a", thinking: "high" }],
   });
   assert.ok(lines(wizard).some((line) => line.includes("Group created.")));
@@ -201,9 +205,11 @@ test("edit flow pre-fills the group and update saves without recreating", async 
   wizard.handleInput("\r"); // keep name → mode
   wizard.handleInput("\x1b[B"); // → round-robin
   wizard.handleInput("\r"); // mode → quarantine
-  wizard.handleInput("\r"); // keep "5" → add model
+  wizard.handleInput("\r"); // keep "5" → context window
+  assert.ok(lines(wizard).some((line) => line.includes("Group context window")));
+  wizard.handleInput("\r"); // blank → automatic minimum, then add model
   wizard.handleInput("\x1b"); // back out of add model → editName
-  wizard.handleInput("\x1b"); // back to action? name step Esc goes to action
+  wizard.handleInput("\x1b"); // back to edit picker
   assert.ok(lines(wizard).some((line) => line.includes("Manage model groups")));
   // Cancelled edit; no save happened yet. Re-enter and save via menu flow.
   wizard.handleInput("\x1b[B");
@@ -213,9 +219,10 @@ test("edit flow pre-fills the group and update saves without recreating", async 
   wizard.handleInput("\r");
   wizard.handleInput("\r"); // keep name
   wizard.handleInput("\r"); // keep mode
-  wizard.handleInput("\r"); // keep quarantine
+  wizard.handleInput("\r"); // keep quarantine → context window
+  wizard.handleInput("\r"); // blank → add model
   wizard.handleInput("\x1b"); // add model esc → editName
-  wizard.handleInput("\x1b"); // editName esc → action
+  wizard.handleInput("\x1b"); // editName esc → edit picker
   await flush();
   assert.equal(updatedId, undefined, "escaping the edit flow never saves");
 });

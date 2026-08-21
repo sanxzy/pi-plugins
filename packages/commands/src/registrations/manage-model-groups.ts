@@ -95,6 +95,9 @@ function validateGroupInput(input: ManageModelGroupsGroupInput): string | undefi
   if (!Number.isInteger(input.quarantineMinutes) || input.quarantineMinutes < QUARANTINE_MIN || input.quarantineMinutes > QUARANTINE_MAX) {
     return `Quarantine minutes must be between ${QUARANTINE_MIN} and ${QUARANTINE_MAX}.`;
   }
+  if (input.contextWindow !== undefined && (!Number.isInteger(input.contextWindow) || input.contextWindow < 1)) {
+    return "Context window must be a positive whole number of tokens, or blank for the automatic minimum.";
+  }
   if (input.models.length === 0) return "A group needs at least one model.";
   for (const model of input.models) {
     if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(model.ref)) return `Invalid model reference: ${model.ref}`;
@@ -155,6 +158,7 @@ export function createManageModelGroupsController(options: ManageModelGroupsCont
         name: input.name.trim(),
         mode: input.mode,
         quarantineMinutes: input.quarantineMinutes,
+        ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
         models: entriesFor(input),
       };
       const saved = saveModelGroups({ groups: [...file.groups, group], activeGroupId: file.activeGroupId });
@@ -174,6 +178,7 @@ export function createManageModelGroupsController(options: ManageModelGroupsCont
         name: input.name.trim(),
         mode: input.mode,
         quarantineMinutes: input.quarantineMinutes,
+        ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
         models: entriesFor(input),
       };
       const saved = saveModelGroups({

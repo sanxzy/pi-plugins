@@ -18,6 +18,8 @@ export interface ModelGroup {
   name: string;
   mode: ModelGroupMode;
   quarantineMinutes: number;
+  /** Optional user-selected cap for every model in the group. */
+  contextWindow?: number;
   models: ModelGroupEntry[];
 }
 export interface ModelGroupsFile {
@@ -26,6 +28,7 @@ export interface ModelGroupsFile {
 }
 
 const DEFAULT_QUARANTINE = 5;
+const MODEL_GROUP_HOST_API_KEY = "pi-c2.model-groups";
 let cachedFingerprint = "";
 let cached: ModelGroupsFile | undefined;
 let roundRobinPointers = new Map<string, number>();
@@ -68,6 +71,11 @@ function validateGroup(raw: unknown): ModelGroup | undefined {
     if (typeof obj.quarantineMinutes !== "number" || !Number.isInteger(obj.quarantineMinutes) || obj.quarantineMinutes < 1 || obj.quarantineMinutes > 60) return undefined;
     q = obj.quarantineMinutes;
   }
+  let contextWindow: number | undefined;
+  if (obj.contextWindow !== undefined) {
+    if (typeof obj.contextWindow !== "number" || !Number.isInteger(obj.contextWindow) || obj.contextWindow < 1) return undefined;
+    contextWindow = obj.contextWindow;
+  }
   const rawModels = Array.isArray(obj.models) ? obj.models : [];
   const models: ModelGroupEntry[] = [];
   for (const m of rawModels) {
@@ -76,7 +84,7 @@ function validateGroup(raw: unknown): ModelGroup | undefined {
     models.push(e);
   }
   if (models.length === 0) return undefined;
-  return { id, name, mode, quarantineMinutes: q, models };
+  return { id, name, mode, quarantineMinutes: q, ...(contextWindow === undefined ? {} : { contextWindow }), models };
 }
 function parseFile(raw: unknown): ModelGroupsFile {
   if (!raw || typeof raw !== "object") return { groups: [], activeGroupId: undefined };
@@ -179,7 +187,8 @@ export function deriveGroupContextWindow(group: ModelGroup, catalog: Array<{ id:
     if (typeof cw !== "number" || cw <= 0) continue;
     if (min === undefined || cw < min) min = cw;
   }
-  return min;
+  if (group.contextWindow === undefined) return min;
+  return min === undefined ? group.contextWindow : Math.min(group.contextWindow, min);
 }
 
 export function clearActiveGroup(): void {
@@ -188,4 +197,58 @@ export function clearActiveGroup(): void {
   saveModelGroups({ ...current, activeGroupId: undefined });
 }
 
-export const _test = { validateGroup, parseFile, isValidRef };
+export interface ModelGroupHostItem {
+  readonly id: string;
+  readonly name: string;
+  readonly mode: ModelGroupMode;
+  readonly modelRefs: readonly string[];
+  readonly contextWindow?: number;
+  readonly active: boolean;
+}
+
+export type ModelGroupHostActivation =
+  | { readonly ok: true; readonly groupId: string; readonly groupName: string; readonly modelRef: string; readonly thinking?: string; readonly contextWindow?: number }
+  | { readonly ok: false; readonly error: string };
+
+export interface ModelGroupHostApi {
+  readonly list: () => readonly ModelGroupHostItem[];
+  readonly activate: (id: string) => ModelGroupHostActivation;
+  readonly clearActiveGroup: () => void;
+}
+
+export function installModelGroupHostApi(): void {
+  const api: ModelGroupHostApi = {
+    list: () => {
+      const file = getModelGroups();
+      return file.groups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        mode: group.mode,
+        modelRefs: group.models.map((model) => model.ref),
+        ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
+        active: group.id === file.activeGroupId,
+      }));
+    },
+    activate: (id) => {
+      const file = getModelGroups();
+      const group = file.groups.find((item) => item.id === id);
+      if (!group) return { ok: false, error: `Unknown model group: ${id}` };
+      const saved = saveModelGroups({ groups: file.groups, activeGroupId: id });
+      if (!saved.ok) return { ok: false, error: saved.error };
+      const model = resolveActiveModel();
+      if (!model) return { ok: false, error: `All models in group '${group.name}' are quarantined.` };
+      return {
+        ok: true,
+        groupId: group.id,
+        groupName: group.name,
+        modelRef: model.ref,
+        ...(model.thinking === undefined ? {} : { thinking: model.thinking }),
+        ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
+      };
+    },
+    clearActiveGroup: () => clearActiveGroup(),
+  };
+  (globalThis as typeof globalThis & { [key: symbol]: unknown })[Symbol.for(MODEL_GROUP_HOST_API_KEY)] = api;
+}
+
+export const _test = { validateGroup, parseFile, isValidRef, MODEL_GROUP_HOST_API_KEY };
