@@ -129,3 +129,20 @@ test("goal pool keeps separate root sessions isolated during mutation", () => {
   assert.equal(a.get()?.status, "paused");
   assert.equal(b.get()?.status, "active");
 });
+test("updateInterval appends an event and survives a fresh fold", async () => {
+  const { createGoalStore, foldGoalLog } = await import("../src/infrastructure/goals/goal-store.ts");
+  const file = join(mkdtempSync(join(tmpdir(), "pi-c2-goal-store-")), "goals.jsonl");
+  const store = createGoalStore(file, "root");
+  store.create({ cwd: "/project", prompt: "ship it", intervalMs: 600_000 });
+  const updated = store.updateInterval(120_000);
+  assert.equal(updated.ok, true);
+  if (updated.ok) {
+    assert.equal(updated.goal.intervalMs, 120_000);
+    assert.equal(updated.goal.prompt, "ship it");
+    assert.equal(updated.goal.status, "active");
+  }
+  const refolded = foldGoalLog(file).get("root");
+  assert.equal(refolded?.intervalMs, 120_000);
+  assert.equal(refolded?.prompt, "ship it");
+  assert.equal(store.updateInterval(0).ok, false);
+});

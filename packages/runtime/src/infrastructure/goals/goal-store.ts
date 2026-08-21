@@ -34,6 +34,8 @@ export interface GoalStore {
   pause(reason: string): { readonly ok: true; readonly goal: Goal } | { readonly ok: false; readonly error: string };
   /** Resume the paused session goal. */
   resume(): { readonly ok: true; readonly goal: Goal } | { readonly ok: false; readonly error: string };
+  /** Change the delivery cadence without replacing the goal. */
+  updateInterval(intervalMs: number): { readonly ok: true; readonly goal: Goal } | { readonly ok: false; readonly error: string };
   /** Return the current session goal, or undefined when none exists. */
   get(): Goal | undefined;
   /** Remove the session goal so a later creation is allowed. */
@@ -88,6 +90,15 @@ export function createGoalStore(filePath: string, rootSessionId: string): GoalSt
       const current = index.get(rootSessionId);
       if (!current) return { ok: false, error: "no goal exists for this session" };
       append({ event: "goal_resumed", cwd: current.cwd, rootSessionId, goalId: current.goalId, timestamp: Date.now() });
+      return { ok: true, goal: index.get(rootSessionId)! };
+    },
+    updateInterval(intervalMs) {
+      if (!Number.isSafeInteger(intervalMs) || intervalMs <= 0) {
+        return { ok: false, error: "interval must be greater than zero" };
+      }
+      const current = index.get(rootSessionId);
+      if (!current) return { ok: false, error: "no goal exists for this session" };
+      append({ event: "goal_interval_updated", cwd: current.cwd, rootSessionId, goalId: current.goalId, timestamp: Date.now(), intervalMs });
       return { ok: true, goal: index.get(rootSessionId)! };
     },
     get() {

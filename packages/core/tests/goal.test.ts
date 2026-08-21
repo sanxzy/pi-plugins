@@ -116,3 +116,16 @@ test("pause and resume preserve exact timestamps and retain fields", () => {
   assert.equal(resumed.pauseReason, undefined);
   assert.equal(resumed.prompt, "  exact  ");
 });
+
+test("goal_interval_updated folds into the existing record without replacing it", () => {
+  const events = [
+    { event: "goal_created", cwd: "/project", rootSessionId: "root", goalId: "g1", timestamp: 1_000, prompt: "ship it", intervalMs: 600_000 },
+    { event: "goal_paused", cwd: "/project", rootSessionId: "root", goalId: "g1", timestamp: 2_000, reason: "waiting" },
+    { event: "goal_interval_updated", cwd: "/project", rootSessionId: "root", goalId: "g1", timestamp: 3_000, intervalMs: 120_000 },
+  ] as const;
+  const goal = foldGoalEvents(events).get("root");
+  assert.equal(goal?.intervalMs, 120_000);
+  assert.equal(goal?.prompt, "ship it");
+  assert.equal(goal?.status, "paused");
+  assert.equal(goal?.pauseReason, "waiting");
+});

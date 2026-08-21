@@ -28,6 +28,8 @@ export interface ManageGoalController {
   pause(reason: string, signal?: AbortSignal): Promise<ManageGoalApplyResult>;
   /** Resume the paused goal. */
   resume(signal?: AbortSignal): Promise<ManageGoalApplyResult>;
+  /** Change the current goal's delivery interval without replacing the goal. */
+  updateInterval(interval: string, signal?: AbortSignal): Promise<ManageGoalApplyResult>;
   /** Clear the current goal. */
   clear(signal?: AbortSignal): Promise<ManageGoalApplyResult>;
   cancel(): Promise<void>;
@@ -50,6 +52,7 @@ type WizardStep =
   | { kind: "menu" }
   | { kind: "prompt" }
   | { kind: "interval" }
+  | { kind: "interval-edit" }
   | { kind: "reason" }
   | { kind: "confirm-clear" }
   | { kind: "busy"; message: string }
@@ -134,9 +137,9 @@ export class ManageGoalWizard implements Component {
   private menuOptions(): string[] {
     if (!this.goal) return ["Create goal", "Done"];
     if (this.goal.status === "paused") {
-      return ["Resume goal", "Replace goal", "Clear goal", "Done"];
+      return ["Resume goal", "Replace goal", "Change interval", "Clear goal", "Done"];
     }
-    return ["Pause goal", "Replace goal", "Clear goal", "Done"];
+    return ["Pause goal", "Replace goal", "Change interval", "Clear goal", "Done"];
   }
 
   render(width: number): string[] {
@@ -175,6 +178,12 @@ export class ManageGoalWizard implements Component {
         add(" ", this.theme.fg("text", this.promptText("Goal prompt:")));
         for (const line of this.editor.render(Math.max(1, renderWidth - 2))) add(" ", line);
         add(" ", this.theme.fg("dim", "Enter continue • Esc back"));
+        break;
+      }
+      case "interval-edit": {
+        add(" ", this.theme.fg("accent", "Manage goal · change interval"));
+        add(" ", this.theme.fg("muted", `Current interval: ${formatGoalInterval(this.goal?.intervalMs ?? 0)}`));
+        add(" ", this.theme.fg("text", this.promptText("New interval:")));
         break;
       }
       case "interval": {
@@ -222,7 +231,7 @@ export class ManageGoalWizard implements Component {
   }
 
   private promptText(prompt: string): string {
-    return this.step.kind === "prompt" || this.step.kind === "interval" || this.step.kind === "reason"
+    return this.step.kind === "prompt" || this.step.kind === "interval" || this.step.kind === "interval-edit" || this.step.kind === "reason"
       ? `${prompt} ${this.editor.getExpandedText()}`.trim()
       : prompt;
   }
@@ -257,13 +266,15 @@ export class ManageGoalWizard implements Component {
           if (option === "Create goal") this.startCreate();
           else this.finish({ status: "saved", message: "Done." });
         } else if (this.goal.status === "paused") {
-          if (option === "Resume goal") void this.runResume();
+          if (option === "Change interval") this.startIntervalEdit();
+          else if (option === "Resume goal") void this.runResume();
           else if (option === "Replace goal") this.startCreate();
           else if (option === "Clear goal") this.startConfirmClear();
           else this.finish({ status: "saved", message: "Done." });
         } else {
           if (option === "Pause goal") this.startPause();
           else if (option === "Replace goal") this.startCreate();
+          else if (option === "Change interval") this.startIntervalEdit();
           else if (option === "Clear goal") this.startConfirmClear();
           else this.finish({ status: "saved", message: "Done." });
         }
@@ -316,6 +327,24 @@ export class ManageGoalWizard implements Component {
         this.editor.setText("");
         this.step = { kind: "interval" };
         this.refresh();
+        return;
+      }
+      this.editor.handleInput(data);
+      this.refresh();
+      return;
+    }
+    if (this.step.kind === "interval-edit") {
+      if (matchesKey(data, Key.escape)) {
+        this.menuIndex = 0;
+        this.step = { kind: "menu" };
+        this.editor.setText("");
+        this.refresh();
+        return;
+      }
+      if (matchesKey(data, Key.enter)) {
+        const value = this.editor.getExpandedText().trim();
+        this.editor.setText("");
+        void this.submitIntervalEdit(value);
         return;
       }
       this.editor.handleInput(data);
@@ -380,6 +409,25 @@ export class ManageGoalWizard implements Component {
   private startConfirmClear(): void {
     this.menuIndex = 0;
     this.step = { kind: "confirm-clear" };
+    this.refresh();
+  }
+
+  private startIntervalEdit(): void {
+    this.editor.setText("");
+    this.step = { kind: "interval-edit" };
+    this.refresh();
+  }
+
+  private async submitIntervalEdit(interval: string): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.step = { kind: "busy", message: "Saving interval…" };
+    this.refresh();
+    const result = await this.controller.updateInterval(interval, this.signal);
+    if (this.settled) return;
+    this.busy = false;
+    if (result.ok) await this.load();
+    this.step = { kind: "result", ok: result.ok, message: result.message };
     this.refresh();
   }
 

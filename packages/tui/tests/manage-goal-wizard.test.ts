@@ -27,6 +27,7 @@ function controller(overrides: Partial<ManageGoalController> = {}): ManageGoalCo
     create: async ({ prompt, interval }) => ({ ok: true, message: `Goal created: ${prompt} every ${interval || "10m"}.` }),
     pause: async () => ({ ok: true, message: "Goal paused." }),
     resume: async () => ({ ok: true, message: "Goal resumed." }),
+    updateInterval: async () => ({ ok: true, message: "Goal interval updated." }),
     clear: async () => ({ ok: true, message: "Goal cleared." }),
     cancel: async () => {
       await undefined;
@@ -189,7 +190,8 @@ test("clear flow asks for confirmation before clearing", async () => {
   const wizard = new ManageGoalWizard({ tui: tui(), theme, controller: ctl, done: result.resolve });
   await flush();
 
-  // Active goal: Pause / Replace / Clear / Done → move to Clear (index 2).
+  // Active goal: Pause / Replace / Change interval / Clear / Done → move to Clear (index 3).
+  wizard.handleInput("\x1b[B");
   wizard.handleInput("\x1b[B");
   wizard.handleInput("\x1b[B");
   wizard.handleInput("\r");
@@ -213,6 +215,7 @@ test("clear confirmation can be cancelled", async () => {
   const wizard = new ManageGoalWizard({ tui: tui(), theme, controller: ctl, done: () => {} });
   await flush();
 
+  wizard.handleInput("\x1b[B");
   wizard.handleInput("\x1b[B");
   wizard.handleInput("\x1b[B");
   wizard.handleInput("\r");
@@ -312,4 +315,50 @@ test("pause flow preserves large pasted reason content instead of keeping the pa
   await flush();
 
   assert.equal(reason, largeReason);
+});
+
+test("change interval edits the goal in place without replacing it", async () => {
+  const calls: Array<{ kind: string; value?: string }> = [];
+  const initialGoal = { ...GOAL };
+  let currentGoal = { ...GOAL };
+  const final = resultPromise();
+  const component = new ManageGoalWizard({
+    tui: tui(),
+    theme,
+    controller: {
+      ...controller({
+        updateInterval: async (interval) => {
+          calls.push({ kind: "updateInterval", value: interval });
+          currentGoal = { ...initialGoal, intervalMs: 120_000 };
+          return { ok: true, message: "Goal interval updated." };
+        },
+        create: async ({ prompt }) => {
+          calls.push({ kind: "create", value: prompt });
+          return { ok: true, message: "created" };
+        },
+      }),
+      get: async () => currentGoal,
+    } as ManageGoalController,
+    done: (result) => final.resolve(result),
+  });
+  await flush();
+  const linesRendered = lines(component);
+  assert.ok(linesRendered.some((line) => line.includes("Change interval")), "menu must offer Change interval");
+
+  // Navigate to "Change interval" (index 2 under an active goal) and select it.
+  component.handleInput("\x1b[B");
+  component.handleInput("\x1b[B");
+  component.handleInput("\r");
+  await flush();
+  assert.equal(calls.length, 0);
+  assert.equal(lines(component).some((line) => line.includes("change interval")), true);
+
+  component.handleInput("2m");
+  component.handleInput("\r");
+  await flush();
+  assert.deepEqual(calls, [{ kind: "updateInterval", value: "2m" }]);
+  // Dismissing the result screen closes the wizard; the goal was edited in place.
+  component.handleInput("\r");
+  assert.deepEqual(await final.promise, { status: "saved", message: "Goal interval updated." });
+  assert.equal(calls.some((call) => call.kind === "create"), false);
 });

@@ -1,5 +1,5 @@
 import type { Goal } from "./record.ts";
-import { createGoalRecord, pauseGoalRecord, resumeGoalRecord } from "./record.ts";
+import { createGoalRecord, pauseGoalRecord, resumeGoalRecord, updateGoalIntervalRecord } from "./record.ts";
 
 /**
  * Append-only goal events.
@@ -13,6 +13,7 @@ export type GoalEvent =
   | { event: "goal_created"; cwd: string; rootSessionId: string; goalId: string; timestamp: number; prompt: string; intervalMs: number }
   | { event: "goal_paused"; cwd: string; rootSessionId: string; goalId: string; timestamp: number; reason: string }
   | { event: "goal_resumed"; cwd: string; rootSessionId: string; goalId: string; timestamp: number }
+  | { event: "goal_interval_updated"; cwd: string; rootSessionId: string; goalId: string; timestamp: number; intervalMs: number }
   | { event: "goal_cleared"; cwd: string; rootSessionId: string; goalId: string; timestamp: number };
 
 /** Serialize a goal event to a single JSONL line. */
@@ -42,6 +43,8 @@ function isValidGoalEvent(parsed: unknown): parsed is GoalEvent {
     case "goal_resumed":
     case "goal_cleared":
       return true;
+    case "goal_interval_updated":
+      return isPositiveSafeInteger(event.intervalMs);
     default:
       return false;
   }
@@ -91,6 +94,12 @@ export function foldGoalEvents(events: Iterable<GoalEvent>): Map<string, Goal> {
       case "goal_resumed": {
         if (current && current.goalId === event.goalId) {
           result.set(event.rootSessionId, resumeGoalRecord(current, event.timestamp));
+        }
+        break;
+      }
+      case "goal_interval_updated": {
+        if (current && current.goalId === event.goalId) {
+          result.set(event.rootSessionId, updateGoalIntervalRecord(current, event.intervalMs, event.timestamp));
         }
         break;
       }

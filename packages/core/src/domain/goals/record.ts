@@ -52,3 +52,12 @@ export function resumeGoalRecord(goal: Goal, timestamp: number): Goal {
     updatedAt: timestamp,
   };
 }
+
+/** Change the delivery cadence without replacing the goal's prompt or status. */
+export function updateGoalIntervalRecord(goal: Goal, intervalMs: number, timestamp: number): Goal {
+  return {
+    ...goal,
+    intervalMs,
+    updatedAt: timestamp,
+  };
+}

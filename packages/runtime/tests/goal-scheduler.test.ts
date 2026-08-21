@@ -268,3 +268,41 @@ test("goal mutations emit correlated processWithLog records under a log context"
   assert.ok(after.length >= 1);
   assert.equal(before[0].correlationId, after[0].correlationId);
 });
+
+test("updateInterval re-arms the scheduler without firing a delivery", () => {
+  const pool = createGoalPool(projectRoot());
+  const sent: string[] = [];
+  const scheduled: number[] = [];
+  pool.setScheduler((_callback, _cwd, intervalMs) => {
+    scheduled.push(intervalMs);
+    return { clear() {} };
+  });
+  pool.bind(binding({ sendUserMessage: (content) => sent.push(content) }));
+  assert.equal(pool.create({ cwd: "/project", prompt: "exact prompt", interval: "10m" }).ok, true);
+  const before = sent.length;
+  const result = pool.updateInterval({ interval: "2m" });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.goal.intervalMs, 120_000);
+    assert.equal(result.goal.prompt, "exact prompt");
+    assert.equal(result.goal.status, "active");
+  }
+  // The new cadence is armed; no delivery fires just because the interval changed.
+  assert.equal(scheduled.at(-1), 120_000);
+  assert.equal(sent.length, before);
+});
+
+test("updateInterval keeps a paused goal paused and rejects invalid input", () => {
+  const pool = createGoalPool(projectRoot());
+  pool.setScheduler(() => ({ clear() {} }));
+  pool.create({ cwd: "/project", prompt: "p", interval: "10m" });
+  pool.pause("waiting");
+  const paused = pool.updateInterval({ intervalMs: 60_000 });
+  assert.equal(paused.ok, true);
+  if (paused.ok) {
+    assert.equal(paused.goal.intervalMs, 60_000);
+    assert.equal(paused.goal.status, "paused");
+  }
+  assert.equal(pool.updateInterval({ interval: "nonsense" }).ok, false);
+  assert.equal(pool.updateInterval({ intervalMs: 0 }).ok, false);
+});

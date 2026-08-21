@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   GOAL_DELIVERY_FOOTER,
+  parseGoalInterval,
   splitGoalPromptInterval,
   validateGoalInput,
   type Goal,
@@ -57,6 +58,8 @@ export interface GoalPool {
   create(input: GoalCreateInput): GoalMutationResult;
   pause(reason: string): GoalMutationResult;
   resume(): GoalMutationResult;
+  /** Change the delivery cadence of the current goal without replacing it. */
+  updateInterval(input: { interval?: string; intervalMs?: number }): GoalMutationResult;
   get(): Goal | undefined;
   clear(): boolean;
   all(): Map<string, Goal>;
@@ -265,6 +268,30 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
           // itself skips delivery when delivery is suspended or when the host
           // binding has pending messages already queued.
           tick(goal.cwd);
+        }
+      }
+      return result;
+    },
+    updateInterval(input) {
+      const result = processWithLog({ operation: GOAL_OPERATIONS.UPDATE_INTERVAL, parameters: { rootSessionId } }, () => withCwdMutation(rootSessionId, () => {
+        let intervalMs = input.intervalMs;
+        if (intervalMs === undefined) {
+          const parsed = parseGoalInterval(input.interval);
+          if (!parsed.ok) return parsed as GoalMutationResult;
+          intervalMs = parsed.value;
+        }
+        if (!Number.isSafeInteger(intervalMs) || intervalMs <= 0) {
+          return { ok: false as const, error: "interval must be greater than zero" };
+        }
+        return store.updateInterval(intervalMs);
+      }));
+      if (result.ok) {
+        // Re-arm the scheduler on the new cadence without firing an immediate
+        // tick: changing the interval must not itself trigger a delivery.
+        const goal = store.get();
+        if (goal) {
+          clearScheduler(goal.cwd);
+          ensureScheduler(goal.cwd);
         }
       }
       return result;

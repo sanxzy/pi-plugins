@@ -171,3 +171,22 @@ test("/c2-manage-goal is gated to interactive TUI", async () => {
   } as unknown as ExtensionCommandContext);
   assert.match(notifications[0]!, /requires an interactive TUI/);
 });
+
+test("controller updateInterval changes the cadence in place", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-manage-goal-int-"));
+  try {
+    const controller = createManageGoalController({ cwd, sessionId: "root" });
+    const pool = getGoalPool(cwd, "root");
+    pool.setScheduler(() => ({ clear() {} }));
+    assert.equal((await controller.create({ prompt: "ship it", interval: "2h" })).ok, true);
+    const result = await controller.updateInterval("30s");
+    assert.deepEqual(result, { ok: true, message: "Goal interval updated." });
+    assert.equal(pool.get()?.intervalMs, 30_000);
+    assert.equal(pool.get()?.prompt, "ship it");
+    assert.equal(pool.get()?.status, "active");
+    const failed = await controller.updateInterval("bogus");
+    assert.equal(failed.ok, false);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

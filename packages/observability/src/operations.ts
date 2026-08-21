@@ -43,6 +43,7 @@ export const GOAL_OPERATIONS = {
   CREATE: "goal.create",
   PAUSE: "goal.pause",
   RESUME: "goal.resume",
+  UPDATE_INTERVAL: "goal.updateInterval",
   CLEAR: "goal.clear",
   TICK: "goal.tick",
   BIND: "goal.bind",

@@ -75,6 +75,11 @@ export function createManageGoalController(options: ManageGoalControllerOptions)
       const result = pool.resume();
       return result.ok ? { ok: true, message: "Goal resumed." } : { ok: false, message: result.error };
     },
+    async updateInterval(interval, _signal) {
+      if (!isRootSession(cwd, sessionId)) return unavailable();
+      const result = pool.updateInterval({ interval });
+      return result.ok ? { ok: true, message: "Goal interval updated." } : { ok: false, message: result.error };
+    },
     async clear(_signal) {
       if (!isRootSession(cwd, sessionId)) return unavailable();
       const cleared = pool.clear();
