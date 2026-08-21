@@ -9,8 +9,13 @@ export type ChildLiveTranscriptEntry =
       readonly id: string;
       readonly kind: "message";
       readonly role: "user" | "assistant";
+      /** Original SDK content blocks, retained so the host can use its native renderer. */
+      readonly content?: unknown;
+      /** Text-only fallback for older producers and compact activity projections. */
       readonly text: string;
       readonly complete: boolean;
+      readonly stopReason?: string;
+      readonly errorMessage?: string;
     }
   | {
       readonly id: string;
@@ -21,7 +26,16 @@ export type ChildLiveTranscriptEntry =
       readonly text: string;
       readonly complete: boolean;
       readonly isError?: boolean;
+      /** Original tool result envelope, including renderer details and images. */
+      readonly result?: ChildLiveToolResult;
     };
+
+/** Renderer-compatible tool result retained in a child snapshot. */
+export interface ChildLiveToolResult {
+  readonly content: readonly unknown[];
+  readonly details?: unknown;
+  readonly isError?: boolean;
+}
 
 /** Normalized live event delivered to manager subscribers. */
 export type ChildLiveEvent =
@@ -30,7 +44,11 @@ export type ChildLiveEvent =
       readonly id: string;
       readonly phase: "start" | "update" | "end";
       readonly role: "user" | "assistant";
+      /** Original SDK content blocks used by the host's native transcript renderer. */
+      readonly content?: unknown;
       readonly text: string;
+      readonly stopReason?: string;
+      readonly errorMessage?: string;
       /** Token usage carried by the finalized assistant message; absent for user messages and partial phases. */
       readonly usage?: ChildLiveUsage;
     }
@@ -43,6 +61,8 @@ export type ChildLiveEvent =
       readonly args?: unknown;
       readonly text: string;
       readonly isError?: boolean;
+      /** Original tool result envelope used by the host's native renderer. */
+      readonly result?: ChildLiveToolResult;
     }
   | { readonly type: "agent_end"; readonly willRetry: boolean }
   | { readonly type: "settled"; readonly status: Exclude<ChildLiveStatus, "running"> };
@@ -142,8 +162,11 @@ export function createChildLiveFeed(seed?: ChildLiveSnapshot): ChildLiveFeed {
         id: event.id,
         kind: "message",
         role: event.role,
+        ...(event.content !== undefined ? { content: event.content } : {}),
         text: event.text,
         complete: event.phase === "end",
+        ...(event.stopReason !== undefined ? { stopReason: event.stopReason } : {}),
+        ...(event.errorMessage !== undefined ? { errorMessage: event.errorMessage } : {}),
       };
       if (!previous) return [...snapshot.transcript, next];
       return snapshot.transcript.map((entry) => (entry.id === event.id ? next : entry));
@@ -162,6 +185,7 @@ export function createChildLiveFeed(seed?: ChildLiveSnapshot): ChildLiveFeed {
         text: event.text,
         complete: event.phase === "end",
         isError: event.isError,
+        ...(event.result !== undefined ? { result: event.result } : {}),
       };
       if (!previous) return [...snapshot.transcript, next];
       return snapshot.transcript.map((entry) => (entry.id === event.id ? next : entry));

@@ -18,6 +18,7 @@ const PATCH_MARKERS: Array<[string, string]> = [
   ["dist/core/agent-session.js", "_maybeAbortForThreshold"],
   ["dist/modes/interactive/components/model-selector.js", "pi-c2: the extension publishes a host-neutral model-group bridge"],
   ["dist/modes/interactive/interactive-mode.js", "__pi_c2_group__"],
+  ["dist/modes/interactive/interactive-mode.js", "hostSwapApplyChildEvent"],
 ];
 
 /**
@@ -31,15 +32,10 @@ async function buildPristineSdk(): Promise<string> {
   cpSync(join(SDK_SOURCE, "package.json"), join(dest, "package.json"));
   cpSync(join(SDK_SOURCE, "dist"), join(dest, "dist"), { recursive: true });
   const bundledPatch = readFileSync(PATCH_FILE, "utf8");
-  // The workspace dependency is already patched with the historical host patch,
-  // while the model-group hunks are this package's new postinstall surface. Build
-  // a pristine fixture by reversing only the historical portion, then let the
-  // postinstall script apply the complete bundled patch.
-  const groupMarker = bundledPatch.indexOf('+                    if (model.provider === "__pi_c2_group__")');
-  const groupHunk = groupMarker > 0 ? bundledPatch.lastIndexOf("\n@@", groupMarker) + 1 : -1;
-  assert.ok(groupHunk > 0, "bundled patch must contain the model-group activation hunk");
-  const patchText = bundledPatch.slice(0, groupHunk).trimEnd() + "\n";
-  const reversed = reversePatch(parsePatch(patchText));
+  // The workspace dependency carries the same complete host patch as the
+  // bundled postinstall patch. Reverse the complete patch so the fixture
+  // remains pristine even when new host capabilities are added.
+  const reversed = reversePatch(parsePatch(bundledPatch));
   await new Promise<void>((resolve, reject) => {
     applyPatches(reversed, {
       loadFile(index, callback) {

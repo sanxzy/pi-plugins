@@ -126,11 +126,11 @@ test("maps SDK message and tool events to the core live feed", () => {
   };
   assert.deepEqual(
     mapAgentSessionEvent({ type: "message_start", message }),
-    { type: "message", id: "assistant-1", phase: "start", role: "assistant", text: "hello" },
+    { type: "message", id: "assistant-1", phase: "start", role: "assistant", content: [{ type: "text", text: "hello" }], text: "hello" },
   );
   assert.deepEqual(
     mapAgentSessionEvent({ type: "message_update", message, assistantMessageEvent: assistantEvent }),
-    { type: "message", id: "assistant-1", phase: "update", role: "assistant", text: "hello" },
+    { type: "message", id: "assistant-1", phase: "update", role: "assistant", content: [{ type: "text", text: "hello" }], text: "hello" },
   );
   assert.deepEqual(
     mapAgentSessionEvent({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "ls" } }),
@@ -160,6 +160,7 @@ test("maps SDK message and tool events to the core live feed", () => {
       toolName: "read",
       args: { path: "file.ts" },
       text: "partial",
+      result: { content: [{ type: "text", text: "partial" }] },
     },
   );
   assert.deepEqual(
@@ -178,8 +179,31 @@ test("maps SDK message and tool events to the core live feed", () => {
       toolName: "bash",
       text: "ok",
       isError: false,
+      result: { content: [{ type: "text", text: "ok" }], isError: false },
     },
   );
+});
+
+test("tool calls stay structured instead of being appended to assistant text", () => {
+  const mapped = mapAgentSessionEvent({
+    type: "message_update",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "text", text: "status" },
+        { type: "toolCall", id: "call-1", name: "bash", arguments: { command: "node --version" } },
+      ],
+      timestamp: 8,
+    } as never,
+    assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "", partial: {} } as never,
+  });
+  assert.equal(mapped?.type, "message");
+  if (mapped?.type !== "message") return;
+  assert.equal(mapped.text, "status");
+  assert.deepEqual(mapped.content, [
+    { type: "text", text: "status" },
+    { type: "toolCall", id: "call-1", name: "bash", arguments: { command: "node --version" } },
+  ]);
 });
 
 test("message_end maps finalized assistant usage into the live event", () => {
@@ -199,6 +223,7 @@ test("message_end maps finalized assistant usage into the live event", () => {
     id: "assistant-5",
     phase: "end",
     role: "assistant",
+    content: [{ type: "text", text: "done" }],
     text: "done",
     usage: { input: 100, output: 20, cacheRead: 3, cacheWrite: 0, cost: 0.01 },
   });
@@ -286,7 +311,7 @@ test("copied SDK message objects share one transcript identity", () => {
   feed.emit(mapAgentSessionEvent({ type: "message_end", message: finalMessage as never })!);
   assert.deepEqual(
     feed.snapshot.transcript,
-    [{ id: "assistant-42", kind: "message", role: "assistant", text: "answer", complete: true }],
+    [{ id: "assistant-42", kind: "message", role: "assistant", content: [{ type: "text", text: "answer" }], text: "answer", complete: true }],
     "start/update/end copies collapse into one completed entry",
   );
 });

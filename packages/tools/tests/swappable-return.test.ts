@@ -169,7 +169,7 @@ test("phase4: swapping to a leaf with no descendants renders root anchor and par
     assert.equal(capturedCustomFactory, undefined, "host-level: no overlay for leaf");
     const whileViewing = footer.render(100).join("\n");
     assert.ok(whileViewing.includes("Viewing"), "leaf swapped footer should show viewing hint");
-    assert.ok(whileViewing.includes("child A"), "leaf swapped footer should still show tree with child A (tree always on)");
+    assert.ok(whileViewing.includes("main (job-a)"), "leaf swapped footer should keep the focused child anchor visible");
 
     const callsBefore = renderCalls;
     footer.handleInput(ALT_DOWN);
