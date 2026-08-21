@@ -53,6 +53,7 @@ test("controller create → list → activate → delete", async () => {
         name: "  Work  ",
         mode: "fallback",
         quarantineMinutes: 7,
+        contextWindow: 32000,
         models: [{ ref: "openai/gpt-a", thinking: "high" }, { ref: "openai/gpt-b" }],
       });
       assert.equal(created.ok, true);
@@ -63,10 +64,11 @@ test("controller create → list → activate → delete", async () => {
       assert.equal(group.name, "Work");
       assert.equal(group.mode, "fallback");
       assert.equal(group.quarantineMinutes, 7);
+      assert.equal(group.contextWindow, 32000);
       assert.equal(group.active, false);
       assert.equal(group.models.length, 2);
       assert.equal(group.models[1]!.ref, "openai/gpt-b");
-      assert.equal(group.contextWindow, 64000, "derived contextWindow is the min member window");
+      assert.equal(group.contextWindow, 32000, "configured contextWindow is the effective group cap");
 
       // Duplicate name is rejected.
       const duplicate = await controller.createGroup({
@@ -114,6 +116,9 @@ test("controller rejects invalid inputs with clear messages", async () => {
       const badQuarantineHigh = await controller.createGroup({ name: "A", mode: "fallback", quarantineMinutes: 61, models: [{ ref: "openai/gpt-a" }] });
       assert.equal(badQuarantineHigh.ok, false);
 
+      const badContextWindow = await controller.createGroup({ name: "A", mode: "fallback", quarantineMinutes: 5, contextWindow: 0, models: [{ ref: "openai/gpt-a" }] });
+      assert.equal(badContextWindow.ok, false);
+
       const noModels = await controller.createGroup({ name: "A", mode: "fallback", quarantineMinutes: 5, models: [] });
       assert.equal(noModels.ok, false);
 
@@ -143,6 +148,7 @@ test("controller update changes mode/quarantine/models and preserves the id", as
         name: "RR",
         mode: "round-robin",
         quarantineMinutes: 15,
+        contextWindow: 48000,
         models: [{ ref: "openai/gpt-a", thinking: "off" }, { ref: "openai/gpt-b" }],
       });
       assert.equal(updated.ok, true);
@@ -150,6 +156,7 @@ test("controller update changes mode/quarantine/models and preserves the id", as
       assert.equal(group.id, id, "update keeps the group id");
       assert.equal(group.mode, "round-robin");
       assert.equal(group.quarantineMinutes, 15);
+      assert.equal(group.contextWindow, 48000);
       assert.equal(group.models.length, 2);
     });
   } finally {

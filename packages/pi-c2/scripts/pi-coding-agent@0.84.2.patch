@@ -573,10 +573,10 @@ index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..72ad0b1a8f554941818b496a22af8fc4
      }
      getBranchSummarySettings() {
 diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
-index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff998f4055 100644
+index 0000000..1111111 100644
 --- a/dist/modes/interactive/interactive-mode.js
 +++ b/dist/modes/interactive/interactive-mode.js
-@@ -361,6 +361,10 @@ export class InteractiveMode {
+@@ -361,6 +361,10 @@
          this.headerContainer = new Container();
          this.loadedResourcesContainer = new Container();
          this.chatContainer = new Container();
@@ -587,7 +587,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff
          this.documentContainer = new Container();
          this.documentContainer.addChild(this.headerContainer);
          this.documentContainer.addChild(this.loadedResourcesContainer);
-@@ -2518,6 +2522,15 @@ export class InteractiveMode {
+@@ -2518,6 +2522,15 @@
          if (!this.isInitialized) {
              await this.init();
          }
@@ -603,7 +603,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff
          this.footer.invalidate();
          switch (event.type) {
              case "agent_start":
-@@ -3088,6 +3101,139 @@ export class InteractiveMode {
+@@ -3088,6 +3101,139 @@
          this.chatContainer.clear();
          this.renderSessionEntries(this.sessionManager.buildContextEntries());
      }
@@ -743,3 +743,110 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..86983fb542d1087c29e0770d1d54b4ff
      // =========================================================================
      // Key handlers
      // =========================================================================
+@@ -3999,6 +4145,38 @@
+         this.showSelector((done) => {
+             const selector = new ModelSelectorComponent(this.ui, this.session.model, this.settingsManager, this.session.modelRuntime, this.session.scopedModels, async (model) => {
+                 try {
++                    // pi-c2: selecting a synthetic group keeps agents.model untouched,
++                    // activates the persisted group, and applies its current member to
++                    // the root turn so the group is immediately usable.
++                    if (model.provider === "__pi_c2_group__") {
++                        const api = globalThis[Symbol.for("pi-c2.model-groups")];
++                        const groupId = model.id.startsWith("group:") ? model.id.slice("group:".length) : model.id;
++                        const activation = typeof api?.activate === "function" ? api.activate(groupId) : { ok: false, error: "Model-group integration is unavailable." };
++                        if (!activation.ok) {
++                            done();
++                            this.showError(activation.error);
++                            return;
++                        }
++                        const [provider, id] = activation.modelRef.split("/");
++                        const resolved = provider && id ? this.session.modelRuntime.getModel(provider, id) : undefined;
++                        if (!resolved) {
++                            done();
++                            this.showError(`Model group "${activation.groupName}" resolved unavailable model ${activation.modelRef}`);
++                            return;
++                        }
++                        const groupModel = activation.contextWindow !== undefined && resolved.contextWindow > activation.contextWindow
++                            ? { ...resolved, contextWindow: activation.contextWindow }
++                            : resolved;
++                        await this.session.setModel(groupModel);
++                        if (activation.thinking) this.session.setThinkingLevel(activation.thinking);
++                        this.footer.invalidate();
++                        this.updateEditorBorderColor();
++                        done();
++                        this.showStatus(`Model group: ${activation.groupName} → ${activation.modelRef}`);
++                        return;
++                    }
++                    const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
++                    if (typeof groupApi?.clearActiveGroup === "function") groupApi.clearActiveGroup();
+                     await this.session.setModel(model);
+                     this.footer.invalidate();
+                     this.updateEditorBorderColor();
+
+diff --git a/dist/modes/interactive/components/model-selector.js b/dist/modes/interactive/components/model-selector.js
+index 0000000..1111111 100644
+--- a/dist/modes/interactive/components/model-selector.js
++++ b/dist/modes/interactive/components/model-selector.js
+@@ -51,6 +51,8 @@
+         this.scope = scopedModels.length > 0 ? "scoped" : "all";
+         this.onSelectCallback = onSelect;
+         this.onCancelCallback = onCancel;
++        // pi-c2: the extension publishes a host-neutral model-group bridge.
++        this.modelGroupApi = globalThis[Symbol.for("pi-c2.model-groups")];
+         // Add top border
+         this.addChild(new DynamicBorder());
+         this.addChild(new Spacer(1));
+@@ -101,6 +103,24 @@
+             model,
+         }));
+         this.allModels = this.sortModels(models);
++        // pi-c2: model groups appear in the normal /model selector as synthetic
++        // entries. They are handled by interactive-mode's group activation path.
++        const groups = typeof this.modelGroupApi?.list === "function" ? this.modelGroupApi.list() : [];
++        const groupItems = groups.map((group) => ({
++            provider: "__pi_c2_group__",
++            id: `group:${group.id}`,
++            model: {
++                provider: "__pi_c2_group__",
++                id: `group:${group.id}`,
++                name: `group: ${group.name}`,
++                contextWindow: group.contextWindow ?? 0,
++                reasoning: false,
++            },
++            groupName: group.name,
++            groupMode: group.mode,
++            groupActive: group.active,
++        }));
++        this.allModels = [...this.allModels, ...groupItems];
+         this.scopedModels = this.scopedModels.map((scoped) => {
+             const refreshed = this.modelRuntime.getModel(scoped.model.provider, scoped.model.id);
+             return refreshed ? { ...scoped, model: refreshed } : scoped;
+@@ -226,19 +246,21 @@
+             if (!item)
+                 continue;
+             const isSelected = i === this.selectedIndex;
+-            const isCurrent = modelsAreEqual(this.currentModel, item.model);
++            const isGroup = item.provider === "__pi_c2_group__";
++            const isCurrent = !isGroup && modelsAreEqual(this.currentModel, item.model);
++            const groupCheckmark = isGroup && item.groupActive ? theme.fg("success", " ✓") : "";
+             let line = "";
+             if (isSelected) {
+                 const prefix = theme.fg("accent", "→ ");
+-                const modelText = `${item.id}`;
+-                const providerBadge = theme.fg("muted", `[${item.provider}]`);
+-                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
++                const modelText = isGroup ? `group: ${item.groupName}` : `${item.id}`;
++                const providerBadge = theme.fg("muted", isGroup ? `[${item.groupMode}]` : `[${item.provider}]`);
++                const checkmark = isGroup ? groupCheckmark : (isCurrent ? theme.fg("success", " ✓") : "");
+                 line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
+             }
+             else {
+-                const modelText = `  ${item.id}`;
+-                const providerBadge = theme.fg("muted", `[${item.provider}]`);
+-                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
++                const modelText = isGroup ? `  group: ${item.groupName}` : `  ${item.id}`;
++                const providerBadge = theme.fg("muted", isGroup ? `[${item.groupMode}]` : `[${item.provider}]`);
++                const checkmark = isGroup ? groupCheckmark : (isCurrent ? theme.fg("success", " ✓") : "");
+                 line = `${modelText} ${providerBadge}${checkmark}`;
+             }
+             this.listContainer.addChild(new Text(line, 0, 0));

@@ -140,6 +140,38 @@ test("group contextWindow is persisted and caps the derived member window", asyn
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test("host bridge lists and activates groups with the configured context cap", async () => {
+  const { saveModelGroups, installModelGroupHostApi, clearModelGroupsCache, _test } = await import("../src/infrastructure/model-groups/store.ts");
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      clearModelGroupsCache();
+      saveModelGroups({
+        groups: [{
+          id: "helper-models",
+          name: "helper-models",
+          mode: "round-robin",
+          quarantineMinutes: 5,
+          contextWindow: 32000,
+          models: [{ ref: "openai/gpt-a", thinking: "high" }, { ref: "openai/gpt-b" }],
+        }],
+      });
+      installModelGroupHostApi();
+      const api = (globalThis as typeof globalThis & { [key: symbol]: unknown })[Symbol.for(_test.MODEL_GROUP_HOST_API_KEY)] as {
+        list: () => readonly { id: string; contextWindow?: number; active: boolean }[];
+        activate: (id: string) => { ok: boolean; modelRef?: string; contextWindow?: number };
+        clearActiveGroup: () => void;
+      };
+      assert.deepEqual(api.list(), [{ id: "helper-models", name: "helper-models", mode: "round-robin", modelRefs: ["openai/gpt-a", "openai/gpt-b"], contextWindow: 32000, active: false }]);
+      const activated = api.activate("helper-models");
+      assert.deepEqual(activated, { ok: true, groupId: "helper-models", groupName: "helper-models", modelRef: "openai/gpt-a", thinking: "high", contextWindow: 32000 });
+      assert.equal(api.list()[0]!.active, true);
+      api.clearActiveGroup();
+      assert.equal(api.list()[0]!.active, false);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("round-robin rotates and skips quarantined", async () => {
   const { saveModelGroups, resolveActiveModel, clearModelGroupsCache, clearRoundRobinPointers } = await import("../src/infrastructure/model-groups/store.ts");
   const { quarantineModel, clearQuarantine } = await import("../src/infrastructure/model-groups/quarantine.ts");

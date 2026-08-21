@@ -9,6 +9,7 @@ export interface ManageModelGroupsGroupItem {
   readonly name: string;
   readonly mode: "fallback" | "round-robin";
   readonly quarantineMinutes: number;
+  readonly contextWindow?: number;
   readonly models: ReadonlyArray<{
     readonly ref: string;
     readonly thinking?: string;
@@ -16,7 +17,6 @@ export interface ManageModelGroupsGroupItem {
     /** Remaining quarantine milliseconds at snapshot time; absent when healthy. */
     readonly quarantinedForMs?: number;
   }>;
-  readonly contextWindow?: number;
   readonly active: boolean;
 }
 
@@ -45,6 +45,8 @@ export interface ManageModelGroupsGroupInput {
   readonly name: string;
   readonly mode: "fallback" | "round-robin";
   readonly quarantineMinutes: number;
+  /** Optional group cap; blank means the minimum catalog window. */
+  readonly contextWindow?: number;
   readonly models: ReadonlyArray<{ readonly ref: string; readonly thinking?: string }>;
 }
 
@@ -77,9 +79,11 @@ type Step =
   | { kind: "createName" }
   | { kind: "createMode" }
   | { kind: "createQuarantine" }
+  | { kind: "createContextWindow" }
   | { kind: "editName" }
   | { kind: "editMode" }
   | { kind: "editQuarantine" }
+  | { kind: "editContextWindow" }
   | { kind: "addModel" }
   | { kind: "thinking" }
   | { kind: "modelMenu" }
@@ -125,6 +129,7 @@ export class ManageModelGroupsWizard implements Component {
   private pendingName = "";
   private pendingMode: "fallback" | "round-robin" = "fallback";
   private pendingQuarantine = "5";
+  private pendingContextWindow = "";
   private pendingModels: Array<{ ref: string; thinking?: string }> = [];
   private editingId?: string;
   private editingActive = false;
@@ -200,10 +205,12 @@ export class ManageModelGroupsWizard implements Component {
     if (this.busy) return;
     this.busy = true;
     try {
+      const contextWindow = this.parseContextWindow();
       const result = await this.controller.createGroup({
         name: this.pendingName.trim(),
         mode: this.pendingMode,
         quarantineMinutes: Number.parseInt(this.pendingQuarantine, 10),
+        ...(contextWindow === undefined ? {} : { contextWindow }),
         models: this.pendingModels,
       });
       if (result.ok) this.resultMessage = result.message;
@@ -220,10 +227,12 @@ export class ManageModelGroupsWizard implements Component {
     if (this.busy || !this.editingId) return;
     this.busy = true;
     try {
+      const contextWindow = this.parseContextWindow();
       const result = await this.controller.updateGroup(this.editingId, {
         name: this.pendingName.trim(),
         mode: this.pendingMode,
         quarantineMinutes: Number.parseInt(this.pendingQuarantine, 10),
+        ...(contextWindow === undefined ? {} : { contextWindow }),
         models: this.pendingModels,
       });
       this.resultMessage = result.message;
@@ -293,12 +302,22 @@ export class ManageModelGroupsWizard implements Component {
     this.refresh();
   }
 
+  private parseContextWindow(): number | undefined {
+    const value = this.pendingContextWindow.trim();
+    if (value.length === 0) return undefined;
+    const parsed = Number.parseInt(value, 10);
+    // Preserve zero so the controller can reject it instead of treating it as
+    // an omitted value; blank is the only input that means automatic minimum.
+    return Number.isInteger(parsed) ? parsed : undefined;
+  }
+
   private beginEdit(group: ManageModelGroupsGroupItem): void {
     this.editingId = group.id;
     this.editingActive = group.active;
     this.pendingName = group.name;
     this.pendingMode = group.mode;
     this.pendingQuarantine = String(group.quarantineMinutes);
+    this.pendingContextWindow = group.contextWindow === undefined ? "" : String(group.contextWindow);
     this.pendingModels = group.models.map((m) => ({ ref: m.ref, thinking: m.thinking }));
     this.search.setValue("");
     this.query = "";
@@ -377,11 +396,15 @@ export class ManageModelGroupsWizard implements Component {
       return;
     }
     // Typed-input steps (name, quarantine) route raw text into their field.
-    if (this.step.kind === "createName" || this.step.kind === "editName" || this.step.kind === "createQuarantine" || this.step.kind === "editQuarantine") {
+    if (this.step.kind === "createName" || this.step.kind === "editName" || this.step.kind === "createQuarantine" || this.step.kind === "editQuarantine" || this.step.kind === "createContextWindow" || this.step.kind === "editContextWindow") {
       if (matchesKey(data, Key.escape)) {
         if (this.step.kind === "editName") {
           // Back to the group picker; the in-progress edit is discarded.
           this.step = { kind: "edit" };
+        } else if (this.step.kind === "editContextWindow") {
+          this.step = { kind: "editQuarantine" };
+        } else if (this.step.kind === "createContextWindow") {
+          this.step = { kind: "createQuarantine" };
         } else {
           this.step = { kind: this.editingId ? "editName" : "action" };
         }
@@ -393,16 +416,18 @@ export class ManageModelGroupsWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.backspace)) {
-        const field = this.step.kind === "createName" || this.step.kind === "editName" ? "name" : "quarantine";
+        const field = this.step.kind === "createName" || this.step.kind === "editName" ? "name" : this.step.kind === "createContextWindow" || this.step.kind === "editContextWindow" ? "contextWindow" : "quarantine";
         if (field === "name") this.pendingName = this.pendingName.slice(0, -1);
+        else if (field === "contextWindow") this.pendingContextWindow = this.pendingContextWindow.slice(0, -1);
         else this.pendingQuarantine = this.pendingQuarantine.slice(0, -1);
         this.refresh();
         return;
       }
       if (typeof data === "string" && data.length === 1 && !/[\x00-\x1f]/.test(data)) {
-        const field = this.step.kind === "createName" || this.step.kind === "editName" ? "name" : "quarantine";
+        const field = this.step.kind === "createName" || this.step.kind === "editName" ? "name" : this.step.kind === "createContextWindow" || this.step.kind === "editContextWindow" ? "contextWindow" : "quarantine";
         if (field === "name") this.pendingName += data;
-        else if (/[0-9]/.test(data)) this.pendingQuarantine += data;
+        else if (field === "contextWindow" && /[0-9]/.test(data)) this.pendingContextWindow += data;
+        else if (field === "quarantine" && /[0-9]/.test(data)) this.pendingQuarantine += data;
         this.refresh();
         return;
       }
@@ -446,16 +471,13 @@ export class ManageModelGroupsWizard implements Component {
   private advanceTyped(): void {
     if (this.step.kind === "createName") { this.step = { kind: "createMode" }; this.modeIndex = this.pendingMode === "fallback" ? 0 : 1; this.refresh(); return; }
     if (this.step.kind === "editName") { this.step = { kind: "editMode" }; this.modeIndex = this.pendingMode === "fallback" ? 0 : 1; this.refresh(); return; }
-    if (this.step.kind === "createQuarantine") {
-      const next = this.step.kind === "createQuarantine";
-      if (next) { this.search.setValue(""); this.query = ""; this.modelIndex = 0; this.pendingModels = []; this.step = { kind: "addModel" }; this.refresh(); }
-      return;
-    }
-    if (this.step.kind === "editQuarantine") {
+    if (this.step.kind === "createQuarantine") { this.step = { kind: "createContextWindow" }; this.refresh(); return; }
+    if (this.step.kind === "editQuarantine") { this.step = { kind: "editContextWindow" }; this.refresh(); return; }
+    if (this.step.kind === "createContextWindow" || this.step.kind === "editContextWindow") {
       this.search.setValue("");
       this.query = "";
       this.modelIndex = 0;
-      this.pendingModels = this.pendingModels.slice();
+      this.pendingModels = this.editingId ? this.pendingModels.slice() : [];
       this.step = { kind: "addModel" };
       this.refresh();
       return;
@@ -464,7 +486,7 @@ export class ManageModelGroupsWizard implements Component {
 
   private enterAction(index: number): void {
     if (index === 0) { this.search.setValue(""); this.query = ""; this.groupIndex = 0; this.step = { kind: "activate" }; this.refresh(); return; }
-    if (index === 1) { this.pendingName = ""; this.pendingMode = "fallback"; this.pendingQuarantine = "5"; this.pendingModels = []; this.editingId = undefined; this.step = { kind: "createName" }; this.refresh(); return; }
+    if (index === 1) { this.pendingName = ""; this.pendingMode = "fallback"; this.pendingQuarantine = "5"; this.pendingContextWindow = ""; this.pendingModels = []; this.editingId = undefined; this.step = { kind: "createName" }; this.refresh(); return; }
     if (index === 2) { this.search.setValue(""); this.query = ""; this.groupIndex = 0; this.step = { kind: "edit" }; this.refresh(); return; }
     if (index === 3) { this.search.setValue(""); this.query = ""; this.groupIndex = 0; this.step = { kind: "delete" }; this.refresh(); return; }
     this.finish({ status: "saved", message: "Done." });
@@ -571,6 +593,13 @@ export class ManageModelGroupsWizard implements Component {
         add(" ", this.theme.fg("accent", "Quarantine minutes (1-60)"));
         add(" ", this.theme.fg("text", `Minutes: ${this.pendingQuarantine}▌`));
         add(" ", this.theme.fg("dim", "Type a number • Enter next • Esc back"));
+        break;
+      }
+      case "createContextWindow":
+      case "editContextWindow": {
+        add(" ", this.theme.fg("accent", "Group context window"));
+        add(" ", this.theme.fg("text", `Tokens: ${this.pendingContextWindow || "auto/minimum"}▌`));
+        add(" ", this.theme.fg("dim", "Type a positive token count • blank uses the minimum member window • Enter next • Esc back"));
         break;
       }
       case "addModel": {
