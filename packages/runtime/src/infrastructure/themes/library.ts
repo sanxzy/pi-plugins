@@ -311,6 +311,19 @@ function finishLoad(library: ThemeLibrary, filePath: string, cacheable: boolean,
 }
 
 /**
+ * Append embedded built-ins missing from a valid persisted library so new
+ * releases can ship additional themes. Persisted entries win: a user-customized
+ * profile with the same themeId is never overwritten. The strict reader stays
+ * pure; merging happens only on load.
+ */
+function withEmbeddedBuiltins(library: ThemeLibrary): ThemeLibrary {
+  const known = new Set(library.profiles.map((profile) => profile.themeId));
+  const missing = BUILTIN_THEME_PROFILES.filter((profile) => !known.has(profile.themeId)).map(cloneThemeProfile);
+  if (missing.length === 0) return library;
+  return { version: 1, profiles: [...library.profiles, ...missing] };
+}
+
+/**
  * Load the optional home library. Bad or unavailable storage never blocks the
  * caller: built-ins are returned in memory, while successful publication is
  * attempted atomically and corrupt primaries are preserved as numbered backups.
@@ -341,7 +354,7 @@ export function loadThemeLibrary(persistence: ThemeLibraryPersistence = defaultP
   try {
     const parsed = readThemeLibrary(filePath, persistence);
     try { persistence.chmod(filePath, 0o600); } catch { /* keep valid in-memory edits usable */ }
-    return finishLoad(parsed, filePath, cacheable, true);
+    return finishLoad(withEmbeddedBuiltins(parsed), filePath, cacheable, true);
   } catch {
     // Continue to recovery below. The original primary has not been written.
   }

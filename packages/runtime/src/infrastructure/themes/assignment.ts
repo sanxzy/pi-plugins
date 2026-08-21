@@ -10,7 +10,12 @@ export interface ThemeAssignmentReservation {
 
 /** Process-local round-robin state for fresh child theme assignments. */
 export interface ThemeAssignmentCursor {
-  reserveThemeId(): ThemeAssignmentReservation;
+  /**
+   * Reserve the next rotation profile. When `avoidThemeId` matches the picked
+   * profile, the next profile is used instead so a fresh child never shares its
+   * parent's theme. The cursor advances only on commit.
+   */
+  reserveThemeId(avoidThemeId?: string): ThemeAssignmentReservation;
   nextThemeId(): string;
   reset(): void;
 }
@@ -24,11 +29,15 @@ export interface ThemeAssignmentCursor {
 export function createThemeAssignmentCursor(load: () => ThemeLibrary = loadThemeLibrary): ThemeAssignmentCursor {
   let cursor = 0;
 
-  const reserveThemeId = (): ThemeAssignmentReservation => {
+  const reserveThemeId = (avoidThemeId?: string): ThemeAssignmentReservation => {
     const library = load();
     const profiles = library.profiles;
-    const themeId = profiles.length > 0
-      ? profiles[cursor % profiles.length]!.themeId
+    let index = profiles.length > 0 ? ((cursor % profiles.length) + profiles.length) % profiles.length : -1;
+    if (index >= 0 && avoidThemeId !== undefined && profiles[index]!.themeId === avoidThemeId) {
+      index = (index + 1) % profiles.length;
+    }
+    const themeId = index >= 0
+      ? profiles[index]!.themeId
       : getBuiltinThemeFallback().themeId;
     let settled = false;
     return {

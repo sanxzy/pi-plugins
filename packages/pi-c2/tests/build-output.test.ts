@@ -14,9 +14,9 @@ test("the publishable bundle embeds built-in theme profile data", () => {
   assert.ok(existsSync(join(DIST, "index.js")), "bundle must exist");
   assert.ok(existsSync(join(DIST, "scripts", "pi-coding-agent@0.84.2.patch")), "bundled host patch must ship");
   const bundle = readFileSync(join(DIST, "index.js"), "utf8");
-  // Embedded built-in profiles must be present verbatim (dark + light anchors).
-  assert.ok(bundle.includes("#00d7ff"), "dark profile data must be embedded");
-  assert.ok(bundle.includes("#5a8080"), "light profile data must be embedded");
+  // Embedded built-in profiles must be present verbatim (theme anchors).
+  assert.ok(bundle.includes("#bd93f9"), "dracula profile data must be embedded");
+  assert.ok(bundle.includes("#88c0d0"), "nord profile data must be embedded");
   // The bundle must not load built-in profiles from an unbundled local file.
   assert.ok(!/readFileSync\([^)]*themes?\.json/.test(bundle), "bundle must not read a local themes file for built-ins");
 });

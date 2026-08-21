@@ -122,7 +122,7 @@ test("native child rendering applies the profile before snapshot and restores be
       steer: async () => {},
     };
     pool.liveChildren.set("theme-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
-    pool.registry.createJob(createJob({ jobId: "theme-child", parentSessionId: "root-session", sessionId: "theme-child", status: "running", description: "theme child", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "theme-child", parentSessionId: "root-session", sessionId: "theme-child", status: "running", description: "theme child", subagentType: "test-agent", themeId: "dracula" }));
     const mode = hostMode(current, calls, { recordParentRebuild: true });
     const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
     const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
@@ -131,7 +131,7 @@ test("native child rendering applies the profile before snapshot and restores be
     footer.handleInput(ENTER);
     assert.equal(calls[0]?.type, "theme");
     assert.equal(calls[1]?.type, "snapshot");
-    assert.equal(calls[1]?.theme.name, "Light");
+    assert.equal(calls[1]?.theme.name, "Dracula");
     assert.equal(calls[1]?.snapshot.transcript[1]?.toolName, "read");
     assert.deepEqual(calls[1]?.snapshot.transcript[1]?.args, { path: "src/index.ts" });
     sendInput(ALT_LEFT);
@@ -161,20 +161,20 @@ test("nested themed children restore one frame at a time", () => {
       pool.liveChildren.set(jobId, { sessionFile: join(cwd, `${jobId}.jsonl`), live: feed, steer: async () => {}, abort: async () => {} });
       pool.registry.createJob(createJob({ jobId, parentSessionId, sessionId, status: "running", description: jobId, subagentType: "test-agent", themeId }));
     };
-    addRunning("first", "first-session", "root-session", "light");
+    addRunning("first", "first-session", "root-session", "dracula");
     addRunning("second", "second-session", "first-session", "dark");
     const mode = hostMode(current, calls);
     const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
     const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
     footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
-    assert.equal(current.value.name, "Light");
+    assert.equal(current.value.name, "Dracula");
     footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
     assert.equal(mode.hostSwapDepth(), 2);
-    assert.equal(current.value.name, "Dark");
+    assert.equal(current.value.name, "Deep Space");
     assert.notEqual(current.value, parent);
     sendInput(ALT_LEFT);
     assert.equal(mode.hostSwapDepth(), 1);
-    assert.equal(current.value.name, "Light");
+    assert.equal(current.value.name, "Dracula");
     sendInput(ALT_LEFT);
     assert.equal(mode.hostSwapDepth(), 0);
     assert.equal(current.value, parent);
@@ -194,9 +194,9 @@ test("failed lookup, settled viewing, and footer teardown leave theme and host s
     const { ctx, getFooterFactory } = context(cwd, current, calls);
     register(d, ctx);
     const pool = getChildPool(cwd, "root-session");
-    pool.registry.createJob(createJob({ jobId: "missing-live", parentSessionId: "root-session", sessionId: "missing-live", status: "running", description: "missing", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "missing-live", parentSessionId: "root-session", sessionId: "missing-live", status: "running", description: "missing", subagentType: "test-agent", themeId: "dracula" }));
     const settledSnapshot = { status: "completed", settled: true, transcript: [{ id: "tool", kind: "tool", toolName: "read", text: "done", complete: true }], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } };
-    pool.registry.createJob(createJob({ jobId: "settled", parentSessionId: "root-session", sessionId: "settled", status: "completed", description: "settled", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "settled", parentSessionId: "root-session", sessionId: "settled", status: "completed", description: "settled", subagentType: "test-agent", themeId: "dracula" }));
     pool.retainedLiveSnapshots.set("settled", settledSnapshot);
     const mode = hostMode(current, calls);
     const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
@@ -205,7 +205,7 @@ test("failed lookup, settled viewing, and footer teardown leave theme and host s
     assert.equal(calls.some((entry) => entry.type === "theme"), false);
     assert.equal(mode.hostSwapDepth(), 0);
     footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
-    assert.equal(current.value.name, "Light");
+    assert.equal(current.value.name, "Dracula");
     assert.equal(mode.hostSwapDepth(), 1);
     footer.dispose();
     assert.equal(mode.hostSwapDepth(), 0);
@@ -227,7 +227,7 @@ test("a host footer reset disposes the old theme frame before reinstalling", () 
     const pool = getChildPool(cwd, "root-session");
     const feed = { snapshot: { status: "running", settled: false, transcript: [], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
     pool.liveChildren.set("reset-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
-    pool.registry.createJob(createJob({ jobId: "reset-child", parentSessionId: "root-session", sessionId: "reset-child", status: "running", description: "reset", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "reset-child", parentSessionId: "root-session", sessionId: "reset-child", status: "running", description: "reset", subagentType: "test-agent", themeId: "dracula" }));
     const mode1 = hostMode(current, calls);
     const tui1 = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode1, _hostGetThemeInstance: () => current.value };
     const footer1 = getFooterFactory()(tui1, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
@@ -240,7 +240,7 @@ test("a host footer reset disposes the old theme frame before reinstalling", () 
     const tui2 = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode2, _hostGetThemeInstance: () => current.value };
     const footer2 = getFooterFactory()(tui2, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
     footer2.handleInput(ALT_DOWN); footer2.handleInput(ALT_DOWN); footer2.handleInput(ENTER);
-    assert.equal(current.value.name, "Light");
+    assert.equal(current.value.name, "Dracula");
     footer2.dispose();
     assert.equal(current.value, parent);
   } finally {
@@ -260,7 +260,7 @@ test("a host snapshot failure unwinds the pushed host frame and restores the par
     const pool = getChildPool(cwd, "root-session");
     const feed = { snapshot: { status: "running", settled: false, transcript: [], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
     pool.liveChildren.set("fail-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
-    pool.registry.createJob(createJob({ jobId: "fail-child", parentSessionId: "root-session", sessionId: "fail-child", status: "running", description: "fail", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "fail-child", parentSessionId: "root-session", sessionId: "fail-child", status: "running", description: "fail", subagentType: "test-agent", themeId: "dracula" }));
     const mode = hostMode(current, calls, { failSnapshotAfterPush: true, recordParentRebuild: true });
     const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
     const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
@@ -298,7 +298,7 @@ test("profile refresh while viewing a nested legacy child rebuilds the visible t
     const innerFeed = { snapshot: { status: "running", settled: false, transcript: [{ id: "inner", kind: "message", role: "assistant", text: "inner-text", complete: true }], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
     pool.liveChildren.set("outer-child", { sessionFile: join(cwd, "outer.jsonl"), live: outerFeed, steer: async () => {}, abort: async () => {} });
     pool.liveChildren.set("inner-child", { sessionFile: join(cwd, "inner.jsonl"), live: innerFeed, steer: async () => {}, abort: async () => {} });
-    pool.registry.createJob(createJob({ jobId: "outer-child", parentSessionId: "root-session", sessionId: "outer-child", status: "running", description: "outer", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "outer-child", parentSessionId: "root-session", sessionId: "outer-child", status: "running", description: "outer", subagentType: "test-agent", themeId: "dracula" }));
     pool.registry.createJob(createJob({ jobId: "inner-child", parentSessionId: "outer-child", sessionId: "inner-child", status: "running", description: "inner", subagentType: "test-agent" }));
     const mode = hostMode(current, calls);
     const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
@@ -307,8 +307,8 @@ test("profile refresh while viewing a nested legacy child rebuilds the visible t
     footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
     assert.equal(mode.hostSwapDepth(), 2);
     const library = JSON.parse(JSON.stringify(original));
-    const light = library.profiles.find((profile) => profile.themeId === "light");
-    light.colors.accent = "#654321";
+    const themed = library.profiles.find((profile) => profile.themeId === "dracula");
+    themed.colors.accent = "#654321";
     writeFileSync(homeThemesFile(), JSON.stringify(library));
     clearThemeLibraryCache();
     footer.render(100);
@@ -337,20 +337,20 @@ test("active child refresh applies valid profile updates through the native host
     const pool = getChildPool(cwd, "root-session");
     const feed = { snapshot: { status: "running", settled: false, transcript: [], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
     pool.liveChildren.set("refresh-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
-    pool.registry.createJob(createJob({ jobId: "refresh-child", parentSessionId: "root-session", sessionId: "refresh-child", status: "running", description: "refresh", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "refresh-child", parentSessionId: "root-session", sessionId: "refresh-child", status: "running", description: "refresh", subagentType: "test-agent", themeId: "dracula" }));
     const mode = hostMode(current, calls);
     const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
     const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
     footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
     const library = JSON.parse(JSON.stringify(original));
-    const light = library.profiles.find((profile) => profile.themeId === "light");
-    light.colors.accent = "#123456";
+    const themed = library.profiles.find((profile) => profile.themeId === "dracula");
+    themed.colors.accent = "#123456";
     writeFileSync(homeThemesFile(), JSON.stringify(library));
     clearThemeLibraryCache();
     footer.render(100);
     assert.equal(calls.some((entry) => entry.type === "update"), true);
     assert.equal(calls.at(-1)?.type, "update");
-    assert.equal(calls.at(-1)?.theme.name, "Light");
+    assert.equal(calls.at(-1)?.theme.name, "Dracula");
     footer.dispose();
   } finally {
     writeFileSync(homeThemesFile(), JSON.stringify(original));
@@ -371,7 +371,7 @@ test("an unpatched host never mutates themes while native child viewing still wo
     const pool = getChildPool(cwd, "root-session");
     const feed = { snapshot: { status: "running", settled: false, transcript: [{ id: "m", kind: "message", role: "assistant", text: "child", complete: true }], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
     pool.liveChildren.set("degraded-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
-    pool.registry.createJob(createJob({ jobId: "degraded-child", parentSessionId: "root-session", sessionId: "degraded-child", status: "running", description: "degraded", subagentType: "test-agent", themeId: "light" }));
+    pool.registry.createJob(createJob({ jobId: "degraded-child", parentSessionId: "root-session", sessionId: "degraded-child", status: "running", description: "degraded", subagentType: "test-agent", themeId: "dracula" }));
     const mode = hostMode(current, calls);
     // A stock/unpatched host TUI exposes neither _hostGetThemeInstance nor getTheme.
     const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode };

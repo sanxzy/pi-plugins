@@ -262,7 +262,7 @@ async function startAgentInner(
   let job: Job;
   const themeReservation: ThemeAssignmentReservation | undefined = existingJob
     ? undefined
-    : pool.themeAssignments.reserveThemeId();
+    : pool.themeAssignments.reserveThemeId(activeHostThemeName());
   try {
     job = existingJob ?? recordNewJob(pool.registry, {
       jobId,
@@ -364,4 +364,20 @@ async function startAgentInner(
     prompt: params.prompt,
     status: "queued",
   });
+}
+
+/**
+ * The parent's active host theme name, used to keep fresh children visually
+ * distinct from the parent. Read defensively: the host exposes the active
+ * instance through a global symbol registry, and any unavailable or in-memory
+ * theme simply means no avoidance is applied.
+ */
+function activeHostThemeName(): string | undefined {
+  try {
+    const theme = (globalThis as { [key: symbol]: unknown })[Symbol.for("@earendil-works/pi-coding-agent:theme")] as { name?: unknown } | undefined;
+    const name = typeof theme?.name === "string" ? theme.name : undefined;
+    return name !== undefined && name !== "" && name !== "<in-memory>" ? name : undefined;
+  } catch {
+    return undefined;
+  }
 }

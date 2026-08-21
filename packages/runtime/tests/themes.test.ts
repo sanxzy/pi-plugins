@@ -53,10 +53,26 @@ function writeRaw(value: unknown): void {
 }
 
 test("theme library", async (t) => {
+  await t.test("the embedded library ships at least ten distinct dark built-in themes", () => withHome(() => {
+    assert.ok(BUILTIN_THEME_PROFILES.length >= 10);
+    const ids = BUILTIN_THEME_PROFILES.map((profile) => profile.themeId);
+    assert.equal(new Set(ids).size, ids.length, "built-in theme ids must be unique");
+    assert.equal(ids.includes("light"), false, "no light theme ships by default");
+    assert.ok(ids.includes("dark"));
+    assert.ok(ids.includes("atom-dark"));
+    assert.ok(ids.includes("monokai"));
+    assert.ok(ids.includes("dracula"));
+    for (const profile of BUILTIN_THEME_PROFILES) {
+      assert.notEqual(validateThemeLibrary({ version: 1, profiles: [structuredClone(profile)] }), undefined, `${profile.themeId} must validate`);
+      // Every built-in is a dark theme: light text over dark backgrounds.
+      assert.match(String(profile.export?.pageBg ?? ""), /^#[0-9a-f]{6}$/);
+    }
+  }));
+
   await t.test("first use publishes the complete built-in library privately", () => withHome(() => {
     const library = loadThemeLibrary();
     assert.equal(library.version, 1);
-    assert.deepEqual(library.profiles.map((profile) => profile.themeId), ["dark", "light"]);
+    assert.deepEqual(library.profiles.map((profile) => profile.themeId), Array.from(BUILTIN_THEME_PROFILES.map((profile) => profile.themeId)));
     assert.deepEqual(library.profiles, BUILTIN_THEME_PROFILES);
     assert.equal(homeThemesFile().endsWith(THEMES_FILE_NAME), true);
     assert.equal(statSync(homeThemesFile()).mode & 0o777, 0o600);
@@ -245,9 +261,50 @@ test("theme library", async (t) => {
     const cursor = createThemeAssignmentCursor();
     assert.equal(cursor.nextThemeId(), BUILTIN_THEME_PROFILES[0]!.themeId);
     assert.equal(cursor.nextThemeId(), BUILTIN_THEME_PROFILES[1]!.themeId);
-    assert.equal(cursor.nextThemeId(), BUILTIN_THEME_PROFILES[0]!.themeId);
+    assert.equal(cursor.nextThemeId(), BUILTIN_THEME_PROFILES[2]!.themeId);
     const restarted = createThemeAssignmentCursor();
     assert.equal(restarted.nextThemeId(), BUILTIN_THEME_PROFILES[0]!.themeId);
+  }));
+
+  await t.test("assignment avoids the parent-matching profile so fresh children stay visibly distinct", () => withHome(() => {
+    const dark = BUILTIN_THEME_PROFILES[0]!.themeId;
+    const other = BUILTIN_THEME_PROFILES[1]!.themeId;
+    const cursor = createThemeAssignmentCursor();
+    // Rotation lands on dark (the parent theme): it is skipped.
+    const first = cursor.reserveThemeId(dark);
+    assert.equal(first.themeId, other);
+    first.commit();
+    // Later rotations that land on the parent theme are skipped as well.
+    const second = cursor.reserveThemeId(dark);
+    assert.equal(second.themeId, other);
+    second.commit();
+    // Non-matching picks pass through unchanged.
+    const third = cursor.reserveThemeId(other);
+    assert.equal(third.themeId, BUILTIN_THEME_PROFILES[2]!.themeId);
+    third.commit();
+    // Without an avoid id the pure round-robin order is preserved.
+    assert.equal(createThemeAssignmentCursor().nextThemeId(), dark);
+    // A rollback never consumes a slot, including one reached via avoidance.
+    const fresh = createThemeAssignmentCursor();
+    const rolledBack = fresh.reserveThemeId(dark);
+    assert.equal(rolledBack.themeId, other);
+    rolledBack.rollback();
+    assert.equal(fresh.reserveThemeId(dark).themeId, other);
+  }));
+
+  await t.test("a previously published library gains newly embedded built-ins without losing customizations", () => withHome(() => {
+    const customized = structuredClone(BUILTIN_THEME_PROFILES[0]!);
+    customized.name = "My Dark";
+    writeRaw({ version: 1, profiles: [customized] });
+    clearThemeLibraryCache();
+    const loaded = loadThemeLibrary();
+    const byId = new Map(loaded.profiles.map((profile) => [profile.themeId, profile]));
+    assert.equal(byId.get("dark")?.name, "My Dark");
+    assert.ok(byId.has("dracula"));
+    assert.ok(byId.has("github-dark"));
+    assert.ok(loaded.profiles.length >= BUILTIN_THEME_PROFILES.length);
+    // The strict reader stays pure: merging happens only on load.
+    assert.equal(readThemeLibrary(homeThemesFile()).profiles.length, 1);
   }));
 
   await t.test("lookup returns a defensive profile and deterministic built-in fallback", () => withHome(() => {
@@ -258,6 +315,6 @@ test("theme library", async (t) => {
     assert.equal(getThemeProfile("dark", library).colors.accent, BUILTIN_THEME_PROFILES[0]!.colors.accent);
     assert.equal(getThemeProfile("missing", library).themeId, getBuiltinThemeFallback().themeId);
     assert.equal(getThemeProfile(undefined, library).themeId, "dark");
-    assert.equal(readThemeLibrary(homeThemesFile()).profiles.length, 2);
+    assert.equal(readThemeLibrary(homeThemesFile()).profiles.length, BUILTIN_THEME_PROFILES.length);
   }));
 });
