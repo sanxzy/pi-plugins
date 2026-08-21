@@ -13,6 +13,7 @@ import { registerAgentFooter, createFooterHeartbeat } from "../src/registrations
 const DOWN = "\x1b[B";
 const UP = "\x1b[A";
 const ALT_DOWN = "\x1bn";
+const ALT_DOWN_RELEASE = "\x1b[1;3:3B";
 const ALT_UP = "\x1bp";
 const ALT_LEFT = "\x1bb";
 const ENTER = "\r";
@@ -256,6 +257,54 @@ test("footer management mode consumes navigation keys and passes others through"
 
     footer.dispose();
     assert.equal(terminalInputHandler, undefined, "dispose releases the input listener");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("Kitty Alt+Down release does not move the footer selection twice", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-key-release-"));
+  try {
+    const d = piDouble();
+    registerAgentFooter(d.pi);
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd));
+
+    const pool = getChildPool(cwd, "root-session");
+    const feed = createChildLiveFeed();
+    pool.liveChildren.set("job-a", {
+      sessionFile: join(cwd, "sessions", "job-a.jsonl"),
+      live: feed,
+      steer: async () => {},
+      abort: async () => {},
+    });
+    pool.registry.createJob(createJob({
+      jobId: "job-a",
+      parentSessionId: "root-session",
+      sessionId: "job-a",
+      status: "running",
+      description: "child A",
+      subagentType: "test-agent",
+    }));
+
+    const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
+    const footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+    }) as { render(width: number): string[]; dispose(): void };
+    const tree = (): string => footer.render(100).map(stripVTControlCharacters).slice(3).join("\n");
+
+    assert.equal(terminalInputHandler!("\x1b[1;3B")?.consume, true);
+    assert.match(tree(), /^❯ .*main/m);
+    assert.equal(terminalInputHandler!(ALT_DOWN_RELEASE)?.consume, true);
+    assert.match(tree(), /^❯ .*main/m, "the release event must not move the cursor");
+
+    assert.equal(terminalInputHandler!("\x1b[1;3B")?.consume, true);
+    assert.match(tree(), /^❯ .*child A/m);
+    assert.equal(terminalInputHandler!(ALT_DOWN_RELEASE)?.consume, true);
+    assert.match(tree(), /^❯ .*child A/m, "one physical key press moves exactly one row");
+
+    footer.dispose();
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

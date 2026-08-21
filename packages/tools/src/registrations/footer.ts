@@ -13,7 +13,7 @@ import {
   type FooterTreeRow,
 } from "@xzy-ai/tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
-import { Key, matchesKey } from "@earendil-works/pi-tui";
+import { isKeyRelease, Key, matchesKey } from "@earendil-works/pi-tui";
 import { createHostSwapController, getChildPool, scopeDescendants } from "@xzy-ai/runtime";
 import type { ChildLiveSnapshot } from "@xzy-ai/core";
 
@@ -300,6 +300,10 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
       // keys are consumed here (never reaching the composer); all other input
       // passes through unchanged.
       const stopInput = ctx.ui.onTerminalInput((data) => {
+        // Kitty keyboard mode reports both press and release events. Extension
+        // input listeners run before the host's focused-component release
+        // filter, so never let a release navigate the tree a second time.
+        if (isKeyRelease(data)) return { consume: true };
         if (footer.handleInput(data)) return { consume: true };
         // F009 true host-level swap: parent window is reused, no overlay.
         // Handle close/abort keys directly when viewing via host swap.
