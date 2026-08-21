@@ -576,13 +576,14 @@ diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive
 index 6a88679..63958b9 100644
 --- a/dist/modes/interactive/interactive-mode.js
 +++ b/dist/modes/interactive/interactive-mode.js
-@@ -361,6 +361,10 @@ export class InteractiveMode {
+@@ -361,6 +361,11 @@ export class InteractiveMode {
          this.headerContainer = new Container();
          this.loadedResourcesContainer = new Container();
          this.chatContainer = new Container();
 +        // pi-c2 host swap: expose chatContainer for extension-driven swaps (footer)
 +        this._hostSwapStack = [];
 +        this.ui._hostInteractiveMode = this;
++        this.ui._hostGetThemeInstance = () => globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")];
 +        globalThis.__piHostInteractiveMode = this;
          this.documentContainer = new Container();
          this.documentContainer.addChild(this.headerContainer);

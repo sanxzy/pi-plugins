@@ -8,6 +8,7 @@
  *   1. `registerEntryRenderer` (stock 0.84.2+; the yellow ※ notify entry)
  *   2. `createCommandContext` (patched; telegram lifecycle/controls seam)
  *   3. `sessionFilename`/`privateRoot` (patched; private child-session storage)
+ *   4. `_hostGetThemeInstance` (patched; exact parent-theme restoration)
  *
  * This script locates the HOST's pi-coding-agent (the one the pi CLI runs),
  * checks its version and patch state, and if the host is 0.84.2+ and not yet
@@ -45,6 +46,7 @@ const PATCH_MARKERS = [
   "dist/modes/interactive/components/model-selector.js:pi-c2: the extension publishes a host-neutral model-group bridge",
   "dist/modes/interactive/interactive-mode.js:__pi_c2_group__",
   "dist/modes/interactive/interactive-mode.js:hostSwapApplyChildEvent",
+  "dist/modes/interactive/interactive-mode.js:_hostGetThemeInstance",
 ];
 
 function log(message) {
