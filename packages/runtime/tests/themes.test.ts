@@ -96,6 +96,30 @@ test("theme library", async (t) => {
     assert.deepEqual(offenders, []);
   });
 
+  await t.test("user message surfaces stay clearly lighter than tool surfaces", () => {
+    const luminance = (hex: string): number => {
+      const channel = (index: number): number => Number.parseInt(hex.replace("#", "").slice(index, index + 2), 16) / 255;
+      const adjust = (channelValue: number): number => (channelValue <= 0.03928 ? channelValue / 12.92 : ((channelValue + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * adjust(channel(0)) + 0.7152 * adjust(channel(2)) + 0.0722 * adjust(channel(4));
+    };
+    const resolve = (vars: Record<string, unknown>, value: unknown, seen = new Set<string>()): unknown => {
+      if (typeof value !== "string" || value === "" || value.startsWith("#")) return value;
+      if (seen.has(value)) return undefined;
+      seen.add(value);
+      const next = vars[value];
+      return next === undefined ? undefined : resolve(vars, next, seen);
+    };
+    const offenders: string[] = [];
+    for (const profile of BUILTIN_THEME_PROFILES) {
+      const userBg = String(resolve(profile.vars as Record<string, unknown>, profile.colors.userMessageBg));
+      const pendingBg = String(resolve(profile.vars as Record<string, unknown>, profile.colors.toolPendingBg));
+      if (userBg === pendingBg) offenders.push(`${profile.themeId}: userMessageBg equals toolPendingBg`);
+      else if (luminance(userBg) <= luminance(pendingBg)) offenders.push(`${profile.themeId}: userMessageBg must be lighter than toolPendingBg`);
+      else if (luminance(userBg) - luminance(pendingBg) < 0.015) offenders.push(`${profile.themeId}: userMessageBg contrast too low (${(luminance(userBg) - luminance(pendingBg)).toFixed(3)})`);
+    }
+    assert.deepEqual(offenders, []);
+  });
+
   await t.test("first use publishes the complete built-in library privately", () => withHome(() => {
     const library = loadThemeLibrary();
     assert.equal(library.version, 1);
