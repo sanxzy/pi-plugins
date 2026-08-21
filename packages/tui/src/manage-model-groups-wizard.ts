@@ -62,7 +62,6 @@ export interface ManageModelGroupsController {
   createGroup(input: ManageModelGroupsGroupInput): Promise<ManageModelGroupsApplyResult>;
   updateGroup(id: string, input: ManageModelGroupsGroupInput): Promise<ManageModelGroupsApplyResult>;
   deleteGroup(id: string): Promise<ManageModelGroupsApplyResult>;
-  activateGroup(id: string): Promise<ManageModelGroupsApplyResult>;
 }
 
 export interface ManageModelGroupsWizardOptions {
@@ -75,7 +74,6 @@ export interface ManageModelGroupsWizardOptions {
 
 type Step =
   | { kind: "action" }
-  | { kind: "activate" }
   | { kind: "createName" }
   | { kind: "createMode" }
   | { kind: "createQuarantine" }
@@ -259,20 +257,6 @@ export class ManageModelGroupsWizard implements Component {
     this.refresh();
   }
 
-  private async runActivate(id: string): Promise<void> {
-    if (this.busy) return;
-    this.busy = true;
-    try {
-      const result = await this.controller.activateGroup(id);
-      this.resultMessage = result.message;
-      await this.load();
-      this.step = { kind: "result" };
-    } finally {
-      this.busy = false;
-    }
-    this.refresh();
-  }
-
   private async selectModel(model: ManageModelGroupsModelItem): Promise<void> {
     try {
       if (model.reasoning) {
@@ -330,7 +314,7 @@ export class ManageModelGroupsWizard implements Component {
     if (this.settled || this.busy) return;
     if (this.step.kind === "action" || this.step.kind === "modelMenu") {
       const index = this.step.kind === "action" ? this.actionIndex : this.modelMenuIndex;
-      const count = this.step.kind === "action" ? 5 : 5;
+      const count = this.step.kind === "action" ? 4 : 5;
       const setIndex = (next: number): void => {
         if (this.step.kind === "action") this.actionIndex = next;
         else this.modelMenuIndex = next;
@@ -457,7 +441,6 @@ export class ManageModelGroupsWizard implements Component {
       const filtered = this.filteredGroups();
       const group = filtered[this.groupIndex];
       if (!group) return;
-      if (this.step.kind === "activate") { void this.runActivate(group.id); return; }
       if (this.step.kind === "delete") { void this.runDelete(group.id); return; }
       if (this.step.kind === "edit") { this.beginEdit(group); return; }
       return;
@@ -489,10 +472,9 @@ export class ManageModelGroupsWizard implements Component {
   }
 
   private enterAction(index: number): void {
-    if (index === 0) { this.search.setValue(""); this.query = ""; this.groupIndex = 0; this.step = { kind: "activate" }; this.refresh(); return; }
-    if (index === 1) { this.pendingName = ""; this.pendingMode = "fallback"; this.pendingQuarantine = "5"; this.pendingContextWindow = ""; this.pendingModels = []; this.editingId = undefined; this.modelPickerBack = "createQuarantine"; this.step = { kind: "createName" }; this.refresh(); return; }
-    if (index === 2) { this.search.setValue(""); this.query = ""; this.groupIndex = 0; this.step = { kind: "edit" }; this.refresh(); return; }
-    if (index === 3) { this.search.setValue(""); this.query = ""; this.groupIndex = 0; this.step = { kind: "delete" }; this.refresh(); return; }
+    if (index === 0) { this.pendingName = ""; this.pendingMode = "fallback"; this.pendingQuarantine = "5"; this.pendingContextWindow = ""; this.pendingModels = []; this.editingId = undefined; this.modelPickerBack = "createQuarantine"; this.step = { kind: "createName" }; this.refresh(); return; }
+    if (index === 1) { this.search.setValue(""); this.query = ""; this.groupIndex = 0; this.step = { kind: "edit" }; this.refresh(); return; }
+    if (index === 2) { this.search.setValue(""); this.query = ""; this.groupIndex = 0; this.step = { kind: "delete" }; this.refresh(); return; }
     this.finish({ status: "saved", message: "Done." });
   }
 
@@ -540,17 +522,16 @@ export class ManageModelGroupsWizard implements Component {
     switch (this.step.kind) {
       case "action": {
         add(" ", this.theme.fg("accent", "Manage model groups"));
-        const options = ["Activate group", "Create group", "Edit group", "Delete group", "Done"];
+        const options = ["Create group", "Edit group", "Delete group", "Done"];
         for (let i = 0; i < options.length; i++) {
           add(selected(i === this.actionIndex), this.theme.fg(i === this.actionIndex ? "accent" : "text", `${i + 1}. ${options[i]}`));
         }
         add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc cancel"));
         break;
       }
-      case "activate":
       case "edit":
       case "delete": {
-        const heading = this.step.kind === "activate" ? "activate" : this.step.kind === "edit" ? "edit" : "delete";
+        const heading = this.step.kind === "edit" ? "edit" : "delete";
         add(" ", this.theme.fg("accent", `Manage model groups · ${heading} group`));
         add(" ", this.theme.fg("muted", "Type to filter • ↑↓ navigate • Enter select • Esc back"));
         add(" ", this.theme.fg("text", `Filter: ${this.search.getValue()}`));

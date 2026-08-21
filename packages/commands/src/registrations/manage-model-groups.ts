@@ -199,14 +199,6 @@ export function createManageModelGroupsController(options: ManageModelGroupsCont
       if (!saved.ok) return { ok: false, message: saved.error };
       return { ok: true, message: `Group "${existing.name}" deleted.` };
     },
-    async activateGroup(id) {
-      const file = getModelGroups();
-      const existing = file.groups.find((g) => g.id === id);
-      if (!existing) return { ok: false, message: `Unknown group: ${id}` };
-      const saved = saveModelGroups({ groups: file.groups, activeGroupId: id });
-      if (!saved.ok) return { ok: false, message: saved.error };
-      return { ok: true, message: `Active model group set to "${existing.name}".` };
-    },
   };
 }
 

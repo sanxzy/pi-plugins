@@ -41,7 +41,7 @@ function registry(): { getAvailable(): Array<Record<string, unknown>> } {
   };
 }
 
-test("controller create → list → activate → delete", async () => {
+test("controller create → list → delete", async () => {
   const home = tempHome();
   try {
     await withHome(home, async () => {
@@ -79,14 +79,7 @@ test("controller create → list → activate → delete", async () => {
       });
       assert.equal(duplicate.ok, false);
 
-      // Activate.
-      const activated = await controller.activateGroup(group.id);
-      assert.equal(activated.ok, true);
-      const afterActivate = await controller.listGroups();
-      assert.equal(afterActivate[0]!.active, true);
-      assert.equal(getModelGroups().activeGroupId, group.id);
-
-      // Delete clears the active pointer.
+      // Delete clears the active pointer when the group was active elsewhere.
       const deleted = await controller.deleteGroup(group.id);
       assert.equal(deleted.ok, true);
       assert.equal((await controller.listGroups()).length, 0);
