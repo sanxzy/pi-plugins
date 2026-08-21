@@ -131,7 +131,7 @@ test("escape from the group picker returns to the action menu", async () => {
   assert.ok(lines(wizard).some((line) => line.includes("Manage model groups")));
 });
 
-test("create flow: name → mode → quarantine → model → thinking → menu → save calls createGroup", async () => {
+test("create flow: name → mode → quarantine → models → context window → save calls createGroup", async () => {
   let created: ManageModelGroupsGroupInput | undefined;
   const ctl = controller({
     createGroup: async (input) => {
@@ -153,10 +153,7 @@ test("create flow: name → mode → quarantine → model → thinking → menu 
   // Clear the default "5" and set 12
   wizard.handleInput("\x7f");
   for (const char of "12") wizard.handleInput(char);
-  wizard.handleInput("\r"); // → context window
-  assert.ok(lines(wizard).some((line) => line.includes("Group context window")));
-  for (const char of "32000") wizard.handleInput(char);
-  wizard.handleInput("\r"); // explicit cap, then add model
+  wizard.handleInput("\r"); // quarantine → add models
   assert.ok(lines(wizard).some((line) => line.includes("Add model to group")));
   wizard.handleInput("\r"); // first model (openai/a, reasoning → thinking)
   await flush();
@@ -164,10 +161,13 @@ test("create flow: name → mode → quarantine → model → thinking → menu 
   wizard.handleInput("\x1b[B"); // → high
   wizard.handleInput("\r"); // pick thinking → model menu
   assert.ok(lines(wizard).some((line) => line.includes("Group models")));
-  // Save group is option 4; move down 3 and enter.
+  // Save group is option 4; move down 3 and enter to set context window.
   wizard.handleInput("\x1b[B");
   wizard.handleInput("\x1b[B");
   wizard.handleInput("\x1b[B");
+  wizard.handleInput("\r");
+  assert.ok(lines(wizard).some((line) => line.includes("Group context window")));
+  for (const char of "32000") wizard.handleInput(char);
   wizard.handleInput("\r");
   await flush();
   assert.deepEqual(created, {
@@ -205,10 +205,10 @@ test("edit flow pre-fills the group and update saves without recreating", async 
   wizard.handleInput("\r"); // keep name → mode
   wizard.handleInput("\x1b[B"); // → round-robin
   wizard.handleInput("\r"); // mode → quarantine
-  wizard.handleInput("\r"); // keep "5" → context window
-  assert.ok(lines(wizard).some((line) => line.includes("Group context window")));
-  wizard.handleInput("\r"); // blank → automatic minimum, then add model
-  wizard.handleInput("\x1b"); // back out of add model → editName
+  wizard.handleInput("\r"); // keep "5" → add models
+  assert.ok(lines(wizard).some((line) => line.includes("Add model to group")));
+  wizard.handleInput("\x1b"); // back to quarantine
+  wizard.handleInput("\x1b"); // back to edit name
   wizard.handleInput("\x1b"); // back to edit picker
   assert.ok(lines(wizard).some((line) => line.includes("Manage model groups")));
   // Cancelled edit; no save happened yet. Re-enter and save via menu flow.
@@ -219,10 +219,10 @@ test("edit flow pre-fills the group and update saves without recreating", async 
   wizard.handleInput("\r");
   wizard.handleInput("\r"); // keep name
   wizard.handleInput("\r"); // keep mode
-  wizard.handleInput("\r"); // keep quarantine → context window
-  wizard.handleInput("\r"); // blank → add model
-  wizard.handleInput("\x1b"); // add model esc → editName
-  wizard.handleInput("\x1b"); // editName esc → edit picker
+  wizard.handleInput("\r"); // keep quarantine → add models
+  wizard.handleInput("\x1b"); // add model esc → quarantine
+  wizard.handleInput("\x1b"); // quarantine esc → edit name
+  wizard.handleInput("\x1b"); // edit name esc → edit picker
   await flush();
   assert.equal(updatedId, undefined, "escaping the edit flow never saves");
 });
