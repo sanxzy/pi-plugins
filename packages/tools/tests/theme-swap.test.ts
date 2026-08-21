@@ -21,7 +21,6 @@ function context(cwd, currentTheme, calls) {
     setFooter(factory) { footerFactory = factory; },
     onTerminalInput(handler) { inputHandler = handler; return () => { inputHandler = undefined; }; },
     confirm: async () => true,
-    _hostGetThemeInstance: () => currentTheme.value,
     setTheme(next) {
       currentTheme.value = next;
       calls.push({ type: "theme", theme: next });
@@ -48,7 +47,7 @@ function context(cwd, currentTheme, calls) {
   return { ctx, ui, getFooterFactory: () => footerFactory, sendInput: (data) => inputHandler?.(data) };
 }
 
-function hostMode(currentTheme, calls) {
+function hostMode(currentTheme, calls, options = {}) {
   let depth = 0;
   return {
     hostSwapToSnapshot(session) {
@@ -61,6 +60,7 @@ function hostMode(currentTheme, calls) {
     hostSwapRestore() {
       calls.push({ type: "restore", theme: currentTheme.value });
       depth -= 1;
+      if (options.recordParentRebuild) calls.push({ type: "parent-rebuild", theme: currentTheme.value });
     },
     hostSwapDepth: () => depth,
   };
@@ -119,8 +119,8 @@ test("native child rendering applies the profile before snapshot and restores be
     };
     pool.liveChildren.set("theme-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
     pool.registry.createJob(createJob({ jobId: "theme-child", parentSessionId: "root-session", sessionId: "theme-child", status: "running", description: "theme child", subagentType: "test-agent", themeId: "light" }));
-    const mode = hostMode(current, calls);
-    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode };
+    const mode = hostMode(current, calls, { recordParentRebuild: true });
+    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
     const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
     footer.handleInput(ALT_DOWN);
     footer.handleInput(ALT_DOWN);
@@ -131,7 +131,9 @@ test("native child rendering applies the profile before snapshot and restores be
     assert.equal(calls[1]?.snapshot.transcript[1]?.toolName, "read");
     assert.deepEqual(calls[1]?.snapshot.transcript[1]?.args, { path: "src/index.ts" });
     sendInput(ALT_LEFT);
-    assert.equal(calls.at(-1)?.type, "restore");
+    assert.equal(calls.at(-2)?.type, "restore");
+    assert.equal(calls.at(-2)?.theme, parent);
+    assert.equal(calls.at(-1)?.type, "parent-rebuild");
     assert.equal(calls.at(-1)?.theme, parent);
     assert.equal(current.value, parent);
     footer.dispose();
@@ -155,7 +157,7 @@ test("active child refresh applies valid profile updates through the native host
     pool.liveChildren.set("refresh-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
     pool.registry.createJob(createJob({ jobId: "refresh-child", parentSessionId: "root-session", sessionId: "refresh-child", status: "running", description: "refresh", subagentType: "test-agent", themeId: "light" }));
     const mode = hostMode(current, calls);
-    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode };
+    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
     const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
     footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
     const library = JSON.parse(JSON.stringify(original));
@@ -188,7 +190,7 @@ test("legacy child views do not mutate the parent theme", () => {
     pool.liveChildren.set("legacy-child", { sessionFile: join(cwd, "child.jsonl"), live: { snapshot: { status: "running", settled: false, transcript: [], counters: {} }, subscribe: () => () => {} }, steer: async () => {}, abort: async () => {} });
     pool.registry.createJob(createJob({ jobId: "legacy-child", parentSessionId: "root-session", sessionId: "legacy-child", status: "running", description: "legacy", subagentType: "test-agent" }));
     const mode = hostMode(current, calls);
-    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode };
+    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
     const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
     footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
     sendInput(ALT_LEFT);
