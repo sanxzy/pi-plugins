@@ -150,6 +150,59 @@ test("theme library", async (t) => {
     assert.equal(readFileSync(file, "utf8"), original);
   }));
 
+  await t.test("existence and backup-list failures fail closed without replacing the primary", () => withHome(() => {
+    loadThemeLibrary();
+    const original = "{preserve this primary";
+    writeRaw(original);
+    const file = homeThemesFile();
+    const basePersistence = {
+      readJson: (path: string) => JSON.parse(readFileSync(path, "utf8")),
+      writeJson: () => undefined,
+      rename: (from: string, to: string) => renameSync(from, to),
+      list: (directory: string) => readdirSync(directory),
+      exists: (path: string) => existsSync(path),
+      chmod: () => undefined,
+    };
+
+    const existenceFailure = loadThemeLibrary({
+      ...basePersistence,
+      exists: () => { throw new Error("probe denied"); },
+    });
+    assert.deepEqual(existenceFailure.profiles, BUILTIN_THEME_PROFILES);
+    assert.equal(readFileSync(file, "utf8"), original);
+    assert.equal(existsSync(backupPath(1)), false);
+
+    const listingFailure = loadThemeLibrary({
+      ...basePersistence,
+      list: () => { throw new Error("listing denied"); },
+    });
+    assert.deepEqual(listingFailure.profiles, BUILTIN_THEME_PROFILES);
+    assert.equal(readFileSync(file, "utf8"), original);
+    assert.equal(existsSync(backupPath(1)), false);
+  }));
+
+  await t.test("a backup slot that appears after listing is never overwritten", () => withHome(() => {
+    loadThemeLibrary();
+    const original = "{preserve this collision";
+    writeRaw(original);
+    const file = homeThemesFile();
+    const firstBackup = backupPath(1);
+    writeFileSync(firstBackup, "existing evidence", "utf8");
+    const persistence: ThemeLibraryPersistence = {
+      readJson: (path) => JSON.parse(readFileSync(path, "utf8")),
+      writeJson: () => undefined,
+      rename: (from, to) => renameSync(from, to),
+      list: () => ["themes.json"],
+      exists: (path) => path === file || path === firstBackup,
+      chmod: () => undefined,
+    };
+
+    const recovered = loadThemeLibrary(persistence);
+    assert.deepEqual(recovered.profiles, BUILTIN_THEME_PROFILES);
+    assert.equal(readFileSync(file, "utf8"), original);
+    assert.equal(readFileSync(firstBackup, "utf8"), "existing evidence");
+  }));
+
   await t.test("publication failure after backup restores the original primary", () => withHome(() => {
     loadThemeLibrary();
     const original = "{restore me";
@@ -160,6 +213,10 @@ test("theme library", async (t) => {
       readJson: (path) => JSON.parse(readFileSync(path, "utf8")),
       writeJson: () => { throw new Error("disk full"); },
       rename: (from, to) => {
+        renameCount += 1;
+        renameSync(from, to);
+      },
+      moveToBackup: (from, to) => {
         renameCount += 1;
         renameSync(from, to);
       },
