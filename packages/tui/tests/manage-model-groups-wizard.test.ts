@@ -49,7 +49,6 @@ function controller(overrides: Partial<ManageModelGroupsController> = {}): Manag
     createGroup: async (_input) => ({ ok: true, message: "Group created." }),
     updateGroup: async (_id, _input) => ({ ok: true, message: "Group updated." }),
     deleteGroup: async (_id) => ({ ok: true, message: "Group deleted." }),
-    activateGroup: async (id) => ({ ok: true, message: `Active model group set to "${id}".` }),
     ...overrides,
   };
 }
@@ -74,47 +73,26 @@ test("renders the action menu and escape cancels", async () => {
   const wizard = new ManageModelGroupsWizard({ tui: tui(), theme, controller: ctl, done: result.resolve });
   await flush();
   assert.ok(lines(wizard).some((line) => line.includes("Manage model groups")));
-  assert.ok(lines(wizard).some((line) => line.includes("1. Activate group")));
-  assert.ok(lines(wizard).some((line) => line.includes("2. Create group")));
-  assert.ok(lines(wizard).some((line) => line.includes("3. Edit group")));
-  assert.ok(lines(wizard).some((line) => line.includes("4. Delete group")));
-  assert.ok(lines(wizard).some((line) => line.includes("5. Done")));
+  assert.ok(lines(wizard).some((line) => line.includes("1. Create group")));
+  assert.ok(lines(wizard).some((line) => line.includes("2. Edit group")));
+  assert.ok(lines(wizard).some((line) => line.includes("3. Delete group")));
+  assert.ok(lines(wizard).some((line) => line.includes("4. Done")));
   wizard.handleInput("\x1b");
   assert.deepEqual(await result.promise, { status: "cancelled", message: "Model group management cancelled" });
-});
-
-test("activating a group calls activateGroup and shows the result", async () => {
-  let activated: string | undefined;
-  const ctl = controller({
-    activateGroup: async (id) => {
-      activated = id;
-      return { ok: true, message: `Active model group set to "${id}".` };
-    },
-  });
-  const result = resultPromise();
-  const wizard = new ManageModelGroupsWizard({ tui: tui(), theme, controller: ctl, done: result.resolve });
-  await flush();
-  wizard.handleInput("\r"); // select "Activate group"
-  assert.ok(lines(wizard).some((line) => line.includes("activate group")));
-  assert.ok(lines(wizard).some((line) => line.includes("1. Work [fallback]")));
-  wizard.handleInput("\r"); // activate "Work"
-  await flush();
-  assert.equal(activated, "work");
-  assert.ok(lines(wizard).some((line) => line.includes('Active model group set to "work".')));
-  wizard.handleInput("\r");
-  assert.deepEqual(await result.promise, { status: "saved", message: 'Active model group set to "work".' });
 });
 
 test("up/down navigation and filtering narrows groups", async () => {
   const wizard = new ManageModelGroupsWizard({ tui: tui(), theme, controller: controller(), done: () => {} });
   await flush();
-  wizard.handleInput("\r"); // activate step
+  wizard.handleInput("\x1b[B"); // select "Edit group"
+  wizard.handleInput("\r"); // enter group picker
   wizard.handleInput("\x1b[B"); // down → "Side" selected
   wizard.handleInput("\r");
   await flush();
   // Filter behaves in the group list.
   const wizard2 = new ManageModelGroupsWizard({ tui: tui(), theme, controller: controller(), done: () => {} });
   await flush();
+  wizard2.handleInput("\x1b[B");
   wizard2.handleInput("\r");
   for (const char of "side") wizard2.handleInput(char);
   const rendered = lines(wizard2);
@@ -125,8 +103,9 @@ test("up/down navigation and filtering narrows groups", async () => {
 test("escape from the group picker returns to the action menu", async () => {
   const wizard = new ManageModelGroupsWizard({ tui: tui(), theme, controller: controller(), done: () => {} });
   await flush();
+  wizard.handleInput("\x1b[B");
   wizard.handleInput("\r");
-  assert.ok(lines(wizard).some((line) => line.includes("activate group")));
+  assert.ok(lines(wizard).some((line) => line.includes("edit group")));
   wizard.handleInput("\x1b");
   assert.ok(lines(wizard).some((line) => line.includes("Manage model groups")));
 });
@@ -142,8 +121,7 @@ test("create flow: name → mode → quarantine → models → context window �
   const result = resultPromise();
   const wizard = new ManageModelGroupsWizard({ tui: tui(), theme, controller: ctl, done: result.resolve });
   await flush();
-  wizard.handleInput("\x1b[B"); // → "Create group"
-  wizard.handleInput("\r");
+  wizard.handleInput("\r"); // → "Create group"
   assert.ok(lines(wizard).some((line) => line.includes("Create group · name")));
   for (const char of "nightly") wizard.handleInput(char);
   wizard.handleInput("\r"); // next → mode
@@ -195,7 +173,6 @@ test("edit flow pre-fills the group and update saves without recreating", async 
   const result = resultPromise();
   const wizard = new ManageModelGroupsWizard({ tui: tui(), theme, controller: ctl, done: result.resolve });
   await flush();
-  wizard.handleInput("\x1b[B"); // → Create
   wizard.handleInput("\x1b[B"); // → Edit
   wizard.handleInput("\r");
   assert.ok(lines(wizard).some((line) => line.includes("edit group")));
@@ -211,18 +188,5 @@ test("edit flow pre-fills the group and update saves without recreating", async 
   wizard.handleInput("\x1b"); // back to edit name
   wizard.handleInput("\x1b"); // back to edit picker
   assert.ok(lines(wizard).some((line) => line.includes("Manage model groups")));
-  // Cancelled edit; no save happened yet. Re-enter and save via menu flow.
-  wizard.handleInput("\x1b[B");
-  wizard.handleInput("\x1b[B");
-  wizard.handleInput("\r"); // edit again
-  wizard.handleInput("\x1b[B"); // → Side
-  wizard.handleInput("\r");
-  wizard.handleInput("\r"); // keep name
-  wizard.handleInput("\r"); // keep mode
-  wizard.handleInput("\r"); // keep quarantine → add models
-  wizard.handleInput("\x1b"); // add model esc → quarantine
-  wizard.handleInput("\x1b"); // quarantine esc → edit name
-  wizard.handleInput("\x1b"); // edit name esc → edit picker
-  await flush();
   assert.equal(updatedId, undefined, "escaping the edit flow never saves");
 });
