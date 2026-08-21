@@ -111,6 +111,7 @@ function validateAgentManifest(raw: Partial<AgentManifest>, path: string): Agent
     typeof raw.rootSessionId !== "string" ||
     (raw.parentJobId !== undefined && typeof raw.parentJobId !== "string") ||
     (raw.parentSessionId !== undefined && typeof raw.parentSessionId !== "string") ||
+    (raw.themeId !== undefined && typeof raw.themeId !== "string") ||
     typeof raw.depth !== "number" ||
     typeof raw.description !== "string" ||
     typeof raw.subagentType !== "string" ||
@@ -265,6 +266,7 @@ export type AgentLifecycleEvent =
       readonly parentAgentIds: readonly string[];
       readonly parentJobId?: string;
       readonly parentSessionId?: string;
+      readonly themeId?: string;
       readonly rootAgentId: string;
       readonly depth: number;
       readonly status: "created";
@@ -281,6 +283,7 @@ export type AgentLifecycleEvent =
       readonly endedAt?: string;
       readonly delivered?: boolean;
       readonly sessionFile?: string;
+      readonly themeId?: string;
     };
 
 /** The materialized snapshot reproduced by folding agent events. */
@@ -293,6 +296,7 @@ export interface AgentManifest {
   readonly parentAgentIds: readonly string[];
   readonly parentJobId?: string;
   readonly parentSessionId?: string;
+  readonly themeId?: string;
   readonly rootAgentId: string;
   readonly depth: number;
   status: JobStatus;
@@ -336,6 +340,7 @@ function parseAgentEvent(line: string): AgentLifecycleEvent | null {
         !parsed.parentAgentIds.every((id): id is string => typeof id === "string") ||
         !optionalString(parsed.parentJobId) ||
         !optionalString(parsed.parentSessionId) ||
+        !optionalString(parsed.themeId) ||
         !optionalString(parsed.sessionFile) ||
         !optionalSequence(parsed.sequence) ||
         typeof parsed.rootAgentId !== "string" ||
@@ -359,6 +364,7 @@ function parseAgentEvent(line: string): AgentLifecycleEvent | null {
         !optionalString(parsed.startedAt) ||
         !optionalString(parsed.endedAt) ||
         !optionalString(parsed.sessionFile) ||
+        !optionalString(parsed.themeId) ||
         !optionalBoolean(parsed.delivered)
       ) return null;
       return parsed as unknown as AgentLifecycleEvent;
@@ -395,6 +401,7 @@ export function foldAgentEvents(filePath: string): AgentManifest | undefined {
         parentAgentIds: [...event.parentAgentIds],
         parentJobId: event.parentJobId,
         parentSessionId: event.parentSessionId,
+        themeId: event.themeId,
         rootAgentId: event.rootAgentId,
         depth: event.depth,
         status: event.status,
@@ -413,6 +420,7 @@ export function foldAgentEvents(filePath: string): AgentManifest | undefined {
         endedAt: event.endedAt ?? snapshot.endedAt,
         delivered: event.delivered ?? snapshot.delivered,
         sessionFile: event.sessionFile ?? snapshot.sessionFile,
+        themeId: event.themeId ?? snapshot.themeId,
         updatedAt: event.at,
       };
     }
@@ -433,6 +441,7 @@ function agentSnapshotsEqual(a: AgentManifest, b: AgentManifest): boolean {
     a.rootSessionId === b.rootSessionId &&
     a.parentJobId === b.parentJobId &&
     a.parentSessionId === b.parentSessionId &&
+    a.themeId === b.themeId &&
     a.rootAgentId === b.rootAgentId &&
     a.depth === b.depth &&
     a.status === b.status &&
@@ -458,6 +467,7 @@ export interface CreateAgentManifestStoreInput {
   parentAgentIds?: readonly string[];
   parentJobId?: string;
   parentSessionId?: string;
+  themeId?: string;
   rootAgentId?: string;
   depth?: number;
   sessionFile?: string;
@@ -472,8 +482,8 @@ export interface AgentManifestStore {
   readonly manifestPath: string;
   readonly eventsPath: string;
   readonly projectId: string;
-  create(input: { status?: "created"; description: string; subagentType: string }): void;
-  update(input: { status: JobStatus; at?: string; startedAt?: string; endedAt?: string; delivered?: boolean; sessionFile?: string }): void;
+  create(input: { status?: "created"; description: string; subagentType: string; themeId?: string }): void;
+  update(input: { status: JobStatus; at?: string; startedAt?: string; endedAt?: string; delivered?: boolean; sessionFile?: string; themeId?: string }): void;
   read(): AgentManifest | undefined;
 }
 
@@ -487,6 +497,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
   const piSessionId = input.piSessionId ?? agentId;
   const parentAgentIds = (input.parentAgentIds ?? []).map(canonicalAgentIdFromJobId);
   const rootAgentId = input.rootAgentId ? canonicalAgentIdFromJobId(input.rootAgentId) : agentId;
+  const themeId = input.themeId;
   const depth = input.depth ?? (parentAgentIds.length === 0 ? 0 : parentAgentIds.length + 1);
   const eventsPath = homeAgentEventsFile(projectId, rootSessionId, agentId, parentAgentIds);
   const manifestPath = homeAgentManifestFile(projectId, rootSessionId, agentId, parentAgentIds);
@@ -513,7 +524,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
     manifestPath,
     eventsPath,
     projectId,
-    create({ description, subagentType }): void {
+    create({ description, subagentType, themeId: createdThemeId }): void {
       processWithLog({ operation: PERSISTENCE_OPERATIONS.MANIFEST_AGENT_CREATE, parameters: { agentId } }, () => {
       if (existsSync(manifestPath)) {
         const existingManifest = validateAgentManifest(readPrivateJson<Partial<AgentManifest>>(manifestPath), manifestPath);
@@ -537,6 +548,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
         parentAgentIds,
         parentJobId: input.parentJobId,
         parentSessionId: input.parentSessionId,
+        themeId: createdThemeId ?? themeId,
         rootAgentId,
         depth,
         status: "created",
@@ -563,6 +575,7 @@ export function createAgentManifestStore(input: CreateAgentManifestStoreInput): 
         endedAt: cfg.endedAt,
         delivered: cfg.delivered,
         sessionFile: cfg.sessionFile ?? current.sessionFile,
+        themeId: cfg.themeId,
       };
       append(updated);
       rebuildSnapshot(eventsPath, manifestPath);

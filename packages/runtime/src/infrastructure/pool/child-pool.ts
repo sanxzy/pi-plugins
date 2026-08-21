@@ -6,6 +6,7 @@ import { createDeliveryCoordinator, type DeliveryCoordinator } from "./delivery.
 import { createConcurrencyGate, type ConcurrencyGate } from "./concurrency-gate.ts";
 import { createInterruptionSweep } from "./interruption.ts";
 import { resolveSettingsForProject } from "../../shared/settings.ts";
+import { createThemeAssignmentCursor, type ThemeAssignmentCursor } from "../themes/assignment.ts";
 
 
 /**
@@ -39,6 +40,8 @@ export interface ChildPool {
    * so results addressed to one session's descendants stay isolated.
    */
   readonly deliveryFor: (rootSessionId: string) => DeliveryCoordinator;
+  /** Process-local round-robin cursor for fresh child theme assignments. */
+  readonly themeAssignments: ThemeAssignmentCursor;
   /** Live child handles keyed by job id; populated while a child runs. */
   readonly liveChildren: Map<string, ChildSessionControl>;
   /** Retained live snapshots keyed by job id; remains after a child settles so footer counters persist and resumes continue. */
@@ -105,6 +108,7 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
   // job) is scoped correctly; child job records carry their own parent session
   // id and route to their parent's folder on append.
   const registry = createAgentEventRegistry(projectRoot, rootSessionId);
+  const themeAssignments = createThemeAssignmentCursor();
   const liveChildren = new Map<string, ChildSessionControl>();
   const retainedLiveSnapshots = new Map<string, ChildLiveSnapshot>();
   const jobAbortControllers = new Map<string, AbortController>();
@@ -162,6 +166,7 @@ function createPool(projectRoot: string, rootSessionId?: string): ChildPool {
       return registry.getBySessionId(sessionId) === undefined;
     },
     concurrency: createConcurrencyGate(resolveSettingsForProject(projectRoot).agents.maxConcurrency),
+    themeAssignments,
     deliveryFor,
     rootSessionIdFor,
     liveChildren,
@@ -260,6 +265,9 @@ function upgradePool(pool: ChildPool, projectRoot: string, rootSessionId?: strin
   }
   if (typeof pool.shouldBootstrapRootSession !== "function") {
     patch("shouldBootstrapRootSession", (sessionId: string): boolean => registry.getBySessionId(sessionId) === undefined);
+  }
+  if ((pool as unknown as { themeAssignments?: unknown }).themeAssignments === undefined) {
+    patch("themeAssignments", createThemeAssignmentCursor());
   }
   if (pool.jobAbortControllers === undefined) {
     patch("jobAbortControllers", new Map<string, AbortController>());

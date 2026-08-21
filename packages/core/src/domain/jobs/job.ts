@@ -31,6 +31,8 @@ export interface Job {
   readonly parentAgentIds?: readonly string[];
   /** Exact session file path returned by the child session manager, if known. */
   readonly sessionFile?: string;
+  /** Stable reusable child-window theme profile id; absent on legacy jobs. */
+  readonly themeId?: string;
   /** Token/usage accounting, populated when the child completes. */
   readonly usage?: {
     input: number;
@@ -61,6 +63,7 @@ export interface NewJobInput {
   rootJobId?: string;
   depth?: number;
   sessionFile?: string;
+  themeId?: string;
   parentAgentIds?: readonly string[];
   createdAt?: string;
 }
@@ -89,6 +92,7 @@ export function createJob(input: NewJobInput): Job {
     depth,
     parentAgentIds: input.parentAgentIds,
     sessionFile: input.sessionFile,
+    themeId: input.themeId,
     usage: undefined,
     delivered: false,
     createdAt: now,
@@ -100,6 +104,7 @@ export function createJob(input: NewJobInput): Job {
 export interface JobUpdate {
   status?: JobStatus;
   sessionFile?: string;
+  themeId?: string;
   parentAgentIds?: readonly string[];
   usage?: Job["usage"];
   delivered?: boolean;
@@ -112,6 +117,7 @@ export function updateJob(job: Job, update: JobUpdate): Job {
     ...job,
     ...update,
     usage: update.usage === undefined ? job.usage : update.usage,
+    themeId: update.themeId === undefined ? job.themeId : update.themeId,
     updatedAt: update.updatedAt === undefined ? new Date().toISOString() : update.updatedAt,
   };
 }

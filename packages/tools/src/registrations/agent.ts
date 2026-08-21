@@ -18,6 +18,7 @@ import {
   prepareResumeSessionFile,
   recordNewJob,
   resolveSettingsForProject,
+  type ThemeAssignmentReservation,
   runBackgroundJob,
 } from "@xzy-ai/runtime";
 import { agentParams, type AgentParams } from "../tools.ts";
@@ -259,6 +260,9 @@ async function startAgentInner(
     jobId = makeJobId();
   }
   let job: Job;
+  const themeReservation: ThemeAssignmentReservation | undefined = existingJob
+    ? undefined
+    : pool.themeAssignments.reserveThemeId();
   try {
     job = existingJob ?? recordNewJob(pool.registry, {
       jobId,
@@ -272,8 +276,11 @@ async function startAgentInner(
       sessionFile,
       sessionId: jobId,
       parentAgentIds: allParentAgentIds,
+      themeId: themeReservation?.themeId,
     });
+    themeReservation?.commit();
   } catch (error) {
+    themeReservation?.rollback();
     return errorResult(`could not record agent ${jobId}: ${error instanceof Error ? error.message : String(error)}`, {
       jobId,
       reason: "job recording failed",

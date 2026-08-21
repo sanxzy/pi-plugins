@@ -76,6 +76,7 @@ function toJob(manifest: NonNullable<ReturnType<typeof foldAgentEvents>>): Job {
     parentJobId: manifest.parentJobId,
     rootJobId: canonicalJobId(manifest.rootAgentId ?? manifest.jobId ?? manifest.agentId),
     depth: manifest.depth,
+    themeId: manifest.themeId,
     sessionFile: manifest.sessionFile,
     delivered: manifest.delivered,
     createdAt: manifest.createdAt,
@@ -117,6 +118,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
         parentSessionId: manifest.parentSessionId,
         rootAgentId: manifest.rootAgentId,
         depth: manifest.depth,
+        themeId: manifest.themeId,
         sessionFile: manifest.sessionFile,
         sequence: manifest.sequence,
         now: manifest.createdAt,
@@ -153,6 +155,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
       parentSessionId: job.parentSessionId,
       rootAgentId: job.rootJobId,
       depth: job.depth,
+      themeId: job.themeId,
       sessionFile: job.sessionFile,
       sequence: sequence ?? nextSequence++,
       now: job.createdAt,
@@ -262,7 +265,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
         throw new Error(`Cannot create duplicate agent job id: ${normalized.jobId}`);
       }
       const store = storeFor(normalized, sequence);
-      store.create({ description: normalized.description, subagentType: normalized.subagentType });
+      store.create({ description: normalized.description, subagentType: normalized.subagentType, themeId: normalized.themeId });
       const initialTransitions: Job["status"][] = normalized.status === "created"
         ? []
         : normalized.status === "queued"
@@ -272,7 +275,7 @@ export function createAgentEventRegistry(projectRoot: string, rootSessionId?: st
             : normalized.status === "completed" || normalized.status === "failed"
               ? ["queued", "running", normalized.status]
               : [normalized.status];
-      for (const status of initialTransitions) store.update({ status, at: normalized.updatedAt, sessionFile: normalized.sessionFile });
+      for (const status of initialTransitions) store.update({ status, at: normalized.updatedAt, sessionFile: normalized.sessionFile, themeId: normalized.themeId });
       const entry: Entry = { store, job: normalized, sequence };
       byJob.set(normalized.jobId, entry);
       stores.set(normalized.jobId, store);

@@ -114,6 +114,8 @@ export {
   validateThemeLibrary,
   type ThemeLibraryPersistence,
 } from "./infrastructure/themes/library.ts";
+export { createThemeAssignmentCursor, type ThemeAssignmentCursor, type ThemeAssignmentReservation } from "./infrastructure/themes/assignment.ts";
+export { resolveJobTheme, type JobThemeRegistry } from "./infrastructure/themes/job-theme.ts";
 export {
   THEME_BACKGROUND_TOKENS,
   THEME_COLOR_TOKENS,
