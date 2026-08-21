@@ -142,6 +142,108 @@ test("native child rendering applies the profile before snapshot and restores be
   }
 });
 
+test("nested themed children restore one frame at a time", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-theme-nested-"));
+  try {
+    const parent = createNativeTheme(BUILTIN_THEME_PROFILES[0]);
+    const current = { value: parent };
+    const calls = [];
+    const d = piDouble();
+    const { ctx, getFooterFactory, sendInput } = context(cwd, current, calls);
+    register(d, ctx);
+    const pool = getChildPool(cwd, "root-session");
+    const addRunning = (jobId, sessionId, parentSessionId, themeId) => {
+      const feed = { snapshot: { status: "running", settled: false, transcript: [], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
+      pool.liveChildren.set(jobId, { sessionFile: join(cwd, `${jobId}.jsonl`), live: feed, steer: async () => {}, abort: async () => {} });
+      pool.registry.createJob(createJob({ jobId, parentSessionId, sessionId, status: "running", description: jobId, subagentType: "test-agent", themeId }));
+    };
+    addRunning("first", "first-session", "root-session", "light");
+    addRunning("second", "second-session", "first-session", "dark");
+    const mode = hostMode(current, calls);
+    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
+    const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
+    footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
+    assert.equal(current.value.name, "Light");
+    footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
+    assert.equal(mode.hostSwapDepth(), 2);
+    assert.equal(current.value.name, "Dark");
+    assert.notEqual(current.value, parent);
+    sendInput(ALT_LEFT);
+    assert.equal(mode.hostSwapDepth(), 1);
+    assert.equal(current.value.name, "Light");
+    sendInput(ALT_LEFT);
+    assert.equal(mode.hostSwapDepth(), 0);
+    assert.equal(current.value, parent);
+    footer.dispose();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("failed lookup, settled viewing, and footer teardown leave theme and host stacks balanced", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-theme-lifecycle-"));
+  try {
+    const parent = createNativeTheme(BUILTIN_THEME_PROFILES[0]);
+    const current = { value: parent };
+    const calls = [];
+    const d = piDouble();
+    const { ctx, getFooterFactory } = context(cwd, current, calls);
+    register(d, ctx);
+    const pool = getChildPool(cwd, "root-session");
+    pool.registry.createJob(createJob({ jobId: "missing-live", parentSessionId: "root-session", sessionId: "missing-live", status: "running", description: "missing", subagentType: "test-agent", themeId: "light" }));
+    const settledSnapshot = { status: "completed", settled: true, transcript: [{ id: "tool", kind: "tool", toolName: "read", text: "done", complete: true }], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } };
+    pool.registry.createJob(createJob({ jobId: "settled", parentSessionId: "root-session", sessionId: "settled", status: "completed", description: "settled", subagentType: "test-agent", themeId: "light" }));
+    pool.retainedLiveSnapshots.set("settled", settledSnapshot);
+    const mode = hostMode(current, calls);
+    const tui = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode, _hostGetThemeInstance: () => current.value };
+    const footer = getFooterFactory()(tui, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
+    footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
+    assert.equal(calls.some((entry) => entry.type === "theme"), false);
+    assert.equal(mode.hostSwapDepth(), 0);
+    footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ALT_DOWN); footer.handleInput(ENTER);
+    assert.equal(current.value.name, "Light");
+    assert.equal(mode.hostSwapDepth(), 1);
+    footer.dispose();
+    assert.equal(mode.hostSwapDepth(), 0);
+    assert.equal(current.value, parent);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a host footer reset disposes the old theme frame before reinstalling", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-theme-reset-"));
+  try {
+    const parent = createNativeTheme(BUILTIN_THEME_PROFILES[0]);
+    const current = { value: parent };
+    const calls = [];
+    const d = piDouble();
+    const { ctx, getFooterFactory } = context(cwd, current, calls);
+    register(d, ctx);
+    const pool = getChildPool(cwd, "root-session");
+    const feed = { snapshot: { status: "running", settled: false, transcript: [], counters: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 } }, subscribe: () => () => {}, steer: async () => {} };
+    pool.liveChildren.set("reset-child", { sessionFile: join(cwd, "child.jsonl"), live: feed, steer: async () => {}, abort: async () => {} });
+    pool.registry.createJob(createJob({ jobId: "reset-child", parentSessionId: "root-session", sessionId: "reset-child", status: "running", description: "reset", subagentType: "test-agent", themeId: "light" }));
+    const mode1 = hostMode(current, calls);
+    const tui1 = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode1, _hostGetThemeInstance: () => current.value };
+    const footer1 = getFooterFactory()(tui1, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
+    footer1.handleInput(ALT_DOWN); footer1.handleInput(ALT_DOWN); footer1.handleInput(ENTER);
+    assert.equal(mode1.hostSwapDepth(), 1);
+    footer1.dispose();
+    assert.equal(mode1.hostSwapDepth(), 0);
+    assert.equal(current.value, parent);
+    const mode2 = hostMode(current, calls);
+    const tui2 = { terminal: { rows: 24, columns: 100 }, requestRender() {}, _hostInteractiveMode: mode2, _hostGetThemeInstance: () => current.value };
+    const footer2 = getFooterFactory()(tui2, { fg: (_c, text) => text }, { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 });
+    footer2.handleInput(ALT_DOWN); footer2.handleInput(ALT_DOWN); footer2.handleInput(ENTER);
+    assert.equal(current.value.name, "Light");
+    footer2.dispose();
+    assert.equal(current.value, parent);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("active child refresh applies valid profile updates through the native host", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-c2-theme-refresh-"));
   const original = loadThemeLibrary();
