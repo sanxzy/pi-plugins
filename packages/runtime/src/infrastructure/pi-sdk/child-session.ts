@@ -12,10 +12,10 @@ import {
   type AgentSession,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import { resolveChildModelMapping, resolveChildThinkingMapping } from "./child-model.ts";
+import { resolveChildModelBinding, resolveChildThinkingMapping, resolveExactChildModel } from "./child-model.ts";
 import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
-import { getActiveGroup, resolveActiveModel } from "../model-groups/store.ts";
-import { quarantineModel } from "../model-groups/quarantine.ts";
+import { getGroupById, resolveGroupModel } from "../model-groups/store.ts";
+import { publishChildModelBinding, releaseChildModelBinding, type ChildSessionModelBinding } from "./child-bindings.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
 import { publishSessionMcpActive, publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
@@ -362,27 +362,48 @@ async function createIsolatedChild(options: {
   publishSessionMcpDefinitions(childContext, options.mcpToolDefs ?? []);
   if (options.mcpBridge) publishSessionMcpBridge(childContext, options.mcpBridge);
 
-  // Model mapping, in resolution priority: frontmatter `model` (exact
-  // contract) > active model group (in-memory override) > `agents.model` in
-  // the home-root `pi-c2/config.json` (exact contract) > parent model.
-  // An active group, when set, overrides the global config without touching
-  // disk; quarantine is skipped via resolveActiveModel.
+  // Model binding resolution, in priority order: frontmatter `model` (exact
+  // contract) > `agents.model` in the home-root `pi-c2/config.json` (exact
+  // contract) > parent-model inheritance. Both levels accept plain model
+  // references and explicit `group:<id>` bindings; a group-bound child then
+  // behaves like a parent using that group (rotation, quarantine, fail-over
+  // among members). The transient home-wide selection never overrides this:
+  // it reaches children only through inheritance of the parent model.
   let model = options.model;
-  const activeEntry = resolveActiveModel();
-  const effectiveGlobalModel = activeEntry?.ref ?? resolveSettingsForProject(options.cwd).agents.model;
-  const effectiveGlobalThinking = activeEntry?.thinking ?? resolveSettingsForProject(options.cwd).agents.thinking;
-  const mapping = resolveChildModelMapping({
+  let publishedBinding: ChildSessionModelBinding | undefined;
+  let groupMemberThinking: string | undefined;
+  const settingsResolution = resolveSettingsForProject(options.cwd);
+  const binding = resolveChildModelBinding({
     frontmatterModel: discovered?.model,
-    globalModel: effectiveGlobalModel,
+    globalModel: settingsResolution.agents.model,
     agentName: discovered?.name ?? "",
     modelRuntime,
     globalConfigPath: settingsConfigPath(),
+    findGroup: (groupId) => (getGroupById(groupId) ? { id: groupId } : undefined),
   });
-  if (mapping.error) {
-    throw new Error(mapping.error);
+  if (!binding.ok) {
+    throw new Error(binding.error);
   }
-  if (mapping.model) {
-    model = mapping.model;
+  if (binding.binding.kind === "group") {
+    // Bind explicitly to the named group: start on its current member
+    // (peeked, not advanced — per-request rotation belongs to the host).
+    const member = resolveGroupModel(binding.binding.groupId, { advance: false });
+    if (!member) {
+      throw new Error(`Agent "${discovered?.name ?? ""}" binds to model group "${binding.binding.groupId}", but every member is currently quarantined. Unquarantine a member or fix the binding.`);
+    }
+    const boundModel = resolveExactChildModel(member.ref, modelRuntime);
+    if (!boundModel) {
+      throw new Error(`Agent "${discovered?.name ?? ""}" binds to model group "${binding.binding.groupId}", whose member "${member.ref}" does not match any available model exactly. Fix the group membership.`);
+    }
+    model = boundModel;
+    // Group-member thinking wins while group-bound; explicit levels are
+    // ignored in this mode (mirrors parent-group semantics).
+    groupMemberThinking = member.thinking;
+    publishedBinding = { kind: "group", groupId: binding.binding.groupId };
+  } else if (binding.binding.kind === "model") {
+    // Pinned to one exact model; request-time rotation must never move it.
+    model = binding.binding.model;
+    publishedBinding = { kind: "pinned" };
   }
 
   const sessionOptions: Record<string, unknown> = {
@@ -394,21 +415,29 @@ async function createIsolatedChild(options: {
     sessionManager,
     resourceLoader,
   };
-  // Thinking mapping, in resolution priority: frontmatter `thinking` (exact)
-  // > `agents.thinking` in the home-root `pi-c2/config.json` (exact) > SDK
-  // default. A configured level is applied as-is; an invalid global level
-  // fails the child with a clear error instead of silently ignoring it. The
-  // SDK clamps unsupported levels to the model's range.
-  const thinking = resolveChildThinkingMapping({
-    frontmatterThinking: discovered?.thinking,
-    globalThinking: effectiveGlobalThinking,
-    globalConfigPath: settingsConfigPath(),
-  });
-  if (thinking.error) {
-    throw new Error(thinking.error);
-  }
-  if (thinking.thinking) {
-    sessionOptions.thinkingLevel = thinking.thinking;
+  // Thinking resolution: while group-bound the selected member's thinking
+  // applies and explicit levels are ignored (parent-group semantics).
+  // Otherwise: frontmatter `thinking` (exact) > `agents.thinking` in the
+  // home-root `pi-c2/config.json` (exact) > SDK default. A configured level
+  // is applied as-is; an invalid global level fails the child with a clear
+  // error instead of silently ignoring it. The SDK clamps unsupported levels
+  // to the model's range.
+  if (publishedBinding?.kind === "group") {
+    if (groupMemberThinking) {
+      sessionOptions.thinkingLevel = groupMemberThinking;
+    }
+  } else {
+    const thinking = resolveChildThinkingMapping({
+      frontmatterThinking: discovered?.thinking,
+      globalThinking: settingsResolution.agents.thinking,
+      globalConfigPath: settingsConfigPath(),
+    });
+    if (thinking.error) {
+      throw new Error(thinking.error);
+    }
+    if (thinking.thinking) {
+      sessionOptions.thinkingLevel = thinking.thinking;
+    }
   }
   // Tool mapping: an explicit non-empty `tools` list becomes the child
   // allowlist; an absent/empty list enables the full built-in set (excluding
@@ -437,10 +466,19 @@ async function createIsolatedChild(options: {
   }
 
   const { session } = await (createAgentSession as unknown as (options: Record<string, unknown>) => Promise<{ session: AgentSession }>)(sessionOptions);
+  // Publish the session's model binding so the patched host hooks rotate and
+  // fail over this session according to its declared kind: group-bound
+  // children follow their named group, pinned children never move, and
+  // unpinned children keep following the home-wide active selection.
+  const sessionId = (session as unknown as { sessionId?: string | undefined }).sessionId;
+  if (publishedBinding && sessionId) {
+    publishChildModelBinding(sessionId, publishedBinding);
+  }
 
   return {
     session,
     dispose() {
+      releaseChildModelBinding(sessionId);
       clearMcpNames(childContext);
       session.dispose();
     },
