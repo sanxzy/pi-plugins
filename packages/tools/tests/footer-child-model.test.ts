@@ -27,12 +27,16 @@ function snapshot(): ChildLiveSnapshot {
 const PARENT_MODEL = { provider: "opencode-go", id: "ox-alpha-free", reasoning: true, contextWindow: 450_000 };
 
 function ctx(entries: readonly unknown[] = []): ExtensionContext {
+  return ctxWithUsage(undefined, entries);
+}
+
+function ctxWithUsage(contextWindow: number | undefined, entries: readonly unknown[] = []): ExtensionContext {
   return {
     mode: "tui",
     hasUI: true,
     cwd: "/tmp/project",
     model: PARENT_MODEL,
-    getContextUsage: () => undefined,
+    getContextUsage: () => (contextWindow === undefined ? undefined : { contextWindow }),
     sessionManager: {
       getSessionId: () => "root-session",
       getSessionFile: () => "/tmp/project/s.jsonl",
@@ -95,12 +99,12 @@ test("child footer uses a pinned registry entry's catalog identity and chain thi
       reasoning: true,
       contextWindow: 400_000,
     });
-    const info = childFooterInfo(snapshot(), ctx(), footerData(), "job-pin");
+    const info = childFooterInfo(snapshot(), ctxWithUsage(450_000), footerData(), "job-pin");
     assert.equal(info.model, "gpt-5.6-luna");
     assert.equal(info.provider, "openai-codex");
     assert.equal(info.thinkingLevel, "xhigh");
     assert.equal(info.modelGroupName, undefined);
-    assert.equal(info.contextWindow, 400_000, "the child's own model window backs the context indicator");
+    assert.equal(info.contextWindow, 400_000, "the child's own model window beats the parent's usage context");
     assert.equal(info.reasoning, true, "reasoning capability drives the thinking suffix");
   } finally {
     releaseChildModelBinding("job-pin");
