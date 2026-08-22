@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { buildChildSpawnPublication, resolveChildSpawnBinding, resolveChildThinkingMapping } from "./child-model.ts";
 import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
+import { applyHomeModelOverrides, loadHomeModelsForAgentDir } from "../../shared/home-model-overrides.ts";
 import { getGroupById, resolveGroupModel } from "../model-groups/store.ts";
 import { getChildModelBinding, publishChildModelBinding, releaseChildModelBinding } from "./child-bindings.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
@@ -316,9 +317,17 @@ async function createIsolatedChild(options: {
         pendingNativeProviderRegistrations: Array<{ provider: unknown }>;
       };
     };
+    const homeModels = loadHomeModelsForAgentDir(agentDir);
     for (const { name, config } of extensionsResult.runtime.pendingProviderRegistrations ?? []) {
       try {
-        (modelRuntime as unknown as { registerProvider(name: string, config: unknown): void }).registerProvider(name, config);
+        // Re-apply the home `models.json` modelOverrides layer so extension
+        // providers compose identically to the host (e.g. luna's 260k window).
+        const merged = applyHomeModelOverrides(
+          name,
+          config as { models?: Array<Record<string, unknown>> },
+          homeModels,
+        );
+        (modelRuntime as unknown as { registerProvider(name: string, config: unknown): void }).registerProvider(name, merged);
       } catch {
         // Provider composition errors are surfaced via diagnostics; do not
         // abort child creation for one bad extension.

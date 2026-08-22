@@ -33,11 +33,12 @@ test("merges modelOverrides into matching extension-registered models", () => {
       "openai-codex": { modelOverrides: { "gpt-5.6-luna": { contextWindow: 260_000 } } },
     },
   });
-  const luna = merged.models.find((m: { id: string }) => m.id === "gpt-5.6-luna");
-  const other = merged.models.find((m: { id: string }) => m.id === "other");
-  assert.equal(luna.contextWindow, 260_000);
-  assert.equal(luna.name, "Luna", "non-overridden fields stay untouched");
-  assert.equal(other.contextWindow, 100_000, "models without overrides pass through");
+  const models = merged.models ?? [];
+  const luna = models.find((m) => (m as { id?: string }).id === "gpt-5.6-luna");
+  const other = models.find((m) => (m as { id?: string }).id === "other");
+  assert.equal((luna as { contextWindow?: number })?.contextWindow, 260_000);
+  assert.equal((luna as { name?: string })?.name, "Luna", "non-overridden fields stay untouched");
+  assert.equal((other as { contextWindow?: number })?.contextWindow, 100_000, "models without overrides pass through");
 });
 
 test("a provider without overrides is returned unchanged", () => {
@@ -45,7 +46,7 @@ test("a provider without overrides is returned unchanged", () => {
   const merged = applyHomeModelOverrides("nope-provider", config as never, {
     providers: { "openai-codex": { modelOverrides: { y: { contextWindow: 1 } } } },
   });
-  assert.deepEqual(merged.models[0]!.contextWindow, 5);
+  assert.deepEqual(((merged.models ?? [])[0] as { contextWindow?: number } | undefined)?.contextWindow, 5);
 });
 
 test("override fields beyond contextWindow are applied (reasoning, maxTokens)", () => {
@@ -53,8 +54,9 @@ test("override fields beyond contextWindow are applied (reasoning, maxTokens)", 
   const merged = applyHomeModelOverrides("p", config as never, {
     providers: { p: { modelOverrides: { m: { reasoning: true, maxTokens: 99 } } } },
   });
-  assert.equal(merged.models[0]!.reasoning, true);
-  assert.equal(merged.models[0]!.maxTokens, 99);
+  const first = (merged.models ?? [])[0] as { reasoning?: boolean; maxTokens?: number } | undefined;
+  assert.equal(first?.reasoning, true);
+  assert.equal(first?.maxTokens, 99);
 });
 
 test("reads the real agent-dir file when given a path loader", async () => {
