@@ -1,0 +1,123 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ChildLiveSnapshot } from "@xzy-ai/core";
+import { publishChildModelBinding, releaseChildModelBinding } from "@xzy-ai/runtime";
+import { childFooterInfo } from "../src/registrations/footer.ts";
+
+function snapshot(): ChildLiveSnapshot {
+  return {
+    status: "running",
+    settled: false,
+    transcript: [],
+    counters: {
+      toolUses: 0,
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: 0.001,
+    },
+  };
+}
+
+const PARENT_MODEL = { provider: "opencode-go", id: "ox-alpha-free", reasoning: true, contextWindow: 450_000 };
+
+function ctx(entries: readonly unknown[] = []): ExtensionContext {
+  return {
+    mode: "tui",
+    hasUI: true,
+    cwd: "/tmp/project",
+    model: PARENT_MODEL,
+    getContextUsage: () => undefined,
+    sessionManager: {
+      getSessionId: () => "root-session",
+      getSessionFile: () => "/tmp/project/s.jsonl",
+      getLeafId: () => undefined,
+      getEntries: () => entries,
+      getCwd: () => "/tmp/project",
+      getSessionName: () => "root",
+    },
+  } as unknown as ExtensionContext;
+}
+
+function footerData(): ReadonlyFooterDataDouble {
+  return {
+    getGitBranch: () => null,
+    getAvailableProviderCount: () => 2,
+  };
+}
+
+interface ReadonlyFooterDataDouble {
+  getGitBranch(): string | null;
+  getAvailableProviderCount(): number;
+}
+
+test("child footer prefers the registry's resolved group identity over the parent model", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-footer-model-"));
+  try {
+    process.env.PI_C2_TEST_HOME = home;
+    process.env.PI_C2_HOME = home;
+    publishChildModelBinding("job-view", {
+      kind: "group",
+      groupId: "beta",
+      provider: "prov",
+      modelId: "two",
+      thinking: "high",
+    });
+    const info = childFooterInfo(snapshot(), ctx(), footerData(), "job-view");
+    assert.equal(info.model, "two");
+    assert.equal(info.provider, "prov");
+    assert.equal(info.thinkingLevel, "high");
+    assert.equal(info.modelGroupName, "Beta Group", "an explicitly bound group is labelled by its own name");
+  } finally {
+    releaseChildModelBinding("job-view");
+    delete process.env.PI_C2_TEST_HOME;
+    delete process.env.PI_C2_HOME;
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("child footer uses a pinned registry entry's catalog identity and chain thinking", () => {
+  try {
+    publishChildModelBinding("job-pin", {
+      kind: "pinned",
+      provider: "openai-codex",
+      modelId: "gpt-5.6-luna",
+      thinking: "xhigh",
+    });
+    const info = childFooterInfo(snapshot(), ctx(), footerData(), "job-pin");
+    assert.equal(info.model, "gpt-5.6-luna");
+    assert.equal(info.provider, "openai-codex");
+    assert.equal(info.thinkingLevel, "xhigh");
+    assert.equal(info.modelGroupName, undefined);
+  } finally {
+    releaseChildModelBinding("job-pin");
+  }
+});
+
+test("an inherited publication shows the parent-side resolved model it inherited", () => {
+  try {
+    publishChildModelBinding("job-inherit", {
+      kind: "inherit",
+      provider: "opencode-go",
+      modelId: "ox-alpha-free",
+      thinking: "max",
+    });
+    const info = childFooterInfo(snapshot(), ctx(), footerData(), "job-inherit");
+    assert.equal(info.model, "ox-alpha-free");
+    assert.equal(info.provider, "opencode-go");
+    assert.equal(info.thinkingLevel, "max");
+  } finally {
+    releaseChildModelBinding("job-inherit");
+  }
+});
+
+test("without a registry entry the footer falls back to the parent context model", () => {
+  const info = childFooterInfo(snapshot(), ctx(), footerData(), "job-unknown");
+  assert.equal(info.model, "ox-alpha-free");
+  assert.equal(info.provider, "opencode-go");
+});
