@@ -176,3 +176,104 @@ test("thinking mapping: a whitespace-padded valid level is trimmed before use", 
   const result = thinkingMapping({ globalThinking: "  high  " });
   assert.equal(result.thinking, "high");
 });
+
+// --- Child model binding resolution (frontmatter > config > inherit) -------
+
+import {
+  parseModelBinding,
+  resolveChildModelBinding,
+  type ChildModelBinding,
+} from "../src/infrastructure/pi-sdk/child-model.ts";
+
+test("parse: a plain reference parses as a model binding", () => {
+  assert.deepEqual(parseModelBinding("commandcode/deepseek-v4-flash"), { kind: "model", reference: "commandcode/deepseek-v4-flash" });
+});
+
+test("parse: a group: prefixed reference parses as a group binding", () => {
+  assert.deepEqual(parseModelBinding("group:ox-group"), { kind: "group", groupId: "ox-group" });
+  assert.deepEqual(parseModelBinding("  group:helper  "), { kind: "group", groupId: "helper" });
+});
+
+test("parse: an empty or whitespace-only value parses as no binding", () => {
+  assert.equal(parseModelBinding(undefined), undefined);
+  assert.equal(parseModelBinding(""), undefined);
+  assert.equal(parseModelBinding("   "), undefined);
+});
+
+test("parse: a blank group id is preserved for the resolver to reject", () => {
+  assert.deepEqual(parseModelBinding("group:"), { kind: "group", groupId: "" });
+  assert.deepEqual(parseModelBinding("group:   "), { kind: "group", groupId: "" });
+});
+
+function binding(options: Partial<Parameters<typeof resolveChildModelBinding>[0]> = {}): { ok: true; binding: ChildModelBinding } | { ok: false; error: string } {
+  return resolveChildModelBinding({
+    frontmatterModel: undefined,
+    globalModel: undefined,
+    agentName: "explore",
+    modelRuntime: runtimeWith(CATALOG),
+    globalConfigPath: CONFIG_PATH,
+    findGroup: (id: string) => (id === "ox-group" || id === "helper" ? { id } : undefined),
+    ...options,
+  });
+}
+
+test("binding: a resolvable frontmatter group binds the child to that group", () => {
+  const result = binding({ frontmatterModel: "group:ox-group" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ok && result.binding, { kind: "group", groupId: "ox-group" });
+});
+
+test("binding: an unknown frontmatter group errors without falling back", () => {
+  const result = binding({ frontmatterModel: "group:missing-group" });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.error, /Agent "explore" declares model "group:missing-group"/);
+    assert.match(result.error, /unknown model group/i);
+  }
+});
+
+test("binding: a resolvable frontmatter model still pins exactly as before", () => {
+  const result = binding({ frontmatterModel: "claude-sonnet-4-5" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ok && result.binding, { kind: "model", model: { provider: "anthropic", id: "claude-sonnet-4-5" } });
+});
+
+test("binding: an unknown frontmatter model errors without falling back", () => {
+  const result = binding({ frontmatterModel: "commandcode/dummy-nonexistent-model" });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /does not match any available model exactly/);
+});
+
+test("binding: a global group binds when the frontmatter key is absent", () => {
+  const result = binding({ globalModel: "group:helper" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ok && result.binding, { kind: "group", groupId: "helper" });
+});
+
+test("binding: an unknown global group errors with the config path", () => {
+  const result = binding({ globalModel: "group:missing-group" });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.error, /Global agent model "group:missing-group"/);
+    assert.match(result.error, /unknown model group/i);
+    assert.match(result.error, new RegExp(CONFIG_PATH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
+test("binding: a global plain model still pins when the frontmatter key is absent", () => {
+  const result = binding({ globalModel: "commandcode/deepseek-v4-pro" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ok && result.binding, { kind: "model", model: { provider: "commandcode", id: "deepseek-v4-pro" } });
+});
+
+test("binding: no configured value at either level inherits the parent model", () => {
+  const result = binding();
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ok && result.binding, { kind: "inherit" });
+});
+
+test("binding: the frontmatter group wins over a configured global model", () => {
+  const result = binding({ frontmatterModel: "group:ox-group", globalModel: "commandcode/deepseek-v4-flash" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ok && result.binding, { kind: "group", groupId: "ox-group" });
+});
