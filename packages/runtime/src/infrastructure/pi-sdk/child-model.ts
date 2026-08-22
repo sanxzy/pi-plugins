@@ -15,6 +15,9 @@ import { THINKING_LEVELS } from "@xzy-ai/core";
 export interface ExactModelLike {
   id: string;
   provider: string;
+  /** Present on full catalog entries; identity publication prefers these values. */
+  contextWindow?: number;
+  reasoning?: boolean;
 }
 
 export interface ExactModelCatalog {
@@ -362,12 +365,20 @@ export function buildChildSpawnPublication(options: {
   const identity = options.plan.model ?? options.sessionModel;
   const provider = typeof identity?.provider === "string" ? identity.provider : undefined;
   const modelId = typeof identity?.id === "string" ? identity.id : undefined;
-  // The SESSION's actual model is authoritative for the context window even
-  // when a catalog plan entry exists (catalog entries carry no window size).
-  const contextWindow = typeof options.sessionModel?.contextWindow === "number"
-    ? options.sessionModel.contextWindow
-    : undefined;
-  const reasoning = typeof options.sessionModel?.reasoning === "boolean" ? options.sessionModel.reasoning : undefined;
+  // The child-CATALOG entry (plan.model) is authoritative for window/reasoning:
+  // it already carries the home overrides. The session's runtime model is only
+  // a fallback for inherited children whose catalog entry is absent.
+  const planned = options.plan.model as ModelIdentityLike | undefined;
+  const contextWindow = typeof planned?.contextWindow === "number"
+    ? planned.contextWindow
+    : typeof options.sessionModel?.contextWindow === "number"
+      ? options.sessionModel.contextWindow
+      : undefined;
+  const reasoning = typeof planned?.reasoning === "boolean"
+    ? planned.reasoning
+    : typeof options.sessionModel?.reasoning === "boolean"
+      ? options.sessionModel.reasoning
+      : undefined;
   const base = {
     ...(provider === undefined ? {} : { provider }),
     ...(modelId === undefined ? {} : { modelId }),

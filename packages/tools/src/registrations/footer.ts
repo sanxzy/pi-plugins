@@ -743,9 +743,11 @@ export function childFooterInfo(
     : undefined;
   const model = boundModel ?? ctx.model;
   const reasoning = Boolean(model?.reasoning);
+  // Only an explicitly bound group labels the child; the parent's transient
+  // selection belongs to the parent/root footer, never to a pinned child.
   const modelGroupName = binding?.kind === "group" && binding.groupId
-    ? (getGroupById(binding.groupId)?.name ?? activeModelGroup()?.name)
-    : activeModelGroup()?.name;
+    ? getGroupById(binding.groupId)?.name
+    : undefined;
   // Derive thinkingLevel from child's transcript if it contains a thinking_level_change entry;
   // the live transcript does not carry those, so reuse parent's thinking level.
   const entries = ctx.sessionManager.getEntries() as readonly unknown[];
