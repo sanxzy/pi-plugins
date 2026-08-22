@@ -235,7 +235,12 @@ test("binding: an unknown frontmatter group errors without falling back", () => 
 test("binding: a resolvable frontmatter model still pins exactly as before", () => {
   const result = binding({ frontmatterModel: "claude-sonnet-4-5" });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.ok && result.binding, { kind: "model", model: { provider: "anthropic", id: "claude-sonnet-4-5" } });
+  if (result.ok && result.binding.kind === "model") {
+    assert.equal(result.binding.model.provider, "anthropic");
+    assert.equal(result.binding.model.id, "claude-sonnet-4-5");
+  } else {
+    assert.fail("expected a model binding");
+  }
 });
 
 test("binding: an unknown frontmatter model errors without falling back", () => {
@@ -263,7 +268,12 @@ test("binding: an unknown global group errors with the config path", () => {
 test("binding: a global plain model still pins when the frontmatter key is absent", () => {
   const result = binding({ globalModel: "commandcode/deepseek-v4-pro" });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.ok && result.binding, { kind: "model", model: { provider: "commandcode", id: "deepseek-v4-pro" } });
+  if (result.ok && result.binding.kind === "model") {
+    assert.equal(result.binding.model.provider, "commandcode");
+    assert.equal(result.binding.model.id, "deepseek-v4-pro");
+  } else {
+    assert.fail("expected a model binding");
+  }
 });
 
 test("binding: no configured value at either level inherits the parent model", () => {

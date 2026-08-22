@@ -124,3 +124,91 @@ export function resolveExactChildModel(
   const idMatches = available.filter((entry) => entry.id === reference);
   return idMatches.length === 1 ? idMatches[0] : undefined;
 }
+
+/** A resolved child model binding: the outcome of applying the resolution
+ * priority to one child agent.
+ *
+ *   - `model` — pinned to one exact catalog model (frontmatter or config).
+ *   - `group` — explicitly bound to a model group via the `group:<id>` prefix;
+ *     the child then behaves like a parent using that group (rotation,
+ *     quarantine, fail-over among members).
+ *   - `inherit` — nothing configured at either level; keep the parent's
+ *     current model. A group-using parent reaches such children only through
+ *     this inheritance, never as an override of explicit configuration.
+ */
+export type ChildModelBinding =
+  | { readonly kind: "model"; readonly model: ExactModelLike }
+  | { readonly kind: "group"; readonly groupId: string }
+  | { readonly kind: "inherit" };
+
+export interface GroupCatalog {
+  findGroup(groupId: string): { id: string } | undefined;
+}
+
+/**
+ * Parse a configured model value into its binding shape.
+ *
+ * A `group:<id>` value is an explicit model-group binding; every other
+ * non-empty value is a plain exact model reference. Blank values mean no
+ * binding at this level. A blank group id is preserved so the resolver can
+ * reject it with a clear error instead of silently treating it as absent.
+ */
+export function parseModelBinding(value: string | undefined): ChildModelBindingInput | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("group:")) {
+    return { kind: "group", groupId: trimmed.slice("group:".length).trim() };
+  }
+  return { kind: "model", reference: trimmed };
+}
+
+export type ChildModelBindingInput =
+  | { readonly kind: "model"; readonly reference: string }
+  | { readonly kind: "group"; readonly groupId: string };
+/**
+ * Apply the child model resolution priority for one child agent:
+ *
+ *   frontmatter `model` > global config `agents.model` > inherit parent
+ *
+ * Both levels accept plain model references and explicit `group:<id>`
+ * bindings. A configured value is an exact contract: a model reference must
+ * resolve against the child catalog, a group id must exist in the group
+ * catalog; anything unresolvable produces a clear `error` (never a silent
+ * fallback). Only when no value is configured at either level does the child
+ * inherit the parent's current model.
+ */
+export function resolveChildModelBinding(options: {
+  frontmatterModel?: string;
+  globalModel?: string;
+  agentName: string;
+  modelRuntime: ExactModelCatalog | undefined;
+  globalConfigPath: string;
+  findGroup?: (groupId: string) => { id: string } | undefined;
+}): { ok: true; binding: ChildModelBinding } | { ok: false; error: string } {
+  const frontmatter = parseModelBinding(options.frontmatterModel);
+  const global = frontmatter === undefined ? parseModelBinding(options.globalModel) : undefined;
+  const selected = frontmatter ?? global;
+  if (!selected) return { ok: true, binding: { kind: "inherit" } };
+  const source = frontmatter ? `Agent "${options.agentName}" declares model` : "Global agent model";
+  const location = frontmatter ? "" : ` (from ${options.globalConfigPath} agents.model)`;
+  if (selected.kind === "group") {
+    const known = options.findGroup?.(selected.groupId);
+    if (!selected.groupId || !known) {
+      return {
+        ok: false,
+        error: `${source} "group:${selected.groupId}"${location} names an unknown model group. Fix the value or remove it to inherit the parent model.`,
+      };
+    }
+    return { ok: true, binding: { kind: "group", groupId: selected.groupId } };
+  }
+  const declared = resolveExactChildModel(selected.reference, options.modelRuntime);
+  if (!declared) {
+    return {
+      ok: false,
+      error: `${source} "${selected.reference}"${location} does not match any available model exactly. Fix the value or remove it to inherit the parent model.`,
+    };
+  }
+  return { ok: true, binding: { kind: "model", model: declared } };
+}
+
