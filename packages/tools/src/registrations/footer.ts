@@ -757,7 +757,12 @@ export function childFooterInfo(
   const cacheWrite = counters.cacheWriteTokens;
   const promptTokens = input + cacheRead + cacheWrite;
   const cacheHitRate = promptTokens > 0 ? (cacheRead / promptTokens) * 100 : undefined;
-  const contextWindow = ctx.getContextUsage()?.contextWindow ?? model?.contextWindow ?? 0;
+  // A bound child's own window is authoritative; the viewing context's
+  // usage window (the PARENT's) must never shadow it.
+  const contextWindow = boundModel?.contextWindow
+    ?? ctx.getContextUsage()?.contextWindow
+    ?? model?.contextWindow
+    ?? 0;
   // Child context is not exposed via host; approximate from child's prompt tokens.
   const contextPercent = contextWindow > 0 && promptTokens > 0 ? (promptTokens / contextWindow) * 100 : null;
   return {
