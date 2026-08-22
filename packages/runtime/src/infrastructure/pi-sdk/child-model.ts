@@ -322,22 +322,29 @@ export type ChildBindingPublication = {
   readonly provider?: string;
   readonly modelId?: string;
   readonly thinking?: string;
+  readonly reasoning?: boolean;
+  readonly contextWindow?: number;
 } | {
   readonly kind: "pinned";
   readonly provider?: string;
   readonly modelId?: string;
   readonly thinking?: string;
+  readonly reasoning?: boolean;
+  readonly contextWindow?: number;
 } | {
   readonly kind: "inherit";
   readonly provider?: string;
   readonly modelId?: string;
   readonly thinking?: string;
+  readonly reasoning?: boolean;
+  readonly contextWindow?: number;
 };
 
 interface ModelIdentityLike {
   readonly provider?: string | undefined;
   readonly id?: string | undefined;
   readonly contextWindow?: number | undefined;
+  readonly reasoning?: boolean | undefined;
 }
 
 /**
@@ -360,10 +367,12 @@ export function buildChildSpawnPublication(options: {
   const contextWindow = typeof options.sessionModel?.contextWindow === "number"
     ? options.sessionModel.contextWindow
     : undefined;
+  const reasoning = typeof options.sessionModel?.reasoning === "boolean" ? options.sessionModel.reasoning : undefined;
   const base = {
     ...(provider === undefined ? {} : { provider }),
     ...(modelId === undefined ? {} : { modelId }),
     ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(reasoning === undefined ? {} : { reasoning }),
   };
   if (options.plan.publish?.kind === "group") {
     return {

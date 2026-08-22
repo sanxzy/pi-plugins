@@ -659,6 +659,7 @@ interface FooterChildBinding {
   readonly provider?: string;
   readonly modelId?: string;
   readonly thinking?: string;
+  readonly reasoning?: boolean;
   readonly contextWindow?: number;
 }
 
@@ -736,7 +737,7 @@ export function childFooterInfo(
     ? {
         provider: binding.provider,
         id: binding.modelId,
-        reasoning: false,
+        reasoning: binding.reasoning ?? Boolean(ctx.model?.reasoning),
         contextWindow: binding.contextWindow,
       }
     : undefined;

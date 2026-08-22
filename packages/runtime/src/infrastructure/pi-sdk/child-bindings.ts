@@ -23,6 +23,7 @@ export type ChildSessionModelBinding =
       readonly provider?: string;
       readonly modelId?: string;
       readonly thinking?: string;
+      readonly reasoning?: boolean;
       readonly contextWindow?: number;
     }
   | {
@@ -30,6 +31,7 @@ export type ChildSessionModelBinding =
       readonly provider?: string;
       readonly modelId?: string;
       readonly thinking?: string;
+      readonly reasoning?: boolean;
       readonly contextWindow?: number;
     }
   | {
@@ -38,6 +40,7 @@ export type ChildSessionModelBinding =
       readonly provider?: string;
       readonly modelId?: string;
       readonly thinking?: string;
+      readonly reasoning?: boolean;
       readonly contextWindow?: number;
     };
 
