@@ -56,6 +56,20 @@ test("child live feed accumulates tool uses and token usage from finalized assis
   assert.ok(feed.snapshot.startedAtMs !== undefined, "startedAtMs is captured from the first event");
 });
 
+test("context compaction clears only the current context while retaining lifetime counters", () => {
+  const feed = createChildLiveFeed();
+  feed.emit({ type: "message", id: "m1", phase: "end", role: "assistant", text: "before compaction", usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 0, cost: 0.01, contextTokens: 123 } });
+  feed.emit({ type: "context_reset" });
+
+  assert.equal(feed.snapshot.contextTokens, undefined, "pre-compaction context must not be reused");
+
+  feed.emit({ type: "message", id: "m2", phase: "end", role: "assistant", text: "aborted", usage: { input: 90, output: 1, cacheRead: 4, cacheWrite: 0, cost: 0.001, contextTokens: null } });
+  assert.equal(feed.snapshot.contextTokens, undefined, "invalid post-compaction usage must remain unknown");
+  feed.emit({ type: "message", id: "m3", phase: "end", role: "assistant", text: "empty", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 } });
+  assert.equal(feed.snapshot.contextTokens, undefined, "zero usage must remain unknown");
+  assert.deepEqual(feed.snapshot.counters, { toolUses: 0, inputTokens: 190, outputTokens: 21, cacheReadTokens: 9, cacheWriteTokens: 0, cost: 0.011 });
+});
+
 test("child live feed settlement preserves accumulated counters and the start time", () => {
   const feed = createChildLiveFeed();
   feed.emit({ type: "message", id: "m1", phase: "end", role: "assistant", text: "first", usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: 0 } });

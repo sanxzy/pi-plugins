@@ -229,6 +229,27 @@ test("message_end maps finalized assistant usage into the live event", () => {
   });
 });
 
+test("message_end marks aborted assistant usage as unknown context", () => {
+  const mapped = mapAgentSessionEvent({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "aborted" }],
+      timestamp: 8,
+      stopReason: "aborted",
+      usage: { input: 100, output: 2, cacheRead: 5, cacheWrite: 0, totalTokens: 107, cost: { total: 0.01 } },
+    } as never,
+  });
+  assert.deepEqual(mapped && mapped.type === "message" ? mapped.usage : undefined, {
+    input: 100,
+    output: 2,
+    cacheRead: 5,
+    cacheWrite: 0,
+    cost: 0.01,
+    contextTokens: null,
+  });
+});
+
 test("message_end never carries usage for user messages or missing usage", () => {
   const user = mapAgentSessionEvent({
     type: "message_end",
@@ -269,6 +290,12 @@ test("live feed retains tool-call args for runtime control but UI must not rende
   if (entry.kind === "tool") {
     assert.deepEqual(entry.args, { command: "ls -la", cwd: "/repo" }, "args are retained on the completed entry");
   }
+});
+
+test("maps compaction start to a current-context reset", () => {
+  assert.deepEqual(mapAgentSessionEvent({ type: "compaction_start", reason: "threshold" }), {
+    type: "context_reset",
+  });
 });
 
 test("maps agent end and settlement boundaries without treating streaming as settlement", () => {
@@ -347,6 +374,11 @@ test("attachment forwards events, delivers settlement, and unsubscribes without 
     listener({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "done" }], timestamp: 9 } });
   }
   assert.equal(feed.snapshot.transcript.length, 1, "events forwarded into the feed");
+
+  for (const listener of [...listeners]) {
+    listener({ type: "compaction_start", reason: "manual" });
+  }
+  assert.equal(feed.snapshot.contextTokens, undefined, "compaction invalidates the prior current-context value");
 
   for (const listener of [...listeners]) {
     listener({ type: "agent_settled" });

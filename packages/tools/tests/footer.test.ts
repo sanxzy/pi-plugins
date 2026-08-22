@@ -375,7 +375,10 @@ test("live transcript events repaint the mounted live view without steering", as
   try {
     const d = piDouble();
     registerAgentFooter(d.pi);
-    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd));
+    const testCtx = ctx(cwd, "root-session", {
+      model: { provider: "openai-codex", id: "gpt-5.6-luna", reasoning: true, contextWindow: 260_000 },
+    });
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, testCtx);
 
     const pool = getChildPool(cwd, "root-session");
     const feed = createChildLiveFeed();
@@ -392,15 +395,17 @@ test("live transcript events repaint the mounted live view without steering", as
       onBranchChange: () => () => {},
       getGitBranch: () => "main",
       getAvailableProviderCount: () => 1,
-    }) as { handleInput(data: string): boolean; dispose(): void };
+    }) as { handleInput(data: string): boolean; render(width: number): string[]; dispose(): void };
 
     footer.handleInput(ALT_DOWN);
     footer.handleInput(ALT_DOWN);
     footer.handleInput(ENTER);
     assert.equal(capturedCustomFactory, undefined, "F009 host-level: live view should not mount overlay; parent window reused");
-    assert.ok((footer as unknown as { render(w:number):string[] }).render(100).join("\n").includes("Viewing"), "should be viewing after host swap via parent window");
-    feed.emit({ type: "message", id: "m1", phase: "start", role: "assistant", text: "thinking" });
-    assert.ok(true, "live transcript event does not error while viewing via host swap");
+    assert.ok(footer.render(100).join("\n").includes("Viewing"), "should be viewing after host swap via parent window");
+    feed.emit({ type: "message", id: "m1", phase: "end", role: "assistant", text: "thinking", usage: { input: 40_000, output: 100, cacheRead: 11_900, cacheWrite: 0, cost: 0, contextTokens: 52_000 } });
+    assert.match(footer.render(100).join("\n"), /20\.0%\/260k/, "current child context is rendered from latest usage");
+    feed.emit({ type: "context_reset" });
+    assert.match(footer.render(100).join("\n"), /\?\/260k/, "compaction invalidates the cached child context percentage");
     footer.dispose();
   } finally {
     rmSync(cwd, { recursive: true, force: true });

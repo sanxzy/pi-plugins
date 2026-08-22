@@ -64,6 +64,7 @@ export type ChildLiveEvent =
       /** Original tool result envelope used by the host's native renderer. */
       readonly result?: ChildLiveToolResult;
     }
+  | { readonly type: "context_reset" }
   | { readonly type: "agent_end"; readonly willRetry: boolean }
   | { readonly type: "settled"; readonly status: Exclude<ChildLiveStatus, "running"> };
 
@@ -74,8 +75,8 @@ export interface ChildLiveUsage {
   readonly cacheRead: number;
   readonly cacheWrite: number;
   readonly cost: number;
-  /** Provider-reported context size for this response, when available. */
-  readonly contextTokens?: number;
+  /** Provider-reported context size; null explicitly marks an invalid/unknown response. */
+  readonly contextTokens?: number | null;
 }
 
 /** Cumulative live counters derived from the transcript and reported usage. */
@@ -118,8 +119,10 @@ function emptyCounters(): ChildLiveCounters {
   return { toolUses: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 };
 }
 
-function contextTokensForUsage(usage: ChildLiveUsage): number {
-  return usage.contextTokens ?? usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+function contextTokensForUsage(usage: ChildLiveUsage): number | undefined {
+  if (usage.contextTokens === null) return undefined;
+  const contextTokens = usage.contextTokens ?? usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+  return contextTokens > 0 ? contextTokens : undefined;
 }
 
 /** Recompute cumulative counters from the current transcript and usage map. */
@@ -224,7 +227,13 @@ export function createChildLiveFeed(seed?: ChildLiveSnapshot): ChildLiveFeed {
         cacheWriteTokens: baseCounters.cacheWriteTokens + raw.cacheWriteTokens,
         cost: (baseCounters.cost ?? 0) + raw.cost,
       });
-      if (event.type === "settled") {
+      if (event.type === "context_reset") {
+        snapshot = {
+          ...snapshot,
+          contextTokens: undefined,
+          startedAtMs,
+        };
+      } else if (event.type === "settled") {
         const raw = reduceCounters(snapshot.transcript, usageByMessage);
         snapshot = {
           status: event.status,
