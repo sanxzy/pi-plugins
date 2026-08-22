@@ -160,12 +160,26 @@ export function saveModelGroups(next: ModelGroupsFile): { ok: true } | { ok: fal
 export function clearModelGroupsCache(): void { cached = undefined; cachedFingerprint = ""; }
 
 export function resolveActiveModel(options?: { readonly advance?: boolean }): ModelGroupEntry | undefined {
+  const { activeGroupId } = getModelGroups();
+  if (!activeGroupId) return undefined;
+  return resolveGroupModel(activeGroupId, options);
+}
+
+/**
+ * Resolve the current member of one NAMED group (by id), independent of the
+ * home-wide active selection.
+ *
+ * Every individual model hit consumes one turn of each active quarantine.
+ * Round-robin pointers are keyed by group id, so distinct groups rotate
+ * independently. Returns undefined for unknown groups and when every member
+ * is quarantined.
+ */
+export function resolveGroupModel(groupId: string, options?: { readonly advance?: boolean }): ModelGroupEntry | undefined {
+  if (!groupId) return undefined;
   // Every individual model hit consumes one turn of each active quarantine.
   tickQuarantineTurns();
   const advance = options?.advance ?? true;
-  const { groups, activeGroupId } = getModelGroups();
-  if (!activeGroupId) return undefined;
-  const group = groups.find((g) => g.id === activeGroupId);
+  const group = getGroupById(groupId);
   if (!group) return undefined;
   const available = group.models.filter((m) => !isQuarantined(m.ref));
   if (available.length === 0) return undefined;
@@ -182,10 +196,29 @@ export function resolveActiveModel(options?: { readonly advance?: boolean }): Mo
   return available[0];
 }
 
+/** Look up one validated group by its unique id. */
+export function getGroupById(groupId: string): ModelGroup | undefined {
+  if (!groupId) return undefined;
+  const { groups } = getModelGroups();
+  return groups.find((g) => g.id === groupId);
+}
+
 export function getActiveGroup(): ModelGroup | undefined {
   const { groups, activeGroupId } = getModelGroups();
   if (!activeGroupId) return undefined;
   return groups.find((g) => g.id === activeGroupId);
+}
+
+/**
+ * Quarantine a failed member of one NAMED group and return the next
+ * available member. Non-members and unknown groups yield undefined.
+ */
+export function reportGroupFailure(groupId: string, failedRef: string): ModelGroupEntry | undefined {
+  const group = getGroupById(groupId);
+  if (!group) return undefined;
+  if (!group.models.some((model) => model.ref === failedRef)) return undefined;
+  quarantineModel(failedRef, group.quarantineTurns);
+  return resolveGroupModel(groupId);
 }
 
 export function clearRoundRobinPointers(): void { roundRobinPointers.clear(); }
@@ -229,15 +262,30 @@ export type ModelGroupHostActivation =
 export interface ModelGroupHostApi {
   readonly list: () => readonly ModelGroupHostItem[];
   readonly activate: (id: string) => ModelGroupHostActivation;
-  /** Resolve and advance the active group's current member (per request). */
-  readonly resolveActive: () => { ref: string; thinking?: string; contextWindow?: number } | undefined;
-  /** Quarantine a failed member of the active group and return the next available one. */
-  readonly reportFailure: (failedRef: string) => { ref: string; thinking?: string; contextWindow?: number } | undefined;
+  /** Resolve and advance a group's current member (per request). Defaults to the active group. */
+  readonly resolveActive: (groupId?: string) => { ref: string; thinking?: string; contextWindow?: number } | undefined;
+  /** Quarantine a failed member of a group and return the next available one. Defaults to the active group. */
+  readonly reportFailure: (failedRef: string, groupId?: string) => { ref: string; thinking?: string; contextWindow?: number } | undefined;
   readonly clearActiveGroup: () => void;
 }
 
-export function installModelGroupHostApi(): void {
-  const api: ModelGroupHostApi = {
+function entryPayload(group: ModelGroup, model: ModelGroupEntry): { ref: string; thinking?: string; contextWindow?: number } {
+  return {
+    ref: model.ref,
+    ...(model.thinking === undefined ? {} : { thinking: model.thinking }),
+    ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
+  };
+}
+
+/**
+ * Build the model-group host API consumed by the patched host `/model`
+ * selector and the AgentSession turn_start/failure hooks.
+ *
+ * Every resolver accepts an explicit group id so per-session bindings can
+ * target a named group; omitted ids fall back to the home-wide selection.
+ */
+export function buildModelGroupHostApi(): ModelGroupHostApi {
+  return {
     list: () => {
       const file = getModelGroups();
       return file.groups.map((group) => ({
@@ -255,7 +303,7 @@ export function installModelGroupHostApi(): void {
       if (!group) return { ok: false, error: `Unknown model group: ${id}` };
       const saved = saveModelGroups({ groups: file.groups, activeGroupId: id });
       if (!saved.ok) return { ok: false, error: saved.error };
-      const model = resolveActiveModel({ advance: false });
+      const model = resolveGroupModel(id, { advance: false });
       if (!model) return { ok: false, error: `All models in group '${group.name}' are quarantined.` };
       return {
         ok: true,
@@ -267,42 +315,36 @@ export function installModelGroupHostApi(): void {
       };
     },
     /**
-     * Resolve (and advance) the active group's current member. Called once per
-     * user request by the host patch so round-robin groups rotate per turn.
+     * Resolve (and advance) the group's current member. Called once per user
+     * request by the host patch so round-robin groups rotate per turn.
      */
-    resolveActive: () => {
-      const file = getModelGroups();
-      const group = file.groups.find((item) => item.id === file.activeGroupId);
-      if (!group) return undefined;
-      const model = resolveActiveModel();
-      if (!model) return undefined;
-      return {
-        ref: model.ref,
-        ...(model.thinking === undefined ? {} : { thinking: model.thinking }),
-        ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
-      };
+    resolveActive: (groupId) => {
+      const id = groupId ?? getModelGroups().activeGroupId;
+      if (!id) return undefined;
+      const model = resolveGroupModel(id);
+      const group = getGroupById(id);
+      if (!model || !group) return undefined;
+      return entryPayload(group, model);
     },
     /**
-     * Quarantine a failed member of the active group and return the next
-     * available member so the host can continue with a replacement model.
-     * Non-members are ignored; undefined means no replacement is available.
+     * Quarantine a failed member of the group and return the next available
+     * member so the host can continue with a replacement model. Non-members
+     * are ignored; undefined means no replacement is available.
      */
-    reportFailure: (failedRef) => {
-      const file = getModelGroups();
-      const group = file.groups.find((item) => item.id === file.activeGroupId);
-      if (!group) return undefined;
-      if (!group.models.some((model) => model.ref === failedRef)) return undefined;
-      quarantineModel(failedRef, group.quarantineTurns);
-      const next = resolveActiveModel();
-      if (!next) return undefined;
-      return {
-        ref: next.ref,
-        ...(next.thinking === undefined ? {} : { thinking: next.thinking }),
-        ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
-      };
+    reportFailure: (failedRef, groupId) => {
+      const id = groupId ?? getModelGroups().activeGroupId;
+      if (!id) return undefined;
+      const next = reportGroupFailure(id, failedRef);
+      const group = getGroupById(id);
+      if (!next || !group) return undefined;
+      return entryPayload(group, next);
     },
     clearActiveGroup: () => clearActiveGroup(),
   };
+}
+
+export function installModelGroupHostApi(): void {
+  const api = buildModelGroupHostApi();
   (globalThis as typeof globalThis & { [key: symbol]: unknown })[Symbol.for(MODEL_GROUP_HOST_API_KEY)] = api;
 }
 
