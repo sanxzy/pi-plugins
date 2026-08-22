@@ -659,6 +659,7 @@ interface FooterChildBinding {
   readonly provider?: string;
   readonly modelId?: string;
   readonly thinking?: string;
+  readonly contextWindow?: number;
 }
 
 function viewedChildBinding(jobId: string | undefined): FooterChildBinding | undefined {
@@ -732,7 +733,12 @@ export function childFooterInfo(
   // retained sessions spawned before this registry existed).
   const binding = viewedChildBinding(jobId);
   const boundModel = binding && binding.provider && binding.modelId
-    ? { provider: binding.provider, id: binding.modelId, reasoning: false, contextWindow: undefined as number | undefined }
+    ? {
+        provider: binding.provider,
+        id: binding.modelId,
+        reasoning: false,
+        contextWindow: binding.contextWindow,
+      }
     : undefined;
   const model = boundModel ?? ctx.model;
   const reasoning = Boolean(model?.reasoning);

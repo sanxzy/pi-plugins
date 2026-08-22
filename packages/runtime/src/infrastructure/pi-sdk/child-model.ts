@@ -337,6 +337,7 @@ export type ChildBindingPublication = {
 interface ModelIdentityLike {
   readonly provider?: string | undefined;
   readonly id?: string | undefined;
+  readonly contextWindow?: number | undefined;
 }
 
 /**
@@ -354,9 +355,15 @@ export function buildChildSpawnPublication(options: {
   const identity = options.plan.model ?? options.sessionModel;
   const provider = typeof identity?.provider === "string" ? identity.provider : undefined;
   const modelId = typeof identity?.id === "string" ? identity.id : undefined;
+  // The SESSION's actual model is authoritative for the context window even
+  // when a catalog plan entry exists (catalog entries carry no window size).
+  const contextWindow = typeof options.sessionModel?.contextWindow === "number"
+    ? options.sessionModel.contextWindow
+    : undefined;
   const base = {
     ...(provider === undefined ? {} : { provider }),
     ...(modelId === undefined ? {} : { modelId }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
   };
   if (options.plan.publish?.kind === "group") {
     return {

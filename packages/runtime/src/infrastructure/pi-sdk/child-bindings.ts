@@ -23,12 +23,14 @@ export type ChildSessionModelBinding =
       readonly provider?: string;
       readonly modelId?: string;
       readonly thinking?: string;
+      readonly contextWindow?: number;
     }
   | {
       readonly kind: "pinned";
       readonly provider?: string;
       readonly modelId?: string;
       readonly thinking?: string;
+      readonly contextWindow?: number;
     }
   | {
       /** Follows the home-wide active selection; identity reflects the spawn-time model. */
@@ -36,6 +38,7 @@ export type ChildSessionModelBinding =
       readonly provider?: string;
       readonly modelId?: string;
       readonly thinking?: string;
+      readonly contextWindow?: number;
     };
 
 /** Stable cross-boundary key; mirrors the host patch's lookup. */
