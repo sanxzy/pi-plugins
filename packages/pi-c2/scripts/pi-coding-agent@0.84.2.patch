@@ -1,8 +1,8 @@
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index 4bcf0d4..4e8acd6 100644
+index f8c1f48..be46311 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -97,6 +97,8 @@ export class AgentSession {
+@@ -97,6 +97,8 @@
      _compactionAbortController = undefined;
      _autoCompactionAbortController = undefined;
      _overflowRecoveryAttempted = false;
@@ -11,7 +11,7 @@ index 4bcf0d4..4e8acd6 100644
      // Branch summarization state
      _branchSummaryAbortController = undefined;
      // Retry state
-@@ -396,8 +398,56 @@ export class AgentSession {
+@@ -396,8 +398,56 @@
                      this._retryAttempt = 0;
                  }
              }
@@ -68,25 +68,35 @@ index 4bcf0d4..4e8acd6 100644
      _willRetryAfterAgentEnd(event) {
          const settings = this.settingsManager.getRetrySettings();
          if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
-@@ -446,6 +496,25 @@ export class AgentSession {
+@@ -446,6 +496,35 @@
              await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
          }
          else if (event.type === "turn_start") {
 +            // pi-c2: advance round-robin groups on every individual model request.
++            // Session bindings decide the target: pinned sessions never move,
++            // group-bound sessions advance their named group, and unbound
++            // sessions keep following the home-wide active selection.
 +            try {
-+                const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
-+                if (typeof groupApi?.resolveActive === "function") {
-+                    const resolved = groupApi.resolveActive();
-+                    if (resolved) {
-+                        const separator = resolved.ref.indexOf("/");
-+                        const provider = separator === -1 ? "" : resolved.ref.slice(0, separator);
-+                        const id = separator === -1 ? "" : resolved.ref.slice(separator + 1);
-+                        const found = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
-+                        if (found && (!this.model || this.model.provider !== found.provider || this.model.id !== found.id)) {
-+                            this.agent.state.model = resolved.contextWindow !== undefined && found.contextWindow > found.contextWindow
-+                                ? { ...found, contextWindow: resolved.contextWindow }
-+                                : found;
-+                            if (resolved.thinking) this.setThinkingLevel(resolved.thinking);
++                const bindingApi = globalThis[Symbol.for("pi-c2.child-model-bindings")];
++                const sessionBinding = typeof bindingApi?.getChildModelBinding === "function"
++                    ? bindingApi.getChildModelBinding(this.sessionId)
++                    : undefined;
++                if (sessionBinding?.kind !== "pinned") {
++                    const boundGroupId = sessionBinding?.kind === "group" ? sessionBinding.groupId : undefined;
++                    const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
++                    if (typeof groupApi?.resolveActive === "function") {
++                        const resolved = groupApi.resolveActive(boundGroupId);
++                        if (resolved) {
++                            const separator = resolved.ref.indexOf("/");
++                            const provider = separator === -1 ? "" : resolved.ref.slice(0, separator);
++                            const id = separator === -1 ? "" : resolved.ref.slice(separator + 1);
++                            const found = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
++                            if (found && (!this.model || this.model.provider !== found.provider || this.model.id !== found.id)) {
++                                this.agent.state.model = resolved.contextWindow !== undefined && found.contextWindow > found.contextWindow
++                                    ? { ...found, contextWindow: resolved.contextWindow }
++                                    : found;
++                                if (resolved.thinking) this.setThinkingLevel(resolved.thinking);
++                            }
 +                        }
 +                    }
 +                }
@@ -94,37 +104,44 @@ index 4bcf0d4..4e8acd6 100644
              const extensionEvent = {
                  type: "turn_start",
                  turnIndex: this._turnIndex,
-@@ -761,6 +830,38 @@ export class AgentSession {
+@@ -761,6 +840,45 @@
          if (!msg) {
              return false;
          }
 +        // pi-c2: quarantine group members on HTTP 4xx/5xx and immediately
-+        // continue with the next available member of the active group.
++        // continue with the next available member of the session's bound group.
 +        try {
-+            const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
-+            if (msg.stopReason === "error" && typeof groupApi?.reportFailure === "function" && this.model) {
-+                const errorText = String(msg.errorMessage ?? "");
-+                const statusMatch = /HTTP\s+([45]\d{2})/i.exec(errorText);
-+                const status = statusMatch ? Number(statusMatch[1]) : (/(overloaded|rate.?limit|too many requests|service.?unavailable|server.?error|bad gateway|gateway time)/i.test(errorText) ? 503 : 0);
-+                if (status >= 400 && status <= 599) {
-+                    const currentRef = `${this.model.provider}/${this.model.id}`;
-+                    const next = groupApi.reportFailure(currentRef);
-+                    if (next) {
-+                        const separator = next.ref.indexOf("/");
-+                        const provider = next.ref.slice(0, separator);
-+                        const id = next.ref.slice(separator + 1);
-+                        const found = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
-+                        if (found) {
-+                            this.agent.state.model = next.contextWindow !== undefined && found.contextWindow > next.contextWindow
-+                                ? { ...found, contextWindow: next.contextWindow }
-+                                : found;
-+                            if (next.thinking) this.setThinkingLevel(next.thinking);
-+                            // Drop the failed assistant turn so the continuation retries cleanly.
-+                            const messages = this.agent.state.messages;
-+                            if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
-+                                this.agent.state.messages = messages.slice(0, -1);
++            const bindingApi = globalThis[Symbol.for("pi-c2.child-model-bindings")];
++            const sessionBinding = typeof bindingApi?.getChildModelBinding === "function"
++                ? bindingApi.getChildModelBinding(this.sessionId)
++                : undefined;
++            if (sessionBinding?.kind !== "pinned") {
++                const boundGroupId = sessionBinding?.kind === "group" ? sessionBinding.groupId : undefined;
++                const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
++                if (msg.stopReason === "error" && typeof groupApi?.reportFailure === "function" && this.model) {
++                    const errorText = String(msg.errorMessage ?? "");
++                    const statusMatch = /HTTP\s+([45]\d{2})/i.exec(errorText);
++                    const status = statusMatch ? Number(statusMatch[1]) : (/(overloaded|rate.?limit|too many requests|service.?unavailable|server.?error|bad gateway|gateway time)/i.test(errorText) ? 503 : 0);
++                    if (status >= 400 && status <= 599) {
++                        const currentRef = `${this.model.provider}/${this.model.id}`;
++                        const next = groupApi.reportFailure(currentRef, boundGroupId);
++                        if (next) {
++                            const separator = next.ref.indexOf("/");
++                            const provider = next.ref.slice(0, separator);
++                            const id = next.ref.slice(separator + 1);
++                            const found = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
++                            if (found) {
++                                this.agent.state.model = next.contextWindow !== undefined && found.contextWindow > next.contextWindow
++                                    ? { ...found, contextWindow: next.contextWindow }
++                                    : found;
++                                if (next.thinking) this.setThinkingLevel(next.thinking);
++                                // Drop the failed assistant turn so the continuation retries cleanly.
++                                const messages = this.agent.state.messages;
++                                if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
++                                    this.agent.state.messages = messages.slice(0, -1);
++                                }
++                                return true;
 +                            }
-+                            return true;
 +                        }
 +                    }
 +                }
@@ -133,7 +150,7 @@ index 4bcf0d4..4e8acd6 100644
          if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
              return true;
          }
-@@ -1366,7 +1467,12 @@ export class AgentSession {
+@@ -1366,7 +1484,12 @@
       */
      async compact(customInstructions) {
          await this.abort();
@@ -147,7 +164,7 @@ index 4bcf0d4..4e8acd6 100644
          this._emit({ type: "compaction_start", reason: "manual" });
          try {
              if (!this.model) {
-@@ -1394,7 +1500,7 @@ export class AgentSession {
+@@ -1394,7 +1517,7 @@
                      customInstructions,
                      reason: "manual",
                      willRetry: false,
@@ -156,7 +173,7 @@ index 4bcf0d4..4e8acd6 100644
                  }));
                  if (result?.cancel) {
                      throw new Error("Compaction cancelled");
-@@ -1419,14 +1525,14 @@ export class AgentSession {
+@@ -1419,14 +1542,14 @@
              }
              else {
                  // Generate compaction result
@@ -173,7 +190,7 @@ index 4bcf0d4..4e8acd6 100644
                  throw new Error("Compaction cancelled");
              }
              this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-@@ -1479,7 +1585,9 @@ export class AgentSession {
+@@ -1479,7 +1602,9 @@
              throw error;
          }
          finally {
@@ -184,7 +201,7 @@ index 4bcf0d4..4e8acd6 100644
          }
      }
      /**
-@@ -1511,8 +1619,13 @@ export class AgentSession {
+@@ -1511,8 +1636,13 @@
          const settings = this.settingsManager.getCompactionSettings();
          if (!settings.enabled)
              return false;
@@ -199,7 +216,7 @@ index 4bcf0d4..4e8acd6 100644
              return false;
          const contextWindow = this.model?.contextWindow ?? 0;
          // Skip overflow check if the message came from a different model.
-@@ -1585,7 +1698,9 @@ export class AgentSession {
+@@ -1585,7 +1715,9 @@
              contextTokens = directContextTokens;
          }
          if (shouldCompact(contextTokens, contextWindow, settings)) {
@@ -210,7 +227,7 @@ index 4bcf0d4..4e8acd6 100644
          }
          return false;
      }
-@@ -1595,6 +1710,13 @@ export class AgentSession {
+@@ -1595,6 +1727,13 @@
      async _runAutoCompaction(reason, willRetry) {
          const settings = this.settingsManager.getCompactionSettings();
          let started = false;
@@ -224,7 +241,7 @@ index 4bcf0d4..4e8acd6 100644
          try {
              if (!this.model) {
                  return false;
-@@ -1606,7 +1728,8 @@ export class AgentSession {
+@@ -1606,7 +1745,8 @@
                  return false;
              }
              this._emit({ type: "compaction_start", reason });
@@ -234,7 +251,7 @@ index 4bcf0d4..4e8acd6 100644
              started = true;
              let extensionCompaction;
              let fromExtension = false;
-@@ -1618,7 +1741,7 @@ export class AgentSession {
+@@ -1618,7 +1758,7 @@
                      customInstructions: undefined,
                      reason,
                      willRetry,
@@ -243,7 +260,7 @@ index 4bcf0d4..4e8acd6 100644
                  }));
                  if (extensionResult?.cancel) {
                      this._emit({
-@@ -1650,14 +1773,14 @@ export class AgentSession {
+@@ -1650,14 +1790,14 @@
              }
              else {
                  // Generate compaction result
@@ -260,7 +277,7 @@ index 4bcf0d4..4e8acd6 100644
                  this._emit({
                      type: "compaction_end",
                      reason,
-@@ -1699,9 +1822,19 @@ export class AgentSession {
+@@ -1699,9 +1839,19 @@
                  // from agent state. Rebuilding state from the new compaction can restore that kept entry,
                  // leaving an assistant as the final message. agent.continue() rejects that state, so remove
                  // the retriable error or truncated-length response again before continuing the interrupted turn.
@@ -281,7 +298,7 @@ index 4bcf0d4..4e8acd6 100644
                  return true;
              }
              // Auto-compaction can complete while follow-up/steering/custom messages are waiting.
-@@ -1725,7 +1858,9 @@ export class AgentSession {
+@@ -1725,7 +1875,9 @@
              return false;
          }
          finally {
@@ -292,7 +309,7 @@ index 4bcf0d4..4e8acd6 100644
          }
      }
      /**
-@@ -1908,6 +2043,7 @@ export class AgentSession {
+@@ -1908,6 +2060,7 @@
                  this._extensionShutdownHandler?.();
              },
              getContextUsage: () => this.getContextUsage(),

@@ -27,6 +27,8 @@ export const MAX_CHILD_MODEL_BINDINGS = 4096;
 
 interface BindingRegistry {
   readonly bindings: Map<string, ChildSessionModelBinding>;
+  /** Method form so the patched host can resolve one binding by session id. */
+  readonly getChildModelBinding: (sessionId: string | undefined) => ChildSessionModelBinding | undefined;
 }
 
 // Installed eagerly so the patched host can consult the key at any time,
@@ -34,10 +36,22 @@ interface BindingRegistry {
 const state: BindingRegistry = (() => {
   const globalScope = globalThis as typeof globalThis & { [key: symbol]: unknown };
   const existing = globalScope[Symbol.for(CHILD_MODEL_BINDINGS_KEY)];
-  if (existing && typeof existing === "object" && "bindings" in (existing as object)) {
+  if (
+    existing &&
+    typeof existing === "object" &&
+    "bindings" in existing &&
+    "getChildModelBinding" in existing
+  ) {
     return existing as BindingRegistry;
   }
-  const created: BindingRegistry = { bindings: new Map() };
+  const bindings = new Map<string, ChildSessionModelBinding>();
+  const created: BindingRegistry = {
+    bindings,
+    getChildModelBinding(sessionId) {
+      if (!sessionId) return undefined;
+      return bindings.get(sessionId);
+    },
+  };
   globalScope[Symbol.for(CHILD_MODEL_BINDINGS_KEY)] = created;
   return created;
 })();
@@ -57,8 +71,7 @@ export function publishChildModelBinding(sessionId: string, binding: ChildSessio
 
 /** Read one child session's binding; undefined means inherit. */
 export function getChildModelBinding(sessionId: string | undefined): ChildSessionModelBinding | undefined {
-  if (!sessionId) return undefined;
-  return state.bindings.get(sessionId);
+  return state.getChildModelBinding(sessionId);
 }
 
 /** Remove one child session's binding. Idempotent. */
