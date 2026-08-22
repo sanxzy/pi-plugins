@@ -115,7 +115,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           const retained = retainedSnapshotFor(pool, top.rowId);
           const snapshot = control?.live?.snapshot ?? retained;
           if (snapshot) {
-            const leaf = `${top.rowId}:${snapshot.transcript.length}:${snapshot.counters.inputTokens}:${snapshot.counters.outputTokens}:${snapshot.counters.cacheReadTokens}:${snapshot.counters.cacheWriteTokens}:${snapshot.counters.cost}:${snapshot.status}:${snapshot.settled}:${identity}`;
+            const leaf = `${top.rowId}:${snapshot.transcript.length}:${snapshot.counters.inputTokens}:${snapshot.counters.outputTokens}:${snapshot.counters.cacheReadTokens}:${snapshot.counters.cacheWriteTokens}:${snapshot.counters.cost}:${snapshot.contextTokens ?? "unknown"}:${snapshot.status}:${snapshot.settled}:${identity}`;
             if (infoCache?.leaf === leaf) return infoCache.info;
             const info = childFooterInfo(snapshot, ctx, footerData, top.rowId);
             infoCache = { leaf, info };

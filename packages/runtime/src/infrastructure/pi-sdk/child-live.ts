@@ -36,7 +36,7 @@ function messageDetails(message: { content?: unknown; stopReason?: unknown; erro
 }
 
 /** Extract token usage from a finalized assistant message, if reported. */
-function messageUsage(message: { role?: string; usage?: unknown }): ChildLiveUsage | undefined {
+function messageUsage(message: { role?: string; stopReason?: unknown; usage?: unknown }): ChildLiveUsage | undefined {
   if (message.role !== "assistant") return undefined;
   const usage = message.usage;
   if (!usage || typeof usage !== "object") return undefined;
@@ -45,13 +45,14 @@ function messageUsage(message: { role?: string; usage?: unknown }): ChildLiveUsa
     ? (record.cost as { total?: unknown }).total
     : undefined;
   const totalTokens = finiteNumber(record.totalTokens);
+  const invalidContext = message.stopReason === "aborted" || message.stopReason === "error";
   return {
     input: finiteNumber(record.input),
     output: finiteNumber(record.output),
     cacheRead: finiteNumber(record.cacheRead),
     cacheWrite: finiteNumber(record.cacheWrite),
     cost: finiteNumber(cost),
-    ...(totalTokens > 0 ? { contextTokens: totalTokens } : {}),
+    ...(invalidContext ? { contextTokens: null } : totalTokens > 0 ? { contextTokens: totalTokens } : {}),
   };
 }
 
@@ -170,6 +171,8 @@ export function mapAgentSessionEvent(event: AgentSessionEvent): ChildLiveEvent |
         isError: event.isError,
         ...(toolResult(event.result, event.isError) ? { result: toolResult(event.result, event.isError) } : {}),
       };
+    case "compaction_start":
+      return { type: "context_reset" };
     case "agent_end":
       return { type: "agent_end", willRetry: event.willRetry };
     case "agent_settled":
