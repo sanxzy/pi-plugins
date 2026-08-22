@@ -213,11 +213,10 @@ test("failure: pinned sessions skip quarantine handling entirely", async () => {
 
 test("failure: a member failure inside a bound group quarantines and continues with the next member", async () => {
   const source = await patchedAgentSession();
-  let extracted = extractBlock(source, "// pi-c2: quarantine group members on HTTP 4xx/5xx", "        ");
-  extracted = extracted.replace("} catch {}", "} catch (swallowedError) { console.log(\"SWALLOWED:\", swallowedError?.message, swallowedError?.stack?.split('\\n')[1]); }");
-  extracted = extracted.replace('const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];\n                if (msg.stopReason', 'console.log("DBG before msg check");const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];\n                if (msg.stopReason');
-
-  const hook = compileBlock(extracted, { msg: errorMessage() });
+  const hook = compileBlock(
+    extractBlock(source, "// pi-c2: quarantine group members on HTTP 4xx/5xx", "        "),
+    { msg: errorMessage() },
+  );
   const calls: FakeGroupApiCalls = {
     resolveActiveArgs: [],
     reportFailureArgs: [],
