@@ -182,6 +182,7 @@ test("thinking mapping: a whitespace-padded valid level is trimmed before use", 
 import {
   parseModelBinding,
   resolveChildModelBinding,
+  resolveChildSpawnBinding,
   type ChildModelBinding,
 } from "../src/infrastructure/pi-sdk/child-model.ts";
 
@@ -221,6 +222,23 @@ test("binding: a resolvable frontmatter group binds the child to that group", ()
   const result = binding({ frontmatterModel: "group:ox-group" });
   assert.equal(result.ok, true);
   assert.deepEqual(result.ok && result.binding, { kind: "group", groupId: "ox-group" });
+});
+
+test("a group-bound child model uses the group's effective contextWindow", () => {
+  const result = resolveChildSpawnBinding({
+    frontmatterModel: "group:windowed",
+    globalModel: undefined,
+    agentName: "explore",
+    modelRuntime: runtimeWith([
+      model("large", "provider"),
+      model("small", "provider"),
+    ]),
+    findGroup: (id: string) => (id === "windowed" ? { id } : undefined),
+    resolveInitialMember: () => ({ ref: "provider/large" }),
+    resolveGroupContextWindow: () => 260_000,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.model?.contextWindow, 260_000);
 });
 
 test("binding: an unknown frontmatter group errors without falling back", () => {

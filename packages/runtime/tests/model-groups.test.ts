@@ -114,7 +114,7 @@ test("derived contextWindow is min of members", async () => {
   assert.equal(cw, 64000);
 });
 
-test("group contextWindow is persisted and caps the derived member window", async () => {
+test("an explicit group contextWindow is used exactly as configured", async () => {
   const { saveModelGroups, getModelGroups, deriveGroupContextWindow, clearModelGroupsCache } = await import("../src/infrastructure/model-groups/store.ts");
   const home = tempHome();
   try {
@@ -126,16 +126,16 @@ test("group contextWindow is persisted and caps the derived member window", asyn
           name: "A",
           mode: "fallback",
           quarantineTurns: 5,
-          contextWindow: 32000,
+          contextWindow: 320000,
           models: [{ ref: "openai/gpt-4o" }, { ref: "openai/gpt-4o-mini" }],
         }],
         activeGroupId: "g1",
       } as any);
       assert.equal(saved.ok, true);
       const group = getModelGroups().groups[0]! as any;
-      assert.equal(group.contextWindow, 32000);
+      assert.equal(group.contextWindow, 320000);
       const catalog = [{ provider: "openai", id: "gpt-4o", contextWindow: 128000 }, { provider: "openai", id: "gpt-4o-mini", contextWindow: 64000 }];
-      assert.equal(deriveGroupContextWindow(group, catalog), 32000);
+      assert.equal(deriveGroupContextWindow(group, catalog), 320000);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -187,6 +187,35 @@ test("round-robin rotates and skips quarantined", async () => {
       quarantineModel("openai/b", 5);
       // Next should skip b
       assert.equal(resolveActiveModel()?.ref, "openai/c");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("host bridge derives the smallest member contextWindow when no group cap is configured", async () => {
+  const { saveModelGroups, buildModelGroupHostApi, clearModelGroupsCache, clearRoundRobinPointers } = await import("../src/infrastructure/model-groups/store.ts");
+  const home = tempHome();
+  try {
+    withHome(home, () => {
+      clearModelGroupsCache();
+      clearRoundRobinPointers();
+      saveModelGroups({
+        groups: [{
+          id: "auto",
+          name: "Auto",
+          mode: "round-robin",
+          quarantineTurns: 5,
+          models: [{ ref: "provider/large" }, { ref: "provider/medium" }, { ref: "provider/small" }],
+        }],
+      });
+      const api = buildModelGroupHostApi();
+      const resolveContextWindow = (ref: string): number | undefined => ({
+        "provider/large": 1_000_000,
+        "provider/medium": 1_500_000,
+        "provider/small": 260_000,
+      }[ref]);
+      assert.equal(api.list(resolveContextWindow)[0]!.contextWindow, 260_000);
+      assert.equal(api.activate("auto", resolveContextWindow).contextWindow, 260_000);
+      assert.equal(api.resolveActive("auto", resolveContextWindow)?.contextWindow, 260_000);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

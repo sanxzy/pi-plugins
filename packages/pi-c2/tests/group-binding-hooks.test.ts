@@ -87,8 +87,8 @@ function compileBlock(block: string, freeVars: Record<string, unknown> = {}): (s
 interface FakeGroupApiCalls {
   resolveActiveArgs: unknown[];
   reportFailureArgs: Array<[string, string | undefined]>;
-  resolveNext?: { ref: string; thinking?: string };
-  reportNext?: { ref: string; thinking?: string };
+  resolveNext?: { ref: string; thinking?: string; contextWindow?: number };
+  reportNext?: { ref: string; thinking?: string; contextWindow?: number };
 }
 
 let fakeCalls: FakeGroupApiCalls | undefined;
@@ -165,14 +165,14 @@ test("turn_start: pinned sessions never consult the group api", async () => {
 test("turn_start: group-bound sessions advance their named group", async () => {
   const source = await patchedAgentSession();
   const hook = compileBlock(extractBlock(source, "// pi-c2: advance round-robin groups on every individual model request.", "            "));
-  const calls: FakeGroupApiCalls = { resolveActiveArgs: [], reportFailureArgs: [], resolveNext: { ref: "prov/two", thinking: "member-thinking" } };
+  const calls: FakeGroupApiCalls = { resolveActiveArgs: [], reportFailureArgs: [], resolveNext: { ref: "prov/two", thinking: "member-thinking", contextWindow: 2000 } };
   installFakeApis({ sess: { kind: "group", groupId: "beta" } }, calls);
   try {
     const { self, thinkingLevels } = fakeSelf("sess");
     hook(self);
     assert.deepEqual(calls.resolveActiveArgs, ["beta"], "the bound group id is passed through");
     const state = (self.agent as { state: { model?: unknown } }).state;
-    assert.deepEqual(state.model, { provider: "prov", id: "two", contextWindow: 1000 }, "state.model follows the resolved member");
+    assert.deepEqual(state.model, { provider: "prov", id: "two", contextWindow: 2000 }, "state.model follows the resolved member and exact group window");
     assert.deepEqual(thinkingLevels, ["member-thinking"]);
   } finally {
     clearFakeApis();
@@ -220,7 +220,7 @@ test("failure: a member failure inside a bound group quarantines and continues w
   const calls: FakeGroupApiCalls = {
     resolveActiveArgs: [],
     reportFailureArgs: [],
-    reportNext: { ref: "prov/two" },
+    reportNext: { ref: "prov/two", contextWindow: 2000 },
   };
   installFakeApis({ sess: { kind: "group", groupId: "beta" } }, calls);
   try {
@@ -237,7 +237,7 @@ test("failure: a member failure inside a bound group quarantines and continues w
       "the failing member is reported into the BOUND group",
     );
     const state = (self.agent as { state: { model?: unknown; messages: Array<{ role: string }> } }).state;
-    assert.deepEqual(state.model, { provider: "prov", id: "two", contextWindow: 1000 });
+    assert.deepEqual(state.model, { provider: "prov", id: "two", contextWindow: 2000 });
     assert.deepEqual(state.messages.map((m) => m.role), ["user"], "the failed assistant turn is dropped");
     assert.deepEqual(thinkingLevels, []);
   } finally {
