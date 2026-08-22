@@ -192,5 +192,5 @@ test("a throwing onControl releases the published binding and disposes the child
   assert.equal(status, "failed");
   assert.equal(getChildModelBinding("job-explode"), undefined, "binding must not leak after setup failure");
   assert.equal(spies.disposals, 1, "the created session must be disposed");
-  assert.equal(spies.unsubscribes >= 1 || spies.unsubscribes === 0, true);
+  assert.equal(spies.unsubscribes, 1, "the live feed subscription must be torn down on setup failure");
 });
