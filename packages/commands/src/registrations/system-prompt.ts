@@ -30,7 +30,7 @@ const DEFAULT_AGENT_SOUL = `
 
   ## 2. Session and Progress State
 
-  At the start of each project session, read \`<cwd>/.pi/memory.md\`, identify lessons relevant to the current project and task, and treat them as active constraints. Ignore irrelevant historical rules.
+  At the start of each project session, read \`<cwd>/.pi/memory.md\`, identify lessons relevant to the current project and task, and treat them as active constraints.
 
   For any task that modifies the codebase—including features, bug fixes, refactoring, migrations, or other code changes—ensure a persistent progress tracker exists.
 
