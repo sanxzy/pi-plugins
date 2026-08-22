@@ -41,8 +41,9 @@ test("child live feed reduces message and tool events into a retained snapshot",
 test("child live feed accumulates tool uses and token usage from finalized assistant messages", () => {
   const feed = createChildLiveFeed();
 
-  feed.emit({ type: "message", id: "m1", phase: "end", role: "assistant", text: "first", usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 0, cost: 0.01 } });
+  feed.emit({ type: "message", id: "m1", phase: "end", role: "assistant", text: "first", usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 0, cost: 0.01, contextTokens: 123 } });
   assert.deepEqual(feed.snapshot.counters, { toolUses: 0, inputTokens: 100, outputTokens: 20, cacheReadTokens: 5, cacheWriteTokens: 0, cost: 0.01 });
+  assert.equal(feed.snapshot.contextTokens, 123, "context usage tracks the latest response rather than cumulative counters");
 
   feed.emit({ type: "tool", id: "t1", phase: "start", toolCallId: "call-1", toolName: "grep", text: "" });
   feed.emit({ type: "tool", id: "t2", phase: "start", toolCallId: "call-2", toolName: "read", text: "" });
@@ -51,6 +52,7 @@ test("child live feed accumulates tool uses and token usage from finalized assis
 
   feed.emit({ type: "message", id: "m2", phase: "end", role: "assistant", text: "second", usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 3, cost: 0.005 } });
   assert.deepEqual(feed.snapshot.counters, { toolUses: 2, inputTokens: 140, outputTokens: 30, cacheReadTokens: 5, cacheWriteTokens: 3, cost: 0.015 });
+  assert.equal(feed.snapshot.contextTokens, 53, "missing provider total falls back to the latest response components");
   assert.ok(feed.snapshot.startedAtMs !== undefined, "startedAtMs is captured from the first event");
 });
 

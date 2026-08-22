@@ -225,7 +225,7 @@ test("message_end maps finalized assistant usage into the live event", () => {
     role: "assistant",
     content: [{ type: "text", text: "done" }],
     text: "done",
-    usage: { input: 100, output: 20, cacheRead: 3, cacheWrite: 0, cost: 0.01 },
+    usage: { input: 100, output: 20, cacheRead: 3, cacheWrite: 0, cost: 0.01, contextTokens: 123 },
   });
 });
 

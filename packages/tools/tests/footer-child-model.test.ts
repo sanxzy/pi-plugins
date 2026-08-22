@@ -8,7 +8,7 @@ import type { ChildLiveSnapshot } from "@xzy-ai/core";
 import { clearModelGroupsCache, getModelGroups, publishChildModelBinding, releaseChildModelBinding, saveModelGroups } from "@xzy-ai/runtime";
 import { childFooterInfo } from "../src/registrations/footer.ts";
 
-function snapshot(): ChildLiveSnapshot {
+function snapshot(contextTokens?: number): ChildLiveSnapshot {
   return {
     status: "running",
     settled: false,
@@ -21,6 +21,7 @@ function snapshot(): ChildLiveSnapshot {
       cacheWriteTokens: 0,
       cost: 0.001,
     },
+    ...(contextTokens === undefined ? {} : { contextTokens }),
   };
 }
 
@@ -58,6 +59,33 @@ function footerData(): ReadonlyFooterDataProvider {
 }
 
 
+
+test("child footer uses current context tokens instead of cumulative usage counters", () => {
+  try {
+    publishChildModelBinding("job-context", {
+      kind: "pinned",
+      provider: "openai-codex",
+      modelId: "gpt-5.6-luna",
+      contextWindow: 260_000,
+    });
+    const snapshotWithCumulativeUsage = {
+      ...snapshot(52_000),
+      counters: {
+        toolUses: 0,
+        inputTokens: 179_000,
+        outputTokens: 914,
+        cacheReadTokens: 325_000,
+        cacheWriteTokens: 0,
+        cost: 0.043,
+      },
+    };
+    const info = childFooterInfo(snapshotWithCumulativeUsage, ctx(), footerData(), "job-context");
+    assert.equal(info.contextPercent, 20, "percentage must use the current child context, not lifetime counters");
+    assert.equal(info.contextWindow, 260_000);
+  } finally {
+    releaseChildModelBinding("job-context");
+  }
+});
 
 test("child footer prefers the registry's resolved group identity over the parent model", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-c2-footer-model-"));
