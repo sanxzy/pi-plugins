@@ -20,6 +20,7 @@
  * users. Every outcome prints a clear one-line status.
  */
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -45,11 +46,15 @@ const PATCH_MARKERS = [
   "dist/core/agent-session.js:_maybeAbortForThreshold",
   "dist/core/agent-session.js:advance round-robin groups on every individual model request",
   "dist/core/agent-session.js:quarantine group members on HTTP 4xx/5xx",
+  "dist/core/agent-session.js:pi-c2.child-model-bindings",
   "dist/modes/interactive/components/model-selector.js:pi-c2: the extension publishes a host-neutral model-group bridge",
   "dist/modes/interactive/interactive-mode.js:__pi_c2_group__",
   "dist/modes/interactive/interactive-mode.js:hostSwapApplyChildEvent",
   "dist/modes/interactive/interactive-mode.js:_hostGetThemeInstance",
 ];
+
+/** Suffix of the revision marker written next to a successfully patched host. */
+const REVISION_SUFFIX = ".pi-c2-patch-revision";
 
 function log(message) {
   console.log(`[pi-c2 postinstall] ${message}`);
@@ -117,6 +122,28 @@ function isPatched(sdkDir) {
     if (!existsSync(file)) return false;
     return readFileSync(file, "utf8").includes(needle);
   });
+}
+
+/** Hash of the bundled patch — the deployed revision identity. */
+function bundledRevision() {
+  return createHash("sha256").update(readFileSync(PATCH_FILE)).digest("hex");
+}
+
+function readRevision(sdkDir) {
+  const file = `${sdkDir}${REVISION_SUFFIX}`;
+  return existsSync(file) ? readFileSync(file, "utf8").trim() : null;
+}
+
+function writeRevision(sdkDir, revision) {
+  writeFileSync(`${sdkDir}${REVISION_SUFFIX}`, `${revision}\n`);
+}
+
+function clearRevision(sdkDir) {
+  try {
+    rmSync(`${sdkDir}${REVISION_SUFFIX}`, { force: true });
+  } catch {
+    /* best-effort cleanup */
+  }
 }
 
 /** Strip the `a/` / `b/` prefix that unified diffs add to file names. */
@@ -189,9 +216,13 @@ try {
     log(`host pi-coding-agent is ${version}; the yellow ※ notification requires >= 0.84.2. Please upgrade pi.`);
     process.exit(0);
   }
+  const revision = bundledRevision();
   if (isPatched(hostSdk)) {
-    log(`host pi-coding-agent ${version} already patched; nothing to do`);
-    process.exit(0);
+    if (readRevision(hostSdk) === revision) {
+      log(`host pi-coding-agent ${version} already patched at current revision; nothing to do`);
+      process.exit(0);
+    }
+    log(`host patch revision differs from the bundle; upgrading (pristine backup restored first)`);
   }
   // Back up the pristine host SDK so the patch is reversible. If a backup from
   // a prior run exists, restore it first so the copy we patch is pristine.
@@ -204,11 +235,13 @@ try {
   }
   const changed = await applyPatchToSdk(hostSdk);
   if (isPatched(hostSdk)) {
+    writeRevision(hostSdk, revision);
     log(`patched host pi-coding-agent ${version}: ${changed.join(", ")}. Backup kept at ${backupDir}`);
   } else {
     // Verification failed: restore pristine.
     rmSync(hostSdk, { recursive: true, force: true });
     cpSync(backupDir, hostSdk, { recursive: true });
+    clearRevision(hostSdk);
     log(`patch verification failed; restored pristine host from backup`);
   }
 } catch (error) {
@@ -218,6 +251,7 @@ try {
     try {
       rmSync(hostSdk, { recursive: true, force: true });
       cpSync(backupDir, hostSdk, { recursive: true });
+      clearRevision(hostSdk);
       log(`postinstall failed (${detail}); restored pristine host from backup`);
       process.exit(0);
     } catch {
