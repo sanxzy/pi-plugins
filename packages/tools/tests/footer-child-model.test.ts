@@ -92,12 +92,14 @@ test("child footer uses a pinned registry entry's catalog identity and chain thi
       provider: "openai-codex",
       modelId: "gpt-5.6-luna",
       thinking: "xhigh",
+      contextWindow: 400_000,
     });
     const info = childFooterInfo(snapshot(), ctx(), footerData(), "job-pin");
     assert.equal(info.model, "gpt-5.6-luna");
     assert.equal(info.provider, "openai-codex");
     assert.equal(info.thinkingLevel, "xhigh");
     assert.equal(info.modelGroupName, undefined);
+    assert.equal(info.contextWindow, 400_000, "the child's own model window backs the context indicator");
   } finally {
     releaseChildModelBinding("job-pin");
   }

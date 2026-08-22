@@ -45,6 +45,7 @@ test("publication: a group plan carries member identity and thinking", async () 
       thinking: "high",
       inheritParentModel: false,
     },
+    sessionModel: { provider: "prov", id: "one", contextWindow: 400_000 },
   });
   assert.deepEqual(publication, {
     kind: "group",
@@ -52,6 +53,7 @@ test("publication: a group plan carries member identity and thinking", async () 
     provider: "prov",
     modelId: "one",
     thinking: "high",
+    contextWindow: 400_000,
   });
 });
 
