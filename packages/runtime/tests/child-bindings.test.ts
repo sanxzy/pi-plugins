@@ -67,12 +67,15 @@ test("publication: a pinned plan carries catalog identity and the chain thinking
       inheritParentModel: false,
     },
     chainThinking: "xhigh",
+    sessionModel: { provider: "openai-codex", id: "gpt-5.6-luna", reasoning: true, contextWindow: 260_000 },
   });
   assert.deepEqual(publication, {
     kind: "pinned",
     provider: "openai-codex",
     modelId: "gpt-5.6-luna",
     thinking: "xhigh",
+    reasoning: true,
+    contextWindow: 260_000,
   });
 });
 
