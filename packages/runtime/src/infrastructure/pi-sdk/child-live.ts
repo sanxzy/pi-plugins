@@ -40,16 +40,18 @@ function messageUsage(message: { role?: string; usage?: unknown }): ChildLiveUsa
   if (message.role !== "assistant") return undefined;
   const usage = message.usage;
   if (!usage || typeof usage !== "object") return undefined;
-  const record = usage as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; cost?: unknown };
+  const record = usage as { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; totalTokens?: unknown; cost?: unknown };
   const cost = record.cost && typeof record.cost === "object"
     ? (record.cost as { total?: unknown }).total
     : undefined;
+  const totalTokens = finiteNumber(record.totalTokens);
   return {
     input: finiteNumber(record.input),
     output: finiteNumber(record.output),
     cacheRead: finiteNumber(record.cacheRead),
     cacheWrite: finiteNumber(record.cacheWrite),
     cost: finiteNumber(cost),
+    ...(totalTokens > 0 ? { contextTokens: totalTokens } : {}),
   };
 }
 

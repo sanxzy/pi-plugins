@@ -74,6 +74,8 @@ export interface ChildLiveUsage {
   readonly cacheRead: number;
   readonly cacheWrite: number;
   readonly cost: number;
+  /** Provider-reported context size for this response, when available. */
+  readonly contextTokens?: number;
 }
 
 /** Cumulative live counters derived from the transcript and reported usage. */
@@ -93,6 +95,8 @@ export interface ChildLiveSnapshot {
   readonly settled: boolean;
   readonly transcript: readonly ChildLiveTranscriptEntry[];
   readonly counters: ChildLiveCounters;
+  /** Context size for the latest finalized assistant response, not lifetime usage totals. */
+  readonly contextTokens?: number;
   /** Epoch ms of the first observed event; undefined until the child starts producing activity. */
   readonly startedAtMs?: number;
 }
@@ -112,6 +116,10 @@ export interface ChildLiveFeed extends ChildLiveControl {
 
 function emptyCounters(): ChildLiveCounters {
   return { toolUses: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 };
+}
+
+function contextTokensForUsage(usage: ChildLiveUsage): number {
+  return usage.contextTokens ?? usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 }
 
 /** Recompute cumulative counters from the current transcript and usage map. */
@@ -152,7 +160,7 @@ export function createChildLiveFeed(seed?: ChildLiveSnapshot): ChildLiveFeed {
   let startedAtMs: number | undefined = seed?.startedAtMs;
   const baseCounters: ChildLiveCounters = seed?.counters ?? emptyCounters();
   let snapshot: ChildLiveSnapshot = seed
-    ? { status: "running", settled: false, transcript: [...seed.transcript], counters: seed.counters, startedAtMs }
+    ? { status: "running", settled: false, transcript: [...seed.transcript], counters: seed.counters, ...(seed.contextTokens === undefined ? {} : { contextTokens: seed.contextTokens }), startedAtMs }
     : { status: "running", settled: false, transcript: [], counters: emptyCounters() };
 
   const replaceTranscript = (event: ChildLiveEvent): readonly ChildLiveTranscriptEntry[] => {
@@ -223,6 +231,7 @@ export function createChildLiveFeed(seed?: ChildLiveSnapshot): ChildLiveFeed {
           settled: true,
           transcript: snapshot.transcript,
           counters: withBase(raw),
+          ...(snapshot.contextTokens === undefined ? {} : { contextTokens: snapshot.contextTokens }),
           startedAtMs,
         };
       } else if (event.type === "message" && event.usage !== undefined) {
@@ -234,6 +243,7 @@ export function createChildLiveFeed(seed?: ChildLiveSnapshot): ChildLiveFeed {
           ...snapshot,
           transcript,
           counters: withBase(reduceCounters(transcript, usageByMessage)),
+          contextTokens: contextTokensForUsage(event.usage),
           startedAtMs,
         };
       } else {

@@ -763,8 +763,11 @@ export function childFooterInfo(
     ?? ctx.getContextUsage()?.contextWindow
     ?? model?.contextWindow
     ?? 0;
-  // Child context is not exposed via host; approximate from child's prompt tokens.
-  const contextPercent = contextWindow > 0 && promptTokens > 0 ? (promptTokens / contextWindow) * 100 : null;
+  // Child counters are lifetime totals; use the latest response's context size
+  // instead so repeated turns cannot produce percentages above the window.
+  const contextPercent = contextWindow > 0 && snapshot.contextTokens !== undefined
+    ? (snapshot.contextTokens / contextWindow) * 100
+    : null;
   return {
     cwd: ctx.sessionManager.getCwd(),
     home: process.env.HOME || process.env.USERPROFILE,
