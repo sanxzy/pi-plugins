@@ -16,8 +16,27 @@
  */
 
 export type ChildSessionModelBinding =
-  | { readonly kind: "group"; readonly groupId: string }
-  | { readonly kind: "pinned" };
+  | {
+      readonly kind: "group";
+      readonly groupId: string;
+      /** Resolved start identity, surfaced by TUI footer reads. */
+      readonly provider?: string;
+      readonly modelId?: string;
+      readonly thinking?: string;
+    }
+  | {
+      readonly kind: "pinned";
+      readonly provider?: string;
+      readonly modelId?: string;
+      readonly thinking?: string;
+    }
+  | {
+      /** Follows the home-wide active selection; identity reflects the spawn-time model. */
+      readonly kind: "inherit";
+      readonly provider?: string;
+      readonly modelId?: string;
+      readonly thinking?: string;
+    };
 
 /** Stable cross-boundary key; mirrors the host patch's lookup. */
 export const CHILD_MODEL_BINDINGS_KEY = "pi-c2.child-model-bindings";

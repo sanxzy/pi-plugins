@@ -12,7 +12,7 @@ import {
   type AgentSession,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import { resolveChildSpawnBinding, resolveChildThinkingMapping, resolveExactChildModel } from "./child-model.ts";
+import { buildChildSpawnPublication, resolveChildSpawnBinding, resolveChildThinkingMapping } from "./child-model.ts";
 import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
 import { getGroupById, resolveGroupModel } from "../model-groups/store.ts";
 import { getChildModelBinding, publishChildModelBinding, releaseChildModelBinding } from "./child-bindings.ts";
@@ -381,13 +381,15 @@ async function createIsolatedChild(options: {
       const member = resolveGroupModel(groupId, { advance: false });
       return member ? { ref: member.ref, ...(member.thinking === undefined ? {} : { thinking: member.thinking }) } : undefined;
     },
-    parentBinding: getChildModelBinding(options.parentSessionId),
+    parentBinding: (() => {
+      const bound = getChildModelBinding(options.parentSessionId);
+      return bound && bound.kind !== "inherit" ? bound : undefined;
+    })(),
   });
   if (!plan.ok) {
     throw new Error(plan.error);
   }
   const model = plan.inheritParentModel ? options.model : plan.model;
-  const publishedBinding = plan.publish;
 
   const sessionOptions: Record<string, unknown> = {
     cwd: options.cwd,
@@ -405,7 +407,8 @@ async function createIsolatedChild(options: {
   // is applied as-is; an invalid global level fails the child with a clear
   // error instead of silently ignoring it. The SDK clamps unsupported levels
   // to the model's range.
-  if (publishedBinding?.kind === "group") {
+  let chainThinking: string | undefined;
+  if (plan.publish?.kind === "group") {
     if (plan.thinking) {
       sessionOptions.thinkingLevel = plan.thinking;
     }
@@ -420,6 +423,7 @@ async function createIsolatedChild(options: {
     }
     if (thinking.thinking) {
       sessionOptions.thinkingLevel = thinking.thinking;
+      chainThinking = thinking.thinking;
     }
   }
   // Tool mapping: an explicit non-empty `tools` list becomes the child
@@ -454,8 +458,16 @@ async function createIsolatedChild(options: {
   // children follow their named group, pinned children never move, and
   // unpinned children keep following the home-wide active selection.
   const sessionId = (session as unknown as { sessionId?: string | undefined }).sessionId;
-  if (publishedBinding && sessionId) {
-    publishChildModelBinding(sessionId, publishedBinding);
+  if (sessionId) {
+    // Publish the binding WITH its resolved identity so TUI surfaces can show
+    // this child's actual model/thinking without touching the parent context.
+    const sessionModel = (session as unknown as { model?: { provider?: string; id?: string } | undefined }).model;
+    const publication = buildChildSpawnPublication({
+      plan,
+      chainThinking,
+      sessionModel: sessionModel ?? (Array.isArray(options.model) ? undefined : options.model as { provider?: string; id?: string } | undefined),
+    });
+    publishChildModelBinding(sessionId, publication);
   }
 
   return {

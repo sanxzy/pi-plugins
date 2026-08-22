@@ -14,7 +14,7 @@ import {
 } from "@xzy-ai/tui";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { isKeyRelease, Key, matchesKey } from "@earendil-works/pi-tui";
-import { createHostSwapController, getChildPool, resolveJobTheme, scopeDescendants } from "@xzy-ai/runtime";
+import { createHostSwapController, getChildPool, getGroupById, resolveJobTheme, scopeDescendants } from "@xzy-ai/runtime";
 import type { ChildLiveSnapshot } from "@xzy-ai/core";
 import { createThemeFrame, type ThemeHostUI, type ThemeFrame } from "../theme-bridge.ts";
 
@@ -117,7 +117,7 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           if (snapshot) {
             const leaf = `${top.rowId}:${snapshot.transcript.length}:${snapshot.counters.inputTokens}:${snapshot.counters.outputTokens}:${snapshot.counters.cacheReadTokens}:${snapshot.counters.cacheWriteTokens}:${snapshot.counters.cost}:${snapshot.status}:${snapshot.settled}:${identity}`;
             if (infoCache?.leaf === leaf) return infoCache.info;
-            const info = childFooterInfo(snapshot, ctx, footerData);
+            const info = childFooterInfo(snapshot, ctx, footerData, top.rowId);
             infoCache = { leaf, info };
             return info;
           }
@@ -648,6 +648,31 @@ function activeModelGroup(): FooterModelGroup | undefined {
   }
 }
 
+/**
+ * Per-session model binding published by the child adapter at spawn time
+ * (runtime `child-bindings.ts`). Read through the shared symbol so the footer
+ * can show a viewed child's actual resolved identity.
+ */
+interface FooterChildBinding {
+  readonly kind: "group" | "pinned" | "inherit";
+  readonly groupId?: string;
+  readonly provider?: string;
+  readonly modelId?: string;
+  readonly thinking?: string;
+}
+
+function viewedChildBinding(jobId: string | undefined): FooterChildBinding | undefined {
+  if (!jobId) return undefined;
+  try {
+    const registry = (globalThis as Record<symbol, unknown>)[Symbol.for("pi-c2.child-model-bindings")] as
+      | { getChildModelBinding?(id: string): FooterChildBinding | undefined }
+      | undefined;
+    return typeof registry?.getChildModelBinding === "function" ? registry.getChildModelBinding(jobId) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function footerModelIdentity(ctx: ExtensionContext): string {
   const model = ctx.model;
   const group = activeModelGroup();
@@ -695,19 +720,29 @@ function footerInfo(
   };
 }
 
-function childFooterInfo(
+export function childFooterInfo(
   snapshot: ChildLiveSnapshot,
   ctx: ExtensionContext,
   footerData: ReadonlyFooterDataProvider,
+  jobId?: string,
 ): AgentFooterInfo {
   const counters = snapshot.counters;
-  const model = ctx.model;
+  // A published binding describes the VIEWED child's own resolved identity;
+  // fall back to the viewing context's model only when none exists (roots and
+  // retained sessions spawned before this registry existed).
+  const binding = viewedChildBinding(jobId);
+  const boundModel = binding && binding.provider && binding.modelId
+    ? { provider: binding.provider, id: binding.modelId, reasoning: false, contextWindow: undefined as number | undefined }
+    : undefined;
+  const model = boundModel ?? ctx.model;
   const reasoning = Boolean(model?.reasoning);
-  const modelGroupName = activeModelGroup()?.name;
+  const modelGroupName = binding?.kind === "group" && binding.groupId
+    ? (getGroupById(binding.groupId)?.name ?? activeModelGroup()?.name)
+    : activeModelGroup()?.name;
   // Derive thinkingLevel from child's transcript if it contains a thinking_level_change entry;
   // the live transcript does not carry those, so reuse parent's thinking level.
   const entries = ctx.sessionManager.getEntries() as readonly unknown[];
-  const thinkingLevel = latestThinkingLevel(entries);
+  const thinkingLevel = binding?.thinking ?? latestThinkingLevel(entries);
   const input = counters.inputTokens;
   const cacheRead = counters.cacheReadTokens;
   const cacheWrite = counters.cacheWriteTokens;

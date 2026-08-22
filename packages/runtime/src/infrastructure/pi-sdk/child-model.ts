@@ -310,3 +310,72 @@ export function resolveChildSpawnBinding(options: {
   }
   return { ok: true, inheritParentModel: true };
 }
+
+/**
+ * The registry publication for one spawned child: its binding kind plus the
+ * resolved identity (provider/modelId and effective thinking level) that TUI
+ * surfaces can display without touching the parent session's context.
+ */
+export type ChildBindingPublication = {
+  readonly kind: "group";
+  readonly groupId: string;
+  readonly provider?: string;
+  readonly modelId?: string;
+  readonly thinking?: string;
+} | {
+  readonly kind: "pinned";
+  readonly provider?: string;
+  readonly modelId?: string;
+  readonly thinking?: string;
+} | {
+  readonly kind: "inherit";
+  readonly provider?: string;
+  readonly modelId?: string;
+  readonly thinking?: string;
+};
+
+interface ModelIdentityLike {
+  readonly provider?: string | undefined;
+  readonly id?: string | undefined;
+}
+
+/**
+ * Build the registry publication from a spawn plan and the child's actual
+ * start model. Identity resolution order: the plan's explicit/group model,
+ * else the inherited session model. Thinking follows group membership (member
+ * level) or the resolved configuration chain (`chainThinking`), whichever
+ * applies to this binding.
+ */
+export function buildChildSpawnPublication(options: {
+  plan: Extract<ReturnType<typeof resolveChildSpawnBinding>, { ok: true }>;
+  chainThinking?: string;
+  sessionModel?: ModelIdentityLike;
+}): ChildBindingPublication {
+  const identity = options.plan.model ?? options.sessionModel;
+  const provider = typeof identity?.provider === "string" ? identity.provider : undefined;
+  const modelId = typeof identity?.id === "string" ? identity.id : undefined;
+  const base = {
+    ...(provider === undefined ? {} : { provider }),
+    ...(modelId === undefined ? {} : { modelId }),
+  };
+  if (options.plan.publish?.kind === "group") {
+    return {
+      kind: "group",
+      groupId: options.plan.publish.groupId,
+      ...base,
+      ...(options.plan.thinking === undefined ? {} : { thinking: options.plan.thinking }),
+    };
+  }
+  if (options.plan.publish?.kind === "pinned") {
+    return {
+      kind: "pinned",
+      ...base,
+      ...(options.chainThinking === undefined ? {} : { thinking: options.chainThinking }),
+    };
+  }
+  return {
+    kind: "inherit",
+    ...base,
+    ...(options.chainThinking === undefined ? {} : { thinking: options.chainThinking }),
+  };
+}

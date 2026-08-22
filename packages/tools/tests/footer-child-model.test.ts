@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ReadonlyFooterDataProvider } from "@earendil-works/pi-coding-agent";
 import type { ChildLiveSnapshot } from "@xzy-ai/core";
-import { publishChildModelBinding, releaseChildModelBinding } from "@xzy-ai/runtime";
+import { clearModelGroupsCache, getModelGroups, publishChildModelBinding, releaseChildModelBinding, saveModelGroups } from "@xzy-ai/runtime";
 import { childFooterInfo } from "../src/registrations/footer.ts";
 
 function snapshot(): ChildLiveSnapshot {
@@ -44,23 +44,27 @@ function ctx(entries: readonly unknown[] = []): ExtensionContext {
   } as unknown as ExtensionContext;
 }
 
-function footerData(): ReadonlyFooterDataDouble {
+function footerData(): ReadonlyFooterDataProvider {
   return {
     getGitBranch: () => null,
     getAvailableProviderCount: () => 2,
-  };
+    getExtensionStatuses: () => [],
+    onBranchChange: () => () => {},
+  } as unknown as ReadonlyFooterDataProvider;
 }
 
-interface ReadonlyFooterDataDouble {
-  getGitBranch(): string | null;
-  getAvailableProviderCount(): number;
-}
+
 
 test("child footer prefers the registry's resolved group identity over the parent model", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-c2-footer-model-"));
   try {
     process.env.PI_C2_TEST_HOME = home;
     process.env.PI_C2_HOME = home;
+    clearModelGroupsCache();
+    assert.equal(saveModelGroups({
+      groups: [{ id: "beta", name: "Beta Group", mode: "round-robin", quarantineTurns: 5, models: [{ ref: "prov/two" }, { ref: "prov/one" }] }],
+      activeGroupId: undefined,
+    }).ok, true);
     publishChildModelBinding("job-view", {
       kind: "group",
       groupId: "beta",

@@ -38,6 +38,7 @@ export {
 export { createGoalPool, getGoalPool, normalizeGoalCwd, type GoalPool, type GoalCreateInput, type GoalMutationResult, type GoalDeliveryBinding, type GoalTimerHandle } from "./infrastructure/goals/goal-pool.ts";
 export { createGoalStore, foldGoalLog, type GoalStore } from "./infrastructure/goals/goal-store.ts";
 export { createChildSessionManager, resolveChildTools, resolveChildCustomTools, spawnChildSession } from "./infrastructure/pi-sdk/child-session.ts";
+export { getChildModelBinding, publishChildModelBinding, releaseChildModelBinding, type ChildSessionModelBinding } from "./infrastructure/pi-sdk/child-bindings.ts";
 export { maxAgentDepth } from "./shared/pi-c2-config.ts";
 export {
   canonicalizeWriteEditTarget,
@@ -88,7 +89,7 @@ export { createAgentEventRegistry, canonicalJobId, MAX_RETAINED_TERMINAL_AGENTS,
 export { prepareResumeSessionFile } from "./infrastructure/sessions/resume-file.ts";
 export { scopeDescendants, scopeRegistry, sessionTreeJobs, type ScopedSessionRow, type ScopeRegistry } from "./infrastructure/sessions/scope.ts";
 export { createHostSwapController, type HostSwapController, type HostSwapTarget, type BufferedOutput } from "./infrastructure/host-swap/host-swap.ts";
-export { homeModelGroupsFile, homeModelGroupsFilePath, getModelGroups, saveModelGroups, clearModelGroupsCache, resolveActiveModel, getActiveGroup, clearRoundRobinPointers, deriveGroupContextWindow, clearActiveGroup, installModelGroupHostApi, type ModelGroup, type ModelGroupEntry, type ModelGroupsFile, type ModelGroupMode, type ModelGroupHostApi, type ModelGroupHostItem, type ModelGroupHostActivation } from "./infrastructure/model-groups/store.ts";
+export { homeModelGroupsFile, homeModelGroupsFilePath, getModelGroups, saveModelGroups, clearModelGroupsCache, resolveActiveModel, getActiveGroup, getGroupById, resolveGroupModel, reportGroupFailure, buildModelGroupHostApi, clearRoundRobinPointers, deriveGroupContextWindow, clearActiveGroup, installModelGroupHostApi, type ModelGroup, type ModelGroupEntry, type ModelGroupsFile, type ModelGroupMode, type ModelGroupHostApi, type ModelGroupHostItem, type ModelGroupHostActivation } from "./infrastructure/model-groups/store.ts";
 export { quarantineModel, isQuarantined, clearQuarantine, getQuarantineMap } from "./infrastructure/model-groups/quarantine.ts";
 export { runWithModelGroupFallback, type AttemptResult, type FallbackResult } from "./infrastructure/model-groups/fallback.ts";
 export {
