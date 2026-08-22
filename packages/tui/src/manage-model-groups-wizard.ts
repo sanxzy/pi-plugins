@@ -101,7 +101,7 @@ function scrollWindow(selectedIndex: number, total: number): { start: number; en
  *
  * Structure mirrors `ManageAgentModelWizard`: an action menu, `Input`-based
  * filtering for group/model lists, typed text steps for name and quarantine
- * minutes, and menu steps for mode/thinking. Every input repaints through
+ * quarantine turns, and menu steps for mode/thinking. Every input repaints through
  * `tui.requestRender()` and Escape always steps back (or cancels at the top),
  * so the component never traps the user.
  */
@@ -576,7 +576,7 @@ export class ManageModelGroupsWizard implements Component {
       case "createQuarantine":
       case "editQuarantine": {
         add(" ", this.theme.fg("accent", "Quarantine turns (1-100)"));
-        add(" ", this.theme.fg("text", `Minutes: ${this.pendingQuarantine}▌`));
+        add(" ", this.theme.fg("text", `Turns: ${this.pendingQuarantine}▌`));
         add(" ", this.theme.fg("dim", "Type a number • Enter next • Esc back"));
         break;
       }
