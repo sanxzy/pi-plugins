@@ -12,10 +12,10 @@ import {
   type AgentSession,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import { resolveChildModelBinding, resolveChildThinkingMapping, resolveExactChildModel } from "./child-model.ts";
+import { resolveChildSpawnBinding, resolveChildThinkingMapping, resolveExactChildModel } from "./child-model.ts";
 import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
 import { getGroupById, resolveGroupModel } from "../model-groups/store.ts";
-import { publishChildModelBinding, releaseChildModelBinding, type ChildSessionModelBinding } from "./child-bindings.ts";
+import { getChildModelBinding, publishChildModelBinding, releaseChildModelBinding } from "./child-bindings.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
 import { publishSessionMcpActive, publishSessionMcpBridge, publishSessionMcpDefinitions, publishSessionMcpNames, clearMcpNames } from "@xzy-ai/core";
@@ -364,47 +364,30 @@ async function createIsolatedChild(options: {
 
   // Model binding resolution, in priority order: frontmatter `model` (exact
   // contract) > `agents.model` in the home-root `pi-c2/config.json` (exact
-  // contract) > parent-model inheritance. Both levels accept plain model
+  // contract) > the parent's own binding > unbound inheritance of the
+  // parent's current model. Both configured levels accept plain model
   // references and explicit `group:<id>` bindings; a group-bound child then
   // behaves like a parent using that group (rotation, quarantine, fail-over
   // among members). The transient home-wide selection never overrides this:
   // it reaches children only through inheritance of the parent model.
-  let model = options.model;
-  let publishedBinding: ChildSessionModelBinding | undefined;
-  let groupMemberThinking: string | undefined;
   const settingsResolution = resolveSettingsForProject(options.cwd);
-  const binding = resolveChildModelBinding({
+  const plan = resolveChildSpawnBinding({
     frontmatterModel: discovered?.model,
     globalModel: settingsResolution.agents.model,
     agentName: discovered?.name ?? "",
     modelRuntime,
-    globalConfigPath: settingsConfigPath(),
     findGroup: (groupId) => (getGroupById(groupId) ? { id: groupId } : undefined),
+    resolveInitialMember: (groupId) => {
+      const member = resolveGroupModel(groupId, { advance: false });
+      return member ? { ref: member.ref, ...(member.thinking === undefined ? {} : { thinking: member.thinking }) } : undefined;
+    },
+    parentBinding: getChildModelBinding(options.parentSessionId),
   });
-  if (!binding.ok) {
-    throw new Error(binding.error);
+  if (!plan.ok) {
+    throw new Error(plan.error);
   }
-  if (binding.binding.kind === "group") {
-    // Bind explicitly to the named group: start on its current member
-    // (peeked, not advanced — per-request rotation belongs to the host).
-    const member = resolveGroupModel(binding.binding.groupId, { advance: false });
-    if (!member) {
-      throw new Error(`Agent "${discovered?.name ?? ""}" binds to model group "${binding.binding.groupId}", but every member is currently quarantined. Unquarantine a member or fix the binding.`);
-    }
-    const boundModel = resolveExactChildModel(member.ref, modelRuntime);
-    if (!boundModel) {
-      throw new Error(`Agent "${discovered?.name ?? ""}" binds to model group "${binding.binding.groupId}", whose member "${member.ref}" does not match any available model exactly. Fix the group membership.`);
-    }
-    model = boundModel;
-    // Group-member thinking wins while group-bound; explicit levels are
-    // ignored in this mode (mirrors parent-group semantics).
-    groupMemberThinking = member.thinking;
-    publishedBinding = { kind: "group", groupId: binding.binding.groupId };
-  } else if (binding.binding.kind === "model") {
-    // Pinned to one exact model; request-time rotation must never move it.
-    model = binding.binding.model;
-    publishedBinding = { kind: "pinned" };
-  }
+  const model = plan.inheritParentModel ? options.model : plan.model;
+  const publishedBinding = plan.publish;
 
   const sessionOptions: Record<string, unknown> = {
     cwd: options.cwd,
@@ -423,8 +406,8 @@ async function createIsolatedChild(options: {
   // error instead of silently ignoring it. The SDK clamps unsupported levels
   // to the model's range.
   if (publishedBinding?.kind === "group") {
-    if (groupMemberThinking) {
-      sessionOptions.thinkingLevel = groupMemberThinking;
+    if (plan.thinking) {
+      sessionOptions.thinkingLevel = plan.thinking;
     }
   } else {
     const thinking = resolveChildThinkingMapping({
@@ -610,7 +593,7 @@ export const spawnChildSession: SpawnChildSession & {
   const createChild = spawnChildSession.__createChild ?? ((opts) => createIsolatedChild(opts));
 
   return options.run(async () => {
-    let child: ChildSessionServices;
+    let child: ChildSessionServices | undefined;
     try {
       child = await createChild({
         jobId: options.jobId,
@@ -627,10 +610,11 @@ export const spawnChildSession: SpawnChildSession & {
         mcpEnabled: options.mcpEnabled,
         mcpBridge: options.mcpBridge,
       });
+      const created = child;
       const retained = getChildPool(options.cwd).retainedLiveSnapshots?.get(options.jobId);
-      const live = attachAgentSessionLiveFeed(child.session, retained);
+      const live = attachAgentSessionLiveFeed(created.session, retained);
       options.onControl?.({
-        sessionFile: child.session.sessionFile,
+        sessionFile: created.session.sessionFile,
         live: {
           get snapshot() {
             return live.feed.snapshot;
@@ -638,15 +622,34 @@ export const spawnChildSession: SpawnChildSession & {
           subscribe(listener) {
             return live.feed.subscribe(listener);
           },
-          steer: (prompt) => child.session.steer(prompt),
-          abort: () => child.session.abort(),
+          steer: (prompt) => created.session.steer(prompt),
+          abort: () => created.session.abort(),
         },
-        steer: (prompt) => child.session.steer(prompt),
-        abort: () => child.session.abort(),
+        steer: (prompt) => created.session.steer(prompt),
+        abort: () => created.session.abort(),
       });
-      (child as ChildSessionServices).liveUnsubscribe = live.unsubscribe;
+      (created as ChildSessionServices).liveUnsubscribe = live.unsubscribe;
     } catch (error) {
+      // Setup failed after the child existed (control sink, live feed, or
+      // control publication): never leak the session or its model binding.
+      if (child) {
+        try {
+          (child as ChildSessionServices).liveUnsubscribe?.();
+        } catch {
+          // Best-effort teardown; the original failure is reported below.
+        }
+        try {
+          child.dispose();
+        } catch {
+          // Same: dispose failures must not mask the original error.
+        }
+      }
       return { sessionFile: "", output: toErrorMessage(error), status: "failed" };
+    }
+    if (!child) {
+      // Unreachable: every catch path above returns, but this guard keeps the
+      // happy path narrowed for the lifecycle below.
+      return { sessionFile: "", output: "(child not created)", status: "failed" };
     }
 
     try {

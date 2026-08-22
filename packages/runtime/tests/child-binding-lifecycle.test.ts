@@ -162,7 +162,7 @@ async function spawnWith(
     } as never;
   };
   try {
-    const result = await spawnChildSession({
+    const result = (await spawnChildSession({
       jobId,
       cwd: tmpdir(),
       agent: resolvedAgent(),
@@ -170,8 +170,8 @@ async function spawnWith(
       parentSessionId: "root-1",
       run: (callback: () => Promise<unknown>) => callback() as Promise<unknown>,
       onControl,
-    } as never);
-    return { status: result.status, spies };
+    } as never)) as { status: string } | undefined;
+    return { status: result?.status ?? "failed", spies };
   } finally {
     delete spawnChildSession.__createChild;
   }

@@ -145,6 +145,11 @@ export interface GroupCatalog {
   findGroup(groupId: string): { id: string } | undefined;
 }
 
+/** A registry binding a spawned child can inherit from its parent. */
+export type InheritableParentBinding =
+  | { readonly kind: "group"; readonly groupId: string }
+  | { readonly kind: "pinned" };
+
 /**
  * Parse a configured model value into its binding shape.
  *
@@ -212,3 +217,96 @@ export function resolveChildModelBinding(options: {
   return { ok: true, binding: { kind: "model", model: declared } };
 }
 
+/**
+ * The concrete spawn plan derived from one child's resolution inputs.
+ *
+ *   - `publish` — the binding to register for the patched host hooks:
+ *     group-bound and pinned children publish; unbound children publish
+ *     nothing and keep following the home-wide active selection.
+ *   - `model` — the resolved start model when explicitly configured or
+ *     group-bound; absent means inherit the parent's current model.
+ *   - `thinking` — the group member's thinking level while group-bound;
+ *     explicit levels are ignored in that mode (parent-group semantics).
+ */
+export interface ChildSpawnPlan {
+  readonly ok: true;
+  readonly publish?: { readonly kind: "group"; readonly groupId: string } | { readonly kind: "pinned" };
+  readonly model?: ExactModelLike;
+  readonly thinking?: string;
+  readonly inheritParentModel: boolean;
+}
+
+/**
+ * Resolve the full spawn-time model binding for one child agent:
+ *
+ *   frontmatter `model` > global config `agents.model` > parent binding >
+ *   unbound inheritance of the parent's current model.
+ *
+ * The first two levels accept plain model references and explicit `group:<id>`
+ * bindings. When both levels are unset, an explicitly bound parent passes its
+ * binding down (a group-bound parent raises group-bound children; a pinned
+ * parent keeps its descendants pinned so explicit configuration governs the
+ * whole lineage). A stale inherited group — deleted since the parent spawned —
+ * degrades to unbound inheritance instead of failing the spawn, while a live
+ * inherited group applies the same member-resolution errors as an explicit one.
+ */
+export function resolveChildSpawnBinding(options: {
+  frontmatterModel?: string;
+  globalModel?: string;
+  agentName: string;
+  modelRuntime: ExactModelCatalog | undefined;
+  findGroup: (groupId: string) => { id: string } | undefined;
+  resolveInitialMember: (groupId: string) => { ref: string; thinking?: string } | undefined;
+  parentBinding?: InheritableParentBinding;
+}): ChildSpawnPlan | { ok: false; error: string } {
+  const chain = resolveChildModelBinding({
+    frontmatterModel: options.frontmatterModel,
+    globalModel: options.globalModel,
+    agentName: options.agentName,
+    modelRuntime: options.modelRuntime,
+    globalConfigPath: "",
+    findGroup: options.findGroup,
+  });
+  if (!chain.ok) {
+    return chain;
+  }
+  const bindGroup = (groupId: string): ChildSpawnPlan | { ok: false; error: string } => {
+    const member = options.resolveInitialMember(groupId);
+    if (!member) {
+      return { ok: false, error: `Every member of model group "${groupId}" is currently quarantined. Unquarantine a member or fix the binding.` };
+    }
+    const boundModel = resolveExactChildModel(member.ref, options.modelRuntime);
+    if (!boundModel) {
+      return { ok: false, error: `Member "${member.ref}" of model group "${groupId}" does not match any available model exactly. Fix the group membership.` };
+    }
+    return {
+      ok: true,
+      publish: { kind: "group", groupId },
+      model: boundModel,
+      ...(member.thinking === undefined ? {} : { thinking: member.thinking }),
+      inheritParentModel: false,
+    };
+  };
+  switch (chain.binding.kind) {
+    case "model":
+      // Pinned to one exact model; request-time rotation must never move it.
+      return { ok: true, publish: { kind: "pinned" }, model: chain.binding.model, inheritParentModel: false };
+    case "group":
+      return bindGroup(chain.binding.groupId);
+    case "inherit":
+      break;
+  }
+  const parentBinding = options.parentBinding;
+  if (parentBinding?.kind === "group") {
+    if (options.findGroup(parentBinding.groupId)) {
+      return bindGroup(parentBinding.groupId);
+    }
+    // The parent's group vanished since it spawned; degrade gracefully so a
+    // stale registry entry cannot fail unrelated descendants.
+    return { ok: true, inheritParentModel: true };
+  }
+  if (parentBinding?.kind === "pinned") {
+    return { ok: true, publish: { kind: "pinned" }, inheritParentModel: true };
+  }
+  return { ok: true, inheritParentModel: true };
+}
