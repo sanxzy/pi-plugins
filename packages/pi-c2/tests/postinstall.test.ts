@@ -18,6 +18,7 @@ const PATCH_MARKERS: Array<[string, string]> = [
   ["dist/core/agent-session.js", "_maybeAbortForThreshold"],
   ["dist/core/agent-session.js", "advance round-robin groups on every individual model request"],
   ["dist/core/agent-session.js", "quarantine group members on HTTP 4xx/5xx"],
+  ["dist/core/agent-session.js", "pi-c2.child-model-bindings"],
   ["dist/modes/interactive/components/model-selector.js", "pi-c2: the extension publishes a host-neutral model-group bridge"],
   ["dist/modes/interactive/interactive-mode.js", "__pi_c2_group__"],
   ["dist/modes/interactive/interactive-mode.js", "hostSwapApplyChildEvent"],
@@ -119,9 +120,64 @@ test("postinstall is idempotent on an already-patched host", async () => {
   try {
     const first = runScript(npmBin);
     assert.match(first.stdout, /patched host/);
+    const sdkDir = join(root, "@earendil-works", "pi-coding-agent");
+    const revisionFile = sdkDir + ".pi-c2-patch-revision";
+    assert.ok(existsSync(revisionFile), "applying must record the patch revision");
     const second = runScript(npmBin);
-    assert.match(second.stdout, /already patched; nothing to do/);
+    assert.match(second.stdout, /nothing to do/);
     assert.equal(second.status, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("postinstall upgrades a patched host whose revision is stale", async () => {
+  const { createHash } = await import("node:crypto");
+  const { root, npmBin } = await fakeGlobal();
+  try {
+    // First run: patch + record revision.
+    runScript(npmBin);
+    const sdkDir = join(root, "@earendil-works", "pi-coding-agent");
+    const revisionFile = sdkDir + ".pi-c2-patch-revision";
+    assert.ok(existsSync(revisionFile));
+    // Simulate an OLDER deployed revision.
+    writeFileSync(revisionFile, "stale-revision-hash\n");
+
+    const { status, stdout } = runScript(npmBin);
+    assert.equal(status, 0, stdout);
+    assert.match(stdout, /revision|upgrad/i, "stale revision must trigger an upgrade, not a skip");
+
+    const bundled = createHash("sha256").update(readFileSync(PATCH_FILE)).digest("hex");
+    assert.equal(readFileSync(revisionFile, "utf8").trim(), bundled, "revision updated to the bundled hash");
+    for (const [rel, needle] of PATCH_MARKERS) {
+      assert.ok(readFileSync(join(sdkDir, rel), "utf8").includes(needle));
+    }
+    // The pristine backup survives the upgrade cycle.
+    assert.ok(
+      !readFileSync(join(root, "@earendil-works", "pi-coding-agent.bak-0.84.2", "dist/core/extensions/loader.js"), "utf8").includes("createCommandContext"),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("postinstall upgrades a legacy patched host that has no revision file", async () => {
+  const { root, npmBin } = await fakeGlobal();
+  try {
+    runScript(npmBin);
+    const sdkDir = join(root, "@earendil-works", "pi-coding-agent");
+    const revisionFile = sdkDir + ".pi-c2-patch-revision";
+    rmSync(revisionFile);
+    // Also simulate legacy CONTENT: strip the newest capability block so the
+    // marker set alone would call this host outdated.
+    const agentSession = join(sdkDir, "dist/core/agent-session.js");
+    writeFileSync(agentSession, readFileSync(agentSession, "utf8").replaceAll('Symbol.for("pi-c2.child-model-bindings")', "undefined"));
+
+    const { status, stdout } = runScript(npmBin);
+    assert.equal(status, 0, stdout);
+    assert.match(stdout, /patched host pi-coding-agent/);
+    assert.ok(readFileSync(agentSession, "utf8").includes("pi-c2.child-model-bindings"), "legacy host gains the binding-aware hooks");
+    assert.ok(existsSync(revisionFile), "upgrade records the new revision");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
