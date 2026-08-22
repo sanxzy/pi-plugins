@@ -260,6 +260,7 @@ export function resolveChildSpawnBinding(options: {
   modelRuntime: ExactModelCatalog | undefined;
   findGroup: (groupId: string) => { id: string } | undefined;
   resolveInitialMember: (groupId: string) => { ref: string; thinking?: string } | undefined;
+  resolveGroupContextWindow?: (groupId: string) => number | undefined;
   parentBinding?: InheritableParentBinding;
 }): ChildSpawnPlan | { ok: false; error: string } {
   const chain = resolveChildModelBinding({
@@ -282,10 +283,11 @@ export function resolveChildSpawnBinding(options: {
     if (!boundModel) {
       return { ok: false, error: `Member "${member.ref}" of model group "${groupId}" does not match any available model exactly. Fix the group membership.` };
     }
+    const contextWindow = options.resolveGroupContextWindow?.(groupId);
     return {
       ok: true,
       publish: { kind: "group", groupId },
-      model: boundModel,
+      model: contextWindow === undefined ? boundModel : { ...boundModel, contextWindow },
       ...(member.thinking === undefined ? {} : { thinking: member.thinking }),
       inheritParentModel: false,
     };

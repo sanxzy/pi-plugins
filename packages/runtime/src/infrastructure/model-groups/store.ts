@@ -27,6 +27,9 @@ export interface ModelGroupsFile {
   activeGroupId?: string;
 }
 
+/** Resolve a persisted model reference to its runtime context-window size. */
+export type ModelContextWindowResolver = (ref: string) => number | undefined;
+
 const DEFAULT_QUARANTINE = 5;
 const MODEL_GROUP_HOST_API_KEY = "pi-c2.model-groups";
 let cachedFingerprint = "";
@@ -224,6 +227,10 @@ export function reportGroupFailure(groupId: string, failedRef: string): ModelGro
 export function clearRoundRobinPointers(): void { roundRobinPointers.clear(); }
 
 export function deriveGroupContextWindow(group: ModelGroup, catalog: Array<{ id: string; provider: string; contextWindow?: number }>): number | undefined {
+  // An explicit group value is authoritative, even when it is larger than a
+  // member's catalog value. Without a group value, the smallest known member
+  // window is the safe limit for every member in the group.
+  if (group.contextWindow !== undefined) return group.contextWindow;
   let min: number | undefined;
   for (const m of group.models) {
     // Model ids may contain slashes (openrouter/stealth/ox-alpha): only the
@@ -236,8 +243,19 @@ export function deriveGroupContextWindow(group: ModelGroup, catalog: Array<{ id:
     if (typeof cw !== "number" || cw <= 0) continue;
     if (min === undefined || cw < min) min = cw;
   }
-  if (group.contextWindow === undefined) return min;
-  return min === undefined ? group.contextWindow : Math.min(group.contextWindow, min);
+  return min;
+}
+
+function effectiveGroupContextWindow(group: ModelGroup, resolveContextWindow?: ModelContextWindowResolver): number | undefined {
+  if (group.contextWindow !== undefined) return group.contextWindow;
+  if (!resolveContextWindow) return undefined;
+  let min: number | undefined;
+  for (const model of group.models) {
+    const contextWindow = resolveContextWindow(model.ref);
+    if (typeof contextWindow !== "number" || contextWindow <= 0) continue;
+    if (min === undefined || contextWindow < min) min = contextWindow;
+  }
+  return min;
 }
 
 export function clearActiveGroup(): void {
@@ -260,20 +278,21 @@ export type ModelGroupHostActivation =
   | { readonly ok: false; readonly error: string };
 
 export interface ModelGroupHostApi {
-  readonly list: () => readonly ModelGroupHostItem[];
-  readonly activate: (id: string) => ModelGroupHostActivation;
+  readonly list: (resolveContextWindow?: ModelContextWindowResolver) => readonly ModelGroupHostItem[];
+  readonly activate: (id: string, resolveContextWindow?: ModelContextWindowResolver) => ModelGroupHostActivation;
   /** Resolve and advance a group's current member (per request). Defaults to the active group. */
-  readonly resolveActive: (groupId?: string) => { ref: string; thinking?: string; contextWindow?: number } | undefined;
+  readonly resolveActive: (groupId?: string, resolveContextWindow?: ModelContextWindowResolver) => { ref: string; thinking?: string; contextWindow?: number } | undefined;
   /** Quarantine a failed member of a group and return the next available one. Defaults to the active group. */
-  readonly reportFailure: (failedRef: string, groupId?: string) => { ref: string; thinking?: string; contextWindow?: number } | undefined;
+  readonly reportFailure: (failedRef: string, groupId?: string, resolveContextWindow?: ModelContextWindowResolver) => { ref: string; thinking?: string; contextWindow?: number } | undefined;
   readonly clearActiveGroup: () => void;
 }
 
-function entryPayload(group: ModelGroup, model: ModelGroupEntry): { ref: string; thinking?: string; contextWindow?: number } {
+function entryPayload(group: ModelGroup, model: ModelGroupEntry, resolveContextWindow?: ModelContextWindowResolver): { ref: string; thinking?: string; contextWindow?: number } {
+  const contextWindow = effectiveGroupContextWindow(group, resolveContextWindow);
   return {
     ref: model.ref,
     ...(model.thinking === undefined ? {} : { thinking: model.thinking }),
-    ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
   };
 }
 
@@ -286,18 +305,21 @@ function entryPayload(group: ModelGroup, model: ModelGroupEntry): { ref: string;
  */
 export function buildModelGroupHostApi(): ModelGroupHostApi {
   return {
-    list: () => {
+    list: (resolveContextWindow) => {
       const file = getModelGroups();
-      return file.groups.map((group) => ({
-        id: group.id,
-        name: group.name,
-        mode: group.mode,
-        modelRefs: group.models.map((model) => model.ref),
-        ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
-        active: group.id === file.activeGroupId,
-      }));
+      return file.groups.map((group) => {
+        const contextWindow = effectiveGroupContextWindow(group, resolveContextWindow);
+        return {
+          id: group.id,
+          name: group.name,
+          mode: group.mode,
+          modelRefs: group.models.map((model) => model.ref),
+          ...(contextWindow === undefined ? {} : { contextWindow }),
+          active: group.id === file.activeGroupId,
+        };
+      });
     },
-    activate: (id) => {
+    activate: (id, resolveContextWindow) => {
       const file = getModelGroups();
       const group = file.groups.find((item) => item.id === id);
       if (!group) return { ok: false, error: `Unknown model group: ${id}` };
@@ -305,39 +327,40 @@ export function buildModelGroupHostApi(): ModelGroupHostApi {
       if (!saved.ok) return { ok: false, error: saved.error };
       const model = resolveGroupModel(id, { advance: false });
       if (!model) return { ok: false, error: `All models in group '${group.name}' are quarantined.` };
+      const contextWindow = effectiveGroupContextWindow(group, resolveContextWindow);
       return {
         ok: true,
         groupId: group.id,
         groupName: group.name,
         modelRef: model.ref,
         ...(model.thinking === undefined ? {} : { thinking: model.thinking }),
-        ...(group.contextWindow === undefined ? {} : { contextWindow: group.contextWindow }),
+        ...(contextWindow === undefined ? {} : { contextWindow }),
       };
     },
     /**
      * Resolve (and advance) the group's current member. Called once per user
      * request by the host patch so round-robin groups rotate per turn.
      */
-    resolveActive: (groupId) => {
+    resolveActive: (groupId, resolveContextWindow) => {
       const id = groupId ?? getModelGroups().activeGroupId;
       if (!id) return undefined;
       const model = resolveGroupModel(id);
       const group = getGroupById(id);
       if (!model || !group) return undefined;
-      return entryPayload(group, model);
+      return entryPayload(group, model, resolveContextWindow);
     },
     /**
      * Quarantine a failed member of the group and return the next available
      * member so the host can continue with a replacement model. Non-members
      * are ignored; undefined means no replacement is available.
      */
-    reportFailure: (failedRef, groupId) => {
+    reportFailure: (failedRef, groupId, resolveContextWindow) => {
       const id = groupId ?? getModelGroups().activeGroupId;
       if (!id) return undefined;
       const next = reportGroupFailure(id, failedRef);
       const group = getGroupById(id);
       if (!next || !group) return undefined;
-      return entryPayload(group, next);
+      return entryPayload(group, next, resolveContextWindow);
     },
     clearActiveGroup: () => clearActiveGroup(),
   };

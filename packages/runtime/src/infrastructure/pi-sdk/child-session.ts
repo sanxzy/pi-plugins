@@ -15,7 +15,7 @@ import {
 import { buildChildSpawnPublication, resolveChildSpawnBinding, resolveChildThinkingMapping } from "./child-model.ts";
 import { resolveSettingsForProject, settingsConfigPath } from "../../shared/settings.ts";
 import { applyHomeModelOverrides, loadHomeModelsForAgentDir } from "../../shared/home-model-overrides.ts";
-import { getGroupById, resolveGroupModel } from "../model-groups/store.ts";
+import { deriveGroupContextWindow, getGroupById, resolveGroupModel } from "../model-groups/store.ts";
 import { getChildModelBinding, publishChildModelBinding, releaseChildModelBinding } from "./child-bindings.ts";
 import type { ResolvedAgent } from "@xzy-ai/core";
 import type { JobStatus } from "@xzy-ai/core";
@@ -389,6 +389,17 @@ async function createIsolatedChild(options: {
     resolveInitialMember: (groupId) => {
       const member = resolveGroupModel(groupId, { advance: false });
       return member ? { ref: member.ref, ...(member.thinking === undefined ? {} : { thinking: member.thinking }) } : undefined;
+    },
+    resolveGroupContextWindow: (groupId) => {
+      const group = getGroupById(groupId);
+      if (!group) return undefined;
+      if (group.contextWindow !== undefined) return group.contextWindow;
+      if (!modelRuntime) return undefined;
+      return deriveGroupContextWindow(group, modelRuntime.getModels().map((model) => ({
+        provider: model.provider,
+        id: model.id,
+        contextWindow: model.contextWindow,
+      })));
     },
     parentBinding: (() => {
       const bound = getChildModelBinding(options.parentSessionId);

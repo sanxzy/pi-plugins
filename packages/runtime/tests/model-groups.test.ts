@@ -214,7 +214,9 @@ test("host bridge derives the smallest member contextWindow when no group cap is
         "provider/small": 260_000,
       }[ref]);
       assert.equal(api.list(resolveContextWindow)[0]!.contextWindow, 260_000);
-      assert.equal(api.activate("auto", resolveContextWindow).contextWindow, 260_000);
+      const activation = api.activate("auto", resolveContextWindow);
+      assert.equal(activation.ok, true);
+      if (activation.ok) assert.equal(activation.contextWindow, 260_000);
       assert.equal(api.resolveActive("auto", resolveContextWindow)?.contextWindow, 260_000);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }

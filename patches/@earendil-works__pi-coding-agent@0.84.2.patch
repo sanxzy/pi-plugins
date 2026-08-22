@@ -68,7 +68,7 @@ index f8c1f48..be46311 100644
      _willRetryAfterAgentEnd(event) {
          const settings = this.settingsManager.getRetrySettings();
          if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
-@@ -446,6 +496,35 @@
+@@ -446,6 +496,41 @@
              await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
          }
          else if (event.type === "turn_start") {
@@ -85,14 +85,20 @@ index f8c1f48..be46311 100644
 +                    const boundGroupId = sessionBinding?.kind === "group" ? sessionBinding.groupId : undefined;
 +                    const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
 +                    if (typeof groupApi?.resolveActive === "function") {
-+                        const resolved = groupApi.resolveActive(boundGroupId);
++                        const resolved = groupApi.resolveActive(boundGroupId, (ref) => {
++                            const separator = ref.indexOf("/");
++                            const provider = separator === -1 ? "" : ref.slice(0, separator);
++                            const id = separator === -1 ? "" : ref.slice(separator + 1);
++                            const found = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
++                            return typeof found?.contextWindow === "number" ? found.contextWindow : undefined;
++                        });
 +                        if (resolved) {
 +                            const separator = resolved.ref.indexOf("/");
 +                            const provider = separator === -1 ? "" : resolved.ref.slice(0, separator);
 +                            const id = separator === -1 ? "" : resolved.ref.slice(separator + 1);
 +                            const found = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
-+                            if (found && (!this.model || this.model.provider !== found.provider || this.model.id !== found.id)) {
-+                                this.agent.state.model = resolved.contextWindow !== undefined && found.contextWindow > found.contextWindow
++                            if (found && (!this.model || this.model.provider !== found.provider || this.model.id !== found.id || this.model.contextWindow !== (resolved.contextWindow ?? found.contextWindow))) {
++                                this.agent.state.model = resolved.contextWindow !== undefined
 +                                    ? { ...found, contextWindow: resolved.contextWindow }
 +                                    : found;
 +                                if (resolved.thinking) this.setThinkingLevel(resolved.thinking);
@@ -104,7 +110,7 @@ index f8c1f48..be46311 100644
              const extensionEvent = {
                  type: "turn_start",
                  turnIndex: this._turnIndex,
-@@ -761,6 +840,45 @@
+@@ -761,6 +846,51 @@
          if (!msg) {
              return false;
          }
@@ -124,14 +130,20 @@ index f8c1f48..be46311 100644
 +                    const status = statusMatch ? Number(statusMatch[1]) : (/(overloaded|rate.?limit|too many requests|service.?unavailable|server.?error|bad gateway|gateway time)/i.test(errorText) ? 503 : 0);
 +                    if (status >= 400 && status <= 599) {
 +                        const currentRef = `${this.model.provider}/${this.model.id}`;
-+                        const next = groupApi.reportFailure(currentRef, boundGroupId);
++                        const next = groupApi.reportFailure(currentRef, boundGroupId, (ref) => {
++                            const separator = ref.indexOf("/");
++                            const provider = separator === -1 ? "" : ref.slice(0, separator);
++                            const id = separator === -1 ? "" : ref.slice(separator + 1);
++                            const contextModel = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
++                            return typeof contextModel?.contextWindow === "number" ? contextModel.contextWindow : undefined;
++                        });
 +                        if (next) {
 +                            const separator = next.ref.indexOf("/");
 +                            const provider = next.ref.slice(0, separator);
 +                            const id = next.ref.slice(separator + 1);
 +                            const found = provider && id ? this._modelRuntime.getModel(provider, id) : undefined;
 +                            if (found) {
-+                                this.agent.state.model = next.contextWindow !== undefined && found.contextWindow > next.contextWindow
++                                this.agent.state.model = next.contextWindow !== undefined
 +                                    ? { ...found, contextWindow: next.contextWindow }
 +                                    : found;
 +                                if (next.thinking) this.setThinkingLevel(next.thinking);
@@ -150,7 +162,7 @@ index f8c1f48..be46311 100644
          if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
              return true;
          }
-@@ -1366,7 +1484,12 @@
+@@ -1366,7 +1496,12 @@
       */
      async compact(customInstructions) {
          await this.abort();
@@ -164,7 +176,7 @@ index f8c1f48..be46311 100644
          this._emit({ type: "compaction_start", reason: "manual" });
          try {
              if (!this.model) {
-@@ -1394,7 +1517,7 @@
+@@ -1394,7 +1529,7 @@
                      customInstructions,
                      reason: "manual",
                      willRetry: false,
@@ -173,7 +185,7 @@ index f8c1f48..be46311 100644
                  }));
                  if (result?.cancel) {
                      throw new Error("Compaction cancelled");
-@@ -1419,14 +1542,14 @@
+@@ -1419,14 +1554,14 @@
              }
              else {
                  // Generate compaction result
@@ -190,7 +202,7 @@ index f8c1f48..be46311 100644
                  throw new Error("Compaction cancelled");
              }
              this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-@@ -1479,7 +1602,9 @@
+@@ -1479,7 +1614,9 @@
              throw error;
          }
          finally {
@@ -201,7 +213,7 @@ index f8c1f48..be46311 100644
          }
      }
      /**
-@@ -1511,8 +1636,13 @@
+@@ -1511,8 +1648,13 @@
          const settings = this.settingsManager.getCompactionSettings();
          if (!settings.enabled)
              return false;
@@ -216,7 +228,7 @@ index f8c1f48..be46311 100644
              return false;
          const contextWindow = this.model?.contextWindow ?? 0;
          // Skip overflow check if the message came from a different model.
-@@ -1585,7 +1715,9 @@
+@@ -1585,7 +1727,9 @@
              contextTokens = directContextTokens;
          }
          if (shouldCompact(contextTokens, contextWindow, settings)) {
@@ -227,7 +239,7 @@ index f8c1f48..be46311 100644
          }
          return false;
      }
-@@ -1595,6 +1727,13 @@
+@@ -1595,6 +1739,13 @@
      async _runAutoCompaction(reason, willRetry) {
          const settings = this.settingsManager.getCompactionSettings();
          let started = false;
@@ -241,7 +253,7 @@ index f8c1f48..be46311 100644
          try {
              if (!this.model) {
                  return false;
-@@ -1606,7 +1745,8 @@
+@@ -1606,7 +1757,8 @@
                  return false;
              }
              this._emit({ type: "compaction_start", reason });
@@ -251,7 +263,7 @@ index f8c1f48..be46311 100644
              started = true;
              let extensionCompaction;
              let fromExtension = false;
-@@ -1618,7 +1758,7 @@
+@@ -1618,7 +1770,7 @@
                      customInstructions: undefined,
                      reason,
                      willRetry,
@@ -260,7 +272,7 @@ index f8c1f48..be46311 100644
                  }));
                  if (extensionResult?.cancel) {
                      this._emit({
-@@ -1650,14 +1790,14 @@
+@@ -1650,14 +1802,14 @@
              }
              else {
                  // Generate compaction result
@@ -277,7 +289,7 @@ index f8c1f48..be46311 100644
                  this._emit({
                      type: "compaction_end",
                      reason,
-@@ -1699,9 +1839,19 @@
+@@ -1699,9 +1851,19 @@
                  // from agent state. Rebuilding state from the new compaction can restore that kept entry,
                  // leaving an assistant as the final message. agent.continue() rejects that state, so remove
                  // the retriable error or truncated-length response again before continuing the interrupted turn.
@@ -298,7 +310,7 @@ index f8c1f48..be46311 100644
                  return true;
              }
              // Auto-compaction can complete while follow-up/steering/custom messages are waiting.
-@@ -1725,7 +1875,9 @@
+@@ -1725,7 +1887,9 @@
              return false;
          }
          finally {
@@ -309,7 +321,7 @@ index f8c1f48..be46311 100644
          }
      }
      /**
-@@ -1908,6 +2060,7 @@
+@@ -1908,6 +2072,7 @@
                  this._extensionShutdownHandler?.();
              },
              getContextUsage: () => this.getContextUsage(),
@@ -667,13 +679,19 @@ index de1ebc1..3fba3a1 100644
          // Add top border
          this.addChild(new DynamicBorder());
          this.addChild(new Spacer(1));
-@@ -101,6 +103,24 @@ export class ModelSelectorComponent extends Container {
+@@ -101,6 +103,30 @@ export class ModelSelectorComponent extends Container {
              model,
          }));
          this.allModels = this.sortModels(models);
 +        // pi-c2: model groups appear in the normal /model selector as synthetic
 +        // entries. They are handled by interactive-mode's group activation path.
-+        const groups = typeof this.modelGroupApi?.list === "function" ? this.modelGroupApi.list() : [];
++        const groups = typeof this.modelGroupApi?.list === "function" ? this.modelGroupApi.list((ref) => {
++            const separator = ref.indexOf("/");
++            const provider = separator === -1 ? "" : ref.slice(0, separator);
++            const id = separator === -1 ? "" : ref.slice(separator + 1);
++            const found = provider && id ? this.modelRuntime.getModel(provider, id) : undefined;
++            return typeof found?.contextWindow === "number" ? found.contextWindow : undefined;
++        }) : [];
 +        const groupItems = groups.map((group) => ({
 +            provider: "__pi_c2_group__",
 +            id: `group:${group.id}`,
@@ -692,7 +710,7 @@ index de1ebc1..3fba3a1 100644
          this.scopedModels = this.scopedModels.map((scoped) => {
              const refreshed = this.modelRuntime.getModel(scoped.model.provider, scoped.model.id);
              return refreshed ? { ...scoped, model: refreshed } : scoped;
-@@ -226,19 +246,21 @@ export class ModelSelectorComponent extends Container {
+@@ -226,19 +252,21 @@ export class ModelSelectorComponent extends Container {
              if (!item)
                  continue;
              const isSelected = i === this.selectedIndex;
@@ -980,7 +998,7 @@ index 6a88679..f6cba16 100644
      // =========================================================================
      // Key handlers
      // =========================================================================
-@@ -3999,6 +4233,38 @@ export class InteractiveMode {
+@@ -3999,6 +4233,44 @@ export class InteractiveMode {
          this.showSelector((done) => {
              const selector = new ModelSelectorComponent(this.ui, this.session.model, this.settingsManager, this.session.modelRuntime, this.session.scopedModels, async (model) => {
                  try {
@@ -990,7 +1008,13 @@ index 6a88679..f6cba16 100644
 +                    if (model.provider === "__pi_c2_group__") {
 +                        const api = globalThis[Symbol.for("pi-c2.model-groups")];
 +                        const groupId = model.id.startsWith("group:") ? model.id.slice("group:".length) : model.id;
-+                        const activation = typeof api?.activate === "function" ? api.activate(groupId) : { ok: false, error: "Model-group integration is unavailable." };
++                        const activation = typeof api?.activate === "function" ? api.activate(groupId, (ref) => {
++                            const separator = ref.indexOf("/");
++                            const provider = separator === -1 ? "" : ref.slice(0, separator);
++                            const id = separator === -1 ? "" : ref.slice(separator + 1);
++                            const found = provider && id ? this.session.modelRuntime.getModel(provider, id) : undefined;
++                            return typeof found?.contextWindow === "number" ? found.contextWindow : undefined;
++                        }) : { ok: false, error: "Model-group integration is unavailable." };
 +                        if (!activation.ok) {
 +                            done();
 +                            this.showError(activation.error);
@@ -1003,7 +1027,7 @@ index 6a88679..f6cba16 100644
 +                            this.showError(`Model group "${activation.groupName}" resolved unavailable model ${activation.modelRef}`);
 +                            return;
 +                        }
-+                        const groupModel = activation.contextWindow !== undefined && resolved.contextWindow > activation.contextWindow
++                        const groupModel = activation.contextWindow !== undefined
 +                            ? { ...resolved, contextWindow: activation.contextWindow }
 +                            : resolved;
 +                        await this.session.setModel(groupModel);
