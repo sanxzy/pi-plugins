@@ -124,6 +124,29 @@ test("an inherited publication shows the parent-side resolved model it inherited
   }
 });
 
+test("child footer never labels a non-group binding with the transient active group", () => {
+  // Host bridge reports an ACTIVE ox-group (the parent's selection).
+  (globalThis as Record<symbol, unknown>)[Symbol.for("pi-c2.model-groups")] = {
+    list: () => [{ id: "ox-group", name: "ox group", active: true }],
+  };
+  try {
+    publishChildModelBinding("job-pin2", {
+      kind: "pinned",
+      provider: "openai-codex",
+      modelId: "gpt-5.6-luna",
+      thinking: "xhigh",
+      reasoning: true,
+    });
+    const info = childFooterInfo(snapshot(), ctx(), footerData(), "job-pin2");
+    assert.equal(info.modelGroupName, undefined, "transient selection must not label a pinned child");
+    assert.equal(info.model, "gpt-5.6-luna");
+    assert.equal(info.thinkingLevel, "xhigh");
+  } finally {
+    releaseChildModelBinding("job-pin2");
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("pi-c2.model-groups")];
+  }
+});
+
 test("without a registry entry the footer falls back to the parent context model", () => {
   const info = childFooterInfo(snapshot(), ctx(), footerData(), "job-unknown");
   assert.equal(info.model, "ox-alpha-free");

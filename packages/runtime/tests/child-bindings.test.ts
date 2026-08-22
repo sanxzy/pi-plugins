@@ -63,11 +63,12 @@ test("publication: a pinned plan carries catalog identity and the chain thinking
     plan: {
       ok: true,
       publish: { kind: "pinned" },
-      model: { provider: "openai-codex", id: "gpt-5.6-luna" },
+      // The child-catalog entry carries the home override (260k) and reasoning.
+      model: { provider: "openai-codex", id: "gpt-5.6-luna", contextWindow: 260_000, reasoning: true },
       inheritParentModel: false,
     },
     chainThinking: "xhigh",
-    sessionModel: { provider: "openai-codex", id: "gpt-5.6-luna", reasoning: true, contextWindow: 260_000 },
+    sessionModel: { provider: "openai-codex", id: "gpt-5.6-luna", reasoning: true, contextWindow: 1_000_000 },
   });
   assert.deepEqual(publication, {
     kind: "pinned",
