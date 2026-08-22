@@ -216,7 +216,7 @@ test("failure: a member failure inside a bound group quarantines and continues w
   let extracted = extractBlock(source, "// pi-c2: quarantine group members on HTTP 4xx/5xx", "        ");
   extracted = extracted.replace("} catch {}", "} catch (swallowedError) { console.log(\"SWALLOWED:\", swallowedError?.message, swallowedError?.stack?.split('\\n')[1]); }");
   extracted = extracted.replace('const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];\n                if (msg.stopReason', 'console.log("DBG before msg check");const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];\n                if (msg.stopReason');
-  
+
   const hook = compileBlock(extracted, { msg: errorMessage() });
   const calls: FakeGroupApiCalls = {
     resolveActiveArgs: [],
@@ -231,7 +231,6 @@ test("failure: a member failure inside a bound group quarantines and continues w
       { role: "assistant" },
     ];
     const returned = hook(self);
-    console.log("MEMBER-DBG returned=", returned, "args=", JSON.stringify(calls.reportFailureArgs));
     assert.equal(returned, true, "the hook takes over the retry with a replacement model");
     assert.deepEqual(
       calls.reportFailureArgs,

@@ -594,6 +594,10 @@ export const spawnChildSession: SpawnChildSession & {
 
   return options.run(async () => {
     let child: ChildSessionServices | undefined;
+    // Assigned the moment the live feed subscribes so the sibling catch can
+    // always unwind it, even when onControl throws before the assignment of
+    // `liveUnsubscribe` on the child services record.
+    let unsubscribeFeed: (() => void) | undefined;
     try {
       child = await createChild({
         jobId: options.jobId,
@@ -613,6 +617,9 @@ export const spawnChildSession: SpawnChildSession & {
       const created = child;
       const retained = getChildPool(options.cwd).retainedLiveSnapshots?.get(options.jobId);
       const live = attachAgentSessionLiveFeed(created.session, retained);
+      // Retain the teardown for the sibling catch clause BEFORE control flows
+      // out: a throwing onControl must still unwind the feed subscription.
+      unsubscribeFeed = live.unsubscribe;
       options.onControl?.({
         sessionFile: created.session.sessionFile,
         live: {
@@ -634,7 +641,7 @@ export const spawnChildSession: SpawnChildSession & {
       // control publication): never leak the session or its model binding.
       if (child) {
         try {
-          (child as ChildSessionServices).liveUnsubscribe?.();
+          unsubscribeFeed?.();
         } catch {
           // Best-effort teardown; the original failure is reported below.
         }
