@@ -295,6 +295,7 @@ test("global step back returns to the action menu", async () => {
   assert.ok(lines(wizard).some((line) => line.includes("Set / replace agent model")));
 });
 
+/* Temporarily disabled model-group UI coverage; retain for re-enable.
 test("the action menu shows the active model group and activation calls activateGroup", async () => {
   let activated: string | undefined;
   const ctl = controller({
@@ -342,4 +343,16 @@ test("escape from the group picker returns to the action menu", async () => {
   assert.ok(lines(wizard).some((line) => line.includes("activate model group")));
   wizard.handleInput("\x1b");
   assert.ok(lines(wizard).some((line) => line.includes("Manage agent model")));
+});
+*/
+
+test("model-group controls are hidden from the agent-model menu", async () => {
+  const wizard = new ManageAgentModelWizard({ tui: tui(), theme, controller: controller({
+    listGroups: async () => [{ id: "work", name: "Work", mode: "fallback", models: [{ ref: "openai/gpt-5" }], active: true }],
+  }), done: () => {} });
+  await flush();
+  const rendered = lines(wizard).join(" ");
+  assert.doesNotMatch(rendered, /Activate model group|Active model group/);
+  for (let i = 0; i < 4; i++) wizard.handleInput("\x1b[B");
+  assert.match(lines(wizard).join(" "), /5\. Done/);
 });

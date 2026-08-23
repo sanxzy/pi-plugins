@@ -113,6 +113,7 @@ test("pi-c2 extension registers Telegram setup and goal workflow alongside exist
   );
   assert.equal(commands.filter((name) => name === "c2-goal").length, 1, "goal command registered exactly once");
   assert.equal(commands.filter((name) => name === "c2-manage-goal").length, 1, "manage-goal command registered exactly once");
+  assert.equal(commands.filter((name) => name === "c2-manage-model-groups").length, 0, "model-group management command stays hidden");
   assert.equal(commands.filter((name) => name === "c2-setup-ponytail").length, 1, "Ponytail setup command registered exactly once");
   assert.equal(events.filter((event) => event === "tool_call").length, 0, "Ponytail enforcement must not use tool_call hooks");
   assert.ok(events.includes("session_start"), "session_start lifecycle handler registered");

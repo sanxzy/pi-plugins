@@ -38,7 +38,7 @@ import {
   registerNotifyEntry,
   registerContextAutoCompact,
   createDefaultTelegramCommandExpander,
-  registerManageModelGroupsCommand,
+  // registerManageModelGroupsCommand,
 } from "@xzy-ai/commands";
 import { MAX_CONCURRENCY, MAX_PARALLEL_AGENTS } from "@xzy-ai/core";
 import { registerChildExtensionFactory, registerChildPonytailTools, registerChildThinkingTool, installModelGroupHostApi } from "@xzy-ai/runtime";
@@ -68,7 +68,8 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   // a failure is non-fatal and startup continues on resolver defaults.
   bootstrapSettingsConfig();
   // Publish the synchronous model-group bridge consumed by the patched host
-  // `/model` selector. The host remains decoupled from workspace packages.
+  // `/model` selector. The bridge remains installed while its UI controls are
+  // temporarily hidden, so existing configured groups keep functioning.
   installModelGroupHostApi();
   // One-time best-effort migration: existing installs bootstrapped with the
   // legacy 4 000 goal limit get bumped to the new 10 000 default without
@@ -100,7 +101,7 @@ export default function piC2Extension(pi: ExtensionAPI): void {
   registerTelegramSetup(pi, { getCommands: getMenuCommands });
   registerReferencesSetup(pi);
   registerManageAgentModel(pi);
-  registerManageModelGroupsCommand(pi);
+  // registerManageModelGroupsCommand(pi);
   registerManageCompactThreshold(pi);
   registerCompactionLogging(pi);
   registerTelegramClear(pi);

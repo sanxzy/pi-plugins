@@ -100,6 +100,23 @@ test("workspace and bundled host patches are semantically synchronized", async (
   }
 });
 
+test("model-group controls stay hidden while the host integration remains commented for re-enable", async () => {
+  const bundledText = readFileSync(BUNDLED_PATCH, "utf8");
+  const pristineCopy = await makePristine(bundledText);
+  const patched = await applyTo(pristineCopy, bundledText);
+  try {
+    const selector = readFileSync(join(patched, "dist/modes/interactive/components/model-selector.js"), "utf8");
+    const interactive = readFileSync(join(patched, "dist/modes/interactive/interactive-mode.js"), "utf8");
+    assert.match(selector, /model-group selector UI is temporarily hidden/);
+    assert.doesNotMatch(selector, /^\s+provider: "__pi_c2_group__"/m, "the /model selector must not build group entries");
+    assert.match(interactive, /model-group activation UI is temporarily hidden/);
+    assert.doesNotMatch(interactive, /^\s+if \(model\.provider === "__pi_c2_group__"\)/m, "the /model selector must not activate groups");
+  } finally {
+    rmSync(patched, { recursive: true, force: true });
+    rmSync(pristineCopy, { recursive: true, force: true });
+  }
+});
+
 test("capability markers exist in the patched host and the patch reverses cleanly", async () => {
   const bundledText = readFileSync(BUNDLED_PATCH, "utf8");
   const pristineCopy = await makePristine(bundledText);

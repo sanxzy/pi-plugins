@@ -47,8 +47,6 @@ const PATCH_MARKERS = [
   "dist/core/agent-session.js:advance round-robin groups on every individual model request",
   "dist/core/agent-session.js:quarantine group members on HTTP 4xx/5xx",
   "dist/core/agent-session.js:pi-c2.child-model-bindings",
-  "dist/modes/interactive/components/model-selector.js:pi-c2: the extension publishes a host-neutral model-group bridge",
-  "dist/modes/interactive/interactive-mode.js:__pi_c2_group__",
   "dist/modes/interactive/interactive-mode.js:hostSwapApplyChildEvent",
   "dist/modes/interactive/interactive-mode.js:hostSwapQueueChildMessage",
   "dist/modes/interactive/interactive-mode.js:_hostGetThemeInstance",

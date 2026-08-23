@@ -213,7 +213,7 @@ export class ManageAgentModelWizard implements Component {
           "Remove agent model",
           "Set / replace global agent model",
           "Remove global agent model",
-          "Activate model group",
+          // "Activate model group",
           "Done",
         ];
         for (let i = 0; i < options.length; i++) {
@@ -223,12 +223,15 @@ export class ManageAgentModelWizard implements Component {
         if (this.globalModel) {
           add(" ", this.theme.fg("dim", `Global agent model: ${this.globalModel}${this.globalThinking ? ` · thinking ${this.globalThinking}` : ""}`));
         }
+        /*
         if (this.activeGroupName) {
           add(" ", this.theme.fg("dim", `Active model group: ${this.activeGroupName}`));
         }
+        */
         add(" ", this.theme.fg("dim", "↑↓ navigate • Enter select • Esc cancel"));
         break;
       }
+      /* Model-group activation is temporarily hidden from the user.
       case "group": {
         add(" ", this.theme.fg("accent", "Manage agent model · activate model group"));
         add(" ", this.theme.fg("muted", "Type to filter • ↑↓ navigate • Enter select • Esc back"));
@@ -250,6 +253,7 @@ export class ManageAgentModelWizard implements Component {
         }
         break;
       }
+      */
       case "agent": {
         add(" ", this.theme.fg("accent", "Manage agent model · select agent"));
         add(" ", this.theme.fg("muted", this.step.kind === "agent" ? "Type to filter • ↑↓ navigate • Enter select • Esc back" : ""));
@@ -357,7 +361,7 @@ export class ManageAgentModelWizard implements Component {
         return;
       }
       if (matchesKey(data, Key.down)) {
-        this.actionIndex = Math.min(5, this.actionIndex + 1);
+        this.actionIndex = Math.min(4, this.actionIndex + 1);
         this.refresh();
         return;
       }
@@ -372,18 +376,21 @@ export class ManageAgentModelWizard implements Component {
           this.globalActionIndex = 0;
           this.step = { kind: "global" };
           this.refresh();
+        /*
         } else if (this.actionIndex === 4) {
           this.search.setValue("");
           this.query = "";
           this.groupIndex = 0;
           this.step = { kind: "group" };
           this.refresh();
+        */
         } else {
           this.finish({ status: "saved", message: "Done." });
         }
       }
       return;
     }
+    /* Temporarily hidden model-group activation flow:
     if (this.step.kind === "group") {
       if (matchesKey(data, Key.up)) {
         this.groupIndex = Math.max(0, this.groupIndex - 1);
@@ -414,6 +421,7 @@ export class ManageAgentModelWizard implements Component {
       this.groupIndex = 0;
       return;
     }
+    */
     if (this.step.kind === "global") {
       if (matchesKey(data, Key.up)) {
         this.globalActionIndex = Math.max(0, this.globalActionIndex - 1);
@@ -646,6 +654,7 @@ export class ManageAgentModelWizard implements Component {
     this.refresh();
   }
 
+  /* Temporarily disabled while model-group controls are hidden:
   private async runActivateGroup(group: ManageAgentModelGroupItem): Promise<void> {
     if (this.busy) return;
     this.busy = true;
@@ -658,6 +667,7 @@ export class ManageAgentModelWizard implements Component {
     this.step = { kind: "result", ok: result.ok, message: result.message };
     this.refresh();
   }
+  */
 
   private async runSetGlobal(reference: string, thinking?: string): Promise<void> {
     if (this.busy) return;
