@@ -476,10 +476,8 @@ test("a background result raced into an active run is delivered after the run se
     // an extension event. The stable-idle fallback must redrive the durable
     // result without requiring a reload or a second user turn.
     await new Promise((resolve) => setTimeout(resolve, 250));
-    assert.equal(steers.length, 0, "hidden result must not use the visible user-message channel");
-    assert.equal(hidden.at(-1)?.message.customType, "pi-c2:internal-context");
-    assert.equal(hidden.at(-1)?.message.display, false);
-    assert.equal(hidden.at(-1)?.message.content, "result-a");
+    assert.deepEqual(steers, ["result-a"], "child results use the visible user-message steer channel");
+    assert.deepEqual(hidden, []);
     assert.deepEqual(notifications, ["Agent result delivered to the root session."]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });

@@ -267,10 +267,11 @@ export function registerSessionEvents(pi: ExtensionAPI, options: SessionEventsOp
       // Reject while the host agent is mid-run: the delivery coordinator keeps
       // the result durable pending and retries once the host settles, so a
       // background result is never lost to an active prompt and never surfaces
-      // pi's "already processing a prompt" error. The gate's settled hook
-      // redrives this coordinator the moment agent_end fires, so the result
-      // does not wait for the coordinator's polling retry.
-      if (!gate.trySendHidden(content, "steer")) {
+      // pi's "already processing a prompt" error. Child results use the host's
+      // visible user-message steer path; goals reserve the hidden native
+      // priority path. The gate's settled hook redrives this coordinator the
+      // moment agent_end fires, so the result does not wait for polling retry.
+      if (!gate.trySend(content, "steer")) {
         throw new Error("host agent is busy; defer result delivery");
       }
       if (ctx.hasUI) {
