@@ -30,10 +30,14 @@ export interface GoalDeliveryBinding {
   readonly hasUI: boolean;
   readonly notify: (message: string, type?: "info" | "warning" | "error") => void;
   /**
+   * Whether this binding must deliver every goal tick through the host's
+   * native steering queue, even while the host is busy or already queued.
+   */
+  readonly forceDelivery?: boolean;
+  /**
    * Whether the host already has pending messages queued for delivery.
-   * When true, an immediate goal tick is skipped to avoid stacking another
-   * message behind still-pending ones; the periodic scheduler will fire a
-   * fresh tick after the interval elapses.
+   * Non-forced bindings skip a tick when this is true to avoid stacking
+   * another message behind still-pending ones.
    */
   readonly hasPendingMessages: () => boolean;
   /**
@@ -161,9 +165,10 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
 
         const target = bindings.get(goal.cwd) ?? currentBinding;
         if (!target) return;
-        // Skip this tick if the host already has pending goal messages queued
-        // for delivery. The periodic timer will retry after the interval.
-        if (target.hasPendingMessages()) return;
+        // Ordinary bindings defer behind pending host messages. The live root
+        // goal binding opts into Pi's native steering queue so the exact goal
+        // is accepted even while the agent is busy.
+        if (!target.forceDelivery && target.hasPendingMessages()) return;
         try {
           if (goal.status === "active") {
             target.sendUserMessage(`${goal.prompt}\n${GOAL_DELIVERY_FOOTER}`, { deliverAs: "steer" });

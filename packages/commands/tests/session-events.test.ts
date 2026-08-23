@@ -351,6 +351,28 @@ test("a disposed host gate drops queued messages, cancels retries, and rejects n
   assert.deepEqual(steers, [], "a disposed gate must never deliver");
 });
 
+test("forced hidden delivery uses Pi's native steering queue while the host is busy", () => {
+  const hidden: Array<{ customType: string; content: string; display: boolean }> = [];
+  const options: unknown[] = [];
+  const pi = {
+    on() {},
+    sendMessage(message: { customType: string; content: string; display: boolean }, deliveryOptions: unknown) {
+      hidden.push(message);
+      options.push(deliveryOptions);
+    },
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    isIdle: () => false,
+    hasPendingMessages: () => false,
+  } as unknown as ExtensionContext;
+  const gate = createHostMessageGate(pi, ctx);
+
+  gate.sendImmediateHidden("goal-now", "steer");
+
+  assert.deepEqual(hidden, [{ customType: "pi-c2:internal-context", content: "goal-now", display: false }]);
+  assert.deepEqual(options, [{ triggerTurn: true, deliverAs: "steer" }]);
+});
+
 test("an active turn blocks host delivery even when the runner misreports idle", async () => {
   const listeners = new Map<string, Array<(event: unknown) => void>>();
   const steers: string[] = [];

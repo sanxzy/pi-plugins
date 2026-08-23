@@ -59,7 +59,12 @@ test("active ticks deliver exact prompt plus footer with steer even while busy",
   const sent: string[] = [];
   const notifications: string[] = [];
   pool.setScheduler(() => ({ clear() {} }));
-  pool.bind(binding({ sendUserMessage: (content) => sent.push(content), notify: (message) => notifications.push(message) }));
+  pool.bind(binding({
+    sendUserMessage: (content) => sent.push(content),
+    notify: (message) => notifications.push(message),
+    forceDelivery: true,
+    hasPendingMessages: () => true,
+  }));
   assert.equal(pool.create({ cwd: "/project", prompt: "p", interval: "1m" }).ok, true);
   // create() triggers an immediate delivery
   pool.tick("/project");

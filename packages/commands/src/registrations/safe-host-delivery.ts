@@ -9,6 +9,12 @@ export interface HostMessageGate {
   send(content: string, deliverAs?: HostDeliverAs): void;
   /** Queue model-only context for a safe idle boundary. */
   sendHidden(content: string, deliverAs?: HostDeliverAs): void;
+  /**
+   * Queue model-only context through Pi's native steering queue immediately.
+   * This is reserved for goal ticks, which must be accepted while a turn is
+   * already running rather than waiting for an idle boundary.
+   */
+  sendImmediateHidden(content: string, deliverAs?: HostDeliverAs): void;
   /** Attempt visible delivery without retaining the message; false means retry later. */
   trySend(content: string, deliverAs?: HostDeliverAs): boolean;
   /** Attempt hidden delivery without retaining the message; false means retry later. */
@@ -249,6 +255,18 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
       if (disposed) return;
       queue.push({ content, deliverAs, hidden: true });
       flush();
+    },
+    sendImmediateHidden(content: string, deliverAs: HostDeliverAs = "steer"): void {
+      if (disposed) return;
+      try {
+        deliver({ content, deliverAs, hidden: true });
+        // Keep ordinary gated delivery behind the native goal steer until the
+        // host reports the next settled boundary.
+        sendInFlight = true;
+      } catch {
+        // Pi's native steering path owns busy-run queuing. A synchronous host
+        // failure must not escape an interval callback.
+      }
     },
     trySend(content: string, deliverAs: HostDeliverAs = "steer"): boolean {
       return tryDeliver(content, deliverAs, false);

@@ -94,7 +94,11 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLog
   return {
     cwd: ctx.cwd,
     hasUI: ctx.hasUI,
-    sendUserMessage: (content, options) => gate.sendHidden(content, options?.deliverAs ?? "steer"),
+    // Goals are deliberately different from background results and reload
+    // notices: a goal tick must enter Pi's native steering queue even while a
+    // response is streaming, rather than waiting for an idle boundary.
+    sendUserMessage: (content, options) => gate.sendImmediateHidden(content, options?.deliverAs ?? "steer"),
+    forceDelivery: true,
     notify: (message) => notifyHost(pi, ctx, message),
     hasPendingMessages: () => !gate.ready(),
     logger,
