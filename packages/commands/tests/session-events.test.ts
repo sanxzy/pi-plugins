@@ -373,6 +373,40 @@ test("forced hidden delivery uses Pi's native steering queue while the host is b
   assert.deepEqual(options, [{ triggerTurn: true, deliverAs: "steer", priority: true }]);
 });
 
+test("goal delivery serializes behind a child result accepted by the same host gate", async () => {
+  const hidden: Array<{ customType: string; content: string; display: boolean }> = [];
+  const options: unknown[] = [];
+  const listeners = new Map<string, Array<(event: unknown) => void>>();
+  const pi = {
+    on(event: string, handler: (event: unknown) => void) {
+      listeners.set(event, [...(listeners.get(event) ?? []), handler]);
+      return () => undefined;
+    },
+    sendMessage(message: { customType: string; content: string; display: boolean }, deliveryOptions: unknown) {
+      hidden.push(message);
+      options.push(deliveryOptions);
+    },
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    isIdle: () => true,
+    hasPendingMessages: () => false,
+  } as unknown as ExtensionContext;
+  const gate = createHostMessageGate(pi, ctx);
+  const emit = (event: string): void => {
+    for (const handler of listeners.get(event) ?? []) handler({});
+  };
+
+  assert.equal(gate.trySendHidden("child-result", "steer"), true);
+  emit("turn_start");
+  gate.sendImmediateHidden("goal-now", "steer");
+  assert.deepEqual(hidden.map((message) => message.content), ["child-result"], "goal must not race an accepted child result");
+
+  emit("agent_settled");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(hidden.map((message) => message.content), ["child-result", "goal-now"]);
+  assert.deepEqual(options[1], { triggerTurn: true, deliverAs: "steer", priority: true });
+});
+
 test("an active turn blocks host delivery even when the runner misreports idle", async () => {
   const listeners = new Map<string, Array<(event: unknown) => void>>();
   const steers: string[] = [];
