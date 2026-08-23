@@ -12,6 +12,7 @@ import { saveWikiEntry, slugifyUrl, type WikiSaveResult, wikiRoot } from "../wik
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MIN_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
+export const WEB_FETCH_RESPONSE_LINE_LIMIT = 1000;
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
 
@@ -37,6 +38,12 @@ export interface WebFetchDetails {
     topic: string;
     pages: string[];
   };
+  pagination?: {
+    page: number;
+    totalPages: number;
+    lineLimit: number;
+    next?: string;
+  };
   wikiSaveError?: string;
 }
 
@@ -58,7 +65,7 @@ export function registerWebFetchTool(pi: ExtensionAPI): void {
     name: "web_fetch",
     label: "Web fetch",
     description:
-      "Use this tool for narrow, source-focused research after web_search: fetch a specific candidate URL from search results and retrieve its primary content for verification and detailed analysis. You may also use it when the user provides a URL directly. It converts HTML to markdown or text. Search local wikis and references first with knowledge_search tool; use web_search for broad discovery when local information is absent or insufficient, then use this tool to inspect the most relevant URLs from the search response. Successful results from this tool are automatically saved to the local wiki for reuse. The URL must be a fully-formed HTTP or HTTPS URL.",
+      "Use this tool for narrow, source-focused research after web_search: fetch a specific candidate URL from search results and retrieve its primary content for verification and detailed analysis. You may also use it when the user provides a URL directly. It converts HTML to markdown or text. Responses over 1000 lines return page 1 and are automatically paginated in the local wiki; use knowledge_search with the returned next page path to continue. Search local wikis and references first with knowledge_search tool; use web_search for broad discovery when local information is absent or insufficient, then use this tool to inspect the most relevant URLs from the search response. Successful results from web_fetch are automatically saved to the local wiki for reuse. The URL must be a fully-formed HTTP or HTTPS URL.",
     parameters: webFetchParams,
     async execute(
       _toolCallId: string,
@@ -169,19 +176,9 @@ async function executeWebFetchInner(
   const content = decodeBody(body, contentType);
   if (isHtmlContentType(mime)) {
     const output = format === "text" ? extractTextFromHTML(content) : convertHTMLToMarkdown(content);
-    if (!output.trim()) return textResult(`${title}\n\n${output}`, {});
-    const details: WebFetchDetails = {};
-    const saved = await persistFetchResult(url, title, output, format, options);
-    details.wiki = toWikiDetails(saved);
-    if (saved.error) details.wikiSaveError = saved.error;
-    return textResult(`${title}\n\n${output}`, details);
+    return createTextFetchResult(url, title, output, format, options);
   }
-  if (!content.trim()) return textResult(`${title}\n\n${content}`, {});
-  const details: WebFetchDetails = {};
-  const saved = await persistFetchResult(url, title, content, format, options);
-  details.wiki = toWikiDetails(saved);
-  if (saved.error) details.wikiSaveError = saved.error;
-  return textResult(`${title}\n\n${content}`, details);
+  return createTextFetchResult(url, title, content, format, options);
 }
 
 function normalizeHttpUrl(value: string): string {
@@ -297,6 +294,28 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
+async function createTextFetchResult(
+  url: string,
+  title: string,
+  content: string,
+  format: string,
+  options?: WebFetchExecutionOptions,
+): Promise<AgentToolResult<WebFetchDetails>> {
+  const fullText = `${title}\n\n${content}`;
+  if (!content.trim()) return textResult(fullText, {});
+
+  const details: WebFetchDetails = {};
+  const saved = await persistFetchResult(url, title, content, format, options);
+  details.wiki = toWikiDetails(saved);
+  if (saved.error) details.wikiSaveError = saved.error;
+  if (!saved.saved) return textResult(fullText, details);
+
+  const paginated = paginateWebFetchResponse(fullText, saved.pages);
+  if (!paginated) return textResult(fullText, details);
+  details.pagination = paginated.pagination;
+  return textResult(paginated.text, details);
+}
+
 async function persistFetchResult(
   url: string,
   title: string,
@@ -312,8 +331,33 @@ async function persistFetchResult(
     format,
     title,
     text,
+    pageLineSize: WEB_FETCH_RESPONSE_LINE_LIMIT,
     timestamp: (options?.now ?? (() => new Date()))().toISOString(),
   });
+}
+
+function paginateWebFetchResponse(
+  fullText: string,
+  savedPages: string[],
+): { text: string; pagination: NonNullable<WebFetchDetails["pagination"]> } | undefined {
+  const lines = fullText.split("\n");
+  if (lines.length <= WEB_FETCH_RESPONSE_LINE_LIMIT) return undefined;
+
+  const totalPages = Math.ceil(lines.length / WEB_FETCH_RESPONSE_LINE_LIMIT);
+  const contentLines = lines.slice(0, WEB_FETCH_RESPONSE_LINE_LIMIT - 1);
+  const next = savedPages[1];
+  const continuation = next
+    ? `[web_fetch page 1/${totalPages}; response limited to ${WEB_FETCH_RESPONSE_LINE_LIMIT} lines. Continue with knowledge_search: type="wikis", page="${next}".]`
+    : `[web_fetch page 1/${totalPages}; response limited to ${WEB_FETCH_RESPONSE_LINE_LIMIT} lines. The complete response was saved to the local wiki.]`;
+  return {
+    text: [...contentLines, continuation].join("\n"),
+    pagination: {
+      page: 1,
+      totalPages,
+      lineLimit: WEB_FETCH_RESPONSE_LINE_LIMIT,
+      ...(next ? { next } : {}),
+    },
+  };
 }
 
 function toWikiDetails(saved: WikiSaveResult): { saved: boolean; topic: string; pages: string[] } {

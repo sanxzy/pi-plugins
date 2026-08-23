@@ -374,6 +374,37 @@ test("web_fetch saves text results with URL and content-type metadata", async ()
   }
 });
 
+test("web_fetch paginates long responses at 1000 lines and saves every page", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
+  const source = Array.from({ length: 1200 }, (_, index) => `source-line-${index + 1}`).join("\n");
+  try {
+    await withFetch(async () => new Response(source, { headers: { "content-type": "text/plain" } }), async () => {
+      const result = await executeWebFetch(
+        { url: "https://example.com/long" },
+        undefined,
+        { wikiRoot: root, now: () => new Date("2026-01-01T00:00:00.000Z") },
+      );
+      const output = text(result);
+      assert.equal(output.split("\n").length, 1000);
+      assert.match(output, /source-line-1/);
+      assert.match(output, /knowledge_search/);
+      assert.doesNotMatch(output, /source-line-1200/);
+      assert.deepEqual(result.details, {
+        wiki: { saved: true, topic: "example-com-long", pages: ["example-com-long.md", "example-com-long.part-002.md"] },
+        pagination: { page: 1, totalPages: 2, lineLimit: 1000, next: "example-com-long.part-002.md" },
+      });
+
+      const pages = readdirSync(root).filter((file) => file.endsWith(".md")).sort();
+      assert.deepEqual(pages, ["example-com-long.md", "example-com-long.part-002.md"]);
+      const pageBodies = pages.map((file) => readFileSync(join(root, file), "utf8").split("<!-- pi-c2-wiki-page-end -->\n\n")[1] ?? "");
+      assert.equal(pageBodies.every((body) => body.trimEnd().split("\n").length <= 1000), true);
+      assert.ok(pageBodies.join("\n").includes("source-line-1200"));
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("web_fetch does not save empty text bodies or unsupported binary responses", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-c2-wiki-"));
   mkdirSync(root, { recursive: true });

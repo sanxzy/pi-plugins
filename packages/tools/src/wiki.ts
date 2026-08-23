@@ -278,6 +278,8 @@ export interface WikiEntryInput {
   text: string;
   timestamp?: string;
   pageSize?: number;
+  /** Optional maximum number of lines in each persisted page body. */
+  pageLineSize?: number;
 }
 
 export interface WikiSaveResult {
@@ -375,6 +377,9 @@ export async function saveWikiEntry(input: WikiEntryInput & { root?: string }): 
 async function writePaginatedWikiEntry(input: WikiEntryInput, root: string, topic: string): Promise<WikiSaveResult> {
   return processWithLog({ operation: TOOL_OPERATIONS.WIKI_EXECUTE, parameters: { topic, root } }, async () => {
   const pageSize = Math.max(input.pageSize ?? WIKI_PAGE_SIZE, 256);
+  const pageLineSize = input.pageLineSize === undefined
+    ? undefined
+    : Math.max(Math.floor(input.pageLineSize), 1);
   await mkdir(root, { recursive: true });
   const existingPages = await listTopicPages(root, topic);
   const bodies: string[] = [];
@@ -384,10 +389,12 @@ async function writePaginatedWikiEntry(input: WikiEntryInput, root: string, topi
   }
   if (bodies.length === 0) bodies.push("");
 
-  const chunks = splitEntryForPages(input, pageSize);
+  const chunks = splitEntryForPages(input, pageSize, pageLineSize);
   for (const chunk of chunks) {
     const last = bodies.length - 1;
-    if (bodies[last] && bodies[last].length + chunk.length > pageSize) bodies.push(chunk);
+    const exceedsBytes = bodies[last]!.length + chunk.length > pageSize;
+    const exceedsLines = pageLineSize !== undefined && countLines(bodies[last]!) + countLines(chunk) > pageLineSize;
+    if (bodies[last] && (exceedsBytes || exceedsLines)) bodies.push(chunk);
     else bodies[last] = `${bodies[last]}${chunk}`;
   }
 
@@ -521,7 +528,8 @@ async function atomicWrite(path: string, content: string): Promise<void> {
   }
 }
 
-function splitEntryForPages(input: WikiEntryInput, pageSize: number): string[] {
+function splitEntryForPages(input: WikiEntryInput, pageSize: number, pageLineSize?: number): string[] {
+  if (pageLineSize !== undefined) return splitEntryForLinePages(input, pageLineSize);
   const whole = formatWikiEntry(input);
   if (whole.length <= pageSize) return [whole];
   const overhead = formatWikiEntry({ ...input, text: "" }).length;
@@ -540,6 +548,25 @@ function splitEntryForPages(input: WikiEntryInput, pageSize: number): string[] {
   return chunks.map((text, index) =>
     formatWikiEntry({ ...input, title: index === 0 ? input.title : `${input.title} (continued ${index + 1})`, text }),
   );
+}
+
+function splitEntryForLinePages(input: WikiEntryInput, pageLineSize: number): string[] {
+  const whole = formatWikiEntry(input);
+  if (countLines(whole) <= pageLineSize) return [whole];
+  const emptyEntryLines = countLines(formatWikiEntry({ ...input, text: "" }));
+  const textLineBudget = Math.max(pageLineSize - emptyEntryLines + 1, 1);
+  const lines = input.text.split("\n");
+  const chunks: string[] = [];
+  for (let offset = 0; offset < lines.length; offset += textLineBudget) {
+    chunks.push(lines.slice(offset, offset + textLineBudget).join("\n"));
+  }
+  return chunks.map((text, index) =>
+    formatWikiEntry({ ...input, title: index === 0 ? input.title : `${input.title} (continued ${index + 1})`, text }),
+  );
+}
+
+function countLines(value: string): number {
+  return value.split("\n").length;
 }
 
 function metadataValue(value: string): string {
