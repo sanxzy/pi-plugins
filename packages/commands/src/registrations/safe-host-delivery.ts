@@ -10,11 +10,9 @@ export interface HostMessageGate {
   /** Queue model-only context for a safe idle boundary. */
   sendHidden(content: string, deliverAs?: HostDeliverAs): void;
   /**
-   * Deliver model-only context through Pi's native steering queue when possible.
-   * This is reserved for goal ticks, which may be accepted while a turn is
-   * already running rather than waiting for an idle boundary. An already
-   * accepted message always wins the send race; the goal is queued with
-   * priority until that send settles.
+   * Queue model-only context through Pi's native steering queue immediately.
+   * This is reserved for goal ticks, which must be accepted while a turn is
+   * already running rather than waiting for an idle boundary.
    */
   sendImmediateHidden(content: string, deliverAs?: HostDeliverAs): void;
   /** Attempt visible delivery without retaining the message; false means retry later. */
@@ -140,11 +138,6 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     pi.sendUserMessage(message.content, { deliverAs: message.deliverAs });
   };
 
-  const enqueue = (message: QueuedMessage): void => {
-    if (message.priority) queue.unshift(message);
-    else queue.push(message);
-  };
-
   const flush = (): void => {
     if (disposed || queue.length === 0) return;
     if (!hostIsReady()) {
@@ -243,14 +236,7 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
   if (typeof agentSettledUnsubscribe === "function") unsubscribeLifecycle.push(agentSettledUnsubscribe);
 
   const tryDeliver = (content: string, deliverAs: HostDeliverAs, hidden: boolean): boolean => {
-    if (disposed) return false;
-    // A queued priority message must be drained before an ordinary child
-    // result can claim the next idle boundary.
-    if (queue.some((message) => message.priority)) {
-      flush();
-      return false;
-    }
-    if (!hostIsReady()) return false;
+    if (disposed || !hostIsReady()) return false;
     try {
       deliver({ content, deliverAs, hidden });
       sendInFlight = true;
@@ -263,31 +249,24 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
   return {
     send(content: string, deliverAs: HostDeliverAs = "steer"): void {
       if (disposed) return;
-      enqueue({ content, deliverAs, hidden: false });
+      queue.push({ content, deliverAs, hidden: false });
       flush();
     },
     sendHidden(content: string, deliverAs: HostDeliverAs = "steer"): void {
       if (disposed) return;
-      enqueue({ content, deliverAs, hidden: true });
+      queue.push({ content, deliverAs, hidden: true });
       flush();
     },
     sendImmediateHidden(content: string, deliverAs: HostDeliverAs = "steer"): void {
       if (disposed) return;
-      const message = { content, deliverAs, hidden: true, priority: true } as const;
-      // Child results and goals share this arbiter. Never call the host twice
-      // before the previous accepted send reaches its settlement boundary.
-      if (sendInFlight) {
-        enqueue(message);
-        return;
-      }
       try {
-        deliver(message);
+        deliver({ content, deliverAs, hidden: true, priority: true });
         // Keep ordinary gated delivery behind the native goal steer until the
         // host reports the next settled boundary.
         sendInFlight = true;
       } catch {
-        enqueue(message);
-        flush();
+        // Pi's native steering path owns busy-run queuing. A synchronous host
+        // failure must not escape an interval callback.
       }
     },
     trySend(content: string, deliverAs: HostDeliverAs = "steer"): boolean {
