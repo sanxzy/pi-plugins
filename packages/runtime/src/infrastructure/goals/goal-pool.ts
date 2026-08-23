@@ -26,7 +26,7 @@ export type GoalMutationResult =
 /** A host delivery binding for the goal's delivery cwd. */
 export interface GoalDeliveryBinding {
   readonly cwd: string;
-  readonly sendUserMessage: (content: string, options?: { readonly deliverAs?: "steer" }) => void;
+  readonly sendUserMessage: (content: string, options?: { readonly deliverAs?: "goal" }) => void;
   readonly hasUI: boolean;
   readonly notify: (message: string, type?: "info" | "warning" | "error") => void;
   /**
@@ -171,7 +171,7 @@ export function createGoalPool(projectRoot: string, rootSessionId = "root"): Goa
         if (!target.forceDelivery && target.hasPendingMessages()) return;
         try {
           if (goal.status === "active") {
-            target.sendUserMessage(`${goal.prompt}\n${GOAL_DELIVERY_FOOTER}`, { deliverAs: "steer" });
+            target.sendUserMessage(`${goal.prompt}\n${GOAL_DELIVERY_FOOTER}`, { deliverAs: "goal" });
             target.notify(`Goal triggered and sent to the current session — this goal will be sent every ${formatGoalInterval(goal.intervalMs)}.`, "info");
           } else if (target.hasUI) {
             target.notify(`Goal paused: ${goal.pauseReason ?? ""}`, "warning");

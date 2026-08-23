@@ -51,7 +51,7 @@ test("first active delivery occurs immediately on goal creation", () => {
   const created = pool.create({ cwd: "/project", prompt: "exact prompt", interval: "10s" });
   assert.equal(created.ok, true);
   assert.equal(sent.length, 1, "goal is delivered immediately on creation");
-  assert.equal(sent[0]?.deliverAs, "steer");
+  assert.equal(sent[0]?.deliverAs, "goal");
 });
 
 test("active ticks deliver exact prompt plus footer with steer even while busy", () => {

@@ -367,10 +367,10 @@ test("forced hidden delivery uses Pi's native steering queue while the host is b
   } as unknown as ExtensionContext;
   const gate = createHostMessageGate(pi, ctx);
 
-  gate.sendImmediateHidden("goal-now", "steer");
+  gate.sendImmediateHidden("goal-now", "goal");
 
   assert.deepEqual(hidden, [{ customType: "pi-c2:internal-context", content: "goal-now", display: false }]);
-  assert.deepEqual(options, [{ triggerTurn: true, deliverAs: "steer", priority: true }]);
+  assert.deepEqual(options, [{ triggerTurn: true, deliverAs: "goal" }]);
 });
 
 test("an active turn blocks host delivery even when the runner misreports idle", async () => {
@@ -476,8 +476,10 @@ test("a background result raced into an active run is delivered after the run se
     // an extension event. The stable-idle fallback must redrive the durable
     // result without requiring a reload or a second user turn.
     await new Promise((resolve) => setTimeout(resolve, 250));
-    assert.deepEqual(steers, ["result-a"], "child results use the visible user-message steer channel");
-    assert.deepEqual(hidden, []);
+    assert.deepEqual(steers, [], "native child results stay hidden from the user-message channel");
+    assert.equal(hidden.at(-1)?.message.customType, "pi-c2:internal-context");
+    assert.equal(hidden.at(-1)?.message.display, false);
+    assert.equal(hidden.at(-1)?.message.content, "result-a");
     assert.deepEqual(notifications, ["Agent result delivered to the root session."]);
   } finally {
     rmSync(cwd, { recursive: true, force: true });

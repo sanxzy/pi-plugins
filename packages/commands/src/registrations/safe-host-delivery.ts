@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export type HostDeliverAs = "steer" | "followUp";
+export type HostDeliverAs = "steer" | "followUp" | "goal";
 
 const HIDDEN_HOST_MESSAGE_TYPE = "pi-c2:internal-context";
 
@@ -35,7 +35,6 @@ interface QueuedMessage {
   readonly content: string;
   readonly deliverAs: HostDeliverAs;
   readonly hidden: boolean;
-  readonly priority?: boolean;
 }
 
 /** Backoff for re-delivery while the host run settles (agent_end / reload). */
@@ -131,11 +130,11 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     if (message.hidden) {
       pi.sendMessage(
         { customType: HIDDEN_HOST_MESSAGE_TYPE, content: message.content, display: false },
-        { triggerTurn: true, deliverAs: message.deliverAs, ...(message.priority ? { priority: true } : {}) },
+        { triggerTurn: true, deliverAs: message.deliverAs },
       );
       return;
     }
-    pi.sendUserMessage(message.content, { deliverAs: message.deliverAs });
+    pi.sendUserMessage(message.content, { deliverAs: message.deliverAs === "goal" ? "steer" : message.deliverAs });
   };
 
   const flush = (): void => {
@@ -257,10 +256,10 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
       queue.push({ content, deliverAs, hidden: true });
       flush();
     },
-    sendImmediateHidden(content: string, deliverAs: HostDeliverAs = "steer"): void {
+    sendImmediateHidden(content: string, deliverAs: HostDeliverAs = "goal"): void {
       if (disposed) return;
       try {
-        deliver({ content, deliverAs, hidden: true, priority: true });
+        deliver({ content, deliverAs, hidden: true });
         // Keep ordinary gated delivery behind the native goal steer until the
         // host reports the next settled boundary.
         sendInFlight = true;

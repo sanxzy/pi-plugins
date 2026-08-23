@@ -97,7 +97,7 @@ function goalBinding(pi: ExtensionAPI, ctx: ExtensionContext, logger: SessionLog
     // Goals are deliberately different from background results and reload
     // notices: a goal tick must enter Pi's native steering queue even while a
     // response is streaming, rather than waiting for an idle boundary.
-    sendUserMessage: (content, options) => gate.sendImmediateHidden(content, options?.deliverAs ?? "steer"),
+    sendUserMessage: (content, options) => gate.sendImmediateHidden(content, options?.deliverAs ?? "goal"),
     forceDelivery: true,
     notify: (message) => notifyHost(pi, ctx, message),
     hasPendingMessages: () => !gate.ready(),
@@ -268,10 +268,11 @@ export function registerSessionEvents(pi: ExtensionAPI, options: SessionEventsOp
       // the result durable pending and retries once the host settles, so a
       // background result is never lost to an active prompt and never surfaces
       // pi's "already processing a prompt" error. Child results use the host's
-      // visible user-message steer path; goals reserve the hidden native
-      // priority path. The gate's settled hook redrives this coordinator the
-      // moment agent_end fires, so the result does not wait for polling retry.
-      if (!gate.trySend(content, "steer")) {
+      // native custom-message steer path; goals use the same path with the
+      // explicit goal delivery mode. The gate's settled hook redrives this
+      // coordinator the moment agent_end fires, so the result does not wait
+      // for polling retry.
+      if (!gate.trySendHidden(content, "steer")) {
         throw new Error("host agent is busy; defer result delivery");
       }
       if (ctx.hasUI) {

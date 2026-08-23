@@ -185,7 +185,7 @@ index f8c1f48..be46311 100644
              if (options?.deliverAs === "followUp") {
                  this.agent.followUp(appMessage);
              }
-+            else if (options?.priority === true) {
++            else if (options?.deliverAs === "goal") {
 +                this._queuePrioritySteer(appMessage);
 +            }
              else {
@@ -479,17 +479,17 @@ index 556623b..773d9c3 100644
      /** Trigger compaction without awaiting completion. */
      compact(options?: CompactOptions): void;
      /** Get the current effective system prompt. */
-@@ -301,4 +302,5 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
+@@ -301,4 +302,4 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
      sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
          triggerTurn?: boolean;
-+        priority?: boolean;
-         deliverAs?: "steer" | "followUp" | "nextTurn";
+-        deliverAs?: "steer" | "followUp" | "nextTurn";
++        deliverAs?: "steer" | "followUp" | "goal" | "nextTurn";
      }): Promise<void>;
-@@ -928,4 +930,5 @@
+@@ -928,4 +930,4 @@
      sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
          triggerTurn?: boolean;
-+        priority?: boolean;
-         deliverAs?: "steer" | "followUp" | "nextTurn";
+-        deliverAs?: "steer" | "followUp" | "nextTurn";
++        deliverAs?: "steer" | "followUp" | "goal" | "nextTurn";
      }): void;
 @@ -959,6 +964,11 @@ export interface ExtensionAPI {
      getThinkingLevel(): ThinkingLevel;
@@ -503,11 +503,11 @@ index 556623b..773d9c3 100644
      /**
       * Register or override a model provider.
       *
-@@ -1141,4 +1151,5 @@
+@@ -1141,4 +1151,4 @@
  export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
      triggerTurn?: boolean;
-+    priority?: boolean;
-     deliverAs?: "steer" | "followUp" | "nextTurn";
+-    deliverAs?: "steer" | "followUp" | "nextTurn";
++    deliverAs?: "steer" | "followUp" | "goal" | "nextTurn";
  }) => void;
 @@ -1206,6 +1217,8 @@ export interface ExtensionActions {
      setModel: SetModelHandler;
