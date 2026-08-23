@@ -30,14 +30,18 @@ function recordedConfirm(_title: string, _message: string): Promise<boolean> {
 function ctx(
   cwd: string,
   sessionId = "root-session",
-  options: { model?: unknown; entries?: readonly unknown[] } = {},
+  options: {
+    model?: unknown;
+    entries?: readonly unknown[];
+    contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
+  } = {},
 ): ExtensionContext {
   return {
     mode: "tui",
     hasUI: true,
     cwd,
     model: options.model,
-    getContextUsage: () => undefined,
+    getContextUsage: () => options.contextUsage,
     ui: {
       setFooter: recordedSetFooter,
       onTerminalInput: recordedOnTerminalInput,
@@ -183,6 +187,74 @@ test("the footer shows group, provider/model, and thinking after group selection
     d.handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, ctx(cwd));
     if (previous === undefined) delete (globalThis as typeof globalThis & { [key: symbol]: unknown })[symbol];
     else (globalThis as typeof globalThis & { [key: symbol]: unknown })[symbol] = previous;
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("root context percentage uses the latest response, not a cumulative provider estimate", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-context-"));
+  const d = piDouble();
+  try {
+    const entries = [
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          stopReason: "toolUse",
+          usage: { input: 120_000, output: 4_000, cacheRead: 12_000, cacheWrite: 0, totalTokens: 136_000 },
+        },
+      },
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          stopReason: "stop",
+          usage: { input: 45_000, output: 2_000, cacheRead: 4_000, cacheWrite: 0, totalTokens: 52_000 },
+        },
+      },
+    ];
+    registerAgentFooter(d.pi);
+    const testCtx = ctx(cwd, "root-session", {
+      model: { provider: "openai-codex", id: "gpt-5.6-luna", contextWindow: 340_000 },
+      entries,
+      // Reproduce the bad host-facing estimate seen in the report: it reflects
+      // a value larger than the current response and would render 323.8%.
+      contextUsage: { tokens: 1_100_920, contextWindow: 340_000, percent: 323.8 },
+    });
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, testCtx);
+    assert.ok(capturedFooterFactory);
+    const footer = capturedFooterFactory!({ requestRender: () => {}, terminal: { rows: 24, columns: 100 } }, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => null,
+      getAvailableProviderCount: () => 1,
+    }) as { render(width: number): string[] };
+    assert.match(footer.render(100).map(stripVTControlCharacters).join("\\n"), /15\.3%\/340k/, "the footer must use the latest 52k response context");
+  } finally {
+    d.handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, ctx(cwd));
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("root context percentage is unknown after compaction until a new response arrives", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-context-reset-"));
+  const d = piDouble();
+  try {
+    registerAgentFooter(d.pi);
+    const testCtx = ctx(cwd, "root-session", {
+      model: { provider: "openai-codex", id: "gpt-5.6-luna", contextWindow: 340_000 },
+      entries: [{ type: "compaction" }],
+      contextUsage: { tokens: 1_100_920, contextWindow: 340_000, percent: 323.8 },
+    });
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, testCtx);
+    assert.ok(capturedFooterFactory);
+    const footer = capturedFooterFactory!({ requestRender: () => {}, terminal: { rows: 24, columns: 100 } }, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => null,
+      getAvailableProviderCount: () => 1,
+    }) as { render(width: number): string[] };
+    assert.match(footer.render(100).map(stripVTControlCharacters).join("\\n"), /\?\/340k/, "pre-compaction context must not remain visible");
+  } finally {
+    d.handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, ctx(cwd));
     rmSync(cwd, { recursive: true, force: true });
   }
 });

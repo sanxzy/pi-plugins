@@ -699,6 +699,17 @@ function footerInfo(
   const reasoning = Boolean(model?.reasoning);
   const thinkingLevel = latestThinkingLevel(entries);
   const modelGroupName = activeModelGroup()?.name;
+  const contextWindow = contextUsage?.contextWindow ?? model?.contextWindow ?? 0;
+  // The host's context counters are a live estimate, but the footer's lifetime
+  // counters are intentionally independent. Prefer the latest valid assistant
+  // response when available so a provider's cumulative usage fields can never
+  // turn the context indicator into a lifetime-total percentage.
+  const currentContext = latestContextTokens(entries);
+  const contextPercent = contextWindow > 0 && currentContext.tokens !== undefined
+    ? (currentContext.tokens / contextWindow) * 100
+    : currentContext.invalidated
+      ? null
+      : contextUsage?.percent ?? null;
   return {
     cwd: ctx.sessionManager.getCwd(),
     home: process.env.HOME || process.env.USERPROFILE,
@@ -710,8 +721,8 @@ function footerInfo(
     cacheWrite: usage.cacheWrite,
     cacheHitRate: usage.cacheHitRate,
     cost: usage.cost,
-    contextPercent: contextUsage?.percent ?? null,
-    contextWindow: contextUsage?.contextWindow ?? model?.contextWindow ?? 0,
+    contextPercent,
+    contextWindow,
     autoCompactEnabled: true,
     model: model?.id,
     provider: model?.provider,
@@ -835,6 +846,33 @@ function latestThinkingLevel(entries: readonly unknown[]): string {
     }
   }
   return "off";
+}
+
+/**
+ * Return the context size reported by the latest valid assistant response.
+ * This is deliberately separate from collectUsage(), whose totals are for
+ * lifetime telemetry. A compaction boundary invalidates all older response
+ * usage until a post-compaction response supplies a new context size.
+ */
+function latestContextTokens(entries: readonly unknown[]): { tokens?: number; invalidated: boolean } {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const record = asRecord(entries[index]);
+    if (record?.type === "compaction") return { invalidated: true };
+    if (record?.type !== "message") continue;
+    const message = asRecord(record.message);
+    if (message?.role !== "assistant") continue;
+    if (message.stopReason === "aborted" || message.stopReason === "error") continue;
+    const usage = asRecord(message.usage);
+    if (!usage) continue;
+    const totalTokens = numberValue(usage.totalTokens);
+    if (totalTokens > 0) return { tokens: totalTokens, invalidated: false };
+    const estimated = numberValue(usage.input)
+      + numberValue(usage.output)
+      + numberValue(usage.cacheRead)
+      + numberValue(usage.cacheWrite);
+    if (estimated > 0) return { tokens: estimated, invalidated: false };
+  }
+  return { invalidated: false };
 }
 
 function asRecord(value: unknown): Record<string, any> | undefined {
