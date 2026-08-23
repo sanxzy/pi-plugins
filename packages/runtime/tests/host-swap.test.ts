@@ -18,6 +18,9 @@ test("host swap patch is delivered and does not break compaction", () => {
   assert.ok(found, `patch file must exist (checked ${candidates.join(", ")})`);
   const content = readFileSync(found!, "utf8");
   assert.match(content, /hostSwap|HostSwap|_hostSwapStack/, "patch must contain host swap primitive marker");
+  assert.match(content, /hostSwapQueueChildMessage/, "child swap must expose the native queued-message renderer");
+  assert.match(content, /entry_appended\", \"queue_update/, "parent queue updates must not overwrite the child queue display");
+  assert.match(content, /\$\{label\}: \$\{message\.text\}/, "queued child messages must use the parent's Steering display");
 });
 
 // Phase 1 AC1: swap primitive rebinds main transcript+composer to child session and preserves parent

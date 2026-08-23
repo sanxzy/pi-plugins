@@ -761,7 +761,7 @@ index 6a88679..f6cba16 100644
          }
 +        // pi-c2: while host-swapped (viewing child), suppress parent transcript mutations
 +        if (this._hostSwapStack && this._hostSwapStack.length > 0) {
-+            const chatEvents = new Set(["message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end", "agent_start", "agent_end", "entry_appended"]);
++            const chatEvents = new Set(["message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end", "agent_start", "agent_end", "entry_appended", "queue_update"]);
 +            if (chatEvents.has(event.type)) {
 +                this.footer.invalidate();
 +                try { this.ui.requestRender(); } catch {}
@@ -771,7 +771,7 @@ index 6a88679..f6cba16 100644
          this.footer.invalidate();
          switch (event.type) {
              case "agent_start":
-@@ -3088,6 +3102,226 @@ export class InteractiveMode {
+@@ -3088,6 +3102,274 @@ export class InteractiveMode {
          this.chatContainer.clear();
          this.renderSessionEntries(this.sessionManager.buildContextEntries());
      }
@@ -780,7 +780,14 @@ index 6a88679..f6cba16 100644
 +        if (!this._hostSwapStack) this._hostSwapStack = [];
 +        const snapshot = liveSession?.snapshot ?? liveSession;
 +        const steer = liveSession?.steer;
-+        this._hostSwapStack.push({ children: [...this.chatContainer.children], onSubmit: this.editor?.onSubmit, editorText: this.editor?.getText ? this.editor.getText() : "" });
++        this._hostSwapStack.push({
++            children: [...this.chatContainer.children],
++            onSubmit: this.editor?.onSubmit,
++            editorText: this.editor?.getText ? this.editor.getText() : "",
++            pendingChildren: [...this.pendingMessagesContainer.children],
++            childQueuedMessages: [],
++        });
++        this.pendingMessagesContainer.clear();
 +        this.hostSwapRenderChildSnapshot(snapshot);
 +        if (steer && this.editor) {
 +            const prevSubmit = this.editor.onSubmit;
@@ -793,9 +800,12 @@ index 6a88679..f6cba16 100644
 +                }
 +                this.editor.setText("");
 +                this.editor.addToHistory?.(text);
++                this.hostSwapQueueChildMessage(text, "steer");
 +                try {
 +                    await steer(text);
-+                } catch {}
++                } catch {
++                    this.hostSwapDequeueChildMessage(text);
++                }
 +            };
 +            if (this.defaultEditor && this.defaultEditor !== this.editor) {
 +                this.defaultEditor.onSubmit = this.editor.onSubmit;
@@ -812,6 +822,39 @@ index 6a88679..f6cba16 100644
 +        if (!this._hostSwapStack || this._hostSwapStack.length === 0 || !event) return;
 +        this.hostSwapApplyChildEventInternal(event);
 +        this.ui.requestRender();
++    }
++    hostSwapQueueChildMessage(text, mode = "steer") {
++        const frame = this._hostSwapStack?.[this._hostSwapStack.length - 1];
++        if (!frame) return;
++        const queued = Array.isArray(frame.childQueuedMessages) ? frame.childQueuedMessages : [];
++        queued.push({ text, mode });
++        frame.childQueuedMessages = queued;
++        this.hostSwapRenderPendingChildMessages();
++        this.ui.requestRender();
++    }
++    hostSwapDequeueChildMessage(text) {
++        const frame = this._hostSwapStack?.[this._hostSwapStack.length - 1];
++        if (!frame || !Array.isArray(frame.childQueuedMessages)) return;
++        const index = frame.childQueuedMessages.findIndex((message) => message.text === text);
++        if (index === -1) return;
++        frame.childQueuedMessages.splice(index, 1);
++        this.hostSwapRenderPendingChildMessages();
++        this.ui.requestRender();
++    }
++    hostSwapRenderPendingChildMessages() {
++        const frame = this._hostSwapStack?.[this._hostSwapStack.length - 1];
++        this.pendingMessagesContainer.clear();
++        const messages = frame?.childQueuedMessages ?? [];
++        if (messages.length === 0) return;
++        this.pendingMessagesContainer.addChild(new Spacer(1));
++        for (const message of messages) {
++            const label = message.mode === "followUp" ? "Follow-up" : "Steering";
++            const text = theme.fg("dim", `${label}: ${message.text}`);
++            this.pendingMessagesContainer.addChild(new TruncatedText(text, 1, 0));
++        }
++        const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
++        const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
++        this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
 +    }
 +    hostSwapMessage(event) {
 +        const rawContent = Array.isArray(event.content)
@@ -877,7 +920,10 @@ index 6a88679..f6cba16 100644
 +        if (event.type === "message") {
 +            const message = this.hostSwapMessage(event);
 +            if (event.role === "user") {
-+                if (event.phase === "start") this.addMessageToChat(message);
++                if (event.phase === "start") {
++                    this.hostSwapDequeueChildMessage(event.text ?? "");
++                    this.addMessageToChat(message);
++                }
 +                return;
 +            }
 +            if (event.phase === "start") {
@@ -989,6 +1035,8 @@ index 6a88679..f6cba16 100644
 +            const children = Array.isArray(prev) ? prev : prev.children;
 +            for (const c of children) this.chatContainer.addChild(c);
 +        }
++        this.pendingMessagesContainer.clear();
++        for (const child of prev?.pendingChildren ?? []) this.pendingMessagesContainer.addChild(child);
 +        this.ui.requestRender();
 +        try { this.transcriptScrollView?.scrollToBottom?.(); } catch {}
 +    }
