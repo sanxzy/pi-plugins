@@ -370,7 +370,7 @@ test("forced hidden delivery uses Pi's native steering queue while the host is b
   gate.sendImmediateHidden("goal-now", "steer");
 
   assert.deepEqual(hidden, [{ customType: "pi-c2:internal-context", content: "goal-now", display: false }]);
-  assert.deepEqual(options, [{ triggerTurn: true, deliverAs: "steer" }]);
+  assert.deepEqual(options, [{ triggerTurn: true, deliverAs: "steer", priority: true }]);
 });
 
 test("an active turn blocks host delivery even when the runner misreports idle", async () => {

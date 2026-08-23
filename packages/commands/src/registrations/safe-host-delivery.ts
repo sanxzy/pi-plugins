@@ -35,6 +35,7 @@ interface QueuedMessage {
   readonly content: string;
   readonly deliverAs: HostDeliverAs;
   readonly hidden: boolean;
+  readonly priority?: boolean;
 }
 
 /** Backoff for re-delivery while the host run settles (agent_end / reload). */
@@ -130,7 +131,7 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     if (message.hidden) {
       pi.sendMessage(
         { customType: HIDDEN_HOST_MESSAGE_TYPE, content: message.content, display: false },
-        { triggerTurn: true, deliverAs: message.deliverAs },
+        { triggerTurn: true, deliverAs: message.deliverAs, ...(message.priority ? { priority: true } : {}) },
       );
       return;
     }
@@ -259,7 +260,7 @@ export function createHostMessageGate(pi: ExtensionAPI, ctx: ExtensionContext): 
     sendImmediateHidden(content: string, deliverAs: HostDeliverAs = "steer"): void {
       if (disposed) return;
       try {
-        deliver({ content, deliverAs, hidden: true });
+        deliver({ content, deliverAs, hidden: true, priority: true });
         // Keep ordinary gated delivery behind the native goal steer until the
         // host reports the next settled boundary.
         sendInFlight = true;

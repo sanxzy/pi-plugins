@@ -13,6 +13,8 @@ const SDK_SOURCE = new URL("../node_modules/@earendil-works/pi-coding-agent", im
 
 /** Capability markers every patched host must expose for pi-c2 theme/swap features. */
 const CAPABILITY_MARKERS: Array<[string, string]> = [
+  ["dist/core/agent-session.js", "_queuePrioritySteer"],
+  ["dist/core/agent-session.js", "options?.priority === true"],
   ["dist/modes/interactive/interactive-mode.js", "_hostInteractiveMode"],
   ["dist/modes/interactive/interactive-mode.js", "__piHostInteractiveMode"],
   ["dist/modes/interactive/interactive-mode.js", "_hostGetThemeInstance"],

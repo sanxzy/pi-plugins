@@ -162,7 +162,37 @@ index f8c1f48..be46311 100644
          if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
              return true;
          }
-@@ -1366,7 +1496,12 @@
+@@ -1014,3 +1144,17 @@
++    /**
++     * Queue a steering message ahead of already queued steering messages.
++     * pi-c2 uses the host's native queue, but goals need priority over older
++     * pending work.
++     */
++    _queuePrioritySteer(message) {
++        const queue = this.agent.steeringQueue;
++        if (queue && Array.isArray(queue.messages)) {
++            queue.messages.unshift(message);
++        }
++        else {
++            this.agent.steer(message);
++        }
++    }
+     /**
+      * Internal: Queue a steering message (already expanded, no extension command check).
+      */
+@@ -1081,8 +1225,11 @@
+         else if (this.isStreaming && options?.triggerTurn !== false) {
+             if (options?.deliverAs === "followUp") {
+                 this.agent.followUp(appMessage);
+             }
++            else if (options?.priority === true) {
++                this._queuePrioritySteer(appMessage);
++            }
+             else {
+                 this.agent.steer(appMessage);
+             }
+         }
+@@ -1366,7 +1513,12 @@
       */
      async compact(customInstructions) {
          await this.abort();
@@ -176,7 +206,7 @@ index f8c1f48..be46311 100644
          this._emit({ type: "compaction_start", reason: "manual" });
          try {
              if (!this.model) {
-@@ -1394,7 +1529,7 @@
+@@ -1394,7 +1546,7 @@
                      customInstructions,
                      reason: "manual",
                      willRetry: false,
@@ -185,7 +215,7 @@ index f8c1f48..be46311 100644
                  }));
                  if (result?.cancel) {
                      throw new Error("Compaction cancelled");
-@@ -1419,14 +1554,14 @@
+@@ -1419,14 +1571,14 @@
              }
              else {
                  // Generate compaction result
@@ -202,7 +232,7 @@ index f8c1f48..be46311 100644
                  throw new Error("Compaction cancelled");
              }
              this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-@@ -1479,7 +1614,9 @@
+@@ -1479,7 +1631,9 @@
              throw error;
          }
          finally {
@@ -213,7 +243,7 @@ index f8c1f48..be46311 100644
          }
      }
      /**
-@@ -1511,8 +1648,13 @@
+@@ -1511,8 +1665,13 @@
          const settings = this.settingsManager.getCompactionSettings();
          if (!settings.enabled)
              return false;
@@ -228,7 +258,7 @@ index f8c1f48..be46311 100644
              return false;
          const contextWindow = this.model?.contextWindow ?? 0;
          // Skip overflow check if the message came from a different model.
-@@ -1585,7 +1727,9 @@
+@@ -1585,7 +1744,9 @@
              contextTokens = directContextTokens;
          }
          if (shouldCompact(contextTokens, contextWindow, settings)) {
@@ -239,7 +269,7 @@ index f8c1f48..be46311 100644
          }
          return false;
      }
-@@ -1595,6 +1739,13 @@
+@@ -1595,6 +1756,13 @@
      async _runAutoCompaction(reason, willRetry) {
          const settings = this.settingsManager.getCompactionSettings();
          let started = false;
@@ -253,7 +283,7 @@ index f8c1f48..be46311 100644
          try {
              if (!this.model) {
                  return false;
-@@ -1606,7 +1757,8 @@
+@@ -1606,7 +1774,8 @@
                  return false;
              }
              this._emit({ type: "compaction_start", reason });
@@ -263,7 +293,7 @@ index f8c1f48..be46311 100644
              started = true;
              let extensionCompaction;
              let fromExtension = false;
-@@ -1618,7 +1770,7 @@
+@@ -1618,7 +1787,7 @@
                      customInstructions: undefined,
                      reason,
                      willRetry,
@@ -272,7 +302,7 @@ index f8c1f48..be46311 100644
                  }));
                  if (extensionResult?.cancel) {
                      this._emit({
-@@ -1650,14 +1802,14 @@
+@@ -1650,14 +1819,14 @@
              }
              else {
                  // Generate compaction result
@@ -289,7 +319,7 @@ index f8c1f48..be46311 100644
                  this._emit({
                      type: "compaction_end",
                      reason,
-@@ -1699,9 +1851,19 @@
+@@ -1699,9 +1868,19 @@
                  // from agent state. Rebuilding state from the new compaction can restore that kept entry,
                  // leaving an assistant as the final message. agent.continue() rejects that state, so remove
                  // the retriable error or truncated-length response again before continuing the interrupted turn.
@@ -310,7 +340,7 @@ index f8c1f48..be46311 100644
                  return true;
              }
              // Auto-compaction can complete while follow-up/steering/custom messages are waiting.
-@@ -1725,7 +1887,9 @@
+@@ -1725,7 +1904,9 @@
              return false;
          }
          finally {
@@ -321,7 +351,7 @@ index f8c1f48..be46311 100644
          }
      }
      /**
-@@ -1908,6 +2072,7 @@
+@@ -1908,6 +2089,7 @@
                  this._extensionShutdownHandler?.();
              },
              getContextUsage: () => this.getContextUsage(),
@@ -449,7 +479,19 @@ index 556623b..773d9c3 100644
      /** Trigger compaction without awaiting completion. */
      compact(options?: CompactOptions): void;
      /** Get the current effective system prompt. */
-@@ -959,6 +962,11 @@ export interface ExtensionAPI {
+@@ -301,4 +302,5 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
+     sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
+         triggerTurn?: boolean;
++        priority?: boolean;
+         deliverAs?: "steer" | "followUp" | "nextTurn";
+     }): Promise<void>;
+@@ -928,4 +930,5 @@
+     sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
+         triggerTurn?: boolean;
++        priority?: boolean;
+         deliverAs?: "steer" | "followUp" | "nextTurn";
+     }): void;
+@@ -959,6 +964,11 @@ export interface ExtensionAPI {
      getThinkingLevel(): ThinkingLevel;
      /** Set thinking level (clamped to model capabilities). */
      setThinkingLevel(level: ThinkingLevel): void;
@@ -461,7 +503,13 @@ index 556623b..773d9c3 100644
      /**
       * Register or override a model provider.
       *
-@@ -1206,6 +1214,8 @@ export interface ExtensionActions {
+@@ -1141,4 +1151,5 @@
+ export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
+     triggerTurn?: boolean;
++    priority?: boolean;
+     deliverAs?: "steer" | "followUp" | "nextTurn";
+ }) => void;
+@@ -1206,6 +1217,8 @@ export interface ExtensionActions {
      setModel: SetModelHandler;
      getThinkingLevel: GetThinkingLevelHandler;
      setThinkingLevel: SetThinkingLevelHandler;
@@ -470,7 +518,7 @@ index 556623b..773d9c3 100644
  }
  /**
   * Actions for ExtensionContext (ctx.* in event handlers).
-@@ -1221,6 +1231,7 @@ export interface ExtensionContextActions {
+@@ -1221,6 +1234,7 @@ export interface ExtensionContextActions {
      hasPendingMessages: () => boolean;
      shutdown: () => void;
      getContextUsage: () => ContextUsage | undefined;
