@@ -178,7 +178,15 @@ test("phase3: Alt+Left pops one level", async () => {
     pool.registry.createJob(createJob({ jobId: "job-c", parentSessionId: "job-a", sessionId: "job-c", status: "running", description: "grandchild C", subagentType: "test-agent" }));
     pool.registry.createJob(createJob({ jobId: "job-d", parentSessionId: "job-c", sessionId: "job-d", status: "running", description: "great-grandchild D", subagentType: "test-agent" }));
 
-    const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 } };
+    const hostUpdates: unknown[] = [];
+    const hostFrames: unknown[] = [];
+    const hostMode = {
+      hostSwapToSnapshot: (session: unknown) => { hostFrames.push(session); },
+      hostSwapUpdateSnapshot: (session: unknown) => { hostUpdates.push(session); },
+      hostSwapRestore: () => { hostFrames.pop(); },
+      hostSwapDepth: () => hostFrames.length,
+    };
+    const tui = { requestRender: () => {}, terminal: { rows: 24, columns: 100 }, _hostInteractiveMode: hostMode };
     const footerData = { onBranchChange: () => () => {}, getGitBranch: () => "main", getAvailableProviderCount: () => 1 };
     let footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, footerData) as any;
     // Push A
@@ -197,6 +205,8 @@ test("phase3: Alt+Left pops one level", async () => {
     // Alt+Left should pop one level via host primitive (no overlay)
     const res1 = terminalInputHandler(ALT_LEFT);
     assert.equal(res1.consume, true, "Alt+Left should be consumed and pop");
+    assert.equal(hostFrames.length, 1, "one native host frame should remain after returning to depth 1");
+    assert.equal(hostUpdates.length, 1, "the depth-1 child snapshot should be restored after the native pop");
     // Footer should re-project to A's descendants (C and D)
     const rowsAfterPop = footer.render(100).join("\n");
     assert.ok(rowsAfterPop.includes("grandchild C"), "after pop, footer shows C again. Got:\n" + rowsAfterPop);

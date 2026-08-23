@@ -351,7 +351,14 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           }
           if (displayedLiveSession === liveSession) displayedLiveSession = previousDisplayedSession;
           try {
-            if (hostMode && hostSnapshotApplied) hostMode.hostSwapRestore();
+            if (hostMode && hostSnapshotApplied) {
+              hostMode.hostSwapRestore();
+              // Restoring a nested swap reveals the previous child frame. Re-apply
+              // its current snapshot so depth-2 → depth-1 does not show the root.
+              if (hostMode.hostSwapDepth() > 0 && previousDisplayedSession) {
+                hostMode.hostSwapUpdateSnapshot(previousDisplayedSession);
+              }
+            }
           } catch {}
           try { hostSwap.restore(); } catch {}
           const idx = viewStack.findIndex((r) => r.rowId === row.rowId);

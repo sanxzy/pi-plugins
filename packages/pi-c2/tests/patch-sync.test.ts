@@ -22,6 +22,7 @@ const CAPABILITY_MARKERS: Array<[string, string]> = [
   ["dist/modes/interactive/interactive-mode.js", "hostSwapUpdateSnapshot"],
   ["dist/modes/interactive/interactive-mode.js", "hostSwapApplyChildEvent"],
   ["dist/modes/interactive/interactive-mode.js", "hostSwapRestore"],
+  ["dist/modes/interactive/interactive-mode.js", "const nested = this._hostSwapStack.length > 0"],
 ];
 
 function sdkFiles(dir: string, base = dir): string[] {
@@ -115,6 +116,36 @@ test("model-group controls stay hidden while the host integration remains commen
     rmSync(patched, { recursive: true, force: true });
     rmSync(pristineCopy, { recursive: true, force: true });
   }
+});
+
+test("nested host restore keeps the immediately previous child window", async () => {
+  const { InteractiveMode } = await import(new URL("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js", import.meta.url).href);
+  const children: string[] = [];
+  const pendingChildren: string[] = [];
+  const fake = {
+    _hostSwapStack: [
+      { children: ["root"], onSubmit: undefined, editorText: "", pendingChildren: [], childQueuedMessages: [] },
+      { children: ["depth-1"], onSubmit: undefined, editorText: "", pendingChildren: [], childQueuedMessages: [] },
+    ],
+    editor: undefined,
+    defaultEditor: undefined,
+    chatContainer: {
+      clear: () => { children.length = 0; },
+      addChild: (child: string) => { children.push(child); },
+    },
+    pendingMessagesContainer: {
+      clear: () => { pendingChildren.length = 0; },
+      addChild: (child: string) => { pendingChildren.push(child); },
+    },
+    sessionManager: { buildContextEntries: () => ["root-from-session"] },
+    renderSessionEntries: (entries: string[]) => { children.push(...entries); },
+    ui: { requestRender: () => {} },
+    transcriptScrollView: { scrollToBottom: () => {} },
+  };
+
+  Reflect.apply(InteractiveMode.prototype.hostSwapRestore, fake, []);
+  assert.deepEqual(children, ["depth-1"], "depth-2 restore must reveal the depth-1 child, not the root session");
+  assert.equal(fake._hostSwapStack.length, 1, "one native swap frame remains after one nested pop");
 });
 
 test("capability markers exist in the patched host and the patch reverses cleanly", async () => {

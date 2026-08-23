@@ -819,7 +819,7 @@ index 6a88679..f6cba16 100644
          this.footer.invalidate();
          switch (event.type) {
              case "agent_start":
-@@ -3088,6 +3102,274 @@ export class InteractiveMode {
+@@ -3088,6 +3102,278 @@ export class InteractiveMode {
          this.chatContainer.clear();
          this.renderSessionEntries(this.sessionManager.buildContextEntries());
      }
@@ -1066,11 +1066,15 @@ index 6a88679..f6cba16 100644
 +                this.defaultEditor.onSubmit = prev.onSubmit;
 +            }
 +        }
-+        // Re-render parent from its sessionManager so background output that arrived
-+        // while viewing a child is not lost. Fall back to restoring saved children
-+        // only if sessionManager is unavailable (tests).
++        // A nested swap must restore the immediately previous child frame. The
++        // root session manager only represents the host parent, so rebuilding it
++        // here would skip depth-1 when returning from depth-2.
++        const nested = this._hostSwapStack.length > 0;
++        // At the root boundary, re-render from sessionManager so parent output
++        // that arrived while viewing a child is not lost. Otherwise restore the
++        // saved child components and let the extension refresh their snapshot.
 +        try {
-+            if (this.sessionManager?.buildContextEntries && this.renderSessionEntries) {
++            if (!nested && this.sessionManager?.buildContextEntries && this.renderSessionEntries) {
 +                this.chatContainer.clear();
 +                this.renderSessionEntries(this.sessionManager.buildContextEntries());
 +            } else {
