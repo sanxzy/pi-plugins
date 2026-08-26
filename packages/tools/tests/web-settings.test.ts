@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearSettingsCache } from "@xzy-ai/runtime";
+import { clearSettingsCache, resolveSettingsForProject } from "@xzy-ai/runtime";
 import {
   executeWebSearch,
 } from "../src/registrations/web-search.ts";
@@ -250,6 +250,31 @@ test("web_fetch clamps an explicit sub-30 timeout up to the enforced 30s floor",
     globalThis.fetch = original;
     (AbortSignal as unknown as { timeout: typeof AbortSignal.timeout }).timeout = originalAbortTimeout;
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("web provider and API keys resolve with project precedence", async () => {
+  const home = tempHome();
+  const project = tempHome();
+  try {
+    homeWith(home, {
+      provider: "exa",
+      exaApiKey: "home-exa",
+      keenableApiKey: "home-keen",
+    });
+    mkdirSync(join(project, ".pi"), { recursive: true });
+    writeFileSync(join(project, ".pi", "pi-c2.json"), JSON.stringify({
+      tools: { web: { provider: "keenable", keenableApiKey: "project-keen" } },
+    }));
+    await withHome(home, async () => {
+      const settings = resolveSettingsForProject(project);
+      assert.equal(settings.tools.web.provider, "keenable");
+      assert.equal(settings.tools.web.exaApiKey, "home-exa");
+      assert.equal(settings.tools.web.keenableApiKey, "project-keen");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
   }
 });
 

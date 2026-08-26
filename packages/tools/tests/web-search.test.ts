@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { clearSettingsCache } from "@xzy-ai/runtime";
 import {
   registerWebSearchTool,
   executeWebSearch,
@@ -366,4 +367,82 @@ test("web_search rejects a 5 MB response with stream cancellation", async () => 
       assert.equal(cancelled, true);
     },
   );
+});
+
+test("web_search uses configured Keenable JSON provider and normalizes results", async () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-c2-keenable-home-"));
+  const wikiRoot = join(home, "wikis");
+  mkdirSync(wikiRoot, { recursive: true });
+  const previousHome = process.env.PI_C2_TEST_HOME;
+  const previousExaKey = process.env.EXA_API_KEY;
+  const previousKeenableKey = process.env.KEENABLE_API_KEY;
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
+  process.env.PI_C2_TEST_HOME = home;
+  delete process.env.EXA_API_KEY;
+  delete process.env.KEENABLE_API_KEY;
+  mkdirSync(join(home, "pi-c2"), { recursive: true });
+  writeFileSync(join(home, "pi-c2", "config.json"), JSON.stringify({
+    tools: { web: { provider: "keenable", keenableApiKey: "config-keen" } },
+  }));
+  clearSettingsCache();
+  globalThis.fetch = (async (input, init) => {
+    requests.push({ input: String(input), init });
+    return new Response(JSON.stringify({
+      query: "hello",
+      mode: "pro",
+      results: [{
+        title: "Keen result",
+        url: "https://example.com/keen",
+        description: "Description",
+        snippet: "Useful snippet",
+        published_at: "2026-01-01T00:00:00Z",
+        acquired_at: "2026-01-02T00:00:00Z",
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof globalThis.fetch;
+  try {
+    const result = await executeWebSearch(
+      { query: "hello" },
+      undefined,
+      undefined,
+      { wikiRoot },
+    );
+    assert.equal(text(result), [
+      "Web Search: hello",
+      "",
+      "Title: Keen result",
+      "URL: https://example.com/keen",
+      "Published: 2026-01-01T00:00:00Z",
+      "Highlights:",
+      "Useful snippet",
+    ].join("\n"));
+    assert.deepEqual(result.details, {
+      query: "hello",
+      provider: "keenable",
+      results: [{
+        title: "Keen result",
+        url: "https://example.com/keen",
+        published: "2026-01-01T00:00:00Z",
+        snippet: "Useful snippet",
+      }],
+      wiki: { saved: true, topic: "hello", pages: ["hello.md"] },
+    });
+    assert.equal(requests[0]?.input, "https://api.keenable.ai/v1/search");
+    assert.equal(new Headers(requests[0]?.init?.headers).get("x-api-key"), "config-keen");
+    assert.deepEqual(JSON.parse(String(requests[0]?.init?.body)), {
+      query: "hello",
+      max_results: 5,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousHome === undefined) delete process.env.PI_C2_TEST_HOME;
+    else process.env.PI_C2_TEST_HOME = previousHome;
+    if (previousExaKey === undefined) delete process.env.EXA_API_KEY;
+    else process.env.EXA_API_KEY = previousExaKey;
+    if (previousKeenableKey === undefined) delete process.env.KEENABLE_API_KEY;
+    else process.env.KEENABLE_API_KEY = previousKeenableKey;
+    clearSettingsCache();
+    rmSync(home, { recursive: true, force: true });
+  }
 });
