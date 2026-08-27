@@ -986,3 +986,55 @@ test("web_search stops before fallback when notification cancels the request", a
     );
   });
 });
+
+test("web_search never falls back on generic 5xx responses, even with exhaustion wording", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    const cases = [
+      { name: "server-rate", status: 503, body: JSON.stringify({ error: "rate limit exceeded" }) },
+      { name: "server-credits", status: 500, body: JSON.stringify({ error: "credits exhausted" }) },
+      { name: "server-quota", status: 503, body: JSON.stringify({ error: "quota has been depleted" }) },
+    ];
+    for (const item of cases) {
+      const calls: string[] = [];
+      await withFetch(
+        async (input) => {
+          calls.push(String(input));
+          return calls.length === 1
+            ? new Response(item.body, { status: item.status })
+            : new Response(JSON.stringify({ results: [{ title: "unexpected", url: "https://example.com/unexpected" }] }), { status: 200 });
+        },
+        async () => {
+          const result = await executeWebSearch({ query: item.name }, undefined, undefined, { wikiRoot: join(home, `wikis-${item.name}`) });
+          assert.match(text(result), new RegExp(`^Error: HTTP ${item.status}:`));
+          assert.deepEqual(calls, [EXA_REST_URL]);
+        },
+      );
+    }
+  });
+});
+
+test("web_search treats HTTP 402 with rate or quota wording as non-credit non-fallback", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    const cases = [
+      { name: "payment-rate", body: JSON.stringify({ error: "rate limit exceeded" }) },
+      { name: "payment-quota", body: JSON.stringify({ error: "quota exceeded" }) },
+    ];
+    for (const item of cases) {
+      const calls: string[] = [];
+      await withFetch(
+        async (input) => {
+          calls.push(String(input));
+          return calls.length === 1
+            ? new Response(item.body, { status: 402 })
+            : new Response(JSON.stringify({ results: [{ title: "unexpected", url: "https://example.com/unexpected" }] }), { status: 200 });
+        },
+        async () => {
+          const result = await executeWebSearch({ query: item.name }, undefined, undefined, { wikiRoot: join(home, `wikis-${item.name}`) });
+          assert.match(text(result), /^Error: HTTP 402:/);
+          assert.deepEqual(calls, [EXA_REST_URL]);
+        },
+      );
+    }
+  });
+});
+
