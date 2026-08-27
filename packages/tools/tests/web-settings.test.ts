@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { clearSettingsCache, resolveSettingsForProject } from "@xzy-ai/runtime";
 import {
   executeWebSearch,
+  EXA_REST_URL,
 } from "../src/registrations/web-search.ts";
 import {
   executeWebFetch,
@@ -96,26 +97,33 @@ test("web_search reads EXA_API_KEY first then falls back to tools.web.exaApiKey"
   delete process.env.EXA_API_KEY; // clear env so config key is exercised
   const home = tempHome();
   homeWith(home, { exaApiKey: "config-key" });
-  const urls: string[] = [];
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
   const original = globalThis.fetch;
-  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
-    urls.push(String(input));
-    return new Response(payload("keyed"), { status: 200 });
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    requests.push({ input: String(input), init });
+    return new Response(JSON.stringify({ results: [{ title: "Keyed", url: "https://example.com/keyed", highlights: ["keyed"] }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }) as typeof globalThis.fetch;
-  await withHome(home, async () => {
-    const result = await executeWebSearch(
-      { query: "keyed" },
-      undefined,
-      undefined,
-      { wikiRoot: mkdtempSync(join(tmpdir(), "wiki-")) },
-    );
-    assert.ok(urls[0]?.includes("exaApiKey=config-key"), "config key appears in URL");
-    assert.equal(JSON.stringify(result).includes("config-key"), false, "key absent from results");
-  });
-  globalThis.fetch = original;
-  if (originalKey === undefined) delete process.env.EXA_API_KEY;
-  else process.env.EXA_API_KEY = originalKey;
-  rmSync(home, { recursive: true, force: true });
+  try {
+    await withHome(home, async () => {
+      const result = await executeWebSearch(
+        { query: "keyed" },
+        undefined,
+        undefined,
+        { wikiRoot: mkdtempSync(join(tmpdir(), "wiki-")) },
+      );
+      assert.equal(new Headers(requests[0]?.init?.headers).get("authorization"), "Bearer config-key");
+      assert.equal(JSON.stringify(result).includes("config-key"), false, "key absent from results");
+    });
+  } finally {
+    globalThis.fetch = original;
+    if (originalKey === undefined) delete process.env.EXA_API_KEY;
+    else process.env.EXA_API_KEY = originalKey;
+    rmSync(home, { recursive: true, force: true });
+  }
+  assert.equal(requests[0]?.input, EXA_REST_URL);
 });
 
 test("web_search EXA_API_KEY env wins over tools.web.exaApiKey", async () => {
@@ -123,21 +131,28 @@ test("web_search EXA_API_KEY env wins over tools.web.exaApiKey", async () => {
   process.env.EXA_API_KEY = "env-key";
   const home = tempHome();
   homeWith(home, { exaApiKey: "config-key" });
-  const urls: string[] = [];
+  const requests: Array<{ input: string; init?: RequestInit }> = [];
   const original = globalThis.fetch;
-  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
-    urls.push(String(input));
-    return new Response(payload("env"), { status: 200 });
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    requests.push({ input: String(input), init });
+    return new Response(JSON.stringify({ results: [{ title: "Env", url: "https://example.com/env", highlights: ["env"] }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   }) as typeof globalThis.fetch;
-  await withHome(home, async () => {
-    await executeWebSearch({ query: "k" }, undefined, undefined, { wikiRoot: mkdtempSync(join(tmpdir(), "wiki-")) });
-    assert.ok(urls[0]?.includes("exaApiKey=env-key"), "env key wins");
-    assert.equal(urls[0]?.includes("config-key"), false, "config key not used");
-  });
-  globalThis.fetch = original;
-  if (originalKey === undefined) delete process.env.EXA_API_KEY;
-  else process.env.EXA_API_KEY = originalKey;
-  rmSync(home, { recursive: true, force: true });
+  try {
+    await withHome(home, async () => {
+      await executeWebSearch({ query: "k" }, undefined, undefined, { wikiRoot: mkdtempSync(join(tmpdir(), "wiki-")) });
+      assert.equal(new Headers(requests[0]?.init?.headers).get("authorization"), "Bearer env-key");
+      assert.equal(JSON.stringify(requests[0]?.init?.headers).includes("config-key"), false, "config key not used");
+    });
+  } finally {
+    globalThis.fetch = original;
+    if (originalKey === undefined) delete process.env.EXA_API_KEY;
+    else process.env.EXA_API_KEY = originalKey;
+    rmSync(home, { recursive: true, force: true });
+  }
+  assert.equal(requests[0]?.input, EXA_REST_URL);
 });
 
 test("web_search maxResponseBytes is shared via the resolver", async () => {

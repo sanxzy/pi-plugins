@@ -1,16 +1,42 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { renderToolDetail, renderToolOutcome, toolResultFailed, toolResultText } from "../render.ts";
 import { Type } from "typebox";
 import { TOOL_OPERATIONS, processWithLog } from "@xzy-ai/observability";
 import { resolveSettingsForProject, type WebSettings } from "@xzy-ai/runtime";
-import { readBoundedResponseBody } from "../http-body.ts";
 import { errorResult, textResult } from "../results.ts";
+import { expandedToolText, renderToolDetail, renderToolOutcome, toolResultFailed, toolResultText } from "../render.ts";
 import { saveWikiEntry, slugifyQuery, type WikiSaveResult, wikiRoot } from "../wiki.ts";
+import {
+  EXA_MCP_URL,
+  EXA_REST_URL,
+  KEENABLE_PUBLIC_URL,
+  KEENABLE_TITLE,
+  KEENABLE_URL,
+  NO_RESULTS,
+  formatCanonicalSearchResults,
+  isFallbackEligible,
+  parseSearchResponse,
+  searchProvider,
+  type CanonicalWebSearchResult,
+  type WebSearchAdapterRequest,
+  type WebSearchCredentials,
+  type WebSearchProvider,
+} from "../web-search-adapter.ts";
 
-export const EXA_URL = "https://mcp.exa.ai/mcp";
-export const NO_RESULTS = "No search results found. Please try a different query.";
+export const EXA_URL = EXA_MCP_URL;
 export const SEARCH_TIMEOUT_MS = 30_000;
 const MAX_NUM_RESULTS = 20;
+
+export {
+  EXA_MCP_URL,
+  EXA_REST_URL,
+  KEENABLE_PUBLIC_URL,
+  KEENABLE_TITLE,
+  KEENABLE_URL,
+  NO_RESULTS,
+  formatCanonicalSearchResults,
+  parseSearchResponse,
+};
+export type { CanonicalWebSearchResult as WebSearchResult, WebSearchProvider } from "../web-search-adapter.ts";
 
 const webSearchParams = Type.Object({
   query: Type.String({ description: "Web search query" }),
@@ -30,7 +56,8 @@ type WebSearchParams = {
 
 export interface WebSearchDetails {
   query: string;
-  provider: "exa";
+  provider: WebSearchProvider;
+  results?: CanonicalWebSearchResult[];
   wiki?: {
     saved: boolean;
     topic: string;
@@ -44,6 +71,8 @@ export interface WebSearchExecutionOptions {
   now?: () => Date;
   /** Project root used to resolve centralized web settings (defaults when omitted). */
   projectRoot?: string;
+  /** Optional UI notification called when the provider fallback is used. */
+  notify?: (message: string) => void;
 }
 
 /** Resolve the effective web settings for a project, or the default context when omitted. */
@@ -51,7 +80,7 @@ function resolveWebSettings(projectRoot?: string): WebSettings {
   return resolveSettingsForProject(projectRoot).tools.web;
 }
 
-/** Register the Exa-backed `web_search` tool. */
+/** Register the provider-configured `web_search` tool. */
 export function registerWebSearchTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "web_search",
@@ -65,14 +94,23 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<WebSearchDetails>> {
-      return executeWebSearch(params, signal, undefined, { projectRoot: ctx.cwd });
+      const notify = ctx.hasUI && typeof ctx.ui?.notify === "function"
+        ? (message: string): void => {
+          try {
+            ctx.ui.notify(message, "warning");
+          } catch {
+            // Notification failure must not turn a successful search into an error.
+          }
+        }
+        : undefined;
+      return executeWebSearch(params, signal, undefined, { projectRoot: ctx.cwd, notify });
     },
     renderCall(args, theme, context) {
       return renderToolDetail(theme, "web_search", args.query, 96, context, args);
     },
     renderResult(result, options, theme, context) {
       const failed = toolResultFailed(result, context);
-      const details = result.details as (WebSearchDetails & { results?: Array<{ title?: string; url?: string }> }) | undefined;
+      const details = result.details as WebSearchDetails | undefined;
       const count = details?.results?.length ?? (toolResultText(result) ? 1 : 0);
       const label = `Web search • ${count} results`;
       return renderToolOutcome(theme, label, { ...options, expanded: Boolean(context.expanded ?? options.expanded) }, failed, toolResultText(result), result, context.args);
@@ -100,131 +138,131 @@ async function executeWebSearchInner(
   settings: WebSettings,
   options?: WebSearchExecutionOptions,
 ): Promise<AgentToolResult<WebSearchDetails>> {
+  const provider = settings.provider ?? "exa";
+  const alternateProvider: WebSearchProvider = provider === "exa" ? "keenable" : "exa";
+  const request: WebSearchAdapterRequest = {
+    query: params.query,
+    numResults: boundedNumResults(params.numResults, settings.defaultNumResults),
+    type: params.type ?? settings.defaultSearchType,
+    livecrawl: params.livecrawl ?? settings.defaultLivecrawl,
+    ...(params.contextMaxCharacters === undefined ? {} : { contextMaxCharacters: params.contextMaxCharacters }),
+  };
+  const credentials: WebSearchCredentials = {
+    exaApiKey: effectiveCredential(process.env.EXA_API_KEY, settings.exaApiKey),
+    keenableApiKey: effectiveCredential(process.env.KEENABLE_API_KEY, settings.keenableApiKey),
+  };
+  const timeoutSignal = AbortSignal.timeout(settings.searchTimeoutMs);
+  const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
   try {
-    const timeoutSignal = AbortSignal.timeout(settings.searchTimeoutMs);
-    const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-    const apiKey = process.env.EXA_API_KEY || settings.exaApiKey;
-    const url = exaUrl(apiKey);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Accept: "application/json, text/event-stream",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "web_search_exa",
-          arguments: {
-            query: params.query,
-            type: params.type ?? settings.defaultSearchType,
-            numResults: params.numResults ?? settings.defaultNumResults,
-            livecrawl: params.livecrawl ?? settings.defaultLivecrawl,
-            ...(params.contextMaxCharacters === undefined ? {} : { contextMaxCharacters: params.contextMaxCharacters }),
-          },
-        },
-      }),
-      signal: requestSignal,
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText || "Request failed"}`);
-    const body = await readBoundedResponseBody(
-      response,
-      settings.maxResponseBytes,
-      responseLimitMessage(settings.maxResponseBytes),
-    );
-    const output = parseSearchResponse(new TextDecoder().decode(body));
-    if (output.malformed) throw new Error("Malformed search response body");
-    if (output.error) throw new Error(`Search request failed: ${output.error}`);
-    const resultText = output.text ?? NO_RESULTS;
-    if (resultText === NO_RESULTS) return textResult(NO_RESULTS, { query: params.query, provider: "exa" });
-    if (!resultText.trim()) return textResult(`Web Search: ${params.query}\n\n${resultText}`, { query: params.query, provider: "exa" });
-
-    const details: WebSearchDetails = { query: params.query, provider: "exa" };
-    const saved = await persistSearchResult(params.query, resultText, options);
-    details.wiki = toWikiDetails(saved);
-    if (saved.error) details.wikiSaveError = saved.error;
-    return textResult(`Web Search: ${params.query}\n\n${resultText}`, details);
-  } catch (error) {
-    return errorResult(toErrorMessage(error), { query: params.query, provider: "exa" });
-  }
-}
-
-function responseLimitMessage(maximumBytes: number): string {
-  return maximumBytes === 5 * 1024 * 1024
-    ? "Response too large (exceeds 5MB limit)"
-    : "Response too large (exceeds configured response limit)";
-}
-
-function exaUrl(apiKey: string | undefined): string {
-  if (!apiKey) return EXA_URL;
-  const url = new URL(EXA_URL);
-  url.searchParams.set("exaApiKey", apiKey);
-  return url.toString();
-}
-
-interface ParsedSearchResponse {
-  text?: string;
-  error?: string;
-  malformed?: boolean;
-}
-
-function parseSearchResponse(body: string): ParsedSearchResponse {
-  const trimmed = body.trim();
-  if (!trimmed) return { text: NO_RESULTS };
-
-  const direct = parseJsonPayload(trimmed);
-  if (direct.kind === "text" || direct.kind === "error" || direct.kind === "empty") return direct.value;
-  if (direct.kind === "malformed") {
-    // A body beginning with JSON is expected to be a direct JSON-RPC payload.
-    // SSE bodies can contain event lines before their data frame.
-    if (trimmed.startsWith("{")) return { malformed: true };
-  }
-
-  let sawData = false;
-  for (const line of body.split(/\r?\n/)) {
-    if (!line.startsWith("data:")) continue;
-    sawData = true;
-    const payload = line.slice(5).trim();
-    if (!payload || payload === "[DONE]") continue;
-    const parsed = parseJsonPayload(payload);
-    if (parsed.kind === "text" || parsed.kind === "error") return parsed.value;
-    // Empty frames are skipped; a later frame may carry the result.
-  }
-  if (sawData) return { text: NO_RESULTS };
-  return { error: "Malformed search response body" };
-}
-
-function parseJsonPayload(payload: string):
-  | { kind: "text"; value: { text: string } }
-  | { kind: "error"; value: { error: string } }
-  | { kind: "empty"; value: { text: string } }
-  | { kind: "malformed" } {
-  try {
-    const parsed: unknown = JSON.parse(payload);
-    if (!parsed || typeof parsed !== "object") return { kind: "malformed" };
-    const record = parsed as Record<string, unknown>;
-    if (record.error && typeof record.error === "object") {
-      const error = record.error as Record<string, unknown>;
-      return { kind: "error", value: { error: typeof error.message === "string" ? error.message : "Unknown JSON-RPC error" } };
+    const response = await searchProvider(provider, request, settings, requestSignal, credentials);
+    return completeSearch(provider, params.query, response, options);
+  } catch (firstError) {
+    if (!isFallbackEligible(firstError)) {
+      return errorResult(safeErrorMessage(firstError, credentials), { query: params.query, provider });
     }
-    const result = record.result;
-    if (!result || typeof result !== "object") return { kind: "malformed" };
-    const content = (result as Record<string, unknown>).content;
-    if (!Array.isArray(content)) return { kind: "malformed" };
-    const item = content.find((entry): entry is { text: string } => {
-      return Boolean(entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).text === "string" && (entry as Record<string, unknown>).text);
-    });
-    return item ? { kind: "text", value: { text: item.text } } : { kind: "empty", value: { text: NO_RESULTS } };
-  } catch {
-    return { kind: "malformed" };
+    if (requestSignal.aborted) {
+      return errorResult(signal?.aborted ? "Request aborted" : "Request timed out", { query: params.query, provider });
+    }
+
+    safeNotify(options?.notify, `Web search: ${providerLabel(provider)} limit reached; falling back to ${providerLabel(alternateProvider)}.`);
+    if (requestSignal.aborted) {
+      return errorResult(signal?.aborted ? "Request aborted" : "Request timed out", { query: params.query, provider });
+    }
+    try {
+      const response = await searchProvider(alternateProvider, request, settings, requestSignal, credentials);
+      return completeSearch(alternateProvider, params.query, response, options);
+    } catch (secondError) {
+      return errorResult(combinedFailureMessage(provider, firstError, alternateProvider, secondError, credentials), {
+        query: params.query,
+        provider: alternateProvider,
+      });
+    }
   }
+}
+
+async function completeSearch(
+  provider: WebSearchProvider,
+  query: string,
+  response: { results: CanonicalWebSearchResult[]; text?: string },
+  options?: WebSearchExecutionOptions,
+): Promise<AgentToolResult<WebSearchDetails>> {
+  const resultText = response.results.length > 0
+    ? formatCanonicalSearchResults(response.results)
+    : response.text ?? NO_RESULTS;
+  if (resultText === NO_RESULTS) return textResult(NO_RESULTS, { query, provider });
+  if (!resultText.trim()) return textResult(`Web Search: ${query}\n\n${resultText}`, { query, provider });
+
+  const details: WebSearchDetails = { query, provider };
+  if (response.results.length > 0) details.results = response.results;
+  const saved = await persistSearchResult(query, resultText, options);
+  details.wiki = toWikiDetails(saved);
+  if (saved.error) details.wikiSaveError = saved.error;
+  return textResult(`Web Search: ${query}\n\n${resultText}`, details);
+}
+
+function safeNotify(notify: ((message: string) => void) | undefined, message: string): void {
+  if (!notify) return;
+  try {
+    notify(message);
+  } catch {
+    // UI notification is best effort and must not affect the provider result.
+  }
+}
+
+function providerLabel(provider: WebSearchProvider): string {
+  return provider === "exa" ? "Exa" : "Keenable";
+}
+
+function combinedFailureMessage(
+  firstProvider: WebSearchProvider,
+  firstError: unknown,
+  secondProvider: WebSearchProvider,
+  secondError: unknown,
+  credentials: WebSearchCredentials,
+): string {
+  return `Search failed with ${providerLabel(firstProvider)} (${boundedFailure(safeErrorMessage(firstError, credentials))}); ${providerLabel(secondProvider)} fallback failed: ${boundedFailure(safeErrorMessage(secondError, credentials))}`;
+}
+
+function boundedNumResults(value: number | undefined, fallback: number): number {
+  const requested = typeof value === "number" && Number.isSafeInteger(value) ? value : fallback;
+  return Math.min(MAX_NUM_RESULTS, Math.max(1, requested));
+}
+
+function effectiveCredential(environmentValue: string | undefined, configuredValue: string | undefined): string | undefined {
+  const value = environmentValue || configuredValue;
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+function safeErrorMessage(error: unknown, credentials: WebSearchCredentials): string {
+  return redactSensitiveText(toErrorMessage(error), credentials);
+}
+
+function redactSensitiveText(message: string, credentials: WebSearchCredentials): string {
+  let redacted = message;
+  const secrets = [credentials.exaApiKey, credentials.keenableApiKey]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .sort((left, right) => right.length - left.length);
+  for (const secret of secrets) {
+    redacted = redacted.split(secret).join("[REDACTED]");
+    try {
+      const encoded = encodeURIComponent(secret);
+      if (encoded !== secret) redacted = redacted.split(encoded).join("[REDACTED]");
+    } catch {
+      // Invalid URI code units do not change the exact-secret redaction above.
+    }
+  }
+  return expandedToolText(redacted);
+}
+
+function boundedFailure(message: string): string {
+  const normalized = message.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  return normalized.length <= 240 ? normalized : `${normalized.slice(0, 239).trimEnd()}…`;
 }
 
 function webSearchDescription(): string {
-  return `Use this tool for broad discovery: search the web and return current information beyond the knowledge cutoff. Start with a broad query to map a topic and surface candidate URLs and sources; then retry with narrower keyword combinations to narrow down the most relevant candidates. Search local wikis and references first with knowledge_search tool; fall back to this tool when local information is absent or insufficient. This tool is very expensive, so use it sparingly; once candidate URLs have been identified, prefer web_fetch for subsequent retrieval and verification because web_fetch is free. Successful results from this tool are automatically saved to the local wiki for reuse. The current year is ${new Date().getFullYear()}; use this year when searching for recent information or current events.`;
+  return `Use this tool for broad discovery: search the web and return current information beyond the knowledge cutoff. Start with a broad query to map a topic and surface candidate URLs and sources; then retry with narrower keyword combinations to narrow down the most relevant candidates. Search local wikis and references first with knowledge_search tool; fall back to this tool when local knowledge cache is absent or insufficient. This tool is very expensive, so use it sparingly; once candidate URLs have been identified, prefer web_fetch for subsequent retrieval and verification because web_fetch is free. Successful results from this tool are automatically saved to the local wiki for reuse. The current year is ${new Date().getFullYear()}; use this year when searching for recent information or current events.`;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -257,4 +295,4 @@ function toWikiDetails(saved: WikiSaveResult): { saved: boolean; topic: string; 
   return { saved: saved.saved, topic: saved.topic, pages: saved.pages };
 }
 
-export { webSearchParams, parseSearchResponse };
+export { webSearchParams };

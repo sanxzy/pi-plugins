@@ -16,6 +16,10 @@ import {
   NO_RESULTS,
   SEARCH_TIMEOUT_MS,
 } from "../src/registrations/web-search.ts";
+import {
+  buildKeenableRequestBody,
+  clampKeenableSnippetLength,
+} from "../src/web-search-adapter.ts";
 
 type FetchUrl = string;
 
@@ -481,6 +485,29 @@ test("web_search uses configured Keenable JSON provider and normalizes results",
     clearSettingsCache();
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("Keenable request bodies clamp snippet length to the documented 180..10,000 range", () => {
+  assert.equal(clampKeenableSnippetLength(undefined), undefined);
+  assert.equal(clampKeenableSnippetLength(50), 180);
+  assert.equal(clampKeenableSnippetLength(180), 180);
+  assert.equal(clampKeenableSnippetLength(10_000), 10_000);
+  assert.equal(clampKeenableSnippetLength(50_000), 10_000);
+  const baseRequest = {
+    query: "hello",
+    numResults: 5,
+    type: "auto",
+    livecrawl: "fallback",
+  } as const;
+  assert.deepEqual(buildKeenableRequestBody({ ...baseRequest, contextMaxCharacters: 50 }), {
+    query: "hello",
+    max_results: 5,
+    snippet_max_length: 180,
+  });
+  assert.deepEqual(buildKeenableRequestBody(baseRequest), {
+    query: "hello",
+    max_results: 5,
+  });
 });
 
 test("web_search excludes X402 payment challenges from limit fallback", async () => {

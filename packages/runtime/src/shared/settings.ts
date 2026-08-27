@@ -63,6 +63,7 @@ export interface ChannelSettings {
 }
 
 export interface WebSettings {
+  provider: "exa" | "keenable";
   searchTimeoutMs: number;
   fetchTimeoutSeconds: number;
   maxResponseBytes: number;
@@ -70,6 +71,7 @@ export interface WebSettings {
   defaultSearchType: "auto" | "fast" | "deep";
   defaultLivecrawl: "fallback" | "preferred";
   exaApiKey?: string;
+  keenableApiKey?: string;
 }
 
 export interface McpSettings {
@@ -168,6 +170,7 @@ export function defaultSettings(): ResolvedSettings {
       ponytailEnabled: false,
       writeEditTicketTtlMs: 600_000,
       web: {
+        provider: "exa",
         searchTimeoutMs: 30_000,
         fetchTimeoutSeconds: FETCH_SECONDS_MIN,
         maxResponseBytes: 5 * MIB,
@@ -211,7 +214,7 @@ export function bootstrapSettingsConfig(filePath?: string): boolean {
       agents: { ...defaults.agents },
       runtime: { ...defaults.runtime },
       channels: { ...defaults.channels },
-      tools: { ...defaults.tools, web: { ...defaults.tools.web, exaApiKey: "" } },
+      tools: { ...defaults.tools, web: { ...defaults.tools.web, exaApiKey: "", keenableApiKey: "" } },
       mcp: { ...defaults.mcp },
       commands: { ...defaults.commands, telegram: { ...defaults.commands.telegram } },
     };
@@ -334,6 +337,7 @@ function applySource(source: Record<string, unknown>, target: ResolvedSettings, 
   }
   const web = isObject(sourceTools) ? sourceTools.web : undefined;
   if (isObject(web)) {
+    if (web.provider === "exa" || web.provider === "keenable") target.tools.web.provider = web.provider;
     if (isMs(web.searchTimeoutMs, 1_000, HOUR_MS)) target.tools.web.searchTimeoutMs = web.searchTimeoutMs;
     if (isPosInt(web.fetchTimeoutSeconds, FETCH_SECONDS_MAX) && web.fetchTimeoutSeconds >= FETCH_SECONDS_MIN) {
       target.tools.web.fetchTimeoutSeconds = web.fetchTimeoutSeconds;
@@ -348,6 +352,9 @@ function applySource(source: Record<string, unknown>, target: ResolvedSettings, 
     }
     if (typeof web.exaApiKey === "string" && web.exaApiKey.length > 0) {
       target.tools.web.exaApiKey = web.exaApiKey;
+    }
+    if (typeof web.keenableApiKey === "string" && web.keenableApiKey.length > 0) {
+      target.tools.web.keenableApiKey = web.keenableApiKey;
     }
   }
   const mcp = source.mcp;
