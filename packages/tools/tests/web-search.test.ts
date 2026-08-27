@@ -890,3 +890,99 @@ test("web_search excludes generic payment-required tags from credit fallback", a
     );
   });
 });
+
+test("web_search caps normalized provider results to the requested count", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key" }, async (home) => {
+    const results = Array.from({ length: 25 }, (_, index) => ({
+      title: `Result ${index + 1}`,
+      url: `https://example.com/result-${index + 1}`,
+    }));
+    await withFetch(
+      async () => new Response(JSON.stringify({ results }), { status: 200 }),
+      async () => {
+        const result = await executeWebSearch({ query: "bounded", numResults: 3 }, undefined, undefined, { wikiRoot: join(home, "wikis") });
+        const details = result.details as { results?: Array<{ title: string }> };
+        assert.equal(details.results?.length, 3);
+        assert.equal((text(result).match(/^Title:/gm) ?? []).length, 3);
+      },
+    );
+  });
+});
+
+test("web_search treats standard MCP isError envelopes as provider failures", async () => {
+  await withWebHome({ provider: "exa", keenableApiKey: "keen-key" }, async (home) => {
+    const calls: string[] = [];
+    await withFetch(
+      async (input) => {
+        calls.push(String(input));
+        if (calls.length === 1) {
+          return new Response(JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            result: { isError: true, content: [{ type: "text", text: "credits exhausted" }] },
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ results: [{ title: "MCP fallback", url: "https://example.com/mcp-fallback" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+      async () => {
+        const result = await executeWebSearch({ query: "mcp-error" }, undefined, undefined, { wikiRoot: join(home, "wikis") });
+        assert.match(text(result), /Title: MCP fallback/);
+        assert.deepEqual(calls, [EXA_URL, KEENABLE_URL]);
+      },
+    );
+  });
+});
+
+test("web_search handles negated limits and grammatical throttling", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    const cases = [
+      { name: "negated", message: "not out of credits", fallback: false },
+      { name: "throttled", message: "request is being throttled", fallback: true },
+    ];
+    for (const item of cases) {
+      const calls: string[] = [];
+      await withFetch(
+        async (input) => {
+          calls.push(String(input));
+          return calls.length === 1
+            ? new Response(JSON.stringify({ error: item.message }), { status: 200 })
+            : new Response(JSON.stringify({ results: [{ title: "Throttle fallback", url: "https://example.com/throttle" }] }), { status: 200 });
+        },
+        async () => {
+          const result = await executeWebSearch({ query: item.name }, undefined, undefined, { wikiRoot: join(home, `wikis-${item.name}`) });
+          if (item.fallback) assert.match(text(result), /Title: Throttle fallback/);
+          else assert.match(text(result), /Search request failed: not out of credits/);
+          assert.deepEqual(calls, item.fallback ? [EXA_REST_URL, KEENABLE_URL] : [EXA_REST_URL]);
+        },
+      );
+    }
+  });
+});
+
+test("web_search stops before fallback when notification cancels the request", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    const calls: string[] = [];
+    const controller = new AbortController();
+    await withFetch(
+      async (input) => {
+        calls.push(String(input));
+        return calls.length === 1
+          ? new Response("", { status: 429 })
+          : new Response(JSON.stringify({ results: [{ title: "unexpected", url: "https://example.com/unexpected" }] }), { status: 200 });
+      },
+      async () => {
+        const result = await executeWebSearch(
+          { query: "notification-cancel" },
+          controller.signal,
+          undefined,
+          { wikiRoot: join(home, "wikis"), notify: () => controller.abort() },
+        );
+        assert.equal(text(result), "Error: Request aborted");
+        assert.deepEqual(calls, [EXA_REST_URL]);
+      },
+    );
+  });
+});
