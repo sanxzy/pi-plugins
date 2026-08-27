@@ -781,3 +781,49 @@ test("web_search requires explicit exhaustion wording instead of bare quota or c
     }
   });
 });
+
+test("web_search recognizes grammatical credit and quota exhaustion variants", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    const messages = ["credits have been exhausted", "credits are depleted", "quota is exhausted"];
+    for (const message of messages) {
+      const calls: string[] = [];
+      await withFetch(
+        async (input) => {
+          calls.push(String(input));
+          return calls.length === 1
+            ? new Response(JSON.stringify({ error: message }), { status: 200 })
+            : new Response(JSON.stringify({ results: [{ title: "Grammar fallback", url: "https://example.com/grammar" }] }), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+        },
+        async () => {
+          const result = await executeWebSearch({ query: message }, undefined, undefined, { wikiRoot: join(home, `wikis-${messages.indexOf(message)}`) });
+          assert.match(text(result), /Title: Grammar fallback/);
+          assert.deepEqual(calls, [EXA_REST_URL, KEENABLE_URL]);
+        },
+      );
+    }
+  });
+});
+
+test("web_search redacts structured token fields from fallback failures", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    let calls = 0;
+    await withFetch(
+      async () => {
+        calls += 1;
+        return calls === 1
+          ? new Response(JSON.stringify({ error: "rate limit" }), { status: 200 })
+          : new Response(JSON.stringify({ message: '{"access_token":"OPAQUE-TOKEN","refresh_token":"REFRESH-TOKEN"}' }), { status: 200 });
+      },
+      async () => {
+        const result = await executeWebSearch({ query: "structured secret failure" }, undefined, undefined, { wikiRoot: join(home, "wikis") });
+        const output = text(result);
+        assert.match(output, /^Error: Search failed with Exa/);
+        assert.equal(output.includes("OPAQUE-TOKEN"), false);
+        assert.equal(output.includes("REFRESH-TOKEN"), false);
+      },
+    );
+  });
+});
