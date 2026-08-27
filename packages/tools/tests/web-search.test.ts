@@ -821,8 +821,71 @@ test("web_search redacts structured token fields from fallback failures", async 
         const result = await executeWebSearch({ query: "structured secret failure" }, undefined, undefined, { wikiRoot: join(home, "wikis") });
         const output = text(result);
         assert.match(output, /^Error: Search failed with Exa/);
+        assert.equal((result.details as { provider?: string }).provider, "keenable");
         assert.equal(output.includes("OPAQUE-TOKEN"), false);
         assert.equal(output.includes("REFRESH-TOKEN"), false);
+      },
+    );
+  });
+});
+
+test("web_search redacts trimmed configured credentials from fallback failures", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "  PADDED-EXA-KEY  ", keenableApiKey: "  PADDED-KEEN-KEY  " }, async (home) => {
+    let calls = 0;
+    await withFetch(
+      async () => {
+        calls += 1;
+        return calls === 1
+          ? new Response(JSON.stringify({ error: "rate limit" }), { status: 200 })
+          : new Response(JSON.stringify({ message: "fallback rejected access_token=PADDED-KEEN-KEY" }), { status: 200 });
+      },
+      async () => {
+        const result = await executeWebSearch({ query: "padded secret failure" }, undefined, undefined, { wikiRoot: join(home, "wikis") });
+        const output = text(result);
+        assert.equal(output.includes("PADDED-EXA-KEY"), false);
+        assert.equal(output.includes("PADDED-KEEN-KEY"), false);
+      },
+    );
+  });
+});
+
+test("web_search does not fallback for non-exhaustion credit wording", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    const cases = ["no credits required", "no credits configured", "credits spent: 5"];
+    for (const message of cases) {
+      const calls: string[] = [];
+      await withFetch(
+        async (input) => {
+          calls.push(String(input));
+          return calls.length === 1
+            ? new Response(JSON.stringify({ error: message }), { status: 200 })
+            : new Response(JSON.stringify({ results: [{ title: "unexpected", url: "https://example.com/unexpected" }] }), { status: 200 });
+        },
+        async () => {
+          const result = await executeWebSearch({ query: message }, undefined, undefined, { wikiRoot: join(home, `wikis-${cases.indexOf(message)}`) });
+          assert.match(text(result), /Search request failed:/);
+          assert.deepEqual(calls, [EXA_REST_URL]);
+        },
+      );
+    }
+  });
+});
+
+test("web_search excludes generic payment-required tags from credit fallback", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    const calls: string[] = [];
+    await withFetch(
+      async (input) => {
+        calls.push(String(input));
+        if (calls.length === 1) {
+          return new Response(JSON.stringify({ error: "credits exhausted", tag: "PAYMENT_REQUIRED" }), { status: 402 });
+        }
+        return new Response(JSON.stringify({ results: [{ title: "unexpected", url: "https://example.com/unexpected" }] }), { status: 200 });
+      },
+      async () => {
+        const result = await executeWebSearch({ query: "payment-tag" }, undefined, undefined, { wikiRoot: join(home, "wikis") });
+        assert.match(text(result), /^Error: HTTP 402:/);
+        assert.deepEqual(calls, [EXA_REST_URL]);
       },
     );
   });
