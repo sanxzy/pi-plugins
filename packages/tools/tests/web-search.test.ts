@@ -701,3 +701,83 @@ test("web_search redacts configured secrets from combined fallback failures", as
     );
   });
 });
+
+test("web_search does not fallback for a nested Exa X402 payment tag", async () => {
+  await withWebHome({ provider: "exa", keenableApiKey: "keen-key" }, async (home) => {
+    const calls: string[] = [];
+    await withFetch(
+      async (input) => {
+        calls.push(String(input));
+        if (calls.length === 1) {
+          return new Response(JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            error: {
+              code: -32000,
+              message: "credits exhausted",
+              data: { tag: "X402_PAYMENT_REQUIRED" },
+            },
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ results: [{ title: "unexpected", url: "https://example.com/unexpected" }] }), { status: 200 });
+      },
+      async () => {
+        const result = await executeWebSearch({ query: "nested-x402" }, undefined, undefined, { wikiRoot: join(home, "wikis") });
+        assert.equal(text(result), "Error: Search request failed: credits exhausted");
+        assert.deepEqual(calls, [EXA_URL]);
+      },
+    );
+  });
+});
+
+test("web_search recognizes Keenable's documented insufficient-credit 402 response", async () => {
+  await withWebHome({ provider: "keenable", keenableApiKey: "keen-key", exaApiKey: "exa-key" }, async (home) => {
+    const calls: string[] = [];
+    await withFetch(
+      async (input) => {
+        calls.push(String(input));
+        if (calls.length === 1) {
+          return new Response(JSON.stringify({
+            error: "Insufficient credits",
+            message: "No credits available for this API key",
+          }), { status: 402 });
+        }
+        return new Response(JSON.stringify({ results: [{ title: "Credit fallback", url: "https://example.com/credit" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+      async () => {
+        const result = await executeWebSearch({ query: "credit-fallback" }, undefined, undefined, { wikiRoot: join(home, "wikis") });
+        assert.match(text(result), /Title: Credit fallback/);
+        assert.equal((result.details as { provider?: string }).provider, "exa");
+        assert.deepEqual(calls, [KEENABLE_URL, EXA_REST_URL]);
+      },
+    );
+  });
+});
+
+test("web_search requires explicit exhaustion wording instead of bare quota or credit terms", async () => {
+  await withWebHome({ provider: "exa", exaApiKey: "exa-key", keenableApiKey: "keen-key" }, async (home) => {
+    const cases = [
+      { name: "credits-remaining", response: () => new Response(JSON.stringify({ error: "credits remaining: 10" }), { status: 200 }), expected: /Search request failed: credits remaining/ },
+      { name: "quota-configured", response: () => new Response(JSON.stringify({ message: "quota configured for this account" }), { status: 503 }), expected: /HTTP 503:/ },
+    ];
+    for (const item of cases) {
+      const calls: string[] = [];
+      await withFetch(
+        async (input) => {
+          calls.push(String(input));
+          return calls.length === 1
+            ? item.response()
+            : new Response(JSON.stringify({ results: [{ title: "unexpected", url: "https://example.com/unexpected" }] }), { status: 200 });
+        },
+        async () => {
+          const result = await executeWebSearch({ query: item.name }, undefined, undefined, { wikiRoot: join(home, `wikis-${item.name}`) });
+          assert.match(text(result), item.expected);
+          assert.deepEqual(calls, [EXA_REST_URL]);
+        },
+      );
+    }
+  });
+});
