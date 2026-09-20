@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLED_PATCH = join(HERE, "../scripts/pi-coding-agent@0.84.2.patch");
-const WORKSPACE_PATCH = new URL("../../../patches/@earendil-works__pi-coding-agent@0.84.2.patch", import.meta.url).pathname;
+const BUNDLED_PATCH = join(HERE, "../scripts/pi-coding-agent@0.86.0.patch");
+const WORKSPACE_PATCH = new URL("../../../patches/@earendil-works__pi-coding-agent@0.86.0.patch", import.meta.url).pathname;
 
 /**
  * The patched AgentSession hooks must respect per-session model bindings

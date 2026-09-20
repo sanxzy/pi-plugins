@@ -273,8 +273,12 @@ async function createIsolatedChild(options: {
   // an in-memory override on the child's own SettingsManager so the SDK-native
   // `_checkCompaction` path (the only auto-compaction that runs inside child
   // sessions, since children never emit extension events) uses the configured
-  // percentage instead of the default reserve-token math.
-  settingsManager.setCompactionThresholdPercent(resolveSettingsForProject(options.cwd).runtime.contextCompactThresholdPercent);
+  // percentage instead of the default reserve-token math. An unpatched host
+  // keeps its native reserve-token behavior instead of failing child startup.
+  const thresholdPercent = resolveSettingsForProject(options.cwd).runtime.contextCompactThresholdPercent;
+  if (typeof settingsManager.setCompactionThresholdPercent === "function") {
+    settingsManager.setCompactionThresholdPercent(thresholdPercent);
+  }
   // Every resolved agent comes from a valid agent file and carries its
   // frontmatter fields and Markdown body.
   const discovered = options.agent;

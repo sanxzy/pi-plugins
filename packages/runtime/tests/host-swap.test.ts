@@ -8,11 +8,11 @@ import { resolve } from "node:path";
 // It will fail until the patch is delivered.
 test("host swap patch is delivered and does not break compaction", () => {
   const candidates = [
-    resolve(import.meta.dirname ?? ".", "../../../patches/@earendil-works__pi-coding-agent@0.84.2.patch"),
-    resolve(import.meta.dirname ?? ".", "../../patches/@earendil-works__pi-coding-agent@0.84.2.patch"),
-    resolve(process.cwd(), "patches/@earendil-works__pi-coding-agent@0.84.2.patch"),
-    resolve(process.cwd(), "../patches/@earendil-works__pi-coding-agent@0.84.2.patch"),
-    resolve(process.cwd(), "../../patches/@earendil-works__pi-coding-agent@0.84.2.patch"),
+    resolve(import.meta.dirname ?? ".", "../../../patches/@earendil-works__pi-coding-agent@0.86.0.patch"),
+    resolve(import.meta.dirname ?? ".", "../../patches/@earendil-works__pi-coding-agent@0.86.0.patch"),
+    resolve(process.cwd(), "patches/@earendil-works__pi-coding-agent@0.86.0.patch"),
+    resolve(process.cwd(), "../patches/@earendil-works__pi-coding-agent@0.86.0.patch"),
+    resolve(process.cwd(), "../../patches/@earendil-works__pi-coding-agent@0.86.0.patch"),
   ];
   const found = candidates.find((p) => existsSync(p));
   assert.ok(found, `patch file must exist (checked ${candidates.join(", ")})`);

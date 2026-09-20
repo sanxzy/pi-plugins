@@ -7,7 +7,7 @@ import { applyPatches, parsePatch, reversePatch } from "diff";
 import { test } from "node:test";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLED_PATCH = join(HERE, "../scripts/pi-coding-agent@0.84.2.patch");
+const BUNDLED_PATCH = join(HERE, "../scripts/pi-coding-agent@0.86.0.patch");
 const SDK_SOURCE = new URL("../node_modules/@earendil-works/pi-coding-agent", import.meta.url).pathname;
 const TARGET_REL = "dist/core/agent-session.js";
 

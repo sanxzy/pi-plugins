@@ -13,7 +13,7 @@
  *   index.js                  bundled extension (default-export factory)
  *   package.json              publish-ready manifest
  *   scripts/postinstall.mjs   host patch applier (ships as source)
- *   scripts/pi-coding-agent@0.84.2.patch
+ *   scripts/pi-coding-agent@0.86.0.patch
  */
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -183,8 +183,8 @@ writeFileSync(join(distDir, "package.json"), JSON.stringify(publishPkg, null, 2)
 // bundled patch next to it.
 cpSync(join(here, "postinstall.mjs"), join(distDir, "scripts", "postinstall.mjs"));
 cpSync(
-  join(here, "pi-coding-agent@0.84.2.patch"),
-  join(distDir, "scripts", "pi-coding-agent@0.84.2.patch"),
+  join(here, "pi-coding-agent@0.86.0.patch"),
+  join(distDir, "scripts", "pi-coding-agent@0.86.0.patch"),
 );
 
 // Verify the bundle loads as a factory function through jiti — the same
@@ -193,8 +193,8 @@ cpSync(
 // as the host would.
 const sdkDir = join(workspaceRoot, "node_modules", ".pnpm");
 const sdkEntry =
-  readdirSync(sdkDir).find((e) => e.startsWith("@earendil-works+pi-coding-agent@0.84.2") && e.includes("patch_hash")) ??
-  readdirSync(sdkDir).find((e) => e.startsWith("@earendil-works+pi-coding-agent@0.84.2"));
+  readdirSync(sdkDir).find((e) => e.startsWith("@earendil-works+pi-coding-agent@0.86.0") && e.includes("patch_hash")) ??
+  readdirSync(sdkDir).find((e) => e.startsWith("@earendil-works+pi-coding-agent@0.86.0"));
 if (!sdkEntry) throw new Error("patched host SDK not found in pnpm store — run pnpm install first");
 const sdkPkg = join(sdkDir, sdkEntry, "node_modules", "@earendil-works", "pi-coding-agent");
 const verifyScript =

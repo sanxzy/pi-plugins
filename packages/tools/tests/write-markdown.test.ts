@@ -35,7 +35,7 @@ for (const extension of ["md", "MD", "Md", "mdx", "MDX", "txt", "TXT", "Mixed.Tx
       const file = join(canonicalProjectRoot(root), "docs", `notes.${extension}`);
       assert.equal(existsSync(file), true, "file created");
       assert.equal(readFileSync(file, "utf8"), "# Notes\ncontent");
-      assert.match(textOf(result), /Successfully wrote \d+ bytes to /);
+      assert.match(textOf(result), /Successfully wrote(?: \d+ bytes)? to /);
       assert.doesNotMatch(textOf(result), /# Notes\ncontent/);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });

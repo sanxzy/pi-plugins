@@ -16,12 +16,13 @@
   "private": true,
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
-    "typecheck": "tsgo --noEmit",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
     "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/extension.test.ts tests/manager-removal.test.ts tests/postinstall.test.ts tests/patch-sync.test.ts tests/group-binding-patch.test.ts tests/group-binding-hooks.test.ts tests/build-output.test.ts tests/percentage-compaction.test.ts tests/midturn-compaction.test.ts tests/repro-abort-loop.test.ts tests/publish-version.test.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.2",
-    "@earendil-works/pi-tui": "^0.84.2",
+    "@earendil-works/pi-coding-agent": "^0.86.0",
+    "@earendil-works/pi-tui": "^0.86.0",
     "@xzy-ai/commands": "workspace:*",
     "@xzy-ai/core": "workspace:*",
     "@xzy-ai/mcp": "workspace:*",

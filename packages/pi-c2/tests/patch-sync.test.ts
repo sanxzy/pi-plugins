@@ -7,8 +7,8 @@ import { test } from "node:test";
 import { applyPatches, parsePatch, reversePatch } from "diff";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLED_PATCH = join(HERE, "../scripts/pi-coding-agent@0.84.2.patch");
-const WORKSPACE_PATCH = new URL("../../../patches/@earendil-works__pi-coding-agent@0.84.2.patch", import.meta.url).pathname;
+const BUNDLED_PATCH = join(HERE, "../scripts/pi-coding-agent@0.86.0.patch");
+const WORKSPACE_PATCH = new URL("../../../patches/@earendil-works__pi-coding-agent@0.86.0.patch", import.meta.url).pathname;
 const SDK_SOURCE = new URL("../node_modules/@earendil-works/pi-coding-agent", import.meta.url).pathname;
 
 /** Capability markers every patched host must expose for pi-c2 theme/swap features. */

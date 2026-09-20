@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { parsePatch, reversePatch, applyPatches } from "diff";
 
 const SCRIPT = new URL("../scripts/postinstall.mjs", import.meta.url).pathname;
-const PATCH_FILE = new URL("../scripts/pi-coding-agent@0.84.2.patch", import.meta.url).pathname;
+const PATCH_FILE = new URL("../scripts/pi-coding-agent@0.86.0.patch", import.meta.url).pathname;
 const SDK_SOURCE = new URL("../node_modules/@earendil-works/pi-coding-agent", import.meta.url).pathname;
 
 /** Marker strings that only exist after the patch is applied. */
@@ -25,7 +25,7 @@ const PATCH_MARKERS: Array<[string, string]> = [
 ];
 
 /**
- * Build a pristine (unpatched) 0.84.2 SDK copy by reverse-applying the bundled
+ * Build a pristine (unpatched) 0.86.0 SDK copy by reverse-applying the bundled
  * patch to the workspace's already-patched SDK. Deterministic, offline.
  */
 async function buildPristineSdk(): Promise<string> {
@@ -61,7 +61,7 @@ async function buildPristineSdk(): Promise<string> {
 }
 
 /** Create a fake global root with a pristine SDK + a stub `npm` bin. */
-async function fakeGlobal(): Promise<{ root: string; npmBin: string }> {
+async function fakeGlobal(pathOnly = false): Promise<{ root: string; npmBin: string }> {
   const root = mkdtempSync(join(tmpdir(), "pi-c2-fake-global-"));
   const sdkDir = join(root, "@earendil-works", "pi-coding-agent");
   const pristine = await buildPristineSdk();
@@ -71,9 +71,14 @@ async function fakeGlobal(): Promise<{ root: string; npmBin: string }> {
   mkdirSync(bin, { recursive: true });
   writeFileSync(
     join(bin, "npm"),
-    "#!/bin/bash\nif [ \"$1\" = \"root\" ] && [ \"$2\" = \"-g\" ]; then echo \"" + root + "\"; exit 0; fi\nexit 1\n",
+    pathOnly
+      ? "#!/bin/bash\nexit 1\n"
+      : "#!/bin/bash\nif [ \"$1\" = \"root\" ] && [ \"$2\" = \"-g\" ]; then echo \"" + root + "\"; exit 0; fi\nexit 1\n",
   );
   chmodSync(join(bin, "npm"), 0o755);
+  if (pathOnly) {
+    symlinkSync(join(sdkDir, "dist", "bundle", "cli.js"), join(bin, "pi"));
+  }
   return { root, npmBin: bin };
 }
 
@@ -85,7 +90,7 @@ function runScript(npmBin: string): { status: number; stdout: string } {
   return { status: result.status ?? -1, stdout: result.stdout + result.stderr };
 }
 
-test("postinstall patches an unpatched 0.84.2 host and keeps a pristine backup", async () => {
+test("postinstall patches an unpatched 0.86.0 host and keeps a pristine backup", async () => {
   const { root, npmBin } = await fakeGlobal();
   try {
     const sdkDir = join(root, "@earendil-works", "pi-coding-agent");
@@ -97,18 +102,31 @@ test("postinstall patches an unpatched 0.84.2 host and keeps a pristine backup",
     );
     const { status, stdout } = runScript(npmBin);
     assert.equal(status, 0, `script must exit 0, got ${status}: ${stdout}`);
-    assert.match(stdout, /patched host pi-coding-agent 0\.84\.2/);
+    assert.match(stdout, /patched host pi-coding-agent 0\.86\.0/);
     for (const [rel, needle] of PATCH_MARKERS) {
       assert.ok(readFileSync(join(sdkDir, rel), "utf8").includes(needle), `${rel} must contain ${needle}`);
     }
     // Backup exists and is pristine.
-    const backup = join(root, "@earendil-works", "pi-coding-agent.bak-0.84.2");
+    const backup = join(root, "@earendil-works", "pi-coding-agent.bak-0.86.0");
     assert.ok(existsSync(backup), "backup must exist");
     assert.equal(
       readFileSync(join(backup, "dist/core/extensions/loader.js"), "utf8").includes("createCommandContext"),
       false,
       "backup must be pristine",
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("postinstall resolves a Bun-style dist/bundle executable when npm root misses the host", async () => {
+  const { root, npmBin } = await fakeGlobal(true);
+  try {
+    const sdkDir = join(root, "@earendil-works", "pi-coding-agent");
+    const { status, stdout } = runScript(npmBin);
+    assert.equal(status, 0, stdout);
+    assert.match(stdout, /patched host pi-coding-agent 0\.86\.0/);
+    assert.ok(readFileSync(join(sdkDir, "dist/core/settings-manager.js"), "utf8").includes("thresholdPercentOverride"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -153,7 +171,7 @@ test("postinstall upgrades a patched host whose revision is stale", async () => 
     }
     // The pristine backup survives the upgrade cycle.
     assert.ok(
-      !readFileSync(join(root, "@earendil-works", "pi-coding-agent.bak-0.84.2", "dist/core/extensions/loader.js"), "utf8").includes("createCommandContext"),
+      !readFileSync(join(root, "@earendil-works", "pi-coding-agent.bak-0.86.0", "dist/core/extensions/loader.js"), "utf8").includes("createCommandContext"),
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -182,7 +200,7 @@ test("postinstall upgrades a legacy patched host that has no revision file", asy
   }
 });
 
-test("postinstall skips a host older than 0.84.2", async () => {
+test("postinstall skips a host older than 0.86.0", async () => {
   const { root, npmBin } = await fakeGlobal();
   try {
     const pkgPath = join(root, "@earendil-works", "pi-coding-agent", "package.json");
@@ -191,7 +209,7 @@ test("postinstall skips a host older than 0.84.2", async () => {
     writeFileSync(pkgPath, JSON.stringify(pkg));
     const { status, stdout } = runScript(npmBin);
     assert.equal(status, 0);
-    assert.match(stdout, /requires >= 0\.84\.2/);
+    assert.match(stdout, /requires >= 0\.86\.0/);
     // Host untouched.
     const sdkDir = join(root, "@earendil-works", "pi-coding-agent");
     assert.equal(
@@ -226,7 +244,7 @@ test("postinstall restores the pre-script host state when the patch cannot apply
       "failed patch must not leave partial markers",
     );
     // Backup is retained as the recovery safety net.
-    assert.ok(existsSync(join(root, "@earendil-works", "pi-coding-agent.bak-0.84.2")));
+    assert.ok(existsSync(join(root, "@earendil-works", "pi-coding-agent.bak-0.86.0")));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

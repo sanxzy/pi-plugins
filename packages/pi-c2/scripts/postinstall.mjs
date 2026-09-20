@@ -5,13 +5,13 @@
  * The pi-c2 extension depends on three host-side capabilities that are not
  * present in every `@earendil-works/pi-coding-agent` install:
  *
- *   1. `registerEntryRenderer` (stock 0.84.2+; the yellow ※ notify entry)
+ *   1. `registerEntryRenderer` (stock 0.86.0+; the yellow ※ notify entry)
  *   2. `createCommandContext` (patched; telegram lifecycle/controls seam)
  *   3. `sessionFilename`/`privateRoot` (patched; private child-session storage)
  *   4. `_hostGetThemeInstance` (patched; exact parent-theme restoration)
  *
  * This script locates the HOST's pi-coding-agent (the one the pi CLI runs),
- * checks its version and patch state, and if the host is 0.84.2+ and not yet
+ * checks its version and patch state, and if the host is 0.86.0+ and not yet
  * patched, backs it up and applies the bundled patch with a pure-JS unified
  * diff applier (no git, no .git dir, no external tools). It is idempotent:
  * already-patched hosts are left untouched.
@@ -26,17 +26,18 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyPatches } from "diff";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const PATCH_FILE = join(SCRIPT_DIR, "pi-coding-agent@0.84.2.patch");
-const MIN_VERSION = [0, 84, 2];
+const PATCH_FILE = join(SCRIPT_DIR, "pi-coding-agent@0.86.0.patch");
+const MIN_VERSION = [0, 86, 0];
 
 /** Marker strings that only exist after the patch is applied. */
 const PATCH_MARKERS = [
@@ -100,14 +101,41 @@ function resolveHostSdk() {
     const candidate = join(globalRoot, "@earendil-works", "pi-coding-agent");
     if (existsSync(join(candidate, "package.json"))) return candidate;
   }
-  // 2. We are a sibling of the host SDK (flat global layout).
+  // 2. Follow the `pi` executable selected by PATH. Bun global installs keep
+  // the package under ~/.bun/install/global while exposing a symlink from
+  // ~/.bun/bin, so npm root -g cannot discover them.
+  for (const pathEntry of (process.env.PATH ?? "").split(delimiter)) {
+    const executable = join(pathEntry || ".", "pi");
+    if (!existsSync(executable)) continue;
+    try {
+      // The Bun shim may target either dist/cli.js or dist/bundle/cli.js;
+      // walk upward until the host package manifest is found instead of
+      // assuming a fixed bundle depth.
+      let candidate = dirname(realpathSync(executable));
+      for (let depth = 0; depth < 8 && dirname(candidate) !== candidate; depth++) {
+        const packageFile = join(candidate, "package.json");
+        if (existsSync(packageFile)) {
+          try {
+            const packageJson = JSON.parse(readFileSync(packageFile, "utf8"));
+            if (packageJson.name === "@earendil-works/pi-coding-agent") return candidate;
+          } catch {
+            // Continue walking if an ancestor manifest is unreadable.
+          }
+        }
+        candidate = dirname(candidate);
+      }
+    } catch {
+      // Try the remaining PATH entries and fallback strategies.
+    }
+  }
+  // 3. We are a sibling of the host SDK (flat global layout).
   let current = resolve(SCRIPT_DIR);
   for (let depth = 0; depth < 6 && dirname(current) !== current; depth++) {
     const candidate = join(current, "@earendil-works", "pi-coding-agent");
     if (existsSync(join(candidate, "package.json"))) return candidate;
     current = dirname(current);
   }
-  // 3. Local workspace install (dev/test).
+  // 4. Local workspace install (dev/test).
   const local = resolve(join(SCRIPT_DIR, "..", "..", "..", "..", "node_modules", "@earendil-works", "pi-coding-agent"));
   if (existsSync(join(local, "package.json"))) return local;
   return null;
@@ -212,7 +240,7 @@ try {
   const pkg = JSON.parse(readFileSync(join(hostSdk, "package.json"), "utf8"));
   const version = pkg.version ?? "0.0.0";
   if (!satisfiesMin(version)) {
-    log(`host pi-coding-agent is ${version}; the yellow ※ notification requires >= 0.84.2. Please upgrade pi.`);
+    log(`host pi-coding-agent is ${version}; the yellow ※ notification requires >= 0.86.0. Please upgrade pi.`);
     process.exit(0);
   }
   const revision = bundledRevision();

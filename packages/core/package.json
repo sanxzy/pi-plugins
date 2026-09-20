@@ -6,12 +6,12 @@
   "main": "./src/index.ts",
   "private": true,
   "scripts": {
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "node --test --test-force-exit --import ../../test-setup.mjs --import tsx tests/job-session.test.ts tests/child-session-live.test.ts tests/goal.test.ts tests/references.test.ts tests/frontmatter.test.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.2",
-    "@earendil-works/pi-agent-core": "^0.84.2"
+    "@earendil-works/pi-coding-agent": "^0.86.0",
+    "@earendil-works/pi-agent-core": "^0.86.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

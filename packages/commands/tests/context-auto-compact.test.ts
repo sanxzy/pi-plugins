@@ -30,7 +30,7 @@ function writeHomeConfig(homeRoot: string, value: unknown): void {
 
 interface FakeSettingsManager {
   threshold: number | undefined;
-  setCompactionThresholdPercent(percent: number): void;
+  setCompactionThresholdPercent?: (percent: number) => void;
 }
 
 function registrations(): { pi: ExtensionAPI; handlers: Map<string, Handler>; settings: FakeSettingsManager } {
@@ -79,6 +79,22 @@ test("session_start applies the default 80 when the config omits the threshold",
       const handler = handlers.get("session_start")!;
       await handler({ type: "session_start", reason: "startup" } as SessionStartEvent, context(cwd, settings));
       assert.equal(settings.threshold, 80, "default 80 is applied");
+    });
+  } finally {
+    rmSync(h, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("session_start tolerates an unpatched host SettingsManager", async () => {
+  const h = home(); const cwd = project();
+  try {
+    await withHome(h, async () => {
+      const { handlers } = registrations();
+      const handler = handlers.get("session_start")!;
+      const unpatchedSettings: FakeSettingsManager = { threshold: undefined };
+      await handler({ type: "session_start", reason: "startup" } as SessionStartEvent, context(cwd, unpatchedSettings));
+      assert.equal(unpatchedSettings.threshold, undefined, "the stock host keeps its native compaction settings");
     });
   } finally {
     rmSync(h, { recursive: true, force: true });

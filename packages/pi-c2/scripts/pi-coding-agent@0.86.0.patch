@@ -1,8 +1,8 @@
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index f8c1f48..be46311 100644
+index 638646d..8df079f 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -97,6 +97,8 @@
+@@ -96,6 +96,8 @@ export class AgentSession {
      _compactionAbortController = undefined;
      _autoCompactionAbortController = undefined;
      _overflowRecoveryAttempted = false;
@@ -11,7 +11,7 @@ index f8c1f48..be46311 100644
      // Branch summarization state
      _branchSummaryAbortController = undefined;
      // Retry state
-@@ -396,8 +398,56 @@
+@@ -438,6 +440,13 @@ export class AgentSession {
                      this._retryAttempt = 0;
                  }
              }
@@ -22,6 +22,11 @@ index f8c1f48..be46311 100644
 +            // finish. The completed message is always kept whole (never cut off
 +            // mid-message) because the check runs on message_end.
 +            await this._maybeAbortForThreshold();
+         }
+         // A turn ends after its assistant message and every tool result has been appended,
+         // so this is the first point in the run where a context-only custom message can be
+@@ -448,6 +457,47 @@ export class AgentSession {
+             this._flushPendingCustomMessages();
          }
      };
 +    /**
@@ -36,7 +41,7 @@ index f8c1f48..be46311 100644
 +    async _maybeAbortForThreshold() {
 +        if (this._thresholdAbortPending)
 +            return;
-+        const settings = this.settingsManager.getCompactionSettings();
++        const settings = this.settingsManager.getCompactionSettings(this.model);
 +        if (!settings.enabled || typeof settings.thresholdPercent !== "number")
 +            return;
 +        const model = this.model;
@@ -66,9 +71,9 @@ index f8c1f48..be46311 100644
 +        }
 +    }
      _willRetryAfterAgentEnd(event) {
-         const settings = this.settingsManager.getRetrySettings();
-         if (!settings.enabled || this._retryAttempt >= settings.maxRetries) {
-@@ -446,6 +496,41 @@
+         if (this._agentRunAbortRequested)
+             return false;
+@@ -498,6 +548,41 @@ export class AgentSession {
              await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
          }
          else if (event.type === "turn_start") {
@@ -110,7 +115,7 @@ index f8c1f48..be46311 100644
              const extensionEvent = {
                  type: "turn_start",
                  turnIndex: this._turnIndex,
-@@ -761,6 +846,51 @@
+@@ -887,6 +972,51 @@ export class AgentSession {
          if (!msg) {
              return false;
          }
@@ -160,9 +165,12 @@ index f8c1f48..be46311 100644
 +            }
 +        } catch {}
          if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
-             return true;
-         }
-@@ -1014,3 +1144,17 @@
+             if (this._agentRunAbortRequested)
+                 this._finishCancelledRetry();
+@@ -1152,6 +1282,20 @@ export class AgentSession {
+     async followUp(text, images, options) {
+         await this._queueUserInput(text, images, "followUp", options?.source ?? "interactive");
+     }
 +    /**
 +     * Queue a steering message ahead of already queued steering messages.
 +     * pi-c2 uses the host's native queue, but goals need priority over older
@@ -180,8 +188,7 @@ index f8c1f48..be46311 100644
      /**
       * Internal: Queue a steering message (already expanded, no extension command check).
       */
-@@ -1081,8 +1225,11 @@
-         else if (this.isStreaming && options?.triggerTurn !== false) {
+@@ -1225,6 +1369,9 @@ export class AgentSession {
              if (options?.deliverAs === "followUp") {
                  this.agent.followUp(appMessage);
              }
@@ -191,8 +198,20 @@ index f8c1f48..be46311 100644
              else {
                  this.agent.steer(appMessage);
              }
-         }
-@@ -1366,7 +1513,12 @@
+@@ -1567,8 +1714,10 @@ export class AgentSession {
+     async _runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, signal, env, reason) {
+         return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
+     }
+-    _clearManualCompactionState() {
+-        this._compactionAbortController = undefined;
++    _clearManualCompactionState(controller) {
++        if (controller === undefined || this._compactionAbortController === controller) {
++            this._compactionAbortController = undefined;
++        }
+         this._resolveIdleWaitIfIdle();
+     }
+     /**
+@@ -1588,7 +1737,12 @@ export class AgentSession {
       */
      async compact(customInstructions) {
          await this.abort();
@@ -204,9 +223,18 @@ index f8c1f48..be46311 100644
 +        const abortController = new AbortController();
 +        this._compactionAbortController = abortController;
          this._emit({ type: "compaction_start", reason: "manual" });
-         try {
-             if (!this.model) {
-@@ -1394,7 +1546,7 @@
+         let fromExtension = false;
+         let cancelledByExtension = false;
+@@ -1598,7 +1752,7 @@ export class AgentSession {
+                 throw new Error(formatNoModelSelectedMessage());
+             }
+             const settings = this.settingsManager.getCompactionSettings(model);
+-            const { model: requestModel, apiKey, headers, env, } = await this._getSummarizationRequestAuth(model, this._compactionAbortController.signal);
++            const { model: requestModel, apiKey, headers, env, } = await this._getSummarizationRequestAuth(model, abortController.signal);
+             const pathEntries = this.sessionManager.getBranch();
+             const preparation = prepareCompaction(pathEntries, settings);
+             if (!preparation) {
+@@ -1618,7 +1772,7 @@ export class AgentSession {
                      customInstructions,
                      reason: "manual",
                      willRetry: false,
@@ -214,13 +242,13 @@ index f8c1f48..be46311 100644
 +                    signal: abortController.signal,
                  }));
                  if (result?.cancel) {
-                     throw new Error("Compaction cancelled");
-@@ -1419,14 +1571,14 @@
+                     cancelledByExtension = true;
+@@ -1644,14 +1798,14 @@ export class AgentSession {
              }
              else {
-                 // Generate compaction result
--                const result = await compact(preparation, requestModel, apiKey, headers, customInstructions, this._compactionAbortController.signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }));
-+                const result = await compact(preparation, requestModel, apiKey, headers, customInstructions, abortController.signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }));
+                 // Shared default summary generator, also used by automatic compaction.
+-                const result = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, this._compactionAbortController.signal, env, "manual");
++                const result = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, abortController.signal, env, "manual");
                  summary = result.summary;
                  firstKeptEntryId = result.firstKeptEntryId;
                  tokensBefore = result.tokensBefore;
@@ -232,19 +260,38 @@ index f8c1f48..be46311 100644
                  throw new Error("Compaction cancelled");
              }
              this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-@@ -1479,7 +1631,9 @@
+@@ -1679,7 +1833,7 @@ export class AgentSession {
+                 details,
+             };
+             // compaction_end listeners may submit queued prompts, so expose idle state before notifying them.
+-            this._clearManualCompactionState();
++            this._clearManualCompactionState(abortController);
+             this._emit({
+                 type: "compaction_end",
+                 reason: "manual",
+@@ -1691,9 +1845,9 @@ export class AgentSession {
+         }
+         catch (error) {
+             const message = error instanceof Error ? error.message : String(error);
+-            const aborted = this._compactionAbortController.signal.aborted || cancelledByExtension;
++            const aborted = abortController.signal.aborted || cancelledByExtension;
+             const errorMessage = aborted ? undefined : `Compaction failed: ${message}`;
+-            this._clearManualCompactionState();
++            this._clearManualCompactionState(abortController);
+             this._emit({
+                 type: "compaction_end",
+                 reason: "manual",
+@@ -1712,7 +1866,7 @@ export class AgentSession {
              throw error;
          }
          finally {
--            this._compactionAbortController = undefined;
-+            if (this._compactionAbortController === abortController) {
-+                this._compactionAbortController = undefined;
-+            }
+-            this._clearManualCompactionState();
++            this._clearManualCompactionState(abortController);
          }
      }
      /**
-@@ -1511,8 +1665,13 @@
-         const settings = this.settingsManager.getCompactionSettings();
+@@ -1753,8 +1907,13 @@ export class AgentSession {
+         const settings = this.settingsManager.getCompactionSettings(this.model);
          if (!settings.enabled)
              return false;
 +        // pi-c2 patch: a threshold-triggered abort (mid-turn message_end crossing)
@@ -258,7 +305,7 @@ index f8c1f48..be46311 100644
              return false;
          const contextWindow = this.model?.contextWindow ?? 0;
          // Skip overflow check if the message came from a different model.
-@@ -1585,7 +1744,9 @@
+@@ -1840,7 +1999,9 @@ export class AgentSession {
              contextTokens = directContextTokens;
          }
          if (shouldCompact(contextTokens, contextWindow, settings)) {
@@ -269,57 +316,30 @@ index f8c1f48..be46311 100644
          }
          return false;
      }
-@@ -1595,6 +1756,13 @@
-     async _runAutoCompaction(reason, willRetry) {
-         const settings = this.settingsManager.getCompactionSettings();
-         let started = false;
-+        // pi-c2 patch: keep the abort controller in a LOCAL variable so
-+        // overlapping compaction runs (threshold compaction plus the
-+        // pre-prompt check in _handleAgentPrompt) can never observe each
-+        // other's finally-clear of the shared field as `undefined.signal`.
-+        // The shared field is still assigned so abortCompaction() works.
-+        // Declared OUTSIDE the try so the finally block can reference it.
-+        let abortController;
-         try {
-             if (!this.model) {
+@@ -1868,6 +2029,22 @@ export class AgentSession {
+             const pathEntries = this.sessionManager.getBranch();
+             const preparation = prepareCompaction(pathEntries, settings);
+             if (!preparation) {
++                // A latest-host pre-prompt threshold check may already have
++                // compacted the branch before a mid-turn threshold abort. The
++                // interrupted assistant still needs to be removed so the
++                // resumed turn remains continuable even when no second
++                // compaction window is available.
++                if (willRetry) {
++                    const messages = this.agent.state.messages;
++                    const lastMsg = messages[messages.length - 1];
++                    if (lastMsg?.role === "assistant" &&
++                        (lastMsg.stopReason === "error" || lastMsg.stopReason === "length" || lastMsg.stopReason === "aborted")) {
++                        this.agent.state.messages = messages.slice(0, -1);
++                    }
++                    const newTail = this.agent.state.messages[this.agent.state.messages.length - 1];
++                    if (newTail?.role === "assistant") return false;
++                    return true;
++                }
                  return false;
-@@ -1606,7 +1774,8 @@
-                 return false;
              }
-             this._emit({ type: "compaction_start", reason });
--            this._autoCompactionAbortController = new AbortController();
-+            abortController = new AbortController();
-+            this._autoCompactionAbortController = abortController;
-             started = true;
-             let extensionCompaction;
-             let fromExtension = false;
-@@ -1618,7 +1787,7 @@
-                     customInstructions: undefined,
-                     reason,
-                     willRetry,
--                    signal: this._autoCompactionAbortController.signal,
-+                    signal: abortController.signal,
-                 }));
-                 if (extensionResult?.cancel) {
-                     this._emit({
-@@ -1650,14 +1819,14 @@
-             }
-             else {
-                 // Generate compaction result
--                const compactResult = await compact(preparation, requestModel, apiKey, headers, undefined, this._autoCompactionAbortController.signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }));
-+                const compactResult = await compact(preparation, requestModel, apiKey, headers, undefined, abortController.signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }));
-                 summary = compactResult.summary;
-                 firstKeptEntryId = compactResult.firstKeptEntryId;
-                 tokensBefore = compactResult.tokensBefore;
-                 usage = compactResult.usage;
-                 details = compactResult.details;
-             }
--            if (this._autoCompactionAbortController.signal.aborted) {
-+            if (abortController.signal.aborted) {
-                 this._emit({
-                     type: "compaction_end",
-                     reason,
-@@ -1699,9 +1868,19 @@
+             abortController = new AbortController();
+@@ -1953,9 +2130,19 @@ export class AgentSession {
                  // from agent state. Rebuilding state from the new compaction can restore that kept entry,
                  // leaving an assistant as the final message. agent.continue() rejects that state, so remove
                  // the retriable error or truncated-length response again before continuing the interrupted turn.
@@ -340,18 +360,16 @@ index f8c1f48..be46311 100644
                  return true;
              }
              // Auto-compaction can complete while follow-up/steering/custom messages are waiting.
-@@ -1725,7 +1904,9 @@
+@@ -1990,7 +2177,7 @@ export class AgentSession {
              return false;
          }
          finally {
--            this._autoCompactionAbortController = undefined;
+-            if (this._autoCompactionAbortController === abortController) {
 +            if (abortController !== undefined && this._autoCompactionAbortController === abortController) {
-+                this._autoCompactionAbortController = undefined;
-+            }
-         }
-     }
-     /**
-@@ -1908,6 +2089,7 @@
+                 this._autoCompactionAbortController = undefined;
+             }
+             this._resolveIdleWaitIfIdle();
+@@ -2175,6 +2362,7 @@ export class AgentSession {
                  this._extensionShutdownHandler?.();
              },
              getContextUsage: () => this.getContextUsage(),
@@ -360,7 +378,7 @@ index f8c1f48..be46311 100644
                  void (async () => {
                      try {
 diff --git a/dist/core/compaction/compaction.d.ts b/dist/core/compaction/compaction.d.ts
-index bf40e20..e084ce1 100644
+index e6bfb76..062b6cd 100644
 --- a/dist/core/compaction/compaction.d.ts
 +++ b/dist/core/compaction/compaction.d.ts
 @@ -29,6 +29,8 @@ export interface CompactionSettings {
@@ -373,10 +391,10 @@ index bf40e20..e084ce1 100644
  export declare const DEFAULT_COMPACTION_SETTINGS: CompactionSettings;
  /**
 diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
-index e7ffee7..deff355 100644
+index 3141f94..8a06457 100644
 --- a/dist/core/compaction/compaction.js
 +++ b/dist/core/compaction/compaction.js
-@@ -160,6 +160,13 @@ export function estimateContextTokens(messages) {
+@@ -162,6 +162,13 @@ export function estimateContextTokens(messages) {
  export function shouldCompact(contextTokens, contextWindow, settings) {
      if (!settings.enabled)
          return false;
@@ -391,10 +409,10 @@ index e7ffee7..deff355 100644
  }
  // ============================================================================
 diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
-index 324d30a..50a312a 100644
+index be748bf..b5540c9 100644
 --- a/dist/core/extensions/loader.js
 +++ b/dist/core/extensions/loader.js
-@@ -157,6 +157,8 @@ export function createExtensionRuntime() {
+@@ -129,6 +129,8 @@ export function createExtensionRuntime() {
          setModel: () => Promise.reject(new Error("Extension runtime not initialized")),
          getThinkingLevel: notInitialized,
          setThinkingLevel: notInitialized,
@@ -403,8 +421,8 @@ index 324d30a..50a312a 100644
          flagValues: new Map(),
          pendingProviderRegistrations: [],
          pendingNativeProviderRegistrations: [],
-@@ -316,6 +318,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
-             runtime.assertActive();
+@@ -333,6 +335,12 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
+             assertActive();
              runtime.setThinkingLevel(level);
          },
 +        // Local experiment: expose command-context creation to extensions so
@@ -414,21 +432,21 @@ index 324d30a..50a312a 100644
 +            return runtime.createCommandContext();
 +        },
          registerProvider(providerOrName, config) {
-             runtime.assertActive();
+             assertActive();
              if (typeof providerOrName === "string") {
 diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
-index 418865a..8b7a333 100644
+index a9b57da..ddec522 100644
 --- a/dist/core/extensions/runner.js
 +++ b/dist/core/extensions/runner.js
-@@ -135,6 +135,7 @@ export class ExtensionRunner {
+@@ -161,6 +161,7 @@ export class ExtensionRunner {
      abortFn = () => { };
      hasPendingMessagesFn = () => false;
      getContextUsageFn = () => undefined;
 +    getSettingsManagerFn = () => undefined;
      compactFn = () => { };
      getSystemPromptFn = () => "";
-     getSystemPromptOptionsFn = () => ({ cwd: this.cwd });
-@@ -171,6 +172,10 @@ export class ExtensionRunner {
+     getSystemPromptOptionsFn = () => normalizeBuildSystemPromptOptions({ cwd: this.cwd });
+@@ -199,6 +200,10 @@ export class ExtensionRunner {
          this.runtime.setModel = actions.setModel;
          this.runtime.getThinkingLevel = actions.getThinkingLevel;
          this.runtime.setThinkingLevel = actions.setThinkingLevel;
@@ -439,15 +457,15 @@ index 418865a..8b7a333 100644
          // Context actions (required)
          this.getModel = contextActions.getModel;
          this.getScopedModels = contextActions.getScopedModels;
-@@ -181,6 +186,7 @@ export class ExtensionRunner {
+@@ -209,6 +214,7 @@ export class ExtensionRunner {
          this.hasPendingMessagesFn = contextActions.hasPendingMessages;
          this.shutdownHandler = contextActions.shutdown;
          this.getContextUsageFn = contextActions.getContextUsage;
 +        this.getSettingsManagerFn = contextActions.getSettingsManager;
          this.compactFn = contextActions.compact;
          this.getSystemPromptFn = contextActions.getSystemPrompt;
-         this.getSystemPromptOptionsFn = contextActions.getSystemPromptOptions ?? (() => ({ cwd: this.cwd }));
-@@ -525,6 +531,10 @@ export class ExtensionRunner {
+         this.getSystemPromptOptionsFn =
+@@ -596,6 +602,10 @@ export class ExtensionRunner {
                  runner.assertActive();
                  return runner.getContextUsageFn();
              },
@@ -459,18 +477,18 @@ index 418865a..8b7a333 100644
                  runner.assertActive();
                  runner.compactFn(options);
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
-index 556623b..773d9c3 100644
+index fc925f4..9c37f34 100644
 --- a/dist/core/extensions/types.d.ts
 +++ b/dist/core/extensions/types.d.ts
-@@ -22,6 +22,7 @@ import type { CustomMessage } from "../messages.ts";
+@@ -23,6 +23,7 @@ import type { CustomMessage } from "../messages.ts";
  import type { ModelRegistry } from "../model-registry.ts";
  import type { ScopedModel } from "../model-resolver.ts";
  import type { BranchSummaryEntry, CompactionEntry, CustomEntry, ReadonlySessionManager, SessionEntry, SessionManager } from "../session-manager.ts";
 +import type { SettingsManager } from "../settings-manager.ts";
  import type { SlashCommandInfo } from "../slash-commands.ts";
  import type { SourceInfo } from "../source-info.ts";
- import type { BuildSystemPromptOptions } from "../system-prompt.ts";
-@@ -242,6 +243,8 @@ export interface ExtensionContext {
+ import type { BuildSystemPromptOptions, NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
+@@ -243,6 +244,8 @@ export interface ExtensionContext {
      shutdown(): void;
      /** Get current context usage for the active model. */
      getContextUsage(): ContextUsage | undefined;
@@ -479,21 +497,27 @@ index 556623b..773d9c3 100644
      /** Trigger compaction without awaiting completion. */
      compact(options?: CompactOptions): void;
      /** Get the current effective system prompt. */
-@@ -301,4 +302,4 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
+@@ -298,7 +301,7 @@ export interface ExtensionCommandContext extends ExtensionContext {
+ export interface ReplacedSessionContext extends ExtensionCommandContext {
      sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
          triggerTurn?: boolean;
 -        deliverAs?: "steer" | "followUp" | "nextTurn";
 +        deliverAs?: "steer" | "followUp" | "goal" | "nextTurn";
      }): Promise<void>;
-@@ -928,4 +930,4 @@
+     sendUserMessage(content: string | (TextContent | ImageContent)[], options?: {
+         deliverAs?: "steer" | "followUp";
+@@ -976,7 +979,7 @@ export interface ExtensionAPI {
+     /** Send a custom message to the session. */
      sendMessage<T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
          triggerTurn?: boolean;
 -        deliverAs?: "steer" | "followUp" | "nextTurn";
 +        deliverAs?: "steer" | "followUp" | "goal" | "nextTurn";
      }): void;
-@@ -959,6 +964,11 @@ export interface ExtensionAPI {
-     getThinkingLevel(): ThinkingLevel;
-     /** Set thinking level (clamped to model capabilities). */
+     /**
+      * Send a user message to the agent. Always triggers a turn.
+@@ -1017,6 +1020,11 @@ export interface ExtensionAPI {
+      * for new sessions.
+      */
      setThinkingLevel(level: ThinkingLevel): void;
 +    /**
 +     * Create a fresh ExtensionCommandContext bound to the current runner.
@@ -503,13 +527,16 @@ index 556623b..773d9c3 100644
      /**
       * Register or override a model provider.
       *
-@@ -1141,4 +1151,4 @@
+@@ -1194,7 +1202,7 @@ export interface ExtensionShortcut {
+ type HandlerFn = (...args: unknown[]) => Promise<unknown>;
  export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: {
      triggerTurn?: boolean;
 -    deliverAs?: "steer" | "followUp" | "nextTurn";
 +    deliverAs?: "steer" | "followUp" | "goal" | "nextTurn";
  }) => void;
-@@ -1206,6 +1217,8 @@ export interface ExtensionActions {
+ export type SendUserMessageHandler = (content: string | (TextContent | ImageContent)[], options?: {
+     deliverAs?: "steer" | "followUp";
+@@ -1268,6 +1276,8 @@ export interface ExtensionActions {
      setModel: SetModelHandler;
      getThinkingLevel: GetThinkingLevelHandler;
      setThinkingLevel: SetThinkingLevelHandler;
@@ -518,7 +545,7 @@ index 556623b..773d9c3 100644
  }
  /**
   * Actions for ExtensionContext (ctx.* in event handlers).
-@@ -1221,6 +1234,7 @@ export interface ExtensionContextActions {
+@@ -1283,6 +1293,7 @@ export interface ExtensionContextActions {
      hasPendingMessages: () => boolean;
      shutdown: () => void;
      getContextUsage: () => ContextUsage | undefined;
@@ -527,7 +554,7 @@ index 556623b..773d9c3 100644
      getSystemPrompt: () => string;
      getSystemPromptOptions?: () => BuildSystemPromptOptions;
 diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index 8cdfbde..ad31576 100644
+index b6f73c3..57c74a8 100644
 --- a/dist/core/session-manager.d.ts
 +++ b/dist/core/session-manager.d.ts
 @@ -13,6 +13,10 @@ export interface SessionHeader {
@@ -542,17 +569,17 @@ index 8cdfbde..ad31576 100644
  export interface SessionEntryBase {
      type: string;
 diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index 92e8070..13a5e22 100644
+index 08c8f98..c37d2d5 100644
 --- a/dist/core/session-manager.js
 +++ b/dist/core/session-manager.js
 @@ -1,14 +1,34 @@
- import { uuidv7 } from "@earendil-works/pi-ai";
+ import { getCurrentSystemMessage, uuidv7, } from "@earendil-works/pi-ai";
  import { randomUUID } from "crypto";
 -import { appendFileSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
 +import { appendFileSync, chmodSync, closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, statSync, writeFileSync, } from "fs";
  import { readdir, stat } from "fs/promises";
--import { join, resolve } from "path";
-+import { dirname, join, resolve } from "path";
+-import { basename, join, resolve } from "path";
++import { basename, dirname, join, resolve } from "path";
  import { createInterface } from "readline";
  import { StringDecoder } from "string_decoder";
  import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
@@ -582,7 +609,7 @@ index 92e8070..13a5e22 100644
  function createSessionId() {
      return uuidv7();
  }
-@@ -597,8 +617,8 @@ export class SessionManager {
+@@ -600,8 +620,8 @@ export class SessionManager {
          this.cwd = resolvePath(cwd);
          this.sessionDir = normalizePath(sessionDir);
          this.persist = persist;
@@ -593,7 +620,7 @@ index 92e8070..13a5e22 100644
          }
          if (sessionFile) {
              this._setSessionFile(sessionFile, preloadedFileEntries);
-@@ -613,6 +633,10 @@ export class SessionManager {
+@@ -619,6 +639,10 @@ export class SessionManager {
      }
      _setSessionFile(sessionFile, preloadedFileEntries) {
          this.sessionFile = resolvePath(sessionFile);
@@ -602,9 +629,9 @@ index 92e8070..13a5e22 100644
 +            ensurePrivateSessionFile(this.sessionFile);
 +        }
          if (existsSync(this.sessionFile)) {
-             this.fileEntries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
+             const entries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
              // If file was empty, initialize it with a valid session header. If it was
-@@ -663,11 +687,19 @@ export class SessionManager {
+@@ -664,8 +688,8 @@ export class SessionManager {
          this.leafId = null;
          this.flushed = false;
          if (this.persist) {
@@ -614,6 +641,10 @@ index 92e8070..13a5e22 100644
 +            this.sessionFile = join(this.getSessionDir(), this._resolveSessionFilename(options));
          }
          return this.sessionFile;
+     }
+@@ -684,6 +708,14 @@ export class SessionManager {
+         }
+         this._buildIndex();
      }
 +    /** pi-c2 patch: prefer a caller-fixed sessionFilename, else the stock timestamped name. */
 +    _resolveSessionFilename(options) {
@@ -626,7 +657,7 @@ index 92e8070..13a5e22 100644
      _buildIndex() {
          this.byId.clear();
          this.labelsById.clear();
-@@ -736,7 +768,7 @@ export class SessionManager {
+@@ -752,7 +784,7 @@ export class SessionManager {
              return;
          }
          if (!this.flushed) {
@@ -635,7 +666,7 @@ index 92e8070..13a5e22 100644
              try {
                  for (const e of this.fileEntries) {
                      writeFileSync(fd, `${JSON.stringify(e)}\n`);
-@@ -745,10 +777,12 @@ export class SessionManager {
+@@ -761,10 +793,12 @@ export class SessionManager {
              finally {
                  closeSync(fd);
              }
@@ -649,27 +680,28 @@ index 92e8070..13a5e22 100644
      }
      _appendEntry(entry) {
 diff --git a/dist/core/settings-manager.d.ts b/dist/core/settings-manager.d.ts
-index 494157a..9763ae4 100644
+index 53d2865..709feae 100644
 --- a/dist/core/settings-manager.d.ts
 +++ b/dist/core/settings-manager.d.ts
-@@ -5,6 +5,8 @@ export interface CompactionSettings {
-     enabled?: boolean;
+@@ -10,6 +10,8 @@ export interface CompactionSettings {
      reserveTokens?: number;
      keepRecentTokens?: number;
+     modelOverrides?: Record<string, CompactionModelOverride>;
 +    /** pi-c2 patch: percentage of the context window that triggers compaction. */
 +    thresholdPercent?: number;
  }
  export interface BranchSummarySettings {
      reserveTokens?: number;
-@@ -205,12 +207,15 @@ export declare class SettingsManager {
-     setTransport(transport: TransportSetting): void;
+@@ -229,6 +231,8 @@ export declare class SettingsManager {
      getCompactionEnabled(): boolean;
      setCompactionEnabled(enabled: boolean): void;
+     private getCompactionTokenSetting;
 +    setCompactionThresholdPercent(percent: number): void;
 +    getCompactionThresholdPercent(): number | undefined;
-     getCompactionReserveTokens(): number;
-     getCompactionKeepRecentTokens(): number;
-     getCompactionSettings(): {
+     getCompactionReserveTokens(model?: Pick<Model<string>, "provider" | "id">): number;
+     getCompactionKeepRecentTokens(model?: Pick<Model<string>, "provider" | "id">): number;
+     /** Resolve each token setting through model override, ordinary setting, then built-in default. */
+@@ -236,6 +240,7 @@ export declare class SettingsManager {
          enabled: boolean;
          reserveTokens: number;
          keepRecentTokens: number;
@@ -678,21 +710,21 @@ index 494157a..9763ae4 100644
      getBranchSummarySettings(): {
          reserveTokens: number;
 diff --git a/dist/core/settings-manager.js b/dist/core/settings-manager.js
-index d7fc89c..72ad0b1 100644
+index ed9d8d2..f891c5d 100644
 --- a/dist/core/settings-manager.js
 +++ b/dist/core/settings-manager.js
-@@ -129,6 +129,8 @@ export class SettingsManager {
+@@ -144,6 +144,8 @@ export class SettingsManager {
      globalSettingsLoadError = null; // Track if global settings file had parse errors
      projectSettingsLoadError = null; // Track if project settings file had parse errors
      writeQueue = Promise.resolve();
 +    /** pi-c2 patch: in-memory percentage threshold that survives save() re-merges. */
 +    thresholdPercentOverride;
      errors;
-     constructor(storage, initialGlobal, initialProject, globalLoadError = null, projectLoadError = null, initialErrors = [], projectTrusted = true) {
-         this.storage = storage;
-@@ -520,11 +522,23 @@ export class SettingsManager {
-     getCompactionKeepRecentTokens() {
-         return this.settings.compaction?.keepRecentTokens ?? 20000;
+     settingsPaths;
+     constructor(storage, initialGlobal, initialProject, globalLoadError = null, projectLoadError = null, initialErrors = [], projectTrusted = true, settingsPaths = {}) {
+@@ -586,12 +588,24 @@ export class SettingsManager {
+     getCompactionKeepRecentTokens(model) {
+         return this.getCompactionTokenSetting("keepRecentTokens", model);
      }
 +    /** pi-c2 patch: set the percentage-based compaction threshold (in-memory only). */
 +    setCompactionThresholdPercent(percent) {
@@ -705,29 +737,30 @@ index d7fc89c..72ad0b1 100644
 +        }
 +        return this.settings.compaction?.thresholdPercent;
 +    }
-     getCompactionSettings() {
+     /** Resolve each token setting through model override, ordinary setting, then built-in default. */
+     getCompactionSettings(model) {
          return {
              enabled: this.getCompactionEnabled(),
-             reserveTokens: this.getCompactionReserveTokens(),
-             keepRecentTokens: this.getCompactionKeepRecentTokens(),
+             reserveTokens: this.getCompactionReserveTokens(model),
+             keepRecentTokens: this.getCompactionKeepRecentTokens(model),
 +            thresholdPercent: this.getCompactionThresholdPercent(),
          };
      }
      getBranchSummarySettings() {
 diff --git a/dist/modes/interactive/components/model-selector.js b/dist/modes/interactive/components/model-selector.js
-index de1ebc1..3fba3a1 100644
+index bd88940..8ea0801 100644
 --- a/dist/modes/interactive/components/model-selector.js
 +++ b/dist/modes/interactive/components/model-selector.js
-@@ -51,6 +51,8 @@ export class ModelSelectorComponent extends Container {
-         this.scope = scopedModels.length > 0 ? "scoped" : "all";
+@@ -53,6 +53,8 @@ export class ModelSelectorComponent extends Container {
          this.onSelectCallback = onSelect;
+         this.onSelectAsDefaultCallback = onSelectAsDefault;
          this.onCancelCallback = onCancel;
 +        // pi-c2: model-group selector UI is temporarily hidden.
 +        // this.modelGroupApi = globalThis[Symbol.for("pi-c2.model-groups")];
          // Add top border
          this.addChild(new DynamicBorder());
          this.addChild(new Spacer(1));
-@@ -101,6 +103,30 @@ export class ModelSelectorComponent extends Container {
+@@ -107,6 +109,30 @@ export class ModelSelectorComponent extends Container {
              model,
          }));
          this.allModels = this.sortModels(models);
@@ -758,40 +791,20 @@ index de1ebc1..3fba3a1 100644
          this.scopedModels = this.scopedModels.map((scoped) => {
              const refreshed = this.modelRuntime.getModel(scoped.model.provider, scoped.model.id);
              return refreshed ? { ...scoped, model: refreshed } : scoped;
-@@ -226,19 +252,21 @@ export class ModelSelectorComponent extends Container {
+@@ -262,6 +288,8 @@ export class ModelSelectorComponent extends Container {
              if (!item)
                  continue;
              const isSelected = i === this.selectedIndex;
--            const isCurrent = modelsAreEqual(this.currentModel, item.model);
 +            // Model-group rendering is temporarily disabled; retain stock model rows.
 +            // The old group-aware branch remains represented by the disabled selector block above.
-+            const isCurrent = modelsAreEqual(this.currentModel, item.model);
-             let line = "";
-             if (isSelected) {
-                 const prefix = theme.fg("accent", "→ ");
--                const modelText = `${item.id}`;
--                const providerBadge = theme.fg("muted", `[${item.provider}]`);
--                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-+                const modelText = `${item.id}`;
-+                const providerBadge = theme.fg("muted", `[${item.provider}]`);
-+                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-                 line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
-             }
-             else {
--                const modelText = `  ${item.id}`;
--                const providerBadge = theme.fg("muted", `[${item.provider}]`);
--                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-+                const modelText = `  ${item.id}`;
-+                const providerBadge = theme.fg("muted", `[${item.provider}]`);
-+                const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-                 line = `${modelText} ${providerBadge}${checkmark}`;
-             }
-             this.listContainer.addChild(new Text(line, 0, 0));
+             const isCurrent = modelsAreEqual(this.currentModel, item.model);
+             const isDefault = this.isDefaultModel(item.model);
+             const defaultBadge = isDefault ? theme.fg("muted", " · default") : "";
 diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
-index 6a88679..f6cba16 100644
+index d82182c..2411193 100644
 --- a/dist/modes/interactive/interactive-mode.js
 +++ b/dist/modes/interactive/interactive-mode.js
-@@ -361,6 +361,11 @@ export class InteractiveMode {
+@@ -339,6 +339,11 @@ export class InteractiveMode {
          this.headerContainer = new Container();
          this.loadedResourcesContainer = new Container();
          this.chatContainer = new Container();
@@ -803,7 +816,7 @@ index 6a88679..f6cba16 100644
          this.documentContainer = new Container();
          this.documentContainer.addChild(this.headerContainer);
          this.documentContainer.addChild(this.loadedResourcesContainer);
-@@ -2518,6 +2523,15 @@ export class InteractiveMode {
+@@ -2606,6 +2611,15 @@ export class InteractiveMode {
          if (!this.isInitialized) {
              await this.init();
          }
@@ -819,7 +832,7 @@ index 6a88679..f6cba16 100644
          this.footer.invalidate();
          switch (event.type) {
              case "agent_start":
-@@ -3088,6 +3102,278 @@ export class InteractiveMode {
+@@ -3271,6 +3285,278 @@ export class InteractiveMode {
          this.chatContainer.clear();
          this.renderSessionEntries(this.sessionManager.buildContextEntries());
      }
@@ -1098,48 +1111,15 @@ index 6a88679..f6cba16 100644
      // =========================================================================
      // Key handlers
      // =========================================================================
-@@ -3999,6 +4233,44 @@ export class InteractiveMode {
+@@ -4253,6 +4539,11 @@ export class InteractiveMode {
          this.showSelector((done) => {
-             const selector = new ModelSelectorComponent(this.ui, this.session.model, this.settingsManager, this.session.modelRuntime, this.session.scopedModels, async (model) => {
+             const selectModel = async (model, persist) => {
                  try {
 +                    // pi-c2: model-group activation UI is temporarily hidden.
-+                    // The previous callback is retained below as comments for easy re-enable.
-+                    // if (model.provider === "__pi_c2_group__") {
-+                    //     const api = globalThis[Symbol.for("pi-c2.model-groups")];
-+                    //     const groupId = model.id.startsWith("group:") ? model.id.slice("group:".length) : model.id;
-+                    //     const activation = typeof api?.activate === "function" ? api.activate(groupId, (ref) => {
-+                    //         const separator = ref.indexOf("/");
-+                    //         const provider = separator === -1 ? "" : ref.slice(0, separator);
-+                    //         const id = separator === -1 ? "" : ref.slice(separator + 1);
-+                    //         const found = provider && id ? this.session.modelRuntime.getModel(provider, id) : undefined;
-+                    //         return typeof found?.contextWindow === "number" ? found.contextWindow : undefined;
-+                    //     }) : { ok: false, error: "Model-group integration is unavailable." };
-+                    //     if (!activation.ok) {
-+                    //         done();
-+                    //         this.showError(activation.error);
-+                    //         return;
-+                    //     }
-+                    //     const [provider, id] = activation.modelRef.split("/");
-+                    //     const resolved = provider && id ? this.session.modelRuntime.getModel(provider, id) : undefined;
-+                    //     if (!resolved) {
-+                    //         done();
-+                    //         this.showError(`Model group "${activation.groupName}" resolved unavailable model ${activation.modelRef}`);
-+                    //         return;
-+                    //     }
-+                    //     const groupModel = activation.contextWindow !== undefined
-+                    //         ? { ...resolved, contextWindow: activation.contextWindow }
-+                    //         : resolved;
-+                    //     await this.session.setModel(groupModel);
-+                    //     if (activation.thinking) this.session.setThinkingLevel(activation.thinking);
-+                    //     this.footer.invalidate();
-+                    //     this.updateEditorBorderColor();
-+                    //     done();
-+                    //     this.showStatus(`Model group: ${activation.groupName} → ${activation.modelRef}`);
-+                    //     return;
-+                    // }
-+                    // Model-group activation remains disabled until the UI is re-enabled.
++                    // The latest host has no group rows, but clear a stale active
++                    // group whenever the user selects a normal model.
 +                    const groupApi = globalThis[Symbol.for("pi-c2.model-groups")];
 +                    if (typeof groupApi?.clearActiveGroup === "function") groupApi.clearActiveGroup();
-                     await this.session.setModel(model);
+                     await this.session.setModel(model, { persist });
+                     this.updateAvailableProviderCount();
                      this.footer.invalidate();
-                     this.updateEditorBorderColor();

@@ -41,7 +41,9 @@ export function registerContextAutoCompact(pi: ExtensionAPI): void {
         // the surface is absent and the SDK keeps its stock reserve-token
         // auto-compaction; the percentage policy degrades gracefully.
         const settingsManager = ctx.getSettingsManager?.();
-        settingsManager?.setCompactionThresholdPercent(thresholdPercent);
+        if (typeof settingsManager?.setCompactionThresholdPercent === "function") {
+          settingsManager.setCompactionThresholdPercent(thresholdPercent);
+        }
       },
     );
   });

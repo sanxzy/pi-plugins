@@ -12,7 +12,7 @@ const DIST = join(HERE, "../dist");
 test("the publishable bundle embeds built-in theme profile data", () => {
   execFileSync(process.execPath, [BUILD], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   assert.ok(existsSync(join(DIST, "index.js")), "bundle must exist");
-  assert.ok(existsSync(join(DIST, "scripts", "pi-coding-agent@0.84.2.patch")), "bundled host patch must ship");
+  assert.ok(existsSync(join(DIST, "scripts", "pi-coding-agent@0.86.0.patch")), "bundled host patch must ship");
   const bundle = readFileSync(join(DIST, "index.js"), "utf8");
   // Embedded built-in profiles must be present verbatim (theme anchors).
   assert.ok(bundle.includes("#bd93f9"), "dracula profile data must be embedded");

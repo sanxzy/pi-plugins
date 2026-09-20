@@ -4,4 +4,11 @@ allowBuilds:
   '@google/genai': false
   esbuild: false
   protobufjs: false
-patchedDependencies: { '@earendil-works/pi-coding-agent@0.84.2': patches/@earendil-works__pi-coding-agent@0.84.2.patch }
+minimumReleaseAgeExclude:
+  - '@earendil-works/chord@0.86.0'
+  - '@earendil-works/pi-agent-core@0.86.0'
+  - '@earendil-works/pi-ai@0.86.0'
+  - '@earendil-works/pi-coding-agent@0.86.0'
+  - '@earendil-works/pi-telemetry@0.86.0'
+  - '@earendil-works/pi-tui@0.86.0'
+patchedDependencies: { '@earendil-works/pi-coding-agent@0.86.0': patches/@earendil-works__pi-coding-agent@0.86.0.patch }

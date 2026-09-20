@@ -21,6 +21,9 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
  * streamSimple() returns a scripted stream. No network, no API keys.
  */
 
+type JsonValue = null | boolean | number | string | readonly JsonValue[] | JsonObject;
+type JsonObject = { [key: string]: JsonValue };
+
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "pi-c2-midturn-"));
 }
@@ -49,10 +52,10 @@ function makeModel(contextWindow: number) {
   };
 }
 
-function makeAssistantMessage(text: string, totalTokens: number, stopReason: string, toolCalls?: Array<{ id: string; name: string; arguments: Record<string, unknown> }>) {
+function makeAssistantMessage(text: string, totalTokens: number, stopReason: string, toolCalls?: Array<{ id: string; name: string; arguments: JsonObject }>) {
   const content: Array<
     | { type: "text"; text: string }
-    | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
+    | { type: "toolCall"; id: string; name: string; arguments: JsonObject }
   > = [];
   if (text) content.push({ type: "text", text });
   for (const call of toolCalls ?? []) content.push({ type: "toolCall", id: call.id, name: call.name, arguments: call.arguments });
