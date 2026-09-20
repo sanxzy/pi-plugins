@@ -8,6 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   AgentFooter,
+  SwapSessionView,
   type AgentFooterInfo,
   type FooterTreeLiveStats,
   type FooterTreeRow,
@@ -299,6 +300,46 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
         displayedLiveSession = liveSession;
         let hostSnapshotApplied = false;
         let liveUnsub: (() => void) | undefined;
+        let restoreFallbackEntries: (() => void) | undefined;
+        let fallbackClose: (() => void) | undefined;
+        let finished = false;
+        let hostDone: () => void = () => {};
+
+        // A published Pi executable may run the bundled host entry point while
+        // the postinstall patch only exposes capabilities on the unbundled
+        // InteractiveMode module. In that case there is no native host swap;
+        // keep the selected child visible through the existing full-window view
+        // instead of repainting the already-mounted parent chat container.
+        const mountFallbackView = (): boolean => {
+          // A headless test double can expose `custom` without having a mounted
+          // interactive renderer. The real host TUI always has addInputListener
+          // (the same seam used by ctx.ui.onTerminalInput), so require that
+          // capability before installing a view that must receive focus/input.
+          if (
+            typeof ctx.ui.custom !== "function" ||
+            typeof (tui as unknown as { addInputListener?: unknown }).addInputListener !== "function"
+          ) return false;
+          try {
+            ctx.ui.custom(
+              (overlayTui, overlayTheme, _keybindings, done) => {
+                fallbackClose = () => done(undefined);
+                return new SwapSessionView({
+                  tui: overlayTui,
+                  theme: footerTheme(overlayTheme as Theme),
+                  live: liveSession,
+                  abort,
+                  confirm: (title, message) => ctx.ui.confirm(title, message),
+                  done: () => hostDone(),
+                });
+              },
+              { overlay: true, overlayOptions: { width: "100%" } },
+            );
+            return true;
+          } catch {
+            return false;
+          }
+        };
+
         if (hostMode) {
           // The host pushes its swap frame before rendering the snapshot, so a
           // render exception can leave native frames stranded. Record the depth
@@ -329,18 +370,28 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
             } catch {}
           }
         } else {
-          // Fallback: monkey-patch sessionManager if host mode not available (e.g. tests / headless)
-          const origGetEntries = ctx.sessionManager.getEntries.bind(ctx.sessionManager);
-          (ctx.sessionManager as unknown as { getEntries: () => unknown }).getEntries = () => {
-            if (hostSwap.isSwapped()) return (liveSession as unknown as { snapshot: { transcript: unknown[] } }).snapshot.transcript as unknown[];
-            return origGetEntries();
+          // Keep the data projection useful to headless/test hosts, but do not
+          // mistake it for a visual swap: those hosts do not rebuild chat
+          // components from getEntries() during a repaint.
+          const sessionManager = ctx.sessionManager as unknown as { getEntries: () => unknown[] };
+          const previousGetEntries = sessionManager.getEntries;
+          const patchedGetEntries = (): unknown[] => {
+            if (hostSwap.isSwapped()) return (liveSession as { snapshot: { transcript: unknown[] } }).snapshot.transcript;
+            return previousGetEntries.call(sessionManager);
+          };
+          sessionManager.getEntries = patchedGetEntries;
+          restoreFallbackEntries = () => {
+            if (sessionManager.getEntries === patchedGetEntries) sessionManager.getEntries = previousGetEntries;
           };
         }
-        let finished = false;
-        let hostDone: () => void = () => {
+
+        hostDone = () => {
           if (finished) return;
           finished = true;
           try { liveUnsub?.(); } catch {}
+          try { fallbackClose?.(); } catch {}
+          fallbackClose = undefined;
+          try { restoreFallbackEntries?.(); } catch {}
           // Restore the exact theme frame before reconstructing the parent window.
           try { themeFrame?.restore(); } catch {}
           if (activeThemeFrame === themeFrame) {
@@ -369,9 +420,20 @@ export function registerAgentFooter(pi: ExtensionAPI): void {
           tui.requestRender();
         };
         hostDoneStack.push(hostDone);
-        if (hostMode && !hostSnapshotApplied) {
-          hostDone();
-          return;
+        // Native host rendering is authoritative when available. If the host is
+        // unpatched (common for bundled CLI installs), or its renderer rejects a
+        // child event shape, mount the child detail view rather than leaving the
+        // parent transcript on screen.
+        if ((!hostMode || !hostSnapshotApplied) && !mountFallbackView()) {
+          // Headless doubles may intentionally expose neither the native host
+          // swap nor a mountable custom UI. Preserve the historical projection
+          // in that environment so its management/return state remains testable;
+          // a real interactive host has addInputListener and takes the fallback
+          // branch above. A failed native renderer, however, must still unwind.
+          if (hostMode) {
+            hostDone();
+            return;
+          }
         }
         tui.requestRender();
       };

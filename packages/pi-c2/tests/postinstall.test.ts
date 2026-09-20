@@ -9,6 +9,7 @@ import { parsePatch, reversePatch, applyPatches } from "diff";
 const SCRIPT = new URL("../scripts/postinstall.mjs", import.meta.url).pathname;
 const PATCH_FILE = new URL("../scripts/pi-coding-agent@0.86.0.patch", import.meta.url).pathname;
 const SDK_SOURCE = new URL("../node_modules/@earendil-works/pi-coding-agent", import.meta.url).pathname;
+const BUNDLE_DELEGATION_MARKER = "pi-c2: execute the patched unbundled CLI";
 
 /** Marker strings that only exist after the patch is applied. */
 const PATCH_MARKERS: Array<[string, string]> = [
@@ -106,6 +107,8 @@ test("postinstall patches an unpatched 0.86.0 host and keeps a pristine backup",
     for (const [rel, needle] of PATCH_MARKERS) {
       assert.ok(readFileSync(join(sdkDir, rel), "utf8").includes(needle), `${rel} must contain ${needle}`);
     }
+    assert.match(readFileSync(join(sdkDir, "dist/bundle/cli.js"), "utf8"), new RegExp(BUNDLE_DELEGATION_MARKER));
+    assert.match(readFileSync(join(sdkDir, "dist/bundle/cli.js"), "utf8"), /import "\.\.\/cli\.js"/);
     // Backup exists and is pristine.
     const backup = join(root, "@earendil-works", "pi-coding-agent.bak-0.86.0");
     assert.ok(existsSync(backup), "backup must exist");
@@ -114,6 +117,7 @@ test("postinstall patches an unpatched 0.86.0 host and keeps a pristine backup",
       false,
       "backup must be pristine",
     );
+    assert.doesNotMatch(readFileSync(join(backup, "dist/bundle/cli.js"), "utf8"), new RegExp(BUNDLE_DELEGATION_MARKER));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -127,6 +131,7 @@ test("postinstall resolves a Bun-style dist/bundle executable when npm root miss
     assert.equal(status, 0, stdout);
     assert.match(stdout, /patched host pi-coding-agent 0\.86\.0/);
     assert.ok(readFileSync(join(sdkDir, "dist/core/settings-manager.js"), "utf8").includes("thresholdPercentOverride"));
+    assert.match(readFileSync(join(sdkDir, "dist/bundle/cli.js"), "utf8"), new RegExp(BUNDLE_DELEGATION_MARKER));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -143,6 +148,22 @@ test("postinstall is idempotent on an already-patched host", async () => {
     const second = runScript(npmBin);
     assert.match(second.stdout, /nothing to do/);
     assert.equal(second.status, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("postinstall repairs a current patch that predates bundled CLI delegation", async () => {
+  const { root, npmBin } = await fakeGlobal();
+  try {
+    const sdkDir = join(root, "@earendil-works", "pi-coding-agent");
+    runScript(npmBin);
+    const backup = join(root, "@earendil-works", "pi-coding-agent.bak-0.86.0");
+    writeFileSync(join(sdkDir, "dist/bundle/cli.js"), readFileSync(join(backup, "dist/bundle/cli.js"), "utf8"));
+    const repaired = runScript(npmBin);
+    assert.equal(repaired.status, 0, repaired.stdout);
+    assert.match(repaired.stdout, /routed the bundled CLI/);
+    assert.match(readFileSync(join(sdkDir, "dist/bundle/cli.js"), "utf8"), new RegExp(BUNDLE_DELEGATION_MARKER));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

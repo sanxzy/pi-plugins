@@ -14,7 +14,9 @@
  * checks its version and patch state, and if the host is 0.86.0+ and not yet
  * patched, backs it up and applies the bundled patch with a pure-JS unified
  * diff applier (no git, no .git dir, no external tools). It is idempotent:
- * already-patched hosts are left untouched.
+ * already-patched hosts are left untouched. Pi 0.86's bundled `bin` is
+ * redirected to the patched unbundled entry so host-level TUI features keep the
+ * native presentation used by earlier Pi releases.
  *
  * The script never throws — an npm postinstall failure is confusing for
  * users. Every outcome prints a clear one-line status.
@@ -38,6 +40,9 @@ import { applyPatches } from "diff";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PATCH_FILE = join(SCRIPT_DIR, "pi-coding-agent@0.86.0.patch");
 const MIN_VERSION = [0, 86, 0];
+const BUNDLED_CLI_REL = "dist/bundle/cli.js";
+const UNBUNDLED_CLI_REL = "dist/cli.js";
+const BUNDLE_DELEGATION_MARKER = "pi-c2: execute the patched unbundled CLI";
 
 /** Marker strings that only exist after the patch is applied. */
 const PATCH_MARKERS = [
@@ -156,6 +161,23 @@ function bundledRevision() {
   return createHash("sha256").update(readFileSync(PATCH_FILE)).digest("hex");
 }
 
+/**
+ * Pi 0.86 changed its package bin from `dist/cli.js` to a prebuilt bundle.
+ * The host patch targets the readable dist modules, so route that bundle
+ * through the patched entry point to preserve the pre-0.86 native TUI path.
+ * Older hosts have no bundle and remain untouched.
+ */
+function delegateBundledCli(sdkDir) {
+  const bundledCli = join(sdkDir, BUNDLED_CLI_REL);
+  const unbundledCli = join(sdkDir, UNBUNDLED_CLI_REL);
+  if (!existsSync(bundledCli) || !existsSync(unbundledCli)) return false;
+  const current = readFileSync(bundledCli, "utf8");
+  if (current.includes(BUNDLE_DELEGATION_MARKER)) return false;
+  const wrapper = `#!/usr/bin/env node\n// ${BUNDLE_DELEGATION_MARKER}\nimport "../cli.js";\n`;
+  writeFileSync(bundledCli, wrapper);
+  return true;
+}
+
 function readRevision(sdkDir) {
   const file = `${sdkDir}${REVISION_SUFFIX}`;
   return existsSync(file) ? readFileSync(file, "utf8").trim() : null;
@@ -246,7 +268,11 @@ try {
   const revision = bundledRevision();
   if (isPatched(hostSdk)) {
     if (readRevision(hostSdk) === revision) {
-      log(`host pi-coding-agent ${version} already patched at current revision; nothing to do`);
+      const existingBackup = `${hostSdk}.bak-${version}`;
+      const rerouted = existsSync(existingBackup) ? delegateBundledCli(hostSdk) : false;
+      log(rerouted
+        ? `host pi-coding-agent ${version} already patched; routed the bundled CLI through the patched dist entry`
+        : `host pi-coding-agent ${version} already patched at current revision; nothing to do`);
       process.exit(0);
     }
     log(`host patch revision differs from the bundle; upgrading (pristine backup restored first)`);
@@ -262,6 +288,7 @@ try {
   }
   const changed = await applyPatchToSdk(hostSdk);
   if (isPatched(hostSdk)) {
+    if (delegateBundledCli(hostSdk)) changed.push(BUNDLED_CLI_REL);
     writeRevision(hostSdk, revision);
     log(`patched host pi-coding-agent ${version}: ${changed.join(", ")}. Backup kept at ${backupDir}`);
   } else {

@@ -520,6 +520,59 @@ test("the live overlay mount does not delegate height truncation to the host", (
   }
 });
 
+test("an unpatched bundled host opens the selected child detail view instead of leaving the host chat visible", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-fallback-"));
+  try {
+    capturedCustomFactory = undefined;
+    capturedCustomOptions = undefined;
+    const d = piDouble();
+    registerAgentFooter(d.pi);
+    d.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx(cwd));
+
+    const pool = getChildPool(cwd, "root-session");
+    const feed = createChildLiveFeed();
+    feed.emit({ type: "message", id: "m1", phase: "end", role: "assistant", text: "child detail" });
+    pool.liveChildren.set("job-a", {
+      sessionFile: join(cwd, "sessions", "job-a.jsonl"),
+      live: feed,
+      steer: async () => {},
+      abort: async () => {},
+    });
+    pool.registry.createJob(createJob({ jobId: "job-a", parentSessionId: "root-session", sessionId: "job-a", status: "running", description: "Implement", subagentType: "test-agent" }));
+
+    // The bundled CLI lacks the optional native host-swap marker. A real TUI
+    // still exposes addInputListener, so the registration must use its full-
+    // window child view fallback rather than repainting the parent container.
+    const tui = {
+      requestRender: () => {},
+      addInputListener: () => () => {},
+      terminal: { rows: 24, columns: 100 },
+    };
+    const footer = capturedFooterFactory!(tui, { fg: (_c: string, t: string) => t }, {
+      onBranchChange: () => () => {},
+      getGitBranch: () => "main",
+      getAvailableProviderCount: () => 1,
+    }) as { handleInput(data: string): boolean; dispose(): void };
+    footer.handleInput(ALT_DOWN);
+    footer.handleInput(ALT_DOWN);
+    footer.handleInput(ENTER);
+
+    assert.equal(typeof capturedCustomFactory, "function", "missing native host swap mounts the child detail view");
+    assert.deepEqual(capturedCustomOptions, { overlay: true, overlayOptions: { width: "100%" } });
+    const detail = capturedCustomFactory!(
+      { requestRender: () => {}, terminal: { rows: 24, columns: 100 } },
+      { fg: (_c: string, t: string) => t },
+      undefined,
+      () => {},
+    ) as { render(width: number): string[]; dispose(): void };
+    assert.match(detail.render(100).join("\\n"), /child detail/, "the selected child's transcript is rendered");
+    detail.dispose();
+    footer.dispose();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("running child rows project live tool/token counters into the footer", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-c2-footer-"));
   try {
