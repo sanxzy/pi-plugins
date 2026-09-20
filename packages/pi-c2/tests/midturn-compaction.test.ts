@@ -277,6 +277,40 @@ test("message_end: the aborted turn auto-continues after compaction without a ma
   }
 });
 
+test("a threshold abort still compacts and continues when the session abort flag is set", async () => {
+  const cwd = tempDir();
+  const filePath = join(cwd, "target.txt");
+  writeFileSync(filePath, "small file");
+  const { session } = await createTestSession({ contextWindow: 200_000, thresholdPercent: 80, readPath: filePath });
+  try {
+    let compactions = 0;
+    const abortFlag = session as unknown as { _agentRunAbortRequested: boolean };
+    const unsubscribe = session.subscribe((event: { type: string; message?: unknown }) => {
+      const message = event.message as { role?: string; stopReason?: string } | undefined;
+      if (event.type === "compaction_end") compactions++;
+      // Model the 0.86 session lifecycle where an abort marker can be set
+      // before the post-run hook observes the threshold-triggered abort.
+      if (event.type === "message_end" && message?.role === "assistant" && message.stopReason === "toolUse") {
+        abortFlag._agentRunAbortRequested = true;
+      }
+    });
+
+    session.settingsManager.setCompactionThresholdPercent(80);
+    await session.prompt("Do the thing");
+
+    assert.equal(compactions, 1, "the threshold abort must still run compaction");
+    assert.ok(
+      session.state.messages.some((message: { role?: string; content?: unknown }) =>
+        message.role === "assistant" && JSON.stringify(message.content).includes("Continued after compaction.")),
+      "the interrupted turn must continue after compaction",
+    );
+    unsubscribe();
+  } finally {
+    session.dispose();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("overlapping manual compactions never read a cleared shared controller (signal race)", async () => {
   const cwd = tempDir();
   const filePath = join(cwd, "target.txt");

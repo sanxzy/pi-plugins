@@ -2,15 +2,30 @@ diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
 index 638646d..8df079f 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -96,6 +96,8 @@ export class AgentSession {
+@@ -96,6 +96,10 @@ export class AgentSession {
      _compactionAbortController = undefined;
      _autoCompactionAbortController = undefined;
      _overflowRecoveryAttempted = false;
 +    /** Set when a mid-turn message_end crossed the percentage threshold and aborted the run. */
 +    _thresholdAbortPending = false;
++    /** Allows threshold-triggered recovery to cross the host abort guard. */
++    _thresholdContinuationPending = false;
      // Branch summarization state
      _branchSummaryAbortController = undefined;
      // Retry state
+@@ -280,8 +284,12 @@ export class AgentSession {
+         };
+     }
+     async _compactBeforeNextAssistantResponse(context) {
++        // A mid-turn threshold abort must be handled by the post-run recovery
++        // path, which knows to compact and continue the interrupted turn.
++        if (this._thresholdAbortPending)
++            return context;
+         const model = this.model;
+         const settings = this.settingsManager.getCompactionSettings(model);
+         if (!model ||
+             model.contextWindow <= 0 ||
+             !shouldCompact(estimateContextTokens(context.messages).tokens, model.contextWindow, settings)) {
 @@ -438,6 +440,13 @@ export class AgentSession {
                      this._retryAttempt = 0;
                  }
@@ -115,7 +130,29 @@ index 638646d..8df079f 100644
              const extensionEvent = {
                  type: "turn_start",
                  turnIndex: this._turnIndex,
-@@ -887,6 +972,51 @@ export class AgentSession {
+@@ -863,8 +950,12 @@ export class AgentSession {
+         try {
+             await this.agent.prompt(messages);
+             while (await this._handlePostAgentRun()) {
+-                if (this._agentRunAbortRequested)
++                if (this._agentRunAbortRequested && !this._thresholdContinuationPending)
+                     break;
++                if (this._thresholdContinuationPending) {
++                    this._thresholdContinuationPending = false;
++                    this._agentRunAbortRequested = false;
++                }
+                 await this.agent.continue();
+             }
+         }
+@@ -880,13 +971,58 @@ export class AgentSession {
+     async _handlePostAgentRun() {
+         const msg = this._lastAssistantMessage;
+         this._lastAssistantMessage = undefined;
+-        if (this._agentRunAbortRequested) {
++        if (this._agentRunAbortRequested && !this._thresholdAbortPending) {
+             this._finishCancelledRetry();
+             return false;
+         }
          if (!msg) {
              return false;
          }
@@ -167,6 +204,21 @@ index 638646d..8df079f 100644
          if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
              if (this._agentRunAbortRequested)
                  this._finishCancelledRetry();
+@@ -895,4 +1033,4 @@ export class AgentSession {
+-        if (this._agentRunAbortRequested) {
++        if (this._agentRunAbortRequested && !this._thresholdAbortPending) {
+             this._finishCancelledRetry();
+             return false;
+         }
+@@ -906,7 +1046,7 @@ export class AgentSession {
+             this._retryAttempt = 0;
+         }
+         if (await this._checkCompaction(msg)) {
+-            return !this._agentRunAbortRequested;
++            return !this._agentRunAbortRequested || this._thresholdContinuationPending;
+         }
+         // The agent loop drains both queues before emitting agent_end. Any messages
+         // here were queued by agent_end extension handlers and need a continuation.
 @@ -1152,6 +1282,20 @@ export class AgentSession {
      async followUp(text, images, options) {
          await this._queueUserInput(text, images, "followUp", options?.source ?? "interactive");
@@ -198,6 +250,13 @@ index 638646d..8df079f 100644
              else {
                  this.agent.steer(appMessage);
              }
+@@ -1334,4 +1487,6 @@ export class AgentSession {
+     async abort() {
+         if (this._isAgentRunActive) {
+             this._agentRunAbortRequested = true;
++            this._thresholdAbortPending = false;
++            this._thresholdContinuationPending = false;
+         }
 @@ -1567,8 +1714,10 @@ export class AgentSession {
      async _runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, signal, env, reason) {
          return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
@@ -305,14 +364,16 @@ index 638646d..8df079f 100644
              return false;
          const contextWindow = this.model?.contextWindow ?? 0;
          // Skip overflow check if the message came from a different model.
-@@ -1840,7 +1999,9 @@ export class AgentSession {
+@@ -1840,7 +1999,11 @@ export class AgentSession {
              contextTokens = directContextTokens;
          }
          if (shouldCompact(contextTokens, contextWindow, settings)) {
 -            return await this._runAutoCompaction("threshold", false);
 +            // pi-c2 patch: a mid-turn threshold abort resumes the interrupted turn.
 +            const willRetry = thresholdAbort;
-+            return await this._runAutoCompaction("threshold", willRetry);
++            const continued = await this._runAutoCompaction("threshold", willRetry);
++            this._thresholdContinuationPending = willRetry && continued;
++            return continued;
          }
          return false;
      }
